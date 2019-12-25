@@ -590,7 +590,17 @@ oxr_source_cache_update(struct oxr_logger *log,
 		oxr_source_cache_stop_output(log, sess, cache);
 	}
 
-	if (cache->num_inputs > 0) {
+	if (cache->num_inputs > 0 && !cache->inputs[0].input->active) {
+
+		/*!
+		 * @todo This should be a lot more smarter.
+		 */
+
+		U_ZERO(&cache->current);
+		return;
+
+	} else if (cache->num_inputs > 0) {
+
 		/*!
 		 * @todo Combine multiple sources for a single subaction path
 		 * and convert type as required.
