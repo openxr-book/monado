@@ -879,6 +879,9 @@ psmv_device_update_inputs(struct xrt_device *xdev,
 	psmv_update_trigger_value(psmv, PSMV_INDEX_TRIGGER_VALUE, now);
 	// clang-format on
 
+	// Only report the ball as active if we can track it.
+	psmv->base.inputs[PSMV_INDEX_BALL_CENTER_POSE].active = psmv->ball != NULL;
+
 	// Done now.
 	os_mutex_unlock(&psmv->lock);
 }
