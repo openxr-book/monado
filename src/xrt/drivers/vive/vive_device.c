@@ -704,6 +704,17 @@ _get_color_coeffs_lookup(struct xrt_hmd_parts *hmd,
 }
 
 static void
+_get_pose_from_pos_x_z(const cJSON *obj, struct xrt_pose *pose)
+{
+	struct xrt_vec3 plus_x, plus_z;
+	_json_get_vec3(obj, "plus_x", &plus_x);
+	_json_get_vec3(obj, "plus_z", &plus_z);
+	_json_get_vec3(obj, "position", &pose->position);
+
+	math_quat_from_plus_x_z(&plus_x, &plus_z, &pose->orientation);
+}
+
+static void
 get_distortion_properties(struct vive_device *d,
                           const cJSON *eye_transform_json,
                           uint8_t eye)
@@ -803,8 +814,15 @@ vive_parse_config(struct vive_device *d, char *json_string)
 		_json_get_vec3(imu, "gyro_scale", &d->imu.gyro_scale);
 	} break;
 	case VIVE_VARIANT_INDEX: {
+		struct xrt_pose imu_pose, head_pose;
+
+		const cJSON *head =
+		    cJSON_GetObjectItemCaseSensitive(json, "head");
+		_get_pose_from_pos_x_z(head, &head_pose);
+
 		const cJSON *imu =
 		    cJSON_GetObjectItemCaseSensitive(json, "imu");
+		_get_pose_from_pos_x_z(imu, &imu_pose);
 		_json_get_vec3(imu, "acc_bias", &d->imu.acc_bias);
 		_json_get_vec3(imu, "acc_scale", &d->imu.acc_scale);
 		_json_get_vec3(imu, "gyro_bias", &d->imu.gyro_bias);
