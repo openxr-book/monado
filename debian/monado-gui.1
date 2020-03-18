@@ -1,0 +1,36 @@
+.\" Copyright 2020, Collabora, Ltd.
+.\" SPDX-License-Identifier: BSL-1.0
+.\" Author: Ryan Pavlik
+.Dd March 31, 2020
+.Dt MONADO-GUI 1
+.Sh NAME
+.Nm monado-gui
+.Nd GUI tool for configuring and testing Monado
+.Sh SYNOPSIS
+.Nm
+.Sh DESCRIPTION
+.Nm
+is a tool to configure, test, and debug Monado on a system.
+.Pp
+It takes no arguments, and spawns a main menu window with a number of buttons.
+Some options may spawn a number of sub-windows.
+These may be overlapping initially, and should be moved to reveal them all clearly.
+.Pp
+.Bl -tag -width -indent
+.It Calibrate
+Choosing "Calibrate" from the main menu will walk you through selecting a camera device and choosing calibration details.
+You will need a calibration test target in a "checkerboard" or "asymmetric dots" pattern
+(see the OpenCV documentation for more information on these)
+printed very precisely in high contrast on a rigid surface.
+.It Debug Test
+Choosing "Debug Test" from the main menu will probe and start all devices, showing you debug information on many of them.
+The debug views and controls available vary based on available devices.
+.El
+.Sh NOTES
+The GUI available through "Debug Test" may also be available while running an OpenXR-based application using Monado, by setting the environment variable
+.Ev OXR_DEBUG_GUI
+to ON.
+.Sh EXIT STATUS
+.Ex -std
+.Sh SEE ALSO
+.Xr monado-cli 1

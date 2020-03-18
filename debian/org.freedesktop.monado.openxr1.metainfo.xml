@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component>
+    <id>org.freedesktop.monado.openxr1</id>
+    <metadata_license>CC0-1.0</metadata_license>
+    <name>Monado OpenXR Runtime</name>
+    <summary>Run VR/AR applications written against the OpenXR API</summary>
+    <description>
+        <p>
+            Monado is an open-source package for interacting with virtual and augmented
+            reality (collectively known as XR) hardware and software.
+        </p>
+        <p>
+            This package provides a runtime that aims to be a complete and conforming
+            implementation of the OpenXR API from Khronos, after further development
+            and once the conformance tests are released.
+        </p>
+    </description>
+    <provides>
+        <!--Razer Hydra-->
+        <modalias>usb:v1532p0300*</modalias>
+        <!--HTC Vive-->
+        <modalias>usb:v0BB4p2C87*</modalias>
+        <!--HTC Vive Pro-->
+        <modalias>usb:v0BB4p0309*</modalias>
+        <!--Valve Watchman Dongle-->
+        <modalias>usb:v28DEp2101*</modalias>
+        <!--Valve Index Controller-->
+        <modalias>usb:v28DEp2300*</modalias>
+        <!--Valve Receiver for Lighthouse - HTC Vive-->
+        <modalias>usb:v28DEp2000*</modalias>
+        <!--OSVR HDK-->
+        <modalias>usb:v1532p0B00*</modalias>
+        <!--Oculus Rift (DK1)-->
+        <modalias>usb:v2833p0001*</modalias>
+        <!--Oculus Rift (DK2)-->
+        <modalias>usb:v2833p0021*</modalias>
+        <!--Oculus Rift (DK2)-->
+        <modalias>usb:v2833p2021*</modalias>
+        <!--Oculus Rift (CV1)-->
+        <modalias>usb:v2833p0031*</modalias>
+        <!--Sony PlayStation VR-->
+        <modalias>usb:v054Cp09AF*</modalias>
+        <!--Sony PlayStation Move Motion Controller CECH-ZCM1-->
+        <modalias>usb:v054Cp03D5*</modalias>
+        <modalias>bluetooth:v054Cp03D5*</modalias>
+        <modalias>input:b0005v054Cp03D5*</modalias>
+        <!--Sony PlayStation Move Motion Controller CECH-ZCM2-->
+        <modalias>usb:v054Cp0C5E*</modalias>
+        <modalias>bluetooth:v054Cp0C5E*</modalias>
+        <modalias>input:b0005v054Cp0C5E*</modalias>
+        <!--Microsoft HoloLens Sensors-->
+        <modalias>usb:v045Ep0659*</modalias>
+        <!--Samsung Odyssey+ sensors-->
+        <modalias>usb:v04E8p7312*</modalias>
+    </provides>
+</component>

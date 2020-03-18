@@ -1,0 +1,28 @@
+#!/usr/bin/make -f
+# See debhelper(7) (uncomment to enable)
+# output every command that modifies files on the build system.
+#export DH_VERBOSE = 1
+
+
+# see FEATURE AREAS in dpkg-buildflags(1)
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all reproducible=+all
+
+# see ENVIRONMENT in dpkg-buildflags(1)
+# package maintainers to append LDFLAGS
+# Not needed on Bullseye and newer
+#export DEB_LDFLAGS_MAINT_APPEND = -Wl,--as-needed
+
+
+%:
+	dh $@
+
+# We manage active runtime via update-alternatives
+# We use a relative runtime path to allow Multi-Arch: same to work.
+# We disable the service process for now because of packaging (need to split a new binary package) and missing auto-start.
+override_dh_auto_configure:
+	dh_auto_configure -- -DBUILD_WITH_SYSTEM_CJSON=ON -DINSTALL_ACTIVE_RUNTIME=OFF -DVULKAN_ENABLE_VALIDATION=OFF -DBUILD_DOC=OFF -DOPENXR_INSTALL_ABSOLUTE_RUNTIME_PATH=OFF -DXRT_BUILD_IPC=OFF -DBUILD_WITH_OPENHMD=OFF
+
+# Remove imgui config file if it's there.
+override_dh_auto_clean:
+	-rm -f imgui.ini
+	dh_auto_clean

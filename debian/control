@@ -1,0 +1,79 @@
+Source: monado
+Maintainer: Ryan Pavlik <ryan@ryanpavlik.com>
+Uploaders: Andrew Lee (李健秋) <ajqlee@debian.org>
+Section: libs
+Priority: optional
+Build-Depends: debhelper-compat (= 12),
+               cmake,
+               doxygen,
+               glslang-tools,
+               graphviz,
+               libavcodec-dev,
+               libcjson-dev,
+               libegl1-mesa-dev,
+               libeigen3-dev,
+               libgl1-mesa-dev,
+               libglvnd-dev,
+               libhidapi-dev,
+               libopencv-dev,
+               libsdl2-dev,
+               libudev-dev,
+               libusb-1.0-0-dev,
+               libuvc-dev,
+               libv4l-dev,
+               libvulkan-dev,
+               libwayland-dev,
+               libx11-dev,
+               libx11-xcb-dev,
+               libxcb-randr0-dev,
+               libxrandr-dev,
+               libxxf86vm-dev,
+               pkg-config
+Standards-Version: 4.5.0
+Vcs-Browser: https://salsa.debian.org/monado-team/monado
+Vcs-Git: https://salsa.debian.org/monado-team/monado.git
+Homepage: https://monado.freedesktop.org/
+Rules-Requires-Root: no
+
+Package: libopenxr1-monado
+Architecture: any
+Multi-Arch: same
+Depends: ${shlibs:Depends},
+         ${misc:Depends}
+Recommends: xr-hardware,
+            libopenxr-loader1
+Provides: libopenxr1
+Description: Monado preview implementation of the OpenXR API
+ Monado is an open-source package for interacting with virtual and
+ augmented reality (collectively known as XR) hardware and software.
+ .
+ This package provides a runtime that aims to be a complete and conforming
+ implementation of the OpenXR API from Khronos, after further development
+ and once the conformance tests are released.
+
+Package: monado-cli
+Architecture: any
+Section: graphics
+Depends: ${shlibs:Depends},
+         ${misc:Depends}
+Recommends: xr-hardware
+Description: Monado command-line utility
+ Monado is an open-source package for interacting with virtual and
+ augmented reality (collectively known as XR) hardware and software.
+ .
+ This package provides a command line utility that can be used to test
+ probing for XR hardware.
+
+Package: monado-gui
+Architecture: any
+Section: graphics
+Depends: ${shlibs:Depends},
+         ${misc:Depends}
+Recommends: xr-hardware
+Description: Monado GUI config and debug utility
+ Monado is an open-source package for interacting with virtual and
+ augmented reality (collectively known as XR) hardware and software.
+ .
+ This package provides a graphical interface utility that can be used to
+ test probing for XR hardware, as well as performing calibration of
+ cameras for use in tracking.

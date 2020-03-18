@@ -1,0 +1,16 @@
+monado for Debian
+-----------------
+
+The active OpenXR runtime is controlled by
+/etc/xdg/openxr/1/active_runtime.json. This file is managed by the
+update-alternatives system, under the name openxr1-active-runtime.
+
+Note that at this time, you can have only a single runtime active, across all
+architectures. (This is an upstream bug in the OpenXR loader spec, tracked here:
+<https://github.com/KhronosGroup/OpenXR-SDK-Source/issues/148>) This package is
+built so that the runtime will be found in the default path, so you can have
+this runtime installed on multiple architectures and have them all work
+(assuming dependencies permit). However, you'd switch between Monado and some
+other runtime for all architectures at once.
+
+ -- Ryan Pavlik <ryan@ryanpavlik.com>  Thu, 26 Mar 2020 09:36:58 -0500

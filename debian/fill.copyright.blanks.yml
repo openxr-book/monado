@@ -1,0 +1,22 @@
+---
+doc/CHANGELOG.md:
+  license: CC0-1.0
+doc/changes/:
+  copyright: 2020, Collabora, Ltd. and the Monado contributors
+  license: CC0-1.0
+  skip: false
+doc/changes/README.md:
+  copyright: 2020, Collabora, Ltd. and the Proclamation contributors
+  license: CC0-1.0
+  skip: false
+src/external/imgui/imgui_monado/:
+  license: BSL-1.0
+# Default to BSL.
+src/xrt:
+  license: BSL-1.0
+debian/extra/:
+  license: CC0-1.0
+src/xrt/drivers/north_star/distortion/:
+  license: BSD-3-Clause
+src/xrt/auxiliary/math/m_quatexpmap.cpp:
+  license: Apache-2.0

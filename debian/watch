@@ -1,0 +1,7 @@
+version=4
+opts=filenamemangle=s/.*\/archive\/v(\d\S+)\/monado.*\.tar\.bz2/monado-$1\.tar\.bz2/g \
+  https://gitlab.freedesktop.org/monado/monado/-/tags \
+  .*/archive/v(\d\S+)/.*[.]tar[.]bz2
+
+
+# .*/archive/(\d\S+)/.*\.tar\.bz2

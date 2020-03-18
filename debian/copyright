@@ -1,0 +1,294 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: monado
+Source: <https://gitlab.freedesktop.org/monado/monado>
+Copyright: 2018-2020, Collabora, Ltd.
+License: BSL-1.0
+
+Files: *
+Copyright: 2018-2020, Collabora, Ltd.
+License: BSL-1.0
+
+Files: debian/*
+Copyright: 2020, Ryan Pavlik <ryan@ryanpavlik.com>
+License: BSL-1.0
+
+Files: debian/extra/*
+Copyright: 2020, Ryan Pavlik <ryan@ryanpavlik.com>
+License: CC0-1.0
+
+Files: debian/org.freedesktop.monado.openxr1.metainfo.xml
+Copyright: 2020, Collabora, Ltd.
+License: CC0-1.0
+
+Files: doc/CHANGELOG.md
+Copyright: 2020, Collabora, Ltd. and the Monado contributors
+License: CC0-1.0
+
+Files: doc/changes/*
+Copyright: 2020, Collabora, Ltd. and the Proclamation contributors
+License: CC0-1.0
+
+Files: doc/changes/auxiliary/*
+Copyright: 2020, Collabora, Ltd. and the Monado contributors
+License: CC0-1.0
+
+Files: doc/changes/big/*
+Copyright: 2020, Collabora, Ltd. and the Monado contributors
+License: CC0-1.0
+
+Files: doc/changes/compositor/*
+Copyright: 2020, Collabora, Ltd. and the Monado contributors
+License: CC0-1.0
+
+Files: doc/changes/drivers/*
+Copyright: 2020, Collabora, Ltd. and the Monado contributors
+License: CC0-1.0
+
+Files: doc/changes/misc_features/*
+Copyright: 2020, Collabora, Ltd. and the Monado contributors
+License: CC0-1.0
+
+Files: doc/changes/misc_fixes/*
+Copyright: 2020, Collabora, Ltd. and the Monado contributors
+License: CC0-1.0
+
+Files: doc/changes/state_trackers/*
+Copyright: 2020, Collabora, Ltd. and the Monado contributors
+License: CC0-1.0
+
+Files: doc/changes/xrt/*
+Copyright: 2020, Collabora, Ltd. and the Monado contributors
+License: CC0-1.0
+
+Files: src/external/cjson/*
+Copyright: 2009-2017, Dave Gamble and cJSON contributors
+License: Expat
+
+Files: src/external/flexkalman/*
+Copyright: 2019, Collabora, Ltd.
+  2015, 2016, Sensics, Inc.
+License: Apache-2.0
+
+Files: src/external/flexkalman/flexkalman/AbsoluteOrientationMeasurement.h
+  src/external/flexkalman/flexkalman/AngularVelocityMeasurement.h
+  src/external/flexkalman/flexkalman/FlexibleKalmanBase.h
+  src/external/flexkalman/flexkalman/FlexibleKalmanCorrect.h
+  src/external/flexkalman/flexkalman/FlexibleKalmanFilter.h
+  src/external/flexkalman/flexkalman/FlexibleKalmanMeta.h
+  src/external/flexkalman/flexkalman/FlexibleUnscentedCorrect.h
+  src/external/flexkalman/flexkalman/MatrixExponentialMap.h
+  src/external/flexkalman/flexkalman/OrientationConstantVelocity.h
+  src/external/flexkalman/flexkalman/OrientationState.h
+  src/external/flexkalman/flexkalman/PoseConstantVelocity.h
+  src/external/flexkalman/flexkalman/PoseConstantVelocityGeneric.h
+  src/external/flexkalman/flexkalman/PoseDampedConstantVelocity.h
+  src/external/flexkalman/flexkalman/PoseSeparatelyDampedConstantVelocity.h
+  src/external/flexkalman/flexkalman/PoseState.h
+  src/external/flexkalman/flexkalman/PoseStateExponentialMap.h
+Copyright: 2019, 2020, Collabora, Ltd.
+  2015, 2016, Sensics, Inc.
+License: Apache-2.0
+
+Files: src/external/flexkalman/flexkalman/AbsolutePositionLeverArmMeasurement.h
+  src/external/flexkalman/flexkalman/SO3.h
+Copyright: 2018-2020, Collabora, Ltd.
+License: Apache-2.0
+
+Files: src/external/flexkalman/flexkalman/AbsolutePositionMeasurement.h
+  src/external/flexkalman/flexkalman/AugmentedProcessModel.h
+  src/external/flexkalman/flexkalman/AugmentedState.h
+  src/external/flexkalman/flexkalman/ConstantProcess.h
+  src/external/flexkalman/flexkalman/EigenQuatExponentialMap.h
+  src/external/flexkalman/flexkalman/ExternalQuaternion.h
+  src/external/flexkalman/flexkalman/PureVectorState.h
+  src/external/flexkalman/flexkalman/SigmaPointGenerator.h
+Copyright: 2015, 2016, Sensics, Inc.
+License: Apache-2.0
+
+Files: src/external/flexkalman/flexkalman/BaseTypes.h
+Copyright: 2019, Collabora, Ltd.
+License: Apache-2.0
+
+Files: src/external/imgui/imgui/*
+Copyright: 2015, Stephan Dilly
+  2014-2020, Omar Cornut
+License: Expat
+
+Files: src/external/imgui/imgui/imstb_rectpack.h
+  src/external/imgui/imgui/imstb_textedit.h
+  src/external/imgui/imgui/imstb_truetype.h
+Copyright: 2017, Sean Barrett
+License: Expat
+
+Files: src/external/openxr_includes/*
+Copyright: 2017-2019, The Khronos Group Inc.
+License: Apache-2.0
+
+Files: src/external/openxr_includes/openxr/loader_interfaces.h
+Copyright: 2017-2019, The Khronos Group Inc.
+  2017, Valve Corporation
+  2017, LunarG, Inc.
+License: Apache-2.0
+
+Files: src/xrt/auxiliary/math/m_imu_3dof.c
+  src/xrt/auxiliary/math/m_imu_3dof.h
+Copyright: 2020, Collabora, Ltd.
+  2013, Jakob Bornecrantz.
+  2013, Fredrik Hultin.
+License: BSL-1.0
+
+Files: src/xrt/auxiliary/math/m_quatexpmap.cpp
+Copyright: 2019, 2020, Collabora, Ltd.
+  2015, 2016, Sensics, Inc.
+License: Apache-2.0
+
+Files: src/xrt/auxiliary/math/m_vec3.h
+Copyright: 2020, Nova King.
+  2019, 2020, Collabora, Ltd.
+License: BSL-1.0
+
+Files: src/xrt/drivers/hdk/hdk_device.cpp
+Copyright: 2019, Collabora, Ltd.
+  2014-2018, Sensics, Inc.
+  2014, Kevin M. Godby
+License: BSL-1.0
+
+Files: src/xrt/drivers/hydra/hydra_driver.c
+Copyright: 2019, Collabora, Ltd.
+  2011, Iowa State University
+License: BSL-1.0
+
+Files: src/xrt/drivers/north_star/*
+Copyright: 2020, Nova King.
+  2019, 2020, Collabora, Ltd.
+License: BSL-1.0
+
+Files: src/xrt/drivers/north_star/distortion/*
+Copyright: 2020, Nova King.
+  2020, Hesham Wahba.
+License: BSD-3-Clause
+
+Files: src/xrt/drivers/north_star/ns_hmd.h
+Copyright: 2018-2020, Collabora, Ltd.
+License: BSL-1.0
+
+Files: src/xrt/drivers/psvr/*
+Copyright: 2019, Collabora, Ltd.
+  2016, Joey Ferwerda.
+License: BSL-1.0
+
+Files: src/xrt/drivers/psvr/psvr_interface.h
+  src/xrt/drivers/psvr/psvr_prober.c
+Copyright: 2018-2020, Collabora, Ltd.
+License: BSL-1.0
+
+Files: src/xrt/drivers/realsense/rs_6dof.c
+Copyright: 2020, Nova King.
+  2019, 2020, Collabora, Ltd.
+License: BSL-1.0
+
+Files: src/xrt/drivers/vive/vive_controller_driver.c
+  src/xrt/drivers/vive/vive_device.c
+  src/xrt/drivers/vive/vive_protocol.c
+  src/xrt/drivers/vive/vive_protocol.h
+Copyright: 2019, 2020, Collabora, Ltd.
+  2016-2019, Philipp Zabel
+License: BSL-1.0
+
+Files: src/xrt/targets/openxr/install_active_runtime.sh
+Copyright: 2019, Drew DeVault <sir@cmpwn.com>
+License: BSL-1.0
+
+License: Apache-2.0
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+ .
+ https://www.apache.org/licenses/LICENSE-2.0
+ .
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+ .
+ On Debian systems, the complete text of the Apache version 2.0 license
+ can be found in "/usr/share/common-licenses/Apache-2.0".
+
+License: BSD-3-Clause
+ Redistribution and use in source and binary forms, with or without
+ modification, are permitted provided that the following conditions are met:
+     * Redistributions of source code must retain the above copyright
+       notice, this list of conditions and the following disclaimer.
+     * Redistributions in binary form must reproduce the above copyright
+       notice, this list of conditions and the following disclaimer in the
+       documentation and/or other materials provided with the distribution.
+     * Neither the name of the <organization> nor the
+       names of its contributors may be used to endorse or promote products
+       derived from this software without specific prior written permission.
+ .
+ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
+ DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+License: BSL-1.0
+ Permission is hereby granted, free of charge, to any person or organization
+ obtaining a copy of the software and accompanying documentation covered by this
+ license (the "Software") to use, reproduce, display, distribute, execute, and
+ transmit the Software, and to prepare derivative works of the Software, and to
+ permit third-parties to whom the Software is furnished to do so, all subject to
+ the following:
+ .
+ The copyright notices in the Software and this entire statement, including the
+ above license grant, this restriction and the following disclaimer, must be
+ included in all copies of the Software, in whole or in part, and all derivative
+ works of the Software, unless such copies or derivative works are solely in the
+ form of machine-executable object code generated by a source language
+ processor.
+ .
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ FITNESS FOR A PARTICULAR PURPOSE, TITLE AND NON-INFRINGEMENT. IN NO EVENT SHALL
+ THE COPYRIGHT HOLDERS OR ANYONE DISTRIBUTING THE SOFTWARE BE LIABLE FOR ANY
+ DAMAGES OR OTHER LIABILITY, WHETHER IN CONTRACT, TORT OR OTHERWISE, ARISING
+ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ THE SOFTWARE.
+
+License: CC0-1.0
+ foo has dedicated the work to the Commons by waiving all of his
+ or her rights to the work worldwide under copyright law and all related or
+ neighboring legal rights he or she had in the work, to the extent allowable by
+ law.
+ Works under CC0 do not require attribution. When citing the work, you should
+ not imply endorsement by the author.
+ To the extent possible under law, the author(s) have dedicated all
+ copyright and related and neighboring rights to this software to the public
+ domain worldwide. This software is distributed without any warranty.
+ On Debian systems, the complete text of the CC0 license, version 1.0,
+ can be found in /usr/share/common-licenses/CC0-1.0.
+
+License: Expat
+ Permission is hereby granted, free of charge, to any person obtaining a copy
+ of this software and associated documentation files (the "Software"), to deal
+ in the Software without restriction, including without limitation the rights
+ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ copies of the Software, and to permit persons to whom the Software is
+ furnished to do so, subject to the following conditions:
+ .
+ The above copyright notice and this permission notice shall be included in all
+ copies or substantial portions of the Software.
+ .
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ SOFTWARE.

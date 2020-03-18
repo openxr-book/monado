@@ -1,0 +1,31 @@
+monado (0.1.0+git269.695ac70d-1) UNRELEASED; urgency=medium
+
+  * New upstream version 0.1.0+git269.695ac70d
+  * Remove all patches: integrated upstream.
+  * Add a patch for system cJSON build.
+  * Apply cme fixes.
+  * d/control: Fix Vcs-Browser, Vcs-Git
+  * d/control: Add Build-Depends on libx11-xcb-dev
+  * d/copyright: Update
+  * d/rules:
+    - Disable IPC/service module for now.
+    - Fix/use all reproducibility flags.
+    - Configure to force system cJSON.
+    - Comment out flag only needed before Bullseye.
+    - Explicitly disable OpenHMD to avoid confusion/CI issues.
+  * d/README.source: Document procedure for updating and backporting package
+
+ -- Ryan Pavlik <ryan@ryanpavlik.com>  Tue, 05 May 2020 15:30:13 -0500
+
+monado (0.1.0+git108.a8a4d8c3-2) unstable; urgency=medium
+
+  * Add patches to fix build on ppc64el, s390x, powerpc
+  * Rebuild to unblock migration.
+
+ -- Ryan Pavlik <ryan@ryanpavlik.com>  Thu, 09 Apr 2020 18:03:59 -0500
+
+monado (0.1.0+git108.a8a4d8c3-1) unstable; urgency=medium
+
+  * Initial release (Closes: #943486)
+
+ -- Ryan Pavlik <ryan@ryanpavlik.com>  Wed, 08 Apr 2020 10:11:01 -0500
