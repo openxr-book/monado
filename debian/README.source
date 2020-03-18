@@ -1,0 +1,23 @@
+This package is based on the version of Monado in Debian
+(https://salsa.debian.org/monado-team/monado), but is slightly adapted for use
+directly within the "upstream" source tree.
+
+There is useful stuff, more directed at package maintenance for distro
+submission, in the Debian copy of this file:
+<https://salsa.debian.org/monado-team/monado/-/blob/debian/sid/debian/README.source>
+
+To build a package for local use:
+
+- Checkout the branch you want to build (assuming `master` here) and make sure
+  your tree is clean (`git reset --hard` will be used later!) A fresh clone or
+  one kept clean just for package building is probably a good idea.
+- Do a `git merge --no-commit debian/sid` (or `debian/buster-backports`, or
+  `ubuntu/focal`, or...)
+- `debian/extra/prepare-commit-package.sh master` to make the orig.tar.gz file
+  and add the `debian/changelog` entry. (Add an additional command line argument
+  with the debian revision if you want to customize it. The default is usually
+  good.)
+- `debuild -uc -us` to build an unsigned source and binary package on your
+  machine. Or, however else you want to build. (e.g. `debuild -S` for a signed
+  source-only package to upload to a PPA, etc)
+- `git reset --hard` to undo the merging-in changes when you're done.

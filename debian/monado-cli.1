@@ -1,0 +1,26 @@
+.\" Copyright 2020, Collabora, Ltd.
+.\" SPDX-License-Identifier: BSL-1.0
+.\" Author: Ryan Pavlik
+.Dd March 31, 2020
+.Dt MONADO-CLI 1
+.Sh NAME
+.Nm monado-cli
+.Nd Command-line tool for testing Monado
+.Sh SYNOPSIS
+.Nm
+test
+.Nm
+probe
+.Sh DESCRIPTION
+.Nm
+is a tool to test or debug Monado on a system.
+.Pp
+The arguments are as follows:
+.Bl -tag -width -indent
+.It test
+Verbosely lists found devices, including un-recognized devices, for prober testing.
+.It probe
+Creates the prober, probes, and immediately shuts down.
+.El
+.Sh SEE ALSO
+.Xr monado-gui 1
