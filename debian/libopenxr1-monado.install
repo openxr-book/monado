@@ -1,0 +1,3 @@
+usr/lib/*/libopenxr_monado.*
+usr/share/openxr/1/openxr_monado.json
+debian/org.freedesktop.monado.openxr1.metainfo.xml usr/share/metainfo

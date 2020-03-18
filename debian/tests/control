@@ -1,0 +1,3 @@
+Tests: cli-probe, cli-test
+Restrictions: allow-stderr,superficial
+Depends: monado-cli

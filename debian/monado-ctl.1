@@ -1,0 +1,35 @@
+.\" Copyright 2020, Collabora, Ltd.
+.\" SPDX-License-Identifier: BSL-1.0
+.\" Author: Ryan Pavlik
+.Dd July 10, 2020
+.Dt MONADO-CTL 1
+.Sh NAME
+.Nm monado-ctl
+.Nd Monado service control utility
+.Sh SYNOPSIS
+.Nm
+.Nm
+.Op Fl p Ar clientnum
+.Nm
+.Op Fl f Ar clientnum
+.Sh DESCRIPTION
+.Nm
+is a tool to control multiple applications on a system
+that are accessing
+.Xr monado-service 1
+simultaneously.
+If called with no arguments, a list of client applications is displayed.
+.Pp
+The arguments are as follows:
+.Bl -tag -width -indent
+.It Fl p Ar clientnum
+Sets client number
+.Pa clientnum
+as the primary application.
+.It Fl f Ar clientnum
+Sets client number
+.Pa clientnum
+as focused.
+.El
+.Sh SEE ALSO
+.Xr monado-service 1
