@@ -1,0 +1,2 @@
+This package is based on the version of Monado in Debian (https://salsa.debian.org/monado-team/monado),
+but is slightly adapted for use directly within the "upstream" source tree.
