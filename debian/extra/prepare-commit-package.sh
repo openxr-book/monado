@@ -22,7 +22,7 @@ set -e
         PKG_REVISION=$2
         export PKG_REVISION
     else
-        PKG_REVISION=1~ci$(date --utc "+%Y%m%d")
+        PKG_REVISION=1~ubuntu20.04~ci$(date --utc "+%Y%m%d")
         export PKG_REVISION
     fi
 

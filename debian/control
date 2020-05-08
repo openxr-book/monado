@@ -30,8 +30,8 @@ Build-Depends: debhelper-compat (= 12),
                libxxf86vm-dev,
                pkg-config
 Standards-Version: 4.5.0
-Vcs-Browser: https://gitlab.freedesktop.org/monado/monado/-/tree/debian/master
-Vcs-Git: https://gitlab.freedesktop.org/monado/monado.git -b debian/master
+Vcs-Browser: https://gitlab.freedesktop.org/monado/monado/-/tree/ubuntu/focal
+Vcs-Git: https://gitlab.freedesktop.org/monado/monado.git -b ubuntu/focal
 Homepage: https://monado.freedesktop.org/
 Rules-Requires-Root: no
 
