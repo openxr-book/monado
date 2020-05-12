@@ -20,7 +20,14 @@ export DEB_LDFLAGS_MAINT_APPEND = -Wl,--as-needed
 # We use a relative runtime path to allow Multi-Arch: same to work.
 # We disable the service process for now because of packaging (need to split a new binary package) and missing auto-start.
 override_dh_auto_configure:
-	dh_auto_configure -- -DBUILD_WITH_SYSTEM_CJSON=ON -DINSTALL_ACTIVE_RUNTIME=OFF -DVULKAN_ENABLE_VALIDATION=OFF -DBUILD_DOC=OFF -DOPENXR_INSTALL_ABSOLUTE_RUNTIME_PATH=OFF -DXRT_BUILD_IPC=OFF -DBUILD_WITH_OPENHMD=OFF
+	dh_auto_configure -- \
+	  -DXRT_HAVE_SYSTEM_CJSON=ON \
+	  -DXRT_OPENXR_INSTALL_ACTIVE_RUNTIME=OFF \
+	  -DXRT_VULKAN_ENABLE_VALIDATION=OFF \
+	  -DBUILD_DOC=OFF \
+	  -DXRT_OPENXR_INSTALL_ABSOLUTE_RUNTIME_PATH=OFF \
+	  -DXRT_FEATURE_SERVICE=OFF \
+	  -DXRT_BUILD_DRIVER_OHMD=OFF
 
 # Remove imgui config file if it's there.
 override_dh_auto_clean:
