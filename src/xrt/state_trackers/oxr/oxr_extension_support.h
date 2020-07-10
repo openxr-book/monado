@@ -19,18 +19,6 @@
 // beginning of GENERATED defines - do not modify - used by scripts
 
 /*
- * XR_EXT_debug_utils
- */
-#if defined(XR_EXT_debug_utils)
-#define OXR_HAVE_EXT_debug_utils
-#define OXR_EXTENSION_SUPPORT_EXT_debug_utils(_)                               \
-	_(EXT_debug_utils, EXT_DEBUG_UTILS)
-#else
-#define OXR_EXTENSION_SUPPORT_EXT_debug_utils(_)
-#endif
-
-
-/*
  * XR_KHR_convert_timespec_time
  */
 #if defined(XR_KHR_convert_timespec_time) && defined(XR_USE_TIMESPEC)
@@ -79,15 +67,14 @@
 
 
 /*
- * XR_MND_egl_enable
+ * XR_EXT_debug_utils
  */
-#if defined(XR_MND_egl_enable) && defined(XR_USE_PLATFORM_EGL) &&              \
-    defined(XR_USE_GRAPHICS_API_OPENGL)
-#define OXR_HAVE_MND_egl_enable
-#define OXR_EXTENSION_SUPPORT_MND_egl_enable(_)                                \
-	_(MND_egl_enable, MND_EGL_ENABLE)
+#if defined(XR_EXT_debug_utils)
+#define OXR_HAVE_EXT_debug_utils
+#define OXR_EXTENSION_SUPPORT_EXT_debug_utils(_)                               \
+	_(EXT_debug_utils, EXT_DEBUG_UTILS)
 #else
-#define OXR_EXTENSION_SUPPORT_MND_egl_enable(_)
+#define OXR_EXTENSION_SUPPORT_EXT_debug_utils(_)
 #endif
 
 
@@ -99,6 +86,42 @@
 #define OXR_EXTENSION_SUPPORT_MND_headless(_) _(MND_headless, MND_HEADLESS)
 #else
 #define OXR_EXTENSION_SUPPORT_MND_headless(_)
+#endif
+
+
+/*
+ * XR_EXTX_overlay
+ */
+#if defined(XR_EXTX_overlay)
+#define OXR_HAVE_EXTX_overlay
+#define OXR_EXTENSION_SUPPORT_EXTX_overlay(_) _(EXTX_overlay, EXTX_OVERLAY)
+#else
+#define OXR_EXTENSION_SUPPORT_EXTX_overlay(_)
+#endif
+
+
+/*
+ * XR_MNDX_egl_enable
+ */
+#if defined(XR_MNDX_egl_enable) && defined(XR_USE_PLATFORM_EGL) &&             \
+    defined(XR_USE_GRAPHICS_API_OPENGL)
+#define OXR_HAVE_MNDX_egl_enable
+#define OXR_EXTENSION_SUPPORT_MNDX_egl_enable(_)                               \
+	_(MNDX_egl_enable, MNDX_EGL_ENABLE)
+#else
+#define OXR_EXTENSION_SUPPORT_MNDX_egl_enable(_)
+#endif
+
+
+/*
+ * XR_MNDX_ball_on_a_stick_controller
+ */
+#if defined(XR_MNDX_ball_on_a_stick_controller)
+#define OXR_HAVE_MNDX_ball_on_a_stick_controller
+#define OXR_EXTENSION_SUPPORT_MNDX_ball_on_a_stick_controller(_)               \
+	_(MNDX_ball_on_a_stick_controller, MNDX_BALL_ON_A_STICK_CONTROLLER)
+#else
+#define OXR_EXTENSION_SUPPORT_MNDX_ball_on_a_stick_controller(_)
 #endif
 
 // end of GENERATED per-extension defines - do not modify - used by scripts
@@ -125,11 +148,13 @@
  */
 // clang-format off
 #define OXR_EXTENSION_SUPPORT_GENERATE(_) \
-    OXR_EXTENSION_SUPPORT_EXT_debug_utils(_) \
     OXR_EXTENSION_SUPPORT_KHR_convert_timespec_time(_) \
     OXR_EXTENSION_SUPPORT_KHR_opengl_enable(_) \
     OXR_EXTENSION_SUPPORT_KHR_opengl_es_enable(_) \
     OXR_EXTENSION_SUPPORT_KHR_vulkan_enable(_) \
-    OXR_EXTENSION_SUPPORT_MND_egl_enable(_) \
-    OXR_EXTENSION_SUPPORT_MND_headless(_)
+    OXR_EXTENSION_SUPPORT_EXT_debug_utils(_) \
+    OXR_EXTENSION_SUPPORT_MND_headless(_) \
+    OXR_EXTENSION_SUPPORT_EXTX_overlay(_) \
+    OXR_EXTENSION_SUPPORT_MNDX_egl_enable(_) \
+    OXR_EXTENSION_SUPPORT_MNDX_ball_on_a_stick_controller(_)
 // clang-format on

@@ -1,4 +1,4 @@
-// Copyright 2019, Collabora, Ltd.
+// Copyright 2019-2020, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -86,6 +86,8 @@ oxr_xrBeginSession(XrSession session, const XrSessionBeginInfo *beginInfo)
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrBeginSession");
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, beginInfo,
 	                                 XR_TYPE_SESSION_BEGIN_INFO);
+	OXR_VERIFY_VIEW_CONFIG_TYPE(&log, sess->sys->inst,
+	                            beginInfo->primaryViewConfigurationType);
 
 	return oxr_session_begin(&log, sess, beginInfo);
 }
@@ -200,7 +202,7 @@ oxr_xrGetVisibilityMaskKHR(XrSession session,
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess,
 	                                "xrGetVisibilityMaskKHR");
 
-	return oxr_error(&log, XR_ERROR_HANDLE_INVALID, " not implemented");
+	return oxr_error(&log, XR_ERROR_HANDLE_INVALID, "Not implemented");
 }
 
 #endif
@@ -224,7 +226,7 @@ oxr_xrPerfSettingsSetPerformanceLevelEXT(XrSession session,
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess,
 	                                "xrPerfSettingsSetPerformanceLevelEXT");
 
-	return oxr_error(&log, XR_ERROR_HANDLE_INVALID, " not implemented");
+	return oxr_error(&log, XR_ERROR_HANDLE_INVALID, "Not implemented");
 }
 
 #endif
@@ -251,7 +253,7 @@ oxr_xrThermalGetTemperatureTrendEXT(
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess,
 	                                "xrThermalGetTemperatureTrendEXT");
 
-	return oxr_error(&log, XR_ERROR_HANDLE_INVALID, " not implemented");
+	return oxr_error(&log, XR_ERROR_HANDLE_INVALID, "Not implemented");
 }
 
 #endif

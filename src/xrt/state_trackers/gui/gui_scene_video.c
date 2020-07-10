@@ -18,6 +18,10 @@
 #include "gui_imgui.h"
 
 
+/*!
+ * A GUI scene that lets the user select a user device.
+ * @implements gui_scene
+ */
 struct video_select
 {
 	struct gui_scene base;
@@ -170,6 +174,10 @@ create(void)
 void
 gui_scene_select_video_calibrate(struct gui_program *p)
 {
+	if (p->xp == NULL) {
+		// No prober, nothing to create.
+		return;
+	}
 	struct video_select *vs = create();
 
 	gui_scene_push_front(p, &vs->base);

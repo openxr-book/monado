@@ -11,6 +11,7 @@
 #include "xrt/xrt_gfx_fd.h"
 
 #include "util/u_misc.h"
+#include "util/u_var.h"
 
 #include "ipc_protocol.h"
 #include "ipc_client.h"
@@ -33,11 +34,18 @@
  *
  */
 
+/*!
+ * @implements xrt_instance
+ */
 struct ipc_client_instance
 {
+	//! @public Base
 	struct xrt_instance base;
 
 	ipc_connection_t ipc_c;
+
+	struct xrt_tracking_origin *xtracks[8];
+	size_t num_xtracks;
 
 	struct xrt_device *xdevs[8];
 	size_t num_xdevs;
@@ -146,8 +154,16 @@ ipc_client_instance_destroy(struct xrt_instance *xinst)
 	struct ipc_client_instance *ii = ipc_client_instance(xinst);
 
 	// service considers us to be connected until fd is closed
-	if (ii->ipc_c.socket_fd >= 0)
+	if (ii->ipc_c.socket_fd >= 0) {
 		close(ii->ipc_c.socket_fd);
+	}
+
+	for (size_t i = 0; i < ii->num_xtracks; i++) {
+		u_var_remove_root(ii->xtracks[i]);
+		free(ii->xtracks[i]);
+		ii->xtracks[i] = NULL;
+	}
+	ii->num_xtracks = 0;
 
 	os_mutex_destroy(&ii->ipc_c.mutex);
 
@@ -161,8 +177,14 @@ ipc_client_instance_destroy(struct xrt_instance *xinst)
  *
  */
 
+/*!
+ * Constructor for xrt_instance IPC client proxy.
+ *
+ * @public @memberof ipc_instance
+ */
 int
-ipc_instance_create(struct xrt_instance **out_xinst)
+ipc_instance_create(struct xrt_instance_info *i_info,
+                    struct xrt_instance **out_xinst)
 {
 	struct ipc_client_instance *ii =
 	    U_TYPED_CALLOC(struct ipc_client_instance);
@@ -182,7 +204,7 @@ ipc_instance_create(struct xrt_instance **out_xinst)
 		    "Failed to connect to monado service process\n\n"
 		    "###\n"
 		    "#\n"
-		    "# Please make sure that the service procss is running\n"
+		    "# Please make sure that the service process is running\n"
 		    "#\n"
 		    "# It is called \"monado-service\"\n"
 		    "# For builds it's located "
@@ -194,10 +216,21 @@ ipc_instance_create(struct xrt_instance **out_xinst)
 	}
 
 	// get our xdev shm from the server and mmap it
-	ipc_result_t r =
+	xrt_result_t r =
 	    ipc_call_instance_get_shm_fd(&ii->ipc_c, &ii->ipc_c.ism_fd, 1);
-	if (r != IPC_SUCCESS) {
+	if (r != XRT_SUCCESS) {
 		IPC_ERROR(&ii->ipc_c, "Failed to retrieve shm fd");
+		free(ii);
+		return -1;
+	}
+
+	struct ipc_app_state desc = {0};
+	desc.info = *i_info;
+	desc.pid = getpid(); // Extra info.
+
+	r = ipc_call_system_set_client_info(&ii->ipc_c, &desc);
+	if (r != XRT_SUCCESS) {
+		IPC_ERROR(&ii->ipc_c, "Failed to set instance info");
 		free(ii);
 		return -1;
 	}
@@ -213,18 +246,41 @@ ipc_instance_create(struct xrt_instance **out_xinst)
 		return -1;
 	}
 
+	uint32_t count = 0;
+	struct xrt_tracking_origin *xtrack = NULL;
 	struct ipc_shared_memory *ism = ii->ipc_c.ism;
 
+	// Query the server for how many tracking origins it has.
+	count = 0;
+	for (uint32_t i = 0; i < ism->num_itracks; i++) {
+		xtrack = U_TYPED_CALLOC(struct xrt_tracking_origin);
 
-	uint32_t count = 0;
+		memcpy(xtrack->name, ism->itracks[i].name,
+		       sizeof(xtrack->name));
+
+		xtrack->type = ism->itracks[i].type;
+		xtrack->offset = ism->itracks[i].offset;
+		ii->xtracks[count++] = xtrack;
+
+		u_var_add_root(xtrack, "Tracking origin", true);
+		u_var_add_ro_text(xtrack, xtrack->name, "name");
+		u_var_add_pose(xtrack, &xtrack->offset, "offset");
+	}
+
+	ii->num_xtracks = count;
+
 	// Query the server for how many devices it has.
+	count = 0;
 	for (uint32_t i = 0; i < ism->num_idevs; i++) {
-		if (ism->idevs[i].name == XRT_DEVICE_GENERIC_HMD) {
+		struct ipc_shared_device *idev = &ism->idevs[i];
+		xtrack = ii->xtracks[idev->tracking_origin_index];
+
+		if (idev->name == XRT_DEVICE_GENERIC_HMD) {
 			ii->xdevs[count++] =
-			    ipc_client_hmd_create(&ii->ipc_c, i);
+			    ipc_client_hmd_create(&ii->ipc_c, xtrack, i);
 		} else {
 			ii->xdevs[count++] =
-			    ipc_client_device_create(&ii->ipc_c, i);
+			    ipc_client_device_create(&ii->ipc_c, xtrack, i);
 		}
 	}
 
@@ -235,10 +291,4 @@ ipc_instance_create(struct xrt_instance **out_xinst)
 	os_mutex_init(&ii->ipc_c.mutex);
 
 	return 0;
-}
-
-int
-xrt_prober_create(void **hack)
-{
-	return -1;
 }

@@ -47,6 +47,26 @@ struct vive_controller_button_report
 	uint8_t unknown6;
 } __attribute__((packed));
 
+struct vive_controller_touch_sample
+{
+	uint16_t touch[2];
+} __attribute__((packed));
+
+struct vive_controller_trigger_sample
+{
+	uint8_t trigger;
+} __attribute__((packed));
+
+struct vive_controller_button_sample
+{
+	uint8_t buttons;
+} __attribute__((packed));
+
+struct vive_controller_battery_sample
+{
+	uint8_t battery;
+} __attribute__((packed));
+
 #define VIVE_IMU_RANGE_MODES_REPORT_ID 0x01
 
 struct vive_imu_range_modes_report
@@ -158,6 +178,38 @@ struct vive_imu_report
 	struct vive_imu_sample sample[3];
 } __attribute__((packed));
 
+struct watchman_imu_sample
+{
+	/* ouvrt: "Time in 48 MHz ticks, but we are missing the low byte."
+	 *
+	 * The full timestamp is 4 bytes, formed by
+	 * first byte : vive_controller_message.timestamp_hi
+	 * second byte: vive_controller_message.timestamp_lo
+	 * third byte: watchman_imu_sample.timestamp_hi
+	 * fourth byte: remains zero */
+	uint8_t timestamp_hi;
+	uint16_t acc[3];
+	uint16_t gyro[3];
+} __attribute__((packed));
+
+
+#define TYPE_FLAG_TOUCH_FORCE 161
+struct watchman_touch_force
+{
+	uint8_t type_flag;
+
+	uint8_t touch; // bitmask of touched buttons
+
+	// "distance" from hardware
+	uint8_t middle_finger_handle;
+	uint8_t ring_finger_handle;
+	uint8_t pinky_finger_handle;
+	uint8_t index_finger_trigger;
+
+	uint8_t squeeze_force;
+	uint8_t trackpad_force;
+} __attribute__((packed));
+
 #define VIVE_CONTROLLER_LIGHTHOUSE_PULSE_REPORT_ID 0x21
 
 struct vive_controller_lighthouse_pulse
@@ -250,8 +302,8 @@ struct vive_controller_poweroff_report
 	uint8_t magic[4];
 } __attribute__((packed));
 
-const struct vive_headset_power_report power_on_report;
-const struct vive_headset_power_report power_off_report;
+extern const struct vive_headset_power_report power_on_report;
+extern const struct vive_headset_power_report power_off_report;
 
 char *
 vive_read_config(struct os_hid_device *hid_dev);

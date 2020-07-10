@@ -17,12 +17,23 @@
 #include "client/comp_gl_xlib_client.h"
 
 
+/*!
+ * Down-cast helper.
+ *
+ * @private @memberof client_gl_xlib_compositor
+ */
+static inline struct client_gl_xlib_compositor *
+client_gl_xlib_compositor(struct xrt_compositor *xc)
+{
+	return (struct client_gl_xlib_compositor *)xc;
+}
+
 static void
 client_gl_xlib_compositor_destroy(struct xrt_compositor *xc)
 {
 	struct client_gl_xlib_compositor *c = client_gl_xlib_compositor(xc);
 	// Pipe down call into fd compositor.
-	c->base.xcfd->base.destroy(&c->base.xcfd->base);
+	xrt_comp_fd_destroy(&c->base.xcfd);
 	free(c);
 }
 

@@ -38,6 +38,7 @@ add_library(ipc_client STATIC
 	)
 target_include_directories(ipc_client INTERFACE
 	${CMAKE_CURRENT_SOURCE_DIR}
+	${CMAKE_CURRENT_BINARY_DIR}
 	)
 target_include_directories(ipc_client PRIVATE
 	${CMAKE_CURRENT_SOURCE_DIR}
@@ -65,9 +66,9 @@ add_library(ipc_server STATIC
 target_include_directories(ipc_server
 	INTERFACE
 	${CMAKE_CURRENT_SOURCE_DIR}
+	${CMAKE_CURRENT_BINARY_DIR}
 	)
 target_include_directories(ipc_server PRIVATE
-	aux_util
 	${CMAKE_CURRENT_SOURCE_DIR}/../compositor
 	${CMAKE_CURRENT_SOURCE_DIR}
 	${CMAKE_CURRENT_BINARY_DIR}
@@ -76,3 +77,10 @@ target_link_libraries(ipc_server PRIVATE
 	aux_util
 	rt
 	)
+
+if(XRT_HAVE_SYSTEMD)
+	target_include_directories(ipc_server PRIVATE
+		${SYSTEMD_INCLUDE_DIRS})
+	target_link_libraries(ipc_server PRIVATE
+		${SYSTEMD_LIBRARIES})
+endif()

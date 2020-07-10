@@ -1,4 +1,4 @@
-// Copyright 2018-2019, Collabora, Ltd.
+// Copyright 2018-2020, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -115,6 +115,15 @@ oxr_xrEnumerateEnvironmentBlendModes(
 	OXR_VERIFY_INSTANCE_AND_INIT_LOG(&log, instance, inst,
 	                                 "xrEnumerateEnvironmentBlendModes");
 	OXR_VERIFY_SYSTEM_AND_GET(&log, inst, systemId, sys);
+	OXR_VERIFY_VIEW_CONFIG_TYPE(&log, inst, viewConfigurationType);
+
+	if (viewConfigurationType != sys->view_config_type) {
+		return oxr_error(&log,
+		                 XR_ERROR_VIEW_CONFIGURATION_TYPE_UNSUPPORTED,
+		                 "(viewConfigurationType == 0x%08x) "
+		                 "unsupported view configuration type",
+		                 viewConfigurationType);
+	}
 
 	return oxr_system_enumerate_blend_modes(
 	    &log, sys, viewConfigurationType, environmentBlendModeCapacityInput,
@@ -193,6 +202,8 @@ oxr_xrGetOpenGLESGraphicsRequirementsKHR(
 	graphicsRequirements->maxApiVersionSupported =
 	    XR_MAKE_VERSION(ver.max_major, ver.max_minor, ver.max_patch);
 
+	sys->gotten_requirements = true;
+
 	return XR_SUCCESS;
 }
 
@@ -230,6 +241,8 @@ oxr_xrGetOpenGLGraphicsRequirementsKHR(
 	    XR_MAKE_VERSION(ver.min_major, ver.min_minor, ver.min_patch);
 	graphicsRequirements->maxApiVersionSupported =
 	    XR_MAKE_VERSION(ver.max_major, ver.max_minor, ver.max_patch);
+
+	sys->gotten_requirements = true;
 
 	return XR_SUCCESS;
 }

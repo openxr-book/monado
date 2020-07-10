@@ -1,4 +1,4 @@
-// Copyright 2018-2019, Collabora, Ltd.
+// Copyright 2018-2020, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -32,7 +32,7 @@ oxr_session_populate_vk(struct oxr_logger *log,
 	                                            false, &xcfd);
 	if (ret < 0 || xcfd == NULL) {
 		return oxr_error(log, XR_ERROR_INITIALIZATION_FAILED,
-		                 " failed create a fd compositor '%i'", ret);
+		                 "Failed to create an fd compositor '%i'", ret);
 	}
 
 	struct xrt_compositor_vk *xcvk = xrt_gfx_vk_provider_create(
@@ -42,7 +42,7 @@ oxr_session_populate_vk(struct oxr_logger *log,
 	if (xcvk == NULL) {
 		xcfd->base.destroy(&xcfd->base);
 		return oxr_error(log, XR_ERROR_INITIALIZATION_FAILED,
-		                 " failed create a vk client compositor");
+		                 "Failed to create an vk client compositor");
 	}
 
 	sess->compositor = &xcvk->base;

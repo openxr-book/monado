@@ -55,6 +55,10 @@ if sdl2.found()
 	have_conf.set('XRT_HAVE_SDL2', true)
 endif
 
+if v4l2.found() and 'v4l2' in drivers
+	have_conf.set('XRT_HAVE_V4L2', true)
+endif
+
 xrt_config_have_h = configure_file(
 	output: 'xrt_config_have.h',
 	configuration: have_conf,
@@ -72,7 +76,7 @@ xrt_config_have = declare_dependency(
 
 build_conf = configuration_data()
 if true
-	build_conf.set('XRT_BUILD_IPC', true)
+	build_conf.set('XRT_FEATURE_SERVICE', true)
 endif
 
 xrt_config_build_h = configure_file(

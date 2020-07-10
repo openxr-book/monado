@@ -1,4 +1,4 @@
-// Copyright 2018-2019, Collabora, Ltd.
+// Copyright 2018-2020, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -38,7 +38,7 @@ oxr_session_populate_gl_xlib(struct oxr_logger *log,
 	                                            true, &xcfd);
 	if (ret < 0 || xcfd == NULL) {
 		return oxr_error(log, XR_ERROR_INITIALIZATION_FAILED,
-		                 " failed create a fd compositor '%i'", ret);
+		                 "Failed to create an fd compositor '%i'", ret);
 	}
 
 
@@ -49,7 +49,7 @@ oxr_session_populate_gl_xlib(struct oxr_logger *log,
 	if (xcgl == NULL) {
 		xcfd->base.destroy(&xcfd->base);
 		return oxr_error(log, XR_ERROR_INITIALIZATION_FAILED,
-		                 " failed create a xlib client compositor");
+		                 "Failed to create an xlib client compositor");
 	}
 
 	sess->compositor = &xcgl->base;

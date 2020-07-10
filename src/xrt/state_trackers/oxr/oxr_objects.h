@@ -1,4 +1,4 @@
-// Copyright 2018-2019, Collabora, Ltd.
+// Copyright 2018-2020, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -14,10 +14,15 @@
 #include "xrt/xrt_compositor.h"
 #include "xrt/xrt_vulkan_includes.h"
 #include "xrt/xrt_openxr_includes.h"
+
+#include "os/os_threading.h"
+
+#include "util/u_index_fifo.h"
 #include "util/u_hashset.h"
 #include "util/u_hashmap.h"
 
 #include "oxr_extension_support.h"
+
 
 #ifdef __cplusplus
 extern "C" {
@@ -100,17 +105,25 @@ struct oxr_action;
 struct oxr_debug_messenger;
 struct oxr_handle_base;
 struct oxr_sub_paths;
-struct oxr_source;
-struct oxr_source_set;
-struct oxr_source_input;
-struct oxr_source_output;
+struct oxr_action_attachment;
+struct oxr_action_set_attachment;
+struct oxr_action_input;
+struct oxr_action_output;
 struct oxr_binding;
 struct oxr_interaction_profile;
+struct oxr_action_set_ref;
+struct oxr_action_ref;
 
 #define XRT_MAX_HANDLE_CHILDREN 256
+#define OXR_MAX_SWAPCHAIN_IMAGES 8
 
 struct time_state;
 
+/*!
+ * Function pointer type for a handle destruction function.
+ *
+ * @relates oxr_handle_base
+ */
 typedef XrResult (*oxr_handle_destroyer)(struct oxr_logger *log,
                                          struct oxr_handle_base *hb);
 
@@ -142,6 +155,16 @@ enum oxr_sub_action_path
 	OXR_SUB_ACTION_PATH_GAMEPAD,
 };
 
+/*!
+ * Tracks the state of a image that belongs to a @ref oxr_swapchain.
+ */
+enum oxr_image_state
+{
+	OXR_IMAGE_STATE_READY,
+	OXR_IMAGE_STATE_ACQUIRED,
+	OXR_IMAGE_STATE_WAITED,
+};
+
 
 /*
  *
@@ -153,24 +176,31 @@ enum oxr_sub_action_path
  * Destroy the handle's object, as well as all child handles recursively.
  *
  * This should be how all handle-associated objects are destroyed.
+ *
+ * @public @memberof oxr_handle_base
  */
 XrResult
 oxr_handle_destroy(struct oxr_logger *log, struct oxr_handle_base *hb);
 
 /*!
  * Returns a human-readable label for a handle state.
+ *
+ * @relates oxr_handle_base
  */
 const char *
 oxr_handle_state_to_string(enum oxr_handle_state state);
 
-/*
+/*!
  *
- * oxr_instance.c
+ * @name oxr_instance.c
+ * @{
  *
  */
 
 /*!
  * To go back to a OpenXR object.
+ *
+ * @relates oxr_instance
  */
 static inline XrInstance
 oxr_instance_to_openxr(struct oxr_instance *inst)
@@ -178,11 +208,17 @@ oxr_instance_to_openxr(struct oxr_instance *inst)
 	return XRT_CAST_PTR_TO_OXR_HANDLE(XrInstance, inst);
 }
 
+/*!
+ * @public @static @memberof oxr_instance
+ */
 XrResult
 oxr_instance_create(struct oxr_logger *log,
                     const XrInstanceCreateInfo *createInfo,
                     struct oxr_instance **out_inst);
 
+/*!
+ * @public @memberof oxr_instance
+ */
 XrResult
 oxr_instance_get_properties(struct oxr_logger *log,
                             struct oxr_instance *inst,
@@ -190,11 +226,18 @@ oxr_instance_get_properties(struct oxr_logger *log,
 
 #if XR_USE_TIMESPEC
 
+/*!
+ * @public @memberof oxr_instance
+ */
 XrResult
 oxr_instance_convert_time_to_timespec(struct oxr_logger *log,
                                       struct oxr_instance *inst,
                                       XrTime time,
                                       struct timespec *timespecTime);
+
+/*!
+ * @public @memberof oxr_instance
+ */
 XrResult
 oxr_instance_convert_timespec_to_time(struct oxr_logger *log,
                                       struct oxr_instance *inst,
@@ -202,13 +245,35 @@ oxr_instance_convert_timespec_to_time(struct oxr_logger *log,
                                       XrTime *time);
 #endif // XR_USE_TIMESPEC
 
+/*!
+ * @}
+ */
 
-/*
+/*!
  *
- * oxr_path.c
+ * @name oxr_path.c
+ * @{
  *
  */
 
+/*!
+ * Initialize the path system.
+ * @private @memberof oxr_instance
+ */
+XrResult
+oxr_path_init(struct oxr_logger *log, struct oxr_instance *inst);
+
+/*!
+ * @public @memberof oxr_instance
+ */
+bool
+oxr_path_is_valid(struct oxr_logger *log,
+                  struct oxr_instance *inst,
+                  XrPath path);
+
+/*!
+ * @public @memberof oxr_instance
+ */
 void *
 oxr_path_get_attached(struct oxr_logger *log,
                       struct oxr_instance *inst,
@@ -216,6 +281,8 @@ oxr_path_get_attached(struct oxr_logger *log,
 
 /*!
  * Get the path for the given string if it exists, or create it if it does not.
+ *
+ * @public @memberof oxr_instance
  */
 XrResult
 oxr_path_get_or_create(struct oxr_logger *log,
@@ -226,6 +293,8 @@ oxr_path_get_or_create(struct oxr_logger *log,
 
 /*!
  * Only get the path for the given string if it exists.
+ *
+ * @public @memberof oxr_instance
  */
 XrResult
 oxr_path_only_get(struct oxr_logger *log,
@@ -241,6 +310,8 @@ oxr_path_only_get(struct oxr_logger *log,
  * of valid characters, not including the null termination character (but a
  * extra null byte is always reserved at the end so can strings can be given
  * to functions expecting null terminated strings).
+ *
+ * @public @memberof oxr_instance
  */
 XrResult
 oxr_path_get_string(struct oxr_logger *log,
@@ -250,22 +321,61 @@ oxr_path_get_string(struct oxr_logger *log,
                     size_t *out_length);
 
 /*!
- * Destroy all paths that the instance has created.
+ * Destroy the path system and all paths that the instance has created.
+ *
+ * @private @memberof oxr_instance
  */
 void
-oxr_path_destroy_all(struct oxr_logger *log, struct oxr_instance *inst);
+oxr_path_destroy(struct oxr_logger *log, struct oxr_instance *inst);
 
+/*!
+ * @}
+ */
 
-/*
+/*!
+ * To go back to a OpenXR object.
  *
- * oxr_input.c
+ * @relates oxr_action_set
+ */
+static inline XrActionSet
+oxr_action_set_to_openxr(struct oxr_action_set *act_set)
+{
+	return XRT_CAST_PTR_TO_OXR_HANDLE(XrActionSet, act_set);
+}
+
+/*!
+ * To go back to a OpenXR object.
+ *
+ * @relates oxr_action
+ */
+static inline XrAction
+oxr_action_to_openxr(struct oxr_action *act)
+{
+	return XRT_CAST_PTR_TO_OXR_HANDLE(XrAction, act);
+}
+
+
+/*!
+ *
+ * @name oxr_input.c
+ * @{
  *
  */
 
 /*!
  * Helper function to classify sub_paths.
+ *
+ * Sets all members of @p sub_paths ( @ref oxr_sub_paths ) as appropriate based
+ * on the subaction paths found in the list.
+ *
+ * If no paths are provided, @p sub_paths->any will be true.
+ *
+ * @return false if an invalid subaction path is provided.
+ *
+ * @public @memberof oxr_instance
+ * @relatesalso oxr_sub_paths
  */
-void
+bool
 oxr_classify_sub_action_paths(struct oxr_logger *log,
                               struct oxr_instance *inst,
                               uint32_t num_subaction_paths,
@@ -274,23 +384,18 @@ oxr_classify_sub_action_paths(struct oxr_logger *log,
 
 /*!
  * Find the pose input for the set of sub_paths
+ *
+ * @public @memberof oxr_session
  */
 XrResult
-oxr_source_get_pose_input(struct oxr_logger *log,
+oxr_action_get_pose_input(struct oxr_logger *log,
                           struct oxr_session *sess,
                           uint32_t key,
                           const struct oxr_sub_paths *sub_paths,
-                          struct oxr_source_input **out_input);
-
+                          struct oxr_action_input **out_input);
 /*!
- * To go back to a OpenXR object.
+ * @public @memberof oxr_instance
  */
-static inline XrActionSet
-oxr_action_set_to_openxr(struct oxr_action_set *act_set)
-{
-	return XRT_CAST_PTR_TO_OXR_HANDLE(XrActionSet, act_set);
-}
-
 XrResult
 oxr_action_set_create(struct oxr_logger *log,
                       struct oxr_instance *inst,
@@ -298,77 +403,92 @@ oxr_action_set_create(struct oxr_logger *log,
                       struct oxr_action_set **out_act_set);
 
 /*!
- * To go back to a OpenXR object.
+ * @public @memberof oxr_action
  */
-static inline XrAction
-oxr_action_to_openxr(struct oxr_action *act)
-{
-	return XRT_CAST_PTR_TO_OXR_HANDLE(XrAction, act);
-}
-
 XrResult
 oxr_action_create(struct oxr_logger *log,
                   struct oxr_action_set *act_set,
                   const XrActionCreateInfo *createInfo,
                   struct oxr_action **out_act);
-
+/*!
+ * @public @memberof oxr_session
+ * @relatesalso oxr_action_set
+ */
 XrResult
 oxr_session_attach_action_sets(struct oxr_logger *log,
                                struct oxr_session *sess,
                                const XrSessionActionSetsAttachInfo *bindInfo);
-
+/*!
+ * @public @memberof oxr_session
+ */
 XrResult
 oxr_action_sync_data(struct oxr_logger *log,
                      struct oxr_session *sess,
                      uint32_t countActionSets,
                      const XrActiveActionSet *actionSets);
-
+/*!
+ * @public @memberof oxr_session
+ */
 XrResult
 oxr_action_get_boolean(struct oxr_logger *log,
                        struct oxr_session *sess,
-                       uint64_t key,
+                       uint32_t act_key,
                        struct oxr_sub_paths sub_paths,
                        XrActionStateBoolean *data);
-
+/*!
+ * @public @memberof oxr_session
+ */
 XrResult
 oxr_action_get_vector1f(struct oxr_logger *log,
                         struct oxr_session *sess,
-                        uint64_t key,
+                        uint32_t act_key,
                         struct oxr_sub_paths sub_paths,
                         XrActionStateFloat *data);
 
-
+/*!
+ * @public @memberof oxr_session
+ */
 XrResult
 oxr_action_get_vector2f(struct oxr_logger *log,
                         struct oxr_session *sess,
-                        uint64_t key,
+                        uint32_t act_key,
                         struct oxr_sub_paths sub_paths,
                         XrActionStateVector2f *data);
-
+/*!
+ * @public @memberof oxr_session
+ */
 XrResult
 oxr_action_get_pose(struct oxr_logger *log,
                     struct oxr_session *sess,
-                    uint64_t key,
+                    uint32_t act_key,
                     struct oxr_sub_paths sub_paths,
                     XrActionStatePose *data);
-
+/*!
+ * @public @memberof oxr_session
+ */
 XrResult
 oxr_action_apply_haptic_feedback(struct oxr_logger *log,
                                  struct oxr_session *sess,
-                                 uint64_t key,
+                                 uint32_t act_key,
                                  struct oxr_sub_paths sub_paths,
                                  const XrHapticBaseHeader *hapticEvent);
-
+/*!
+ * @public @memberof oxr_session
+ */
 XrResult
 oxr_action_stop_haptic_feedback(struct oxr_logger *log,
                                 struct oxr_session *sess,
-                                uint64_t key,
+                                uint32_t act_key,
                                 struct oxr_sub_paths sub_paths);
 
+/*!
+ * @}
+ */
 
-/*
+/*!
  *
- * oxr_binding.c
+ * @name oxr_binding.c
+ * @{
  *
  */
 
@@ -379,6 +499,8 @@ oxr_action_stop_haptic_feedback(struct oxr_logger *log,
  * @param      inst  Instance.
  * @param      xdev  Can be null.
  * @param[out] out_p Returned interaction profile.
+ *
+ * @public @memberof oxr_instance
  */
 void
 oxr_find_profile_for_device(struct oxr_logger *log,
@@ -388,12 +510,15 @@ oxr_find_profile_for_device(struct oxr_logger *log,
 
 /*!
  * Free all memory allocated by the binding system.
+ *
+ * @public @memberof oxr_instance
  */
 void
 oxr_binding_destroy_all(struct oxr_logger *log, struct oxr_instance *inst);
 
 /*!
  * Find all bindings that is the given action key is bound to.
+ * @public @memberof oxr_interaction_profile
  */
 void
 oxr_binding_find_bindings_from_key(struct oxr_logger *log,
@@ -402,12 +527,18 @@ oxr_binding_find_bindings_from_key(struct oxr_logger *log,
                                    struct oxr_binding *bindings[32],
                                    size_t *num_bindings);
 
+/*!
+ * @public @memberof oxr_instance
+ */
 XrResult
 oxr_action_suggest_interaction_profile_bindings(
     struct oxr_logger *log,
     struct oxr_instance *inst,
     const XrInteractionProfileSuggestedBinding *suggestedBindings);
 
+/*!
+ * @public @memberof oxr_instance
+ */
 XrResult
 oxr_action_get_current_interaction_profile(
     struct oxr_logger *log,
@@ -415,6 +546,9 @@ oxr_action_get_current_interaction_profile(
     XrPath topLevelUserPath,
     XrInteractionProfileState *interactionProfile);
 
+/*!
+ * @public @memberof oxr_session
+ */
 XrResult
 oxr_action_get_input_source_localized_name(
     struct oxr_logger *log,
@@ -424,6 +558,9 @@ oxr_action_get_input_source_localized_name(
     uint32_t *bufferCountOutput,
     char *buffer);
 
+/*!
+ * @public @memberof oxr_session
+ */
 XrResult
 oxr_action_enumerate_bound_sources(struct oxr_logger *log,
                                    struct oxr_session *sess,
@@ -431,16 +568,21 @@ oxr_action_enumerate_bound_sources(struct oxr_logger *log,
                                    uint32_t sourceCapacityInput,
                                    uint32_t *sourceCountOutput,
                                    XrPath *sources);
+/*!
+ * @}
+ */
 
-
-/*
+/*!
  *
- * oxr_session.c
+ * @name oxr_session.c
+ * @{
  *
  */
 
 /*!
  * To go back to a OpenXR object.
+ *
+ * @relates oxr_session
  */
 static inline XrSession
 oxr_session_to_openxr(struct oxr_session *sess)
@@ -473,7 +615,7 @@ XrResult
 oxr_session_request_exit(struct oxr_logger *log, struct oxr_session *sess);
 
 void
-oxr_session_poll(struct oxr_session *sess);
+oxr_session_poll(struct oxr_logger *log, struct oxr_session *sess);
 
 /*!
  * Get the view space position at the given time in relation to the
@@ -686,6 +828,17 @@ oxr_event_push_XrEventDataSessionStateChanged(struct oxr_logger *log,
                                               XrSessionState state,
                                               XrTime time);
 
+XrResult
+oxr_event_push_XrEventDataMainSessionVisibilityChangedEXTX(
+    struct oxr_logger *log, struct oxr_session *sess, bool visible);
+
+/*!
+ * This clears all pending events refers to the given session.
+ */
+XrResult
+oxr_event_remove_session_events(struct oxr_logger *log,
+                                struct oxr_session *sess);
+
 
 /*
  *
@@ -726,7 +879,7 @@ oxr_xdev_get_pose_at(struct oxr_logger *log,
                      enum xrt_input_name name,
                      XrTime at_time,
                      uint64_t *out_pose_timestamp_ns,
-                     struct xrt_pose *out_pose);
+                     struct xrt_space_relation *out_relation);
 
 /*!
  * Returns the relation of the named input from the device, always ensures
@@ -828,7 +981,7 @@ oxr_swapchain_vk_create(struct oxr_logger *,
 XrResult
 oxr_session_populate_egl(struct oxr_logger *log,
                          struct oxr_system *sys,
-                         XrGraphicsBindingEGLMND const *next,
+                         XrGraphicsBindingEGLMNDX const *next,
                          struct oxr_session *sess);
 
 #endif
@@ -845,7 +998,7 @@ oxr_session_populate_egl(struct oxr_logger *log,
  * Used to hold diverse child handles and ensure orderly destruction.
  *
  * Each object referenced by an OpenXR handle should have one of these as its
- * first element.
+ * first element, thus "extending" this class.
  */
 struct oxr_handle_base
 {
@@ -878,6 +1031,10 @@ struct oxr_handle_base
  * can be created from. Might need to open devices in order to get all
  * properties from it, but shouldn't.
  *
+ * Not strictly an object, but an atom.
+ *
+ * Valid only within a XrInstance (@ref oxr_instance)
+ *
  * @obj{XrSystemId}
  */
 struct oxr_system
@@ -896,6 +1053,9 @@ struct oxr_system
 	size_t num_xdevs;
 
 	XrSystemId systemId;
+
+	//! Have the client application called the gfx api requirements func?
+	bool gotten_requirements;
 
 	XrFormFactor form_factor;
 	XrViewConfigurationType view_config_type;
@@ -918,7 +1078,10 @@ struct oxr_extension_status
 /*!
  * Main object that ties everything together.
  *
+ * No parent type/handle: this is the root handle.
+ *
  * @obj{XrInstance}
+ * @extends oxr_handle_base
  */
 struct oxr_instance
 {
@@ -939,12 +1102,28 @@ struct oxr_instance
 
 	struct time_state *timekeeping;
 
+	struct
+	{
+		struct u_hashset *name_store;
+		struct u_hashset *loc_store;
+	} action_sets;
+
 	//! Path store, for looking up paths.
 	struct u_hashset *path_store;
+	//! Mapping from ID to path.
+	struct oxr_path **path_array;
+	//! Total length of path array.
+	size_t path_array_length;
+	//! Number of paths in the array (0 is always null).
+	size_t path_num;
 
 	// Event queue.
-	struct oxr_event *last_event;
-	struct oxr_event *next_event;
+	struct
+	{
+		struct os_mutex mutex;
+		struct oxr_event *last;
+		struct oxr_event *next;
+	} event;
 
 	struct oxr_interaction_profile **profiles;
 	size_t num_profiles;
@@ -958,6 +1137,7 @@ struct oxr_instance
 		XrPath left;
 		XrPath right;
 		XrPath gamepad;
+		XrPath treadmill;
 
 		XrPath khr_simple_controller;
 		XrPath google_daydream_controller;
@@ -968,7 +1148,7 @@ struct oxr_instance
 		XrPath oculus_go_controller;
 		XrPath oculus_touch_controller;
 		XrPath valve_index_controller;
-		XrPath mnd_ball_on_stick_controller;
+		XrPath mndx_ball_on_a_stick_controller;
 	} path_cache;
 
 	//! Debug messengers
@@ -983,7 +1163,10 @@ struct oxr_instance
 /*!
  * Object that client program interact with.
  *
+ * Parent type/handle is @ref oxr_instance
+ *
  * @obj{XrSession}
+ * @extends oxr_handle_base
  */
 struct oxr_session
 {
@@ -995,17 +1178,57 @@ struct oxr_session
 	struct oxr_session *next;
 
 	XrSessionState state;
+	bool has_begun;
+	/*!
+	 * There is a extra state between xrBeginSession has been called and
+	 * the first xrWaitFrame has been called. These are to track this.
+	 */
+	bool has_waited_once;
 	bool frame_started;
 	bool exiting;
 
-	struct u_hashmap_int *act_sets;
-	struct u_hashmap_int *sources;
+	struct
+	{
+		int64_t waited;
+		int64_t begun;
+	} frame_id;
 
-	//! List of created source sets.
-	struct oxr_source_set *src_set_list;
+	struct os_semaphore sem;
 
-	//! Has xrAttachSessionActionSets been called?
-	bool actionsAttached;
+	/*!
+	 * An array of action set attachments that this session owns.
+	 *
+	 * If non-null, this means action sets have been attached to this
+	 * session.
+	 */
+	struct oxr_action_set_attachment *act_set_attachments;
+
+	/*!
+	 * Length of @ref oxr_session::act_set_attachments.
+	 */
+	size_t num_action_set_attachments;
+
+	/*!
+	 * A map of action set key to action set attachments.
+	 *
+	 * If non-null, this means action sets have been attached to this
+	 * session, since this map points to elements of
+	 * oxr_session::act_set_attachments
+	 */
+	struct u_hashmap_int *act_sets_attachments_by_key;
+
+	/*!
+	 * A map of action key to action attachment.
+	 *
+	 * The action attachments are actually owned by the action set
+	 * attachments, but we own the action set attachments, so this is OK.
+	 *
+	 * If non-null, this means action sets have been attached to this
+	 * session, since this map points to @p oxr_action_attachment members of
+	 * oxr_session::act_set_attachments elements.
+	 */
+	struct u_hashmap_int *act_attachments_by_key;
+
 
 	/*!
 	 * Currently bound interaction profile.
@@ -1037,6 +1260,8 @@ struct oxr_session
 
 /*!
  * Returns XR_SUCCESS or XR_SESSION_LOSS_PENDING as appropriate.
+ *
+ * @public @memberof oxr_session
  */
 static inline XrResult
 oxr_session_success_result(struct oxr_session *session)
@@ -1050,6 +1275,8 @@ oxr_session_success_result(struct oxr_session *session)
 /*!
  * Returns XR_SUCCESS, XR_SESSION_LOSS_PENDING, or XR_SESSION_NOT_FOCUSED, as
  * appropriate.
+ *
+ * @public @memberof oxr_session
  */
 static inline XrResult
 oxr_session_success_focused_result(struct oxr_session *session)
@@ -1094,7 +1321,10 @@ struct oxr_binding
 };
 
 /*!
- * To carry around a sementic selection of sub action paths.
+ * A parsed equivalent of a list of sub-action paths.
+ *
+ * If @p any is true, then no paths were provided, which typically means any
+ * input is acceptable.
  */
 struct oxr_sub_paths
 {
@@ -1104,50 +1334,84 @@ struct oxr_sub_paths
 	bool left;
 	bool right;
 	bool gamepad;
+	bool treadmill;
 };
 
 /*!
- * Session input source.
+ * The data associated with the attachment of an Action Set (@ref
+ * oxr_action_set) to as Session (@ref oxr_session).
+ *
+ * Action sets are created as children of the Instance, but are primarily used
+ * with one or more Sessions. They may be used with multiple sessions at a time,
+ * so we can't just put the per-session information directly in the action set
+ * or action. Instead, we have the _attachment structures, which mirror the
+ * action sets and actions but are rooted under the Session:
+ *
+ * - For every action set attached to a session, that session owns a @ref
+ *   oxr_action_set_attachment.
+ * - For each action in those attached action sets, the action set attachment
+ *   owns an @ref oxr_action_attachment.
+ *
+ * We go from the public handle to the _attachment structure by using a `key`
+ * value and a hash map: specifically, we look up the oxr_action_set::key and
+ * oxr_action::key in the session.
+ *
+ * This structure has no pointer to the @ref oxr_action_set that created it
+ * because the application is allowed to destroy an action before the session,
+ * which should change nothing except not allow the application to access the
+ * corresponding data anymore.
  *
  * @see oxr_action_set
  */
-struct oxr_source_set
+struct oxr_action_set_attachment
 {
-	//! Common structure for things referred to by OpenXR handles.
-	struct oxr_handle_base handle;
-
 	//! Owning session.
 	struct oxr_session *sess;
+
+	//! Action set refcounted data
+	struct oxr_action_set_ref *act_set_ref;
+
+	//! Unique key for the session hashmap.
+	uint32_t act_set_key;
 
 	//! Which sub-action paths are requested on the latest sync.
 	struct oxr_sub_paths requested_sub_paths;
 
-	//! Next source set on this session.
-	struct oxr_source_set *next;
+	//! An array of action attachments we own.
+	struct oxr_action_attachment *act_attachments;
+
+	/*!
+	 * Length of @ref oxr_action_set_attachment::act_attachments.
+	 */
+	size_t num_action_attachments;
 };
 
 /*!
- * The state of a action input source.
+ * De-initialize an action set attachment and its action attachments.
  *
- * @see oxr_source
+ * Frees the action attachments, but does not de-allocate the action set
+ * attachment.
+ *
+ * @public @memberof oxr_action_set_attachment
  */
-struct oxr_source_state
+void
+oxr_action_set_attachment_teardown(
+    struct oxr_action_set_attachment *act_set_attached);
+
+
+/*!
+ * The state of a action input.
+ *
+ * @see oxr_action_attachment
+ */
+struct oxr_action_state
 {
-	union {
-		struct
-		{
-			float x;
-		} vec1;
+	/*!
+	 * The actual value - must interpret using action type
+	 */
+	union xrt_input_value value;
 
-		struct
-		{
-			float x;
-			float y;
-		} vec2;
-
-		bool boolean;
-	};
-
+	//! Is this active (bound and providing input)?
 	bool active;
 
 	// Was this changed.
@@ -1158,81 +1422,108 @@ struct oxr_source_state
 };
 
 /*!
- * A input source pair of a @ref xrt_input and a @ref xrt_device.
+ * A input action pair of a @ref xrt_input and a @ref xrt_device, along with the
+ * required transform.
  *
  * @see xrt_device
  * @see xrt_input
  */
-struct oxr_source_input
+struct oxr_action_input
 {
 	struct xrt_device *xdev;
 	struct xrt_input *input;
+	struct oxr_input_transform *transforms;
+	size_t num_transforms;
 };
 
 /*!
- * A output source pair of a @ref xrt_output_name and a @ref xrt_device.
+ * A output action pair of a @ref xrt_output_name and a @ref xrt_device.
  *
  * @see xrt_device
  * @see xrt_output_name
  */
-struct oxr_source_output
+struct oxr_action_output
 {
 	struct xrt_device *xdev;
 	enum xrt_output_name name;
 };
 
 /*!
- * A set of inputs for a single sub action path.
+ * The set of inputs/outputs for a single sub-action path for an action.
  *
- * @see oxr_source
+ * Each @ref oxr_action_attachment has one of these for every known sub-action
+ * path in the spec. Many, or even most, will be "empty".
+ *
+ * @see oxr_action_attachment
  */
-struct oxr_source_cache
+struct oxr_action_cache
 {
-	struct oxr_source_state current;
+	struct oxr_action_state current;
 
 	size_t num_inputs;
-	struct oxr_source_input *inputs;
+	struct oxr_action_input *inputs;
 
 	int64_t stop_output_time;
 	size_t num_outputs;
-	struct oxr_source_output *outputs;
-
-	enum xrt_source_value_redirect redirect;
+	struct oxr_action_output *outputs;
 };
 
 /*!
- * Session input source.
+ * Data associated with an Action that has been attached to a Session.
+ *
+ * More information on the action vs action attachment and action set vs action
+ * set attachment parallel is in the docs for @ref oxr_action_set_attachment.
  *
  * @see oxr_action
+ * @see oxr_action_set_attachment
  */
-struct oxr_source
+struct oxr_action_attachment
 {
-	//! Common structure for things referred to by OpenXR handles.
-	struct oxr_handle_base handle;
+	//! The owning action set attachment
+	struct oxr_action_set_attachment *act_set_attached;
 
-	//! Type the action this source was created from is.
-	XrActionType action_type;
+	//! This action's refcounted data
+	struct oxr_action_ref *act_ref;
 
-	struct oxr_source_state any_state;
+	/*!
+	 * The corresponding session.
+	 *
+	 * This will always be valid: the session outlives this object because
+	 * it owns act_set_attached.
+	 */
+	struct oxr_session *sess;
 
-	struct oxr_source_cache user;
-	struct oxr_source_cache head;
-	struct oxr_source_cache left;
-	struct oxr_source_cache right;
-	struct oxr_source_cache gamepad;
+	//! Unique key for the session hashmap.
+	uint32_t act_key;
+
+	struct oxr_action_state any_state;
+
+	struct oxr_action_cache user;
+	struct oxr_action_cache head;
+	struct oxr_action_cache left;
+	struct oxr_action_cache right;
+	struct oxr_action_cache gamepad;
 };
 
 /*!
- * Can be one of 3 references or a space that are bound to actions.
+ * @}
+ */
+
+/*!
+ * Can be one of several reference space types, or a space that is bound to an
+ * action.
+ *
+ * Parent type/handle is @ref oxr_session
  *
  * @obj{XrSpace}
+ * @extends oxr_handle_base
  */
 struct oxr_space
 {
 	//! Common structure for things referred to by OpenXR handles.
 	struct oxr_handle_base handle;
 
-	//! Onwer of this space.
+	//! Owner of this space.
 	struct oxr_session *sess;
 
 	//! Pose that was given during creation.
@@ -1254,22 +1545,56 @@ struct oxr_space
 /*!
  * A set of images used for rendering.
  *
+ * Parent type/handle is @ref oxr_session
+ *
  * @obj{XrSwapchain}
+ * @extends oxr_handle_base
  */
 struct oxr_swapchain
 {
 	//! Common structure for things referred to by OpenXR handles.
 	struct oxr_handle_base handle;
 
-	//! Onwer of this swapchain.
+	//! Owner of this swapchain.
 	struct oxr_session *sess;
 
 	//! Compositor swapchain.
 	struct xrt_swapchain *swapchain;
 
-	//! Actual state tracked! :D
-	int acquired_index;
-	int released_index;
+	struct
+	{
+		//! Swapchain size.
+		uint32_t width, height;
+		//! For 1 is 2D texture, greater then 1 2D array texture.
+		uint32_t num_array_layers;
+	};
+
+	struct
+	{
+		enum oxr_image_state state;
+	} images[OXR_MAX_SWAPCHAIN_IMAGES];
+
+	struct
+	{
+		size_t num;
+		struct u_index_fifo fifo;
+	} acquired;
+
+	struct
+	{
+		bool yes;
+		int index;
+	} waited;
+
+	struct
+	{
+		bool yes;
+		int index;
+	} released;
+
+	// Is this a static swapchain, needed for acquire semantics.
+	bool is_static;
+
 
 	XrResult (*destroy)(struct oxr_logger *, struct oxr_swapchain *);
 
@@ -1292,47 +1617,124 @@ struct oxr_swapchain
 	                          const XrSwapchainImageReleaseInfo *);
 };
 
+struct oxr_refcounted
+{
+	struct xrt_reference base;
+	//! Destruction callback
+	void (*destroy)(struct oxr_refcounted *);
+};
+
+/*!
+ * Increase the reference count of @p orc.
+ */
+static inline void
+oxr_refcounted_ref(struct oxr_refcounted *orc)
+{
+	xrt_reference_inc(&orc->base);
+}
+
+/*!
+ * Decrease the reference count of @p orc, destroying it if it reaches 0.
+ */
+static inline void
+oxr_refcounted_unref(struct oxr_refcounted *orc)
+{
+	if (xrt_reference_dec(&orc->base)) {
+		orc->destroy(orc);
+	}
+}
+
+/*!
+ * The reference-counted data of an action set.
+ *
+ * One or more sessions may still need this data after the application destroys
+ * its XrActionSet handle, so this data is refcounted.
+ *
+ * @see oxr_action_set
+ * @extends oxr_refcounted
+ */
+struct oxr_action_set_ref
+{
+	struct oxr_refcounted base;
+
+	//! Application supplied name of this action.
+	char name[XR_MAX_ACTION_SET_NAME_SIZE];
+
+	/*!
+	 * Has this action set even been attached to any session, marking it as
+	 * immutable.
+	 */
+	bool ever_attached;
+
+	//! Unique key for the session hashmap.
+	uint32_t act_set_key;
+
+	struct
+	{
+		struct u_hashset *name_store;
+		struct u_hashset *loc_store;
+	} actions;
+};
+
 /*!
  * A group of actions.
  *
+ * Parent type/handle is @ref oxr_instance
+ *
+ * Note, however, that an action set must be "attached" to a session
+ * ( @ref oxr_session ) to be used and not just configured.
+ * The corresponding data is in @ref oxr_action_set_attachment.
+ *
  * @obj{XrActionSet}
+ * @extends oxr_handle_base
  */
 struct oxr_action_set
 {
 	//! Common structure for things referred to by OpenXR handles.
 	struct oxr_handle_base handle;
 
-	//! Onwer of this messenger.
+	//! Owner of this action set.
 	struct oxr_instance *inst;
 
-	//! Application supplied name of this action.
-	char name[XR_MAX_ACTION_SET_NAME_SIZE];
+	/*!
+	 * The data for this action set that must live as long as any session we
+	 * are attached to.
+	 */
+	struct oxr_action_set_ref *data;
 
-	//! Has this action set been attached.
-	bool attached;
 
-	//! Unique key for the session hashmap.
-	uint32_t key;
+	/*!
+	 * Unique key for the session hashmap.
+	 *
+	 * Duplicated from oxr_action_set_ref::act_set_key for efficiency.
+	 */
+	uint32_t act_set_key;
+
+	//! The item in the name hashset.
+	struct u_hashset_item *name_item;
+
+	//! The item in the localized hashset.
+	struct u_hashset_item *loc_item;
 };
 
 /*!
- * A single action.
+ * The reference-counted data of an action.
  *
- * @obj{XrAction}
+ * One or more sessions may still need this data after the application destroys
+ * its XrAction handle, so this data is refcounted.
+ *
+ * @see oxr_action
+ * @extends oxr_refcounted
  */
-struct oxr_action
+struct oxr_action_ref
 {
-	//! Common structure for things referred to by OpenXR handles.
-	struct oxr_handle_base handle;
-
-	//! Onwer of this messenger.
-	struct oxr_action_set *act_set;
+	struct oxr_refcounted base;
 
 	//! Application supplied name of this action.
 	char name[XR_MAX_ACTION_NAME_SIZE];
 
 	//! Unique key for the session hashmap.
-	uint32_t key;
+	uint32_t act_key;
 
 	//! Type this action was created with.
 	XrActionType action_type;
@@ -1342,7 +1744,46 @@ struct oxr_action
 };
 
 /*!
+ * A single action.
+ *
+ * Parent type/handle is @ref oxr_action_set
+ *
+ * For actual usage, an action is attached to a session: the corresponding data
+ * is in @ref oxr_action_attachment
+ *
+ * @obj{XrAction}
+ * @extends oxr_handle_base
+ */
+struct oxr_action
+{
+	//! Common structure for things referred to by OpenXR handles.
+	struct oxr_handle_base handle;
+
+	//! Owner of this action.
+	struct oxr_action_set *act_set;
+
+	//! The data for this action that must live as long as any session we
+	//! are attached to.
+	struct oxr_action_ref *data;
+
+	/*!
+	 * Unique key for the session hashmap.
+	 *
+	 * Duplicated from oxr_action_ref::act_key for efficiency.
+	 */
+	uint32_t act_key;
+
+	//! The item in the name hashset.
+	struct u_hashset_item *name_item;
+
+	//! The item in the localized hashset.
+	struct u_hashset_item *loc_item;
+};
+
+/*!
  * Debug object created by the client program.
+ *
+ * Parent type/handle is @ref oxr_instance
  *
  * @obj{XrDebugUtilsMessengerEXT}
  */
@@ -1351,7 +1792,7 @@ struct oxr_debug_messenger
 	//! Common structure for things referred to by OpenXR handles.
 	struct oxr_handle_base handle;
 
-	//! Onwer of this messenger.
+	//! Owner of this messenger.
 	struct oxr_instance *inst;
 
 	//! Severities to submit to this messenger

@@ -86,18 +86,22 @@ typedef struct ipc_connection
 
 } ipc_connection_t;
 
-
-ipc_result_t
+/*!
+ * @name IPC low-level interface
+ * These functions are called by generated IPC client code.
+ * @{
+ */
+xrt_result_t
 ipc_client_send_message(ipc_connection_t *ipc_c, void *message, size_t size);
 
-ipc_result_t
+xrt_result_t
 ipc_client_send_and_get_reply(struct ipc_connection *ipc_c,
                               void *msg_ptr,
                               size_t msg_size,
                               void *reply_ptr,
                               size_t reply_size);
 
-ipc_result_t
+xrt_result_t
 ipc_client_send_and_get_reply_fds(ipc_connection_t *ipc_c,
                                   void *msg_ptr,
                                   size_t msg_size,
@@ -105,7 +109,9 @@ ipc_client_send_and_get_reply_fds(ipc_connection_t *ipc_c,
                                   size_t reply_size,
                                   int *fds,
                                   size_t num_fds);
-
+/*!
+ * @}
+ */
 
 /*
  *
@@ -120,7 +126,11 @@ ipc_client_compositor_create(ipc_connection_t *ipc_c,
                              struct xrt_compositor_fd **out_xcfd);
 
 struct xrt_device *
-ipc_client_hmd_create(ipc_connection_t *ipc_c, uint32_t device_id);
+ipc_client_hmd_create(ipc_connection_t *ipc_c,
+                      struct xrt_tracking_origin *xtrack,
+                      uint32_t device_id);
 
 struct xrt_device *
-ipc_client_device_create(ipc_connection_t *ipc_c, uint32_t device_id);
+ipc_client_device_create(ipc_connection_t *ipc_c,
+                         struct xrt_tracking_origin *xtrack,
+                         uint32_t device_id);

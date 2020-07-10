@@ -35,6 +35,10 @@
  *
  */
 
+/*!
+ * An IPC client proxy for an HMD @ref xrt_device.
+ * @implements xrt_device
+ */
 struct ipc_client_hmd
 {
 	struct xrt_device base;
@@ -78,9 +82,9 @@ ipc_client_hmd_update_inputs(struct xrt_device *xdev)
 {
 	struct ipc_client_hmd *ich = ipc_client_hmd(xdev);
 
-	ipc_result_t r =
+	xrt_result_t r =
 	    ipc_call_device_update_input(ich->ipc_c, ich->device_id);
-	if (r != IPC_SUCCESS) {
+	if (r != XRT_SUCCESS) {
 		IPC_DEBUG(ich->ipc_c, "IPC: Error calling input update!");
 	}
 }
@@ -94,10 +98,10 @@ ipc_client_hmd_get_tracked_pose(struct xrt_device *xdev,
 {
 	struct ipc_client_hmd *ich = ipc_client_hmd(xdev);
 
-	ipc_result_t r = ipc_call_device_get_tracked_pose(
+	xrt_result_t r = ipc_call_device_get_tracked_pose(
 	    ich->ipc_c, ich->device_id, name, at_timestamp_ns,
 	    out_relation_timestamp_ns, out_relation);
-	if (r != IPC_SUCCESS) {
+	if (r != XRT_SUCCESS) {
 		IPC_DEBUG(ich->ipc_c, "IPC: Error calling tracked pose!");
 	}
 }
@@ -110,23 +114,28 @@ ipc_client_hmd_get_view_pose(struct xrt_device *xdev,
 {
 	struct ipc_client_hmd *ich = ipc_client_hmd(xdev);
 
-	ipc_result_t r = ipc_call_device_get_view_pose(
+	xrt_result_t r = ipc_call_device_get_view_pose(
 	    ich->ipc_c, ich->device_id, eye_relation, view_index, out_pose);
-	if (r != IPC_SUCCESS) {
+	if (r != XRT_SUCCESS) {
 		IPC_DEBUG(ich->ipc_c, "IPC: Error calling view pose!");
 	}
 }
 
+/*!
+ * @public @memberof ipc_client_hmd
+ */
 struct xrt_device *
-ipc_client_hmd_create(ipc_connection_t *ipc_c, uint32_t device_id)
+ipc_client_hmd_create(ipc_connection_t *ipc_c,
+                      struct xrt_tracking_origin *xtrack,
+                      uint32_t device_id)
 {
 	struct ipc_shared_memory *ism = ipc_c->ism;
 	struct ipc_shared_device *idev = &ism->idevs[device_id];
 
 
 
-	enum u_device_alloc_flags flags = (enum u_device_alloc_flags)(
-	    U_DEVICE_ALLOC_HMD | U_DEVICE_ALLOC_TRACKING_NONE);
+	enum u_device_alloc_flags flags =
+	    (enum u_device_alloc_flags)(U_DEVICE_ALLOC_HMD);
 	struct ipc_client_hmd *ich =
 	    U_DEVICE_ALLOCATE(struct ipc_client_hmd, flags, 0, 0);
 	ich->ipc_c = ipc_c;
@@ -137,8 +146,10 @@ ipc_client_hmd_create(ipc_connection_t *ipc_c, uint32_t device_id)
 	ich->base.destroy = ipc_client_hmd_destroy;
 
 	// Start copying the information from the idev.
+	ich->base.tracking_origin = xtrack;
 	ich->base.name = idev->name;
 	ich->device_id = device_id;
+
 	// Print name.
 	snprintf(ich->base.str, XRT_DEVICE_NAME_LEN, "%s", idev->str);
 

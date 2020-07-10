@@ -10,11 +10,12 @@ Build-Depends: debhelper-compat (= 12),
                graphviz,
                libavcodec-dev,
                libcjson-dev,
+               libdbus-1-dev [linux-any],
                libegl1-mesa-dev,
                libeigen3-dev,
                libgl1-mesa-dev,
                libglvnd-dev,
-               libhidapi-dev,
+               libhidapi-dev [!hurd-i386],
                libopencv-dev,
                libsdl2-dev,
                libudev-dev,
@@ -28,6 +29,7 @@ Build-Depends: debhelper-compat (= 12),
                libxcb-randr0-dev,
                libxrandr-dev,
                libxxf86vm-dev,
+               markdown <!nodoc>,
                pkg-config
 Standards-Version: 4.5.0
 Vcs-Browser: https://gitlab.freedesktop.org/monado/monado/-/tree/debian/buster-backports
@@ -42,14 +44,14 @@ Depends: ${shlibs:Depends},
          ${misc:Depends}
 Recommends: xr-hardware,
             libopenxr-loader1
+Suggests: bluez [linux-any]
 Provides: libopenxr1
 Description: Monado preview implementation of the OpenXR API
  Monado is an open-source package for interacting with virtual and
  augmented reality (collectively known as XR) hardware and software.
  .
  This package provides a runtime that aims to be a complete and conforming
- implementation of the OpenXR API from Khronos, after further development
- and once the conformance tests are released.
+ implementation of the OpenXR API from Khronos, after further development.
 
 Package: monado-cli
 Architecture: any

@@ -1,4 +1,4 @@
-// Copyright 2018-2019, Collabora, Ltd.
+// Copyright 2018-2020, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -63,6 +63,8 @@ oxr_vk_get_requirements(struct oxr_logger *log,
 	graphicsRequirements->maxApiVersionSupported =
 	    XR_MAKE_VERSION(ver.max_major, ver.max_minor, ver.max_patch);
 
+	sys->gotten_requirements = true;
+
 	return XR_SUCCESS;
 }
 
@@ -81,29 +83,31 @@ oxr_vk_get_physical_device(struct oxr_logger *log,
 
 	vk_ret = vkEnumeratePhysicalDevices(vkInstance, &count, NULL);
 	if (vk_ret != VK_SUCCESS) {
-		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE,
-		                 " vkEnumeratePhysicalDevices returned %u",
-		                 vk_ret);
+		return oxr_error(
+		    log, XR_ERROR_RUNTIME_FAILURE,
+		    "Call to vkEnumeratePhysicalDevices returned %u", vk_ret);
 	}
 	if (count == 0) {
-		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE,
-		                 " vkEnumeratePhysicalDevices returned zero "
-		                 "VkPhysicalDevices");
+		return oxr_error(
+		    log, XR_ERROR_RUNTIME_FAILURE,
+		    "Call to vkEnumeratePhysicalDevices returned zero "
+		    "VkPhysicalDevices");
 	}
 
 	VkPhysicalDevice *phys = U_TYPED_ARRAY_CALLOC(VkPhysicalDevice, count);
 	vk_ret = vkEnumeratePhysicalDevices(vkInstance, &count, phys);
 	if (vk_ret != VK_SUCCESS) {
 		free(phys);
-		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE,
-		                 " vkEnumeratePhysicalDevices returned %u",
-		                 vk_ret);
+		return oxr_error(
+		    log, XR_ERROR_RUNTIME_FAILURE,
+		    "Call to vkEnumeratePhysicalDevices returned %u", vk_ret);
 	}
 	if (count == 0) {
 		free(phys);
-		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE,
-		                 " vkEnumeratePhysicalDevices returned zero "
-		                 "VkPhysicalDevices");
+		return oxr_error(
+		    log, XR_ERROR_RUNTIME_FAILURE,
+		    "Call to vkEnumeratePhysicalDevices returned zero "
+		    "VkPhysicalDevices");
 	}
 
 	if (count > 1) {

@@ -6,7 +6,7 @@ subdir('shaders')
 comp_include = include_directories('.')
 
 # TODO: Dependency resolution and subsequent configuration could be improved
-compositor_deps = [aux, shaders, vulkan, xrt_config_vulkan]
+compositor_deps = [aux, shaders, vulkan, xrt_config_vulkan, xcb_randr]
 compositor_includes = [xrt_include]
 
 compositor_srcs = [
@@ -26,6 +26,8 @@ compositor_srcs = [
 	'main/comp_vk_swapchain.c',
 	'main/comp_vk_swapchain.h',
 	'main/comp_window.h',
+	'main/comp_layer_renderer.c',
+	'main/comp_layer.c',
 ]
 
 compile_args = []
@@ -107,10 +109,6 @@ if build_wayland
 
 	compositor_srcs += ['main/comp_window_wayland.c']
 	compositor_deps += [wayland, wl_protos]
-endif
-
-if get_option('vulkan-validation')
-	compile_args += ['-DXRT_ENABLE_VK_VALIDATION']
 endif
 
 lib_comp = static_library(
