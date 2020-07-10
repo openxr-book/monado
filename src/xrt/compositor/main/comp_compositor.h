@@ -1,4 +1,4 @@
-// Copyright 2019, Collabora, Ltd.
+// Copyright 2019-2020, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -13,6 +13,7 @@
 #include "xrt/xrt_gfx_vk.h"
 
 #include "util/u_threading.h"
+#include "util/u_index_fifo.h"
 
 #include "main/comp_settings.h"
 #include "main/comp_window.h"
@@ -24,6 +25,7 @@ extern "C" {
 #endif
 
 #define NUM_FRAME_TIMES 50
+#define COMP_MAX_LAYERS 16
 
 /*
  *
@@ -35,6 +37,7 @@ extern "C" {
  * A single swapchain image, holds the needed state for tracking image usage.
  *
  * @ingroup comp_main
+ * @see comp_swapchain
  */
 struct comp_swapchain_image
 {
@@ -46,7 +49,13 @@ struct comp_swapchain_image
 	VkSampler sampler;
 	//! Views used by the renderer and distortion code, for each array
 	//! layer.
-	VkImageView *views;
+	struct
+	{
+		VkImageView *alpha;
+		VkImageView *no_alpha;
+	} views;
+	//! The number of array slices in a texture, 1 == regular 2D texture.
+	size_t array_size;
 };
 
 /*!
@@ -55,6 +64,8 @@ struct comp_swapchain_image
  * Not used by the window backend that uses the vk_swapchain to render to.
  *
  * @ingroup comp_main
+ * @implements xrt_swapchain_fd
+ * @see comp_compositor
  */
 struct comp_swapchain
 {
@@ -63,12 +74,69 @@ struct comp_swapchain
 	struct comp_compositor *c;
 
 	struct comp_swapchain_image images[XRT_MAX_SWAPCHAIN_IMAGES];
+
+	/*!
+	 * This fifo is used to always give out the oldest image to acquire
+	 * image, this should probably be made even smarter.
+	 */
+	struct u_index_fifo fifo;
+};
+
+/*!
+ * A single layer.
+ *
+ * @ingroup comp_main
+ * @see comp_layer_slot
+ */
+struct comp_layer
+{
+	/*!
+	 * Up to two compositor swapchains referenced per layer.
+	 *
+	 * Unused elements should be set to null.
+	 */
+	struct comp_swapchain *scs[2];
+
+	/*!
+	 * All basic (trivially-serializable) data associated with a layer.
+	 */
+	struct xrt_layer_data data;
+};
+
+/*!
+ * A stack of layers.
+ *
+ * @ingroup comp_main
+ * @see comp_compositor
+ */
+struct comp_layer_slot
+{
+	enum xrt_blend_mode env_blend_mode;
+
+	struct comp_layer layers[COMP_MAX_LAYERS];
+
+	uint32_t num_layers;
+};
+
+/*!
+ * State to emulate state transitions correctly.
+ *
+ * @ingroup comp_main
+ */
+enum comp_state
+{
+	COMP_STATE_READY = 0,
+	COMP_STATE_PREPARED = 1,
+	COMP_STATE_WAITED = 2,
+	COMP_STATE_VISIBLE = 3,
+	COMP_STATE_FOCUSED = 4,
 };
 
 /*!
  * Main compositor struct tying everything in the compositor together.
  *
  * @ingroup comp_main
+ * @implements xrt_compositor_fd
  */
 struct comp_compositor
 {
@@ -94,6 +162,12 @@ struct comp_compositor
 
 	//! Timestamp of last-rendered (immersive) frame.
 	int64_t last_frame_time_ns;
+
+	//! State for generating the correct set of events.
+	enum comp_state state;
+
+	//! Triple buffered layer stacks.
+	struct comp_layer_slot slots[3];
 
 	/*!
 	 * @brief Data exclusive to the begin_frame/end_frame for computing an
@@ -164,7 +238,7 @@ struct comp_compositor
 /*!
  * Convenience function to convert a xrt_swapchain to a comp_swapchain.
  *
- * @ingroup comp_main
+ * @private @memberof comp_swapchain
  */
 static inline struct comp_swapchain *
 comp_swapchain(struct xrt_swapchain *xsc)
@@ -175,7 +249,7 @@ comp_swapchain(struct xrt_swapchain *xsc)
 /*!
  * Convenience function to convert a xrt_compositor to a comp_compositor.
  *
- * @ingroup comp_main
+ * @private @memberof comp_compositor
  */
 static inline struct comp_compositor *
 comp_compositor(struct xrt_compositor *xc)
@@ -187,7 +261,7 @@ comp_compositor(struct xrt_compositor *xc)
  * Do garbage collection, destroying any resources that has been scheduled for
  * destruction from other threads.
  *
- * @ingroup comp_main
+ * @public @memberof comp_compositor
  */
 void
 comp_compositor_garbage_collect(struct comp_compositor *c);
@@ -195,45 +269,26 @@ comp_compositor_garbage_collect(struct comp_compositor *c);
 /*!
  * A compositor function that is implemented in the swapchain code.
  *
- * @ingroup comp_main
+ * @public @memberof comp_compositor
  */
 struct xrt_swapchain *
 comp_swapchain_create(struct xrt_compositor *xc,
-                      enum xrt_swapchain_create_flags create,
-                      enum xrt_swapchain_usage_bits bits,
-                      int64_t format,
-                      uint32_t sample_count,
-                      uint32_t width,
-                      uint32_t height,
-                      uint32_t face_count,
-                      uint32_t array_size,
-                      uint32_t mip_count);
+                      struct xrt_swapchain_create_info *info);
 
 /*!
  * Swapchain destruct is delayed until it is safe to destroy them, this function
  * does the actual destruction and is called from @ref
  * comp_compositor_garbage_collect.
  *
- * @ingroup comp_main
+ * @private @memberof comp_swapchain
  */
 void
 comp_swapchain_really_destroy(struct comp_swapchain *sc);
 
 /*!
- * Free and destroy any initialized fields on the given image, safe to pass in
- * images that has one or all fields set to NULL.
- *
- * @ingroup comp_main
- */
-void
-comp_swapchain_image_cleanup(struct vk_bundle *vk,
-                             uint32_t array_size,
-                             struct comp_swapchain_image *image);
-
-/*!
  * Printer helper.
  *
- * @ingroup comp_main
+ * @public @memberof comp_compositor
  */
 void
 comp_compositor_print(struct comp_compositor *c,
@@ -244,7 +299,7 @@ comp_compositor_print(struct comp_compositor *c,
 /*!
  * Spew level logging.
  *
- * @ingroup comp_main
+ * @relates comp_compositor
  */
 #define COMP_SPEW(c, ...)                                                      \
 	do {                                                                   \
@@ -256,7 +311,7 @@ comp_compositor_print(struct comp_compositor *c,
 /*!
  * Debug level logging.
  *
- * @ingroup comp_main
+ * @relates comp_compositor
  */
 #define COMP_DEBUG(c, ...)                                                     \
 	do {                                                                   \
@@ -268,7 +323,7 @@ comp_compositor_print(struct comp_compositor *c,
 /*!
  * Mode printing.
  *
- * @ingroup comp_main
+ * @relates comp_compositor
  */
 #define COMP_PRINT_MODE(c, ...)                                                \
 	do {                                                                   \
@@ -280,7 +335,7 @@ comp_compositor_print(struct comp_compositor *c,
 /*!
  * Error level logging.
  *
- * @ingroup comp_main
+ * @relates comp_compositor
  */
 #define COMP_ERROR(c, ...)                                                     \
 	do {                                                                   \

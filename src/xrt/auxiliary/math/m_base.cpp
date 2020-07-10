@@ -50,6 +50,18 @@ copy(const struct xrt_vec3 *v)
 	return copy(*v);
 }
 
+static inline Eigen::Matrix4f
+copy(const struct xrt_matrix_4x4 *m)
+{
+	Eigen::Matrix4f res;
+	// clang-format off
+	res << m->v[0], m->v[4], m->v[8],  m->v[12],
+	       m->v[1], m->v[5], m->v[9],  m->v[13],
+	       m->v[2], m->v[6], m->v[10], m->v[14],
+	       m->v[3], m->v[7], m->v[11], m->v[15];
+	// clang-format on
+	return res;
+}
 
 /*
  *
@@ -139,7 +151,17 @@ math_quat_validate(const struct xrt_quat *quat)
 	auto rot = copy(*quat);
 
 	const float FLOAT_EPSILON = Eigen::NumTraits<float>::epsilon();
-	auto norm = rot.squaredNorm();
+	/*
+	 * This was originally squaredNorm, but that could result in a norm
+	 * value that was further from 1.0f then FLOAT_EPSILON (two).
+	 *
+	 * Our tracking system would produce such orientations and looping those
+	 * back into say a quad layer would cause this to fail. And even
+	 * normalizing the quat would not fix this as normalizations uses
+	 * non-squared "length" which does fall into the range and doesn't
+	 * change the elements of the quat.
+	 */
+	auto norm = rot.norm();
 	if (norm > 1.0f + FLOAT_EPSILON || norm < 1.0f - FLOAT_EPSILON) {
 		return false;
 	}
@@ -160,6 +182,28 @@ math_quat_normalize(struct xrt_quat *inout)
 	assert(inout != NULL);
 	map_quat(*inout).normalize();
 }
+
+extern "C" bool
+math_quat_ensure_normalized(struct xrt_quat *inout)
+{
+	assert(inout != NULL);
+
+	if (math_quat_validate(inout))
+		return true;
+
+	const float FLOAT_EPSILON = Eigen::NumTraits<float>::epsilon();
+	const float TOLERANCE = FLOAT_EPSILON * 5;
+
+	auto rot = copy(*inout);
+	auto norm = rot.norm();
+	if (norm > 1.0f + TOLERANCE || norm < 1.0f - TOLERANCE) {
+		return false;
+	}
+
+	map_quat(*inout).normalize();
+	return true;
+}
+
 
 extern "C" void
 math_quat_rotate(const struct xrt_quat *left,
@@ -198,7 +242,7 @@ math_quat_rotate_vec3(const struct xrt_quat *left,
 
 /*
  *
- * Exported pose functions.
+ * Exported matrix functions.
  *
  */
 
@@ -215,6 +259,49 @@ math_matrix_3x3_transform_vec3(const struct xrt_matrix_3x3 *left,
 	map_vec3(*result) = m * copy(right);
 }
 
+
+void
+math_matrix_4x4_identity(struct xrt_matrix_4x4 *result)
+{
+	map_matrix_4x4(*result) = Eigen::Matrix4f::Identity();
+}
+
+void
+math_matrix_4x4_multiply(const struct xrt_matrix_4x4 *left,
+                         const struct xrt_matrix_4x4 *right,
+                         struct xrt_matrix_4x4 *result)
+{
+	map_matrix_4x4(*result) = copy(left) * copy(right);
+}
+
+void
+math_matrix_4x4_view_from_pose(const struct xrt_pose *pose,
+                               struct xrt_matrix_4x4 *result)
+{
+	Eigen::Vector3f position = copy(&pose->position);
+	Eigen::Quaternionf orientation = copy(&pose->orientation);
+
+	Eigen::Translation3f translation(position);
+	Eigen::Affine3f transformation = translation * orientation;
+
+	map_matrix_4x4(*result) = transformation.matrix().inverse();
+}
+
+void
+math_matrix_4x4_quad_model(const struct xrt_pose *pose,
+                           const struct xrt_vec2 *size,
+                           struct xrt_matrix_4x4 *result)
+{
+	Eigen::Vector3f position = copy(&pose->position);
+	Eigen::Quaternionf orientation = copy(&pose->orientation);
+
+	auto scale = Eigen::Scaling(size->x, size->y, 1.0f);
+
+	Eigen::Translation3f translation(position);
+	Eigen::Affine3f transformation = translation * orientation * scale;
+
+	map_matrix_4x4(*result) = transformation.matrix();
+}
 
 /*
  *

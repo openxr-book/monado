@@ -106,7 +106,6 @@ math_vec3_cross(const struct xrt_vec3 *l,
                 const struct xrt_vec3 *r,
                 struct xrt_vec3 *result);
 
-
 /*
  *
  * Quat functions.
@@ -166,6 +165,18 @@ math_quat_validate(const struct xrt_quat *quat);
  */
 void
 math_quat_normalize(struct xrt_quat *inout);
+
+/*!
+ * Normalizes a quaternion if it has accumulated float precision errors.
+ * Returns true if the quaternion was already normalized or was normalized after
+ * being found within a small float precision tolerance.
+ * Returns false if the quaternion was not at all normalized.
+ *
+ * @relates xrt_quat
+ * @ingroup aux_math
+ */
+bool
+math_quat_ensure_normalized(struct xrt_quat *inout);
 
 /*!
  * Rotate a vector.
@@ -230,7 +241,7 @@ math_quat_finite_difference(const struct xrt_quat *quat0,
 
 /*
  *
- * Matrix function
+ * Matrix functions
  *
  */
 
@@ -239,6 +250,46 @@ math_matrix_3x3_transform_vec3(const struct xrt_matrix_3x3 *left,
                                const struct xrt_vec3 *right,
                                struct xrt_vec3 *result);
 
+/*!
+ * Initialize Matrix4x4 with identity.
+ *
+ * @relates xrt_matrix_4x4
+ * @ingroup aux_math
+ */
+void
+math_matrix_4x4_identity(struct xrt_matrix_4x4 *result);
+
+/*!
+ * Multiply Matrix4x4.
+ *
+ * @relates xrt_matrix_4x4
+ * @ingroup aux_math
+ */
+void
+math_matrix_4x4_multiply(const struct xrt_matrix_4x4 *left,
+                         const struct xrt_matrix_4x4 *right,
+                         struct xrt_matrix_4x4 *result);
+
+/*!
+ * Compute view matrix from xrt_pose.
+ *
+ * @relates xrt_matrix_4x4
+ * @ingroup aux_math
+ */
+void
+math_matrix_4x4_view_from_pose(const struct xrt_pose *pose,
+                               struct xrt_matrix_4x4 *result);
+
+/*!
+ * Compute quad layer model matrix from xrt_pose and xrt_vec2 size.
+ *
+ * @relates xrt_matrix_4x4
+ * @ingroup aux_math
+ */
+void
+math_matrix_4x4_quad_model(const struct xrt_pose *pose,
+                           const struct xrt_vec2 *size,
+                           struct xrt_matrix_4x4 *result);
 
 /*
  *

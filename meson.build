@@ -4,7 +4,7 @@
 project(
 	'xrt',
 	['c', 'cpp'],
-	version: '0.1.0',
+	version: '0.3.0',
 	license: 'BSL-1.0',
 	meson_version: '>=0.49.0',
 	default_options: [
@@ -65,6 +65,7 @@ udev    = dependency('libudev', required: false)
 libuvc  = dependency('libuvc', required: false)
 vulkan  = dependency('vulkan', required: true)
 zlib    = dependency('zlib', required: false)
+survive = dependency('survive', required: false)
 
 opencv = dependency('opencv4', required: false)
 if not opencv.found()
@@ -129,9 +130,6 @@ drivers = get_option('drivers')
 if 'ohmd' in drivers
 	openhmd_required = true
 endif
-if 'ns' in drivers
-	ns_required = true
-endif
 if 'psvr' in drivers
 	hidapi_required = true
 endif
@@ -140,18 +138,12 @@ if 'v4l2' in drivers
 endif
 
 if 'auto' in drivers
-	drivers += ['dummy', 'hdk', 'hydra', 'psmv']
+	drivers += ['dummy', 'hdk', 'hydra', 'ns', 'psmv']
 endif
 
 openhmd = dependency('openhmd', required: openhmd_required)
 hidapi  = dependency('hidapi-libusb', required: hidapi_required)
 v4l2    = dependency('libv4l2', required: v4l2_required)
-
-if 'auto' in drivers or 'ns' in drivers
-	if 'ns' not in drivers
-		drivers += ['ns']
-	endif
-endif
 
 if openhmd.found() and ('auto' in drivers or 'ohmd' in drivers)
 	if 'ohmd' not in drivers
@@ -181,6 +173,12 @@ if v4l2.found() and ('auto' in drivers or 'v4l2' in drivers)
 	if 'v4l2' not in drivers
 		drivers += ['v4l2']
 	endif
+endif
+
+if survive.found() and ('survive' in drivers)
+  if 'survive' not in drivers
+    drivers += ['survive']
+    endif
 endif
 
 if drivers.length() == 0 or drivers == ['auto']

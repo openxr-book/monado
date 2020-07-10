@@ -1,4 +1,4 @@
-// Copyright 2018-2019, Collabora, Ltd.
+// Copyright 2018-2020, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -30,10 +30,10 @@ extern "C" {
 		}                                                              \
 		if (new_thing->handle.state != OXR_HANDLE_STATE_LIVE) {        \
 			return oxr_error(log, XR_ERROR_HANDLE_INVALID,         \
-			                 " state == %s (" #thing " == %p)",    \
+			                 "(" #thing " == %p) state == %s",     \
+			                 (void *)new_thing,                    \
 			                 oxr_handle_state_to_string(           \
-			                     new_thing->handle.state),         \
-			                 (void *)new_thing);                   \
+			                     new_thing->handle.state));        \
 		}                                                              \
 		oxr_log_set_instance(log, lookup);                             \
 	} while (0)
@@ -91,7 +91,7 @@ extern "C" {
 	do {                                                                   \
 		if (!(inst)->extensions.mixed_case_name) {                     \
 			return oxr_error((log), XR_ERROR_FUNCTION_UNSUPPORTED, \
-			                 " Requires XR_" #mixed_case_name      \
+			                 "Requires XR_" #mixed_case_name       \
 			                 " extension enabled");                \
 		}                                                              \
 	} while (false)
@@ -133,7 +133,8 @@ extern "C" {
 	do {                                                                   \
 		if (count > 0 && paths == NULL) {                              \
 			return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,     \
-			                 " " #count " is not zero but " #paths \
+			                 "(" #count                            \
+			                 ") is not zero but " #paths           \
 			                 " is NULL");                          \
 		}                                                              \
 	} while (false)
@@ -169,6 +170,16 @@ extern "C" {
 			                 "(" #p ".position) is not valid");    \
 		}                                                              \
 	} while (false)
+
+#define OXR_VERIFY_VIEW_CONFIG_TYPE(log, inst, view_conf)                      \
+	do {                                                                   \
+		XrResult verify_ret = oxr_verify_view_config_type(             \
+		    log, inst, view_conf, #view_conf);                         \
+		if (verify_ret != XR_SUCCESS) {                                \
+			return verify_ret;                                     \
+		}                                                              \
+	} while (false)
+
 
 /*
  *
@@ -241,6 +252,12 @@ oxr_verify_subaction_path_get(struct oxr_logger *log,
                               const char *variable);
 
 XrResult
+oxr_verify_view_config_type(struct oxr_logger *log,
+                            struct oxr_instance *inst,
+                            XrViewConfigurationType view_conf,
+                            const char *view_conf_name);
+
+XrResult
 oxr_verify_XrSessionCreateInfo(struct oxr_logger *,
                                const struct oxr_instance *,
                                const XrSessionCreateInfo *);
@@ -259,8 +276,8 @@ oxr_verify_XrGraphicsBindingVulkanKHR(struct oxr_logger *,
 
 #if defined(XR_USE_PLATFORM_EGL) && defined(XR_USE_GRAPHICS_API_OPENGL)
 XrResult
-oxr_verify_XrGraphicsBindingEGLMND(struct oxr_logger *log,
-                                   const XrGraphicsBindingEGLMND *next);
+oxr_verify_XrGraphicsBindingEGLMNDX(struct oxr_logger *log,
+                                    const XrGraphicsBindingEGLMNDX *next);
 #endif // defined(XR_USE_PLATFORM_EGL) && defined(XR_USE_GRAPHICS_API_OPENGL)
 
 /*!

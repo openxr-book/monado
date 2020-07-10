@@ -126,8 +126,10 @@ lib_drv_vive = static_library(
 		'vive/vive_protocol.h',
 		'vive/vive_prober.h',
 		'vive/vive_prober.c',
-		'vive/vive_controller_driver.c',
-		'vive/vive_controller_interface.h'
+		'vive/vive_controller.c',
+		'vive/vive_controller.h',
+		'vive/vive_config.c',
+		'vive/vive_config.h'
 	),
 	include_directories: [
 		xrt_include,
@@ -135,4 +137,20 @@ lib_drv_vive = static_library(
 	],
 	dependencies: [aux, zlib],
 	build_by_default: 'vive' in drivers,
+)
+
+lib_drv_survive = static_library(
+	'drv_survive',
+	files(
+		'survive/survive_driver.c',
+		'survive/survive_interface.h',
+		'survive/survive_wrap.c',
+		'survive/survive_wrap.h'
+	),
+	include_directories: [
+		xrt_include,
+		cjson_include,
+	],
+	dependencies: [aux, zlib, survive],
+	build_by_default: 'survive' in drivers,
 )

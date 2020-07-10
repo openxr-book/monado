@@ -24,6 +24,7 @@
 #include "util/u_misc.h"
 #include "util/u_debug.h"
 #include "util/u_device.h"
+#include "util/u_logging.h"
 
 #include "psmv_interface.h"
 
@@ -44,33 +45,16 @@
  *
  */
 
-#define PSMV_SPEW(p, ...)                                                      \
-	do {                                                                   \
-		if (p->print_spew) {                                           \
-			fprintf(stderr, "%s - ", __func__);                    \
-			fprintf(stderr, __VA_ARGS__);                          \
-			fprintf(stderr, "\n");                                 \
-		}                                                              \
-	} while (false)
+#define PSMV_BALL_DIAMETER_M 0.045  // 45 mm
+#define PSMV_BALL_FROM_IMU_Y_M 0.09 // 9 cm
 
-#define PSMV_DEBUG(p, ...)                                                     \
-	do {                                                                   \
-		if (p->print_debug) {                                          \
-			fprintf(stderr, "%s - ", __func__);                    \
-			fprintf(stderr, __VA_ARGS__);                          \
-			fprintf(stderr, "\n");                                 \
-		}                                                              \
-	} while (false)
+// clang-format off
+#define PSMV_TRACE(p, ...) U_LOG_XDEV_IFL_T(&p->base, p->log_level, __VA_ARGS__)
+#define PSMV_DEBUG(p, ...) U_LOG_XDEV_IFL_D(&p->base, p->log_level, __VA_ARGS__)
+#define PSMV_ERROR(p, ...) U_LOG_XDEV_IFL_E(&p->base, p->log_level, __VA_ARGS__)
+// clang-format on
 
-#define PSMV_ERROR(p, ...)                                                     \
-	do {                                                                   \
-		fprintf(stderr, "%s - ", __func__);                            \
-		fprintf(stderr, __VA_ARGS__);                                  \
-		fprintf(stderr, "\n");                                         \
-	} while (false)
-
-DEBUG_GET_ONCE_BOOL_OPTION(psmv_spew, "PSMV_PRINT_SPEW", false)
-DEBUG_GET_ONCE_BOOL_OPTION(psmv_debug, "PSMV_PRINT_DEBUG", false)
+DEBUG_GET_ONCE_LOG_OPTION(psmv_log, "PSMV_LOG", U_LOGGING_WARN)
 
 /*!
  * Indices where each input is in the input list.
@@ -437,6 +421,8 @@ struct psmv_parsed_input
  * Translated to axis that means the ball is on the Y+ axis, the buttons on the
  * Z+ axis, the trigger on the Z- axis, the USB port on the Y- axis, the start
  * button on the X+ axis, select button on the X- axis.
+ *
+ * @implements xrt_device
  */
 struct psmv_device
 {
@@ -484,6 +470,7 @@ struct psmv_device
 		{
 			struct xrt_quat rot;
 			struct xrt_vec3 rotvec;
+			struct xrt_vec3 angvel;
 			struct imu_fusion *fusion;
 			struct
 			{
@@ -505,8 +492,7 @@ struct psmv_device
 	// Product ID used to tell the difference between ZCM1 and ZCM2.
 	uint16_t pid;
 
-	bool print_spew;
-	bool print_debug;
+	enum u_logging_level log_level;
 
 	struct
 	{
@@ -602,11 +588,11 @@ psmv_update_trigger_value(struct psmv_device *psmv, int index, int64_t now)
  * Does the actual sending of the led control package to the device.
  */
 static int
-psmv_send_led_control(struct psmv_device *psmv,
-                      uint8_t red,
-                      uint8_t green,
-                      uint8_t blue,
-                      uint8_t rumble)
+psmv_send_led_control_locked(volatile struct psmv_device *psmv,
+                             uint8_t red,
+                             uint8_t green,
+                             uint8_t blue,
+                             uint8_t rumble)
 {
 	struct psmv_set_led msg;
 	U_ZERO(&msg);
@@ -620,7 +606,8 @@ psmv_send_led_control(struct psmv_device *psmv,
 }
 
 static void
-psmv_led_and_trigger_update_locked(struct psmv_device *psmv, int64_t time)
+psmv_led_and_trigger_update_locked(volatile struct psmv_device *psmv,
+                                   int64_t time)
 {
 	// Need to keep sending led control packets to keep the leds on.
 	if (psmv->wants.resend_time > time &&
@@ -637,8 +624,8 @@ psmv_led_and_trigger_update_locked(struct psmv_device *psmv, int64_t time)
 	psmv->state.rumble = psmv->wants.rumble;
 
 	psmv->wants.resend_time = time + 1000000000;
-	psmv_send_led_control(psmv, psmv->state.led.r, psmv->state.led.g,
-	                      psmv->state.led.b, psmv->state.rumble);
+	psmv_send_led_control_locked(psmv, psmv->state.led.r, psmv->state.led.g,
+	                             psmv->state.led.b, psmv->state.rumble);
 }
 
 static void
@@ -685,9 +672,9 @@ update_fusion(struct psmv_device *psmv,
 		    psmv->fusion.fusion, timestamp_ns, &psmv->read.gyro,
 		    &psmv->fusion.variance.gyro, &psmv->read.accel,
 		    &psmv->fusion.variance.accel, NULL);
-		struct xrt_vec3 angvel_dummy;
 		imu_fusion_get_prediction(psmv->fusion.fusion, timestamp_ns,
-		                          &psmv->fusion.rot, &angvel_dummy);
+		                          &psmv->fusion.rot,
+		                          &psmv->fusion.angvel);
 		imu_fusion_get_prediction_rotation_vec(
 		    psmv->fusion.fusion, timestamp_ns, &psmv->fusion.rotvec);
 #endif
@@ -710,7 +697,8 @@ psmv_read_one_packet(struct psmv_device *psmv, uint8_t *buffer, size_t size)
 		int ret = os_hid_read(psmv->hid, buffer, size, 1000);
 
 		if (ret == 0) {
-			fprintf(stderr, "%s\n", __func__);
+			PSMV_DEBUG(psmv, "Timeout");
+
 			// Must lock thread before check in while.
 			os_thread_helper_lock(&psmv->oth);
 			continue;
@@ -796,11 +784,17 @@ psmv_get_fusion_pose(struct psmv_device *psmv,
                      struct xrt_space_relation *out_relation)
 {
 	out_relation->pose.orientation = psmv->fusion.rot;
+	out_relation->angular_velocity = psmv->fusion.angvel;
+	out_relation->linear_velocity.x = 0.0f;
+	out_relation->linear_velocity.y = 0.0f;
+	out_relation->linear_velocity.z = 0.0f;
 
 	//! @todo assuming that orientation is actually currently tracked.
 	out_relation->relation_flags = (enum xrt_space_relation_flags)(
 	    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
-	    XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
+	    XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |
+	    XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT |
+	    XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT);
 }
 
 
@@ -831,7 +825,7 @@ psmv_device_destroy(struct xrt_device *xdev)
 	xrt_tracked_psmv_destroy(&psmv->ball);
 
 	if (psmv->hid != NULL) {
-		psmv_send_led_control(psmv, 0x00, 0x00, 0x00, 0x00);
+		psmv_send_led_control_locked(psmv, 0x00, 0x00, 0x00, 0x00);
 
 		os_hid_destroy(psmv->hid);
 		psmv->hid = NULL;
@@ -880,7 +874,6 @@ psmv_device_get_tracked_pose(struct xrt_device *xdev,
 	struct psmv_device *psmv = psmv_device(xdev);
 
 
-	//! @todo transform pose based on input.
 	// We have no tracking, don't return a position.
 	if (psmv->ball != NULL) {
 		xrt_tracked_psmv_get_tracked_pose(
@@ -891,6 +884,23 @@ psmv_device_get_tracked_pose(struct xrt_device *xdev,
 		psmv_get_fusion_pose(psmv, name, now, out_relation);
 		*out_relation_timestamp_ns = now;
 	}
+
+	// Adjust from the normal body center pose to the ball tip.
+	if (name != XRT_INPUT_PSMV_BALL_TIP_POSE) {
+		return;
+	}
+
+	float y = PSMV_BALL_FROM_IMU_Y_M;
+	if (name == XRT_INPUT_PSMV_BALL_TIP_POSE) {
+		y += PSMV_BALL_DIAMETER_M / 2.0;
+	}
+
+	struct xrt_space_relation rel = {0};
+	rel.relation_flags = out_relation->relation_flags;
+	rel.pose.orientation = (struct xrt_quat){0.7071068, 0, 0, 0.7071068};
+	rel.pose.position = (struct xrt_vec3){0, y, 0};
+
+	math_relation_accumulate_relation(&rel, out_relation);
 }
 
 static void
@@ -904,12 +914,16 @@ psmv_device_set_output(struct xrt_device *xdev,
 		return;
 	}
 
+	os_mutex_lock(&psmv->lock);
+
 	psmv->wants.rumble =
 	    psmv_clamp_zero_to_one_float_to_u8(value->vibration.amplitude);
 
 	// Resend if the rumble has been changed.
 	int64_t now = os_monotonic_get_ns();
-	psmv_led_and_trigger_update(psmv, now);
+	psmv_led_and_trigger_update_locked(psmv, now);
+
+	os_mutex_unlock(&psmv->lock);
 }
 
 
@@ -953,8 +967,6 @@ psmv_found(struct xrt_prober *xp,
 	enum u_device_alloc_flags flags = U_DEVICE_ALLOC_TRACKING_NONE;
 	struct psmv_device *psmv =
 	    U_DEVICE_ALLOCATE(struct psmv_device, flags, 12, 1);
-	psmv->print_spew = debug_get_bool_option_psmv_spew();
-	psmv->print_debug = debug_get_bool_option_psmv_debug();
 	psmv->base.destroy = psmv_device_destroy;
 	psmv->base.update_inputs = psmv_device_update_inputs;
 	psmv->base.get_tracked_pose = psmv_device_get_tracked_pose;
@@ -962,6 +974,7 @@ psmv_found(struct xrt_prober *xp,
 	psmv->base.name = XRT_DEVICE_PSMV;
 	psmv->fusion.rot.w = 1.0f;
 	psmv->fusion.fusion = imu_fusion_create();
+	psmv->log_level = debug_get_log_option_psmv_log();
 	psmv->pid = devices[index]->product_id;
 	psmv->hid = hid;
 	snprintf(psmv->base.str, XRT_DEVICE_NAME_LEN, "%s",
@@ -1037,7 +1050,7 @@ psmv_found(struct xrt_prober *xp,
 
 #if 1
 	// 45mm
-	float diameter = 0.045;
+	float diameter = PSMV_BALL_DIAMETER_M;
 	(void)diameter;
 	if (xp->tracking != NULL) {
 		xp->tracking->create_tracked_psmv(xp->tracking, &psmv->base,
@@ -1135,8 +1148,7 @@ psmv_found(struct xrt_prober *xp,
 	u_var_add_gui_header(psmv, &psmv->gui.control, "Control");
 	u_var_add_rgb_u8(psmv, &psmv->wants.led, "Led");
 	u_var_add_u8(psmv, &psmv->wants.rumble, "Rumble");
-	u_var_add_bool(psmv, &psmv->print_debug, "Debug");
-	u_var_add_bool(psmv, &psmv->print_spew, "Spew");
+	u_var_add_log_level(psmv, &psmv->log_level, "Log level");
 	// clang-format on
 
 	// And finally done
@@ -1428,29 +1440,29 @@ psmv_parse_input_zcm1(struct psmv_device *psmv,
 	 * Print
 	 */
 
-	PSMV_SPEW(psmv,
-	          "\n\t"
-	          "missed: %s\n\t"
-	          "buttons: %08x\n\t"
-	          "battery: %x\n\t"
-	          "samples[0].accel: %6i %6i %6i\n\t"
-	          "samples[1].accel: %6i %6i %6i\n\t"
-	          "samples[0].gyro:  %6i %6i %6i\n\t"
-	          "samples[1].gyro:  %6i %6i %6i\n\t"
-	          "trigger_values[0]: %02x\n\t"
-	          "trigger_values[1]: %02x\n\t"
-	          "timestamp: %i\n\t"
-	          "diff: %i\n\t"
-	          "seq_no: %x\n",
-	          missed ? "yes" : "no", input->buttons, input->battery,
-	          input->samples[0].accel.x, input->samples[0].accel.y,
-	          input->samples[0].accel.z, input->samples[1].accel.x,
-	          input->samples[1].accel.y, input->samples[1].accel.z,
-	          input->samples[0].gyro.x, input->samples[0].gyro.y,
-	          input->samples[0].gyro.z, input->samples[1].gyro.x,
-	          input->samples[1].gyro.y, input->samples[1].gyro.z,
-	          input->trigger_values[0], input->trigger_values[1],
-	          input->timestamp, diff, input->seq_no);
+	PSMV_TRACE(psmv,
+	           "\n\t"
+	           "missed: %s\n\t"
+	           "buttons: %08x\n\t"
+	           "battery: %x\n\t"
+	           "samples[0].accel: %6i %6i %6i\n\t"
+	           "samples[1].accel: %6i %6i %6i\n\t"
+	           "samples[0].gyro:  %6i %6i %6i\n\t"
+	           "samples[1].gyro:  %6i %6i %6i\n\t"
+	           "trigger_values[0]: %02x\n\t"
+	           "trigger_values[1]: %02x\n\t"
+	           "timestamp: %i\n\t"
+	           "diff: %i\n\t"
+	           "seq_no: %x\n",
+	           missed ? "yes" : "no", input->buttons, input->battery,
+	           input->samples[0].accel.x, input->samples[0].accel.y,
+	           input->samples[0].accel.z, input->samples[1].accel.x,
+	           input->samples[1].accel.y, input->samples[1].accel.z,
+	           input->samples[0].gyro.x, input->samples[0].gyro.y,
+	           input->samples[0].gyro.z, input->samples[1].gyro.x,
+	           input->samples[1].gyro.y, input->samples[1].gyro.z,
+	           input->trigger_values[0], input->trigger_values[1],
+	           input->timestamp, diff, input->seq_no);
 
 	return 2;
 }
@@ -1678,30 +1690,30 @@ psmv_parse_input_zcm2(struct psmv_device *psmv,
 	 * Print
 	 */
 
-	PSMV_SPEW(psmv,
-	          "\n\t"
-	          "missed: %s\n\t"
-	          "buttons: %08x\n\t"
-	          "battery: %x\n\t"
-	          "sample.accel:      %6i %6i %6i\n\t"
-	          "sample_copy.accel: %6i %6i %6i\n\t"
-	          "sample.gyro:       %6i %6i %6i\n\t"
-	          "sample_copy.gyro:  %6i %6i %6i\n\t"
-	          "sample.trigger: %02x\n\t"
-	          "sample.trigger_low_pass: %02x\n\t"
-	          "timestamp:      %04x\n\t"
-	          "timestamp_copy: %04x\n\t"
-	          "diff: %i\n\t"
-	          "seq_no: %x\n",
-	          missed ? "yes" : "no", input->buttons, input->battery,
-	          input->samples[0].accel.x, input->samples[0].accel.y,
-	          input->samples[0].accel.z, input->samples[1].accel.x,
-	          input->samples[1].accel.y, input->samples[1].accel.z,
-	          input->samples[0].gyro.x, input->samples[0].gyro.y,
-	          input->samples[0].gyro.z, input->samples[1].gyro.x,
-	          input->samples[1].gyro.y, input->samples[1].gyro.z,
-	          input->trigger_low_pass, input->trigger, input->timestamp,
-	          input->timestamp_copy, diff, input->seq_no);
+	PSMV_TRACE(psmv,
+	           "\n\t"
+	           "missed: %s\n\t"
+	           "buttons: %08x\n\t"
+	           "battery: %x\n\t"
+	           "sample.accel:      %6i %6i %6i\n\t"
+	           "sample_copy.accel: %6i %6i %6i\n\t"
+	           "sample.gyro:       %6i %6i %6i\n\t"
+	           "sample_copy.gyro:  %6i %6i %6i\n\t"
+	           "sample.trigger: %02x\n\t"
+	           "sample.trigger_low_pass: %02x\n\t"
+	           "timestamp:      %04x\n\t"
+	           "timestamp_copy: %04x\n\t"
+	           "diff: %i\n\t"
+	           "seq_no: %x\n",
+	           missed ? "yes" : "no", input->buttons, input->battery,
+	           input->samples[0].accel.x, input->samples[0].accel.y,
+	           input->samples[0].accel.z, input->samples[1].accel.x,
+	           input->samples[1].accel.y, input->samples[1].accel.z,
+	           input->samples[0].gyro.x, input->samples[0].gyro.y,
+	           input->samples[0].gyro.z, input->samples[1].gyro.x,
+	           input->samples[1].gyro.y, input->samples[1].gyro.z,
+	           input->trigger_low_pass, input->trigger, input->timestamp,
+	           input->timestamp_copy, diff, input->seq_no);
 
 	return 1;
 }

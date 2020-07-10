@@ -95,9 +95,6 @@ ensure_valid_position_and_orientation(struct xrt_space_relation *relation,
 	if (!valid_pos) {
 		relation->pose.position = fallback->position;
 	}
-
-	relation->relation_flags |= XRT_SPACE_RELATION_POSITION_VALID_BIT;
-	relation->relation_flags |= XRT_SPACE_RELATION_ORIENTATION_VALID_BIT;
 }
 
 void
@@ -129,7 +126,7 @@ oxr_xdev_get_relation_at(struct oxr_logger *log,
 	// Always make those to base things valid.
 	ensure_valid_position_and_orientation(&relation, offset);
 
-	*out_relation_timestamp_ns = time_state_from_monotonic_ns(
+	*out_relation_timestamp_ns = time_state_monotonic_to_ts_ns(
 	    inst->timekeeping, relation_timestamp_ns);
 
 	*out_relation = relation;
@@ -142,7 +139,7 @@ oxr_xdev_get_pose_at(struct oxr_logger *log,
                      enum xrt_input_name name,
                      XrTime at_time,
                      uint64_t *out_pose_timestamp_ns,
-                     struct xrt_pose *out_pose)
+                     struct xrt_space_relation *out_relation)
 {
 	struct xrt_space_relation relation;
 	U_ZERO(&relation);
@@ -150,12 +147,5 @@ oxr_xdev_get_pose_at(struct oxr_logger *log,
 	oxr_xdev_get_relation_at(log, inst, xdev, name, at_time,
 	                         out_pose_timestamp_ns, &relation);
 
-	// Function above makes them valid.
-	// clang-format off
-	assert((relation.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) != 0);
-	assert((relation.relation_flags & XRT_SPACE_RELATION_ORIENTATION_VALID_BIT) != 0);
-	// clang-format on
-
-	out_pose->position = relation.pose.position;
-	out_pose->orientation = relation.pose.orientation;
+	*out_relation = relation;
 }

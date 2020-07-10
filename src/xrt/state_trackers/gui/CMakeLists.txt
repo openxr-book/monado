@@ -1,6 +1,9 @@
 # Copyright 2019-2020, Collabora, Ltd.
 # SPDX-License-Identifier: BSL-1.0
 
+# c-imgui doesn't do well with IPO - lots of warnings.
+set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
+
 set(GUI_SOURCE_FILES
 	gui_common.h
 	gui_imgui.h
@@ -41,7 +44,7 @@ target_include_directories(st_gui PUBLIC
 	${CMAKE_CURRENT_SOURCE_DIR}/../../../external/imgui
 	)
 
-if(BUILD_WITH_SDL2)
+if(XRT_HAVE_SDL2)
 	add_library(imgui_impl_sdl STATIC
 		../../../external/imgui/imgui/cimgui_sdl.cpp
 		../../../external/imgui/imgui/imgui_impl_sdl.cpp

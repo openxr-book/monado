@@ -60,6 +60,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define WINDOW_TITLE "Monado"
 
 /*!
  */
@@ -95,8 +96,6 @@ compositor_destroy(struct xrt_compositor *xc)
 		vk->device = VK_NULL_HANDLE;
 	}
 
-	vk_destroy_validation_callback(vk);
-
 	if (vk->instance != VK_NULL_HANDLE) {
 		vk->vkDestroyInstance(vk->instance, NULL);
 		vk->instance = VK_NULL_HANDLE;
@@ -111,18 +110,32 @@ compositor_destroy(struct xrt_compositor *xc)
 	free(c);
 }
 
-static void
+static xrt_result_t
+compositor_prepare_session(struct xrt_compositor *xc,
+                           struct xrt_session_prepare_info *xspi)
+{
+	struct comp_compositor *c = comp_compositor(xc);
+	COMP_DEBUG(c, "PREPARE_SESSION");
+
+	c->state = COMP_STATE_PREPARED;
+
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
 compositor_begin_session(struct xrt_compositor *xc, enum xrt_view_type type)
 {
 	struct comp_compositor *c = comp_compositor(xc);
 	COMP_DEBUG(c, "BEGIN_SESSION");
+	return XRT_SUCCESS;
 }
 
-static void
+static xrt_result_t
 compositor_end_session(struct xrt_compositor *xc)
 {
 	struct comp_compositor *c = comp_compositor(xc);
 	COMP_DEBUG(c, "END_SESSION");
+	return XRT_SUCCESS;
 }
 
 /*!
@@ -170,8 +183,9 @@ compositor_wait_vsync_or_time(struct comp_compositor *c, int64_t wake_up_time)
 	return ret;
 }
 
-static void
+static xrt_result_t
 compositor_wait_frame(struct xrt_compositor *xc,
+                      int64_t *out_frame_id,
                       uint64_t *predicted_display_time,
                       uint64_t *predicted_display_period)
 {
@@ -188,7 +202,12 @@ compositor_wait_frame(struct xrt_compositor *xc,
 		*predicted_display_period = interval_ns;
 		c->last_next_display_time = now_ns + interval_ns;
 		*predicted_display_time = c->last_next_display_time;
-		return;
+		*out_frame_id = c->last_next_display_time;
+
+		if (c->state == COMP_STATE_PREPARED) {
+			c->state = COMP_STATE_WAITED;
+		}
+		return XRT_SUCCESS;
 	}
 
 	// First estimate of next display time.
@@ -217,26 +236,33 @@ compositor_wait_frame(struct xrt_compositor *xc,
 			*predicted_display_period =
 			    next_display_time - c->last_next_display_time;
 			*predicted_display_time = next_display_time;
+			*out_frame_id = c->last_next_display_time;
 
 			c->last_next_display_time = next_display_time;
-			return;
+
+			if (c->state == COMP_STATE_PREPARED) {
+				c->state = COMP_STATE_WAITED;
+			}
+			return XRT_SUCCESS;
 		}
 	}
 }
 
-static void
-compositor_begin_frame(struct xrt_compositor *xc)
+static xrt_result_t
+compositor_begin_frame(struct xrt_compositor *xc, int64_t frame_id)
 {
 	struct comp_compositor *c = comp_compositor(xc);
 	COMP_SPEW(c, "BEGIN_FRAME");
 	c->app_profiling.last_begin = os_monotonic_get_ns();
+	return XRT_SUCCESS;
 }
 
-static void
-compositor_discard_frame(struct xrt_compositor *xc)
+static xrt_result_t
+compositor_discard_frame(struct xrt_compositor *xc, int64_t frame_id)
 {
 	struct comp_compositor *c = comp_compositor(xc);
 	COMP_SPEW(c, "DISCARD_FRAME");
+	return XRT_SUCCESS;
 }
 
 static void
@@ -276,28 +302,105 @@ compositor_add_frame_timing(struct comp_compositor *c)
 	    (float)diff * 1. / 1000. * 1. / 1000.;
 }
 
-static void
-compositor_end_frame(struct xrt_compositor *xc,
-                     enum xrt_blend_mode blend_mode,
-                     struct xrt_swapchain **xscs,
-                     const uint32_t *image_index,
-                     uint32_t *layers,
-                     uint32_t num_swapchains)
+static xrt_result_t
+compositor_layer_begin(struct xrt_compositor *xc,
+                       int64_t frame_id,
+                       enum xrt_blend_mode env_blend_mode)
 {
 	struct comp_compositor *c = comp_compositor(xc);
-	COMP_SPEW(c, "END_FRAME");
 
-	struct comp_swapchain_image *right;
-	struct comp_swapchain_image *left;
+	// Always zero for now.
+	uint32_t slot_id = 0;
 
-	// Stereo!
-	if (num_swapchains == 2) {
-		left = &comp_swapchain(xscs[0])->images[image_index[0]];
-		right = &comp_swapchain(xscs[1])->images[image_index[1]];
-		comp_renderer_frame(c->r, left, layers[0], right, layers[1]);
-	} else {
-		COMP_ERROR(c, "non-stereo rendering not supported");
+	c->slots[slot_id].env_blend_mode = env_blend_mode;
+	c->slots[slot_id].num_layers = 0;
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+compositor_layer_stereo_projection(struct xrt_compositor *xc,
+                                   struct xrt_device *xdev,
+                                   struct xrt_swapchain *l_xsc,
+                                   struct xrt_swapchain *r_xsc,
+                                   struct xrt_layer_data *data)
+{
+	struct comp_compositor *c = comp_compositor(xc);
+
+	// Without IPC we only have one slot
+	uint32_t slot_id = 0;
+	uint32_t layer_id = c->slots[slot_id].num_layers;
+
+	struct comp_layer *layer = &c->slots[slot_id].layers[layer_id];
+	layer->scs[0] = comp_swapchain(l_xsc);
+	layer->scs[1] = comp_swapchain(r_xsc);
+	layer->data = *data;
+
+	c->slots[slot_id].num_layers++;
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+compositor_layer_quad(struct xrt_compositor *xc,
+                      struct xrt_device *xdev,
+                      struct xrt_swapchain *xsc,
+                      struct xrt_layer_data *data)
+{
+	struct comp_compositor *c = comp_compositor(xc);
+
+	// Without IPC we only have one slot
+	uint32_t slot_id = 0;
+	uint32_t layer_id = c->slots[slot_id].num_layers;
+
+	struct comp_layer *layer = &c->slots[slot_id].layers[layer_id];
+	layer->scs[0] = comp_swapchain(xsc);
+	layer->scs[1] = NULL;
+	layer->data = *data;
+
+	c->slots[slot_id].num_layers++;
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+compositor_layer_commit(struct xrt_compositor *xc, int64_t frame_id)
+{
+	struct comp_compositor *c = comp_compositor(xc);
+
+	COMP_SPEW(c, "LAYER_COMMIT");
+
+	// Always zero for now.
+	uint32_t slot_id = 0;
+	uint32_t num_layers = c->slots[slot_id].num_layers;
+
+	comp_renderer_destroy_layers(c->r);
+	comp_renderer_allocate_layers(c->r, num_layers);
+
+	for (uint32_t i = 0; i < num_layers; i++) {
+		struct comp_layer *layer = &c->slots[slot_id].layers[i];
+		struct xrt_layer_data *data = &layer->data;
+		switch (data->type) {
+		case XRT_LAYER_QUAD: {
+			struct xrt_layer_quad_data *quad = &layer->data.quad;
+			struct comp_swapchain_image *image;
+			image = &layer->scs[0]->images[quad->sub.image_index];
+			comp_renderer_set_quad_layer(c->r, i, image, data);
+		} break;
+		case XRT_LAYER_STEREO_PROJECTION: {
+			struct xrt_layer_stereo_projection_data *stereo =
+			    &data->stereo;
+			struct comp_swapchain_image *right;
+			struct comp_swapchain_image *left;
+			left =
+			    &layer->scs[0]->images[stereo->l.sub.image_index];
+			right =
+			    &layer->scs[1]->images[stereo->r.sub.image_index];
+
+			comp_renderer_set_projection_layer(c->r, i, left, right,
+			                                   data);
+		} break;
+		}
 	}
+
+	comp_renderer_draw(c->r);
 
 	compositor_add_frame_timing(c);
 
@@ -311,6 +414,45 @@ compositor_end_frame(struct xrt_compositor *xc,
 
 	// Now is a good point to garbage collect.
 	comp_compositor_garbage_collect(c);
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+compositor_poll_events(struct xrt_compositor *xc,
+                       union xrt_compositor_event *out_xce)
+{
+	struct comp_compositor *c = comp_compositor(xc);
+	COMP_SPEW(c, "POLL_EVENTS");
+
+	U_ZERO(out_xce);
+
+	switch (c->state) {
+	case COMP_STATE_READY:
+		out_xce->state.type = XRT_COMPOSITOR_EVENT_NONE;
+		break;
+	case COMP_STATE_PREPARED:
+		out_xce->state.type = XRT_COMPOSITOR_EVENT_NONE;
+		break;
+	case COMP_STATE_WAITED:
+		COMP_DEBUG(c, "WAITED -> VISIBLE");
+		out_xce->state.type = XRT_COMPOSITOR_EVENT_STATE_CHANGE;
+		out_xce->state.visible = true;
+		c->state = COMP_STATE_VISIBLE;
+		break;
+	case COMP_STATE_VISIBLE:
+		COMP_DEBUG(c, "VISIBLE -> FOCUSED");
+		out_xce->state.type = XRT_COMPOSITOR_EVENT_STATE_CHANGE;
+		out_xce->state.visible = true;
+		out_xce->state.focused = true;
+		c->state = COMP_STATE_FOCUSED;
+		break;
+	case COMP_STATE_FOCUSED:
+		// No more transitions.
+		out_xce->state.type = XRT_COMPOSITOR_EVENT_NONE;
+		break;
+	}
+
+	return XRT_SUCCESS;
 }
 
 
@@ -337,14 +479,7 @@ find_get_instance_proc_addr(struct comp_compositor *c)
 	return vk_get_loader_functions(&c->vk, vkGetInstanceProcAddr);
 }
 
-#ifdef XRT_ENABLE_VK_VALIDATION
-#define COMPOSITOR_DEBUG_VULKAN_EXTENSIONS VK_EXT_DEBUG_REPORT_EXTENSION_NAME,
-#else
-#define COMPOSITOR_DEBUG_VULKAN_EXTENSIONS
-#endif
-
 #define COMPOSITOR_COMMON_VULKAN_EXTENSIONS                                    \
-	COMPOSITOR_DEBUG_VULKAN_EXTENSIONS                                     \
 	VK_KHR_SURFACE_EXTENSION_NAME,                                         \
 	    VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,            \
 	    VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME,                \
@@ -441,17 +576,6 @@ create_instance(struct comp_compositor *c)
 	    .ppEnabledExtensionNames = instance_extensions,
 	};
 
-#ifdef XRT_ENABLE_VK_VALIDATION
-	const char *instance_layers[] = {
-	    "VK_LAYER_LUNARG_standard_validation",
-	};
-
-	if (c->settings.validate_vulkan) {
-		instance_info.enabledLayerCount = ARRAY_SIZE(instance_layers);
-		instance_info.ppEnabledLayerNames = instance_layers;
-	}
-#endif
-
 	ret = c->vk.vkCreateInstance(&instance_info, NULL, &c->vk.instance);
 	if (ret != VK_SUCCESS) {
 		COMP_ERROR(c, "vkCreateInstance: %s\n", vk_result_string(ret));
@@ -465,11 +589,6 @@ create_instance(struct comp_compositor *c)
 		           vk_result_string(ret));
 		return ret;
 	}
-
-#ifdef XRT_ENABLE_VK_VALIDATION
-	if (c->settings.validate_vulkan)
-		vk_init_validation_callback(&c->vk);
-#endif
 
 	return ret;
 }
@@ -523,6 +642,78 @@ comp_compositor_print(struct comp_compositor *c,
 
 	fprintf(stderr, "\n");
 }
+
+#ifdef VK_USE_PLATFORM_XLIB_XRANDR_EXT
+static bool
+_match_wl_entry(const char *wl_entry, VkDisplayPropertiesKHR *disp)
+{
+	unsigned long wl_entry_length = strlen(wl_entry);
+	unsigned long disp_entry_length = strlen(disp->displayName);
+	if (disp_entry_length < wl_entry_length)
+		return false;
+
+	// we have a match with this whitelist entry.
+	if (strncmp(wl_entry, disp->displayName, wl_entry_length) == 0)
+		return true;
+
+	return false;
+}
+
+/*
+ * our physical device is an nvidia card, we can potentially select
+ * nvidia-specific direct mode.
+ *
+ * we need to also check if we are confident that we can create a direct mode
+ * display, if not we need to abandon the attempt here, and allow desktop-window
+ * fallback to occur.
+ */
+
+static bool
+_test_for_nvidia(struct comp_compositor *c, struct vk_bundle *vk)
+{
+	VkPhysicalDeviceProperties physical_device_properties;
+	vk->vkGetPhysicalDeviceProperties(vk->physical_device,
+	                                  &physical_device_properties);
+
+	if (physical_device_properties.vendorID != 0x10DE)
+		return false;
+
+	// get a list of attached displays
+	uint32_t display_count;
+
+	if (vk->vkGetPhysicalDeviceDisplayPropertiesKHR(
+	        vk->physical_device, &display_count, NULL) != VK_SUCCESS) {
+		COMP_ERROR(c, "Failed to get vulkan display count");
+		return false;
+	}
+
+	VkDisplayPropertiesKHR *display_props =
+	    U_TYPED_ARRAY_CALLOC(VkDisplayPropertiesKHR, display_count);
+
+	if (display_props && vk->vkGetPhysicalDeviceDisplayPropertiesKHR(
+	                         vk->physical_device, &display_count,
+	                         display_props) != VK_SUCCESS) {
+		COMP_ERROR(c, "Failed to get display properties");
+		free(display_props);
+		return false;
+	}
+
+	for (uint32_t i = 0; i < display_count; i++) {
+		VkDisplayPropertiesKHR *disp = display_props + i;
+		// check this display against our whitelist
+		for (uint32_t j = 0; j < ARRAY_SIZE(NV_DIRECT_WHITELIST); j++) {
+			if (_match_wl_entry(NV_DIRECT_WHITELIST[j], disp)) {
+				free(display_props);
+				return true;
+			}
+		}
+	}
+
+	free(display_props);
+
+	return false;
+}
+#endif // VK_USE_PLATFORM_XLIB_XRANDR_EXT
 
 static bool
 compositor_check_vulkan_caps(struct comp_compositor *c)
@@ -584,75 +775,12 @@ compositor_check_vulkan_caps(struct comp_compositor *c)
 		return false;
 	}
 
-	bool nvidia_tests_passed = false;
-
 #ifdef VK_USE_PLATFORM_XLIB_XRANDR_EXT
-	VkPhysicalDeviceProperties physical_device_properties;
-	temp_vk.vkGetPhysicalDeviceProperties(temp_vk.physical_device,
-	                                      &physical_device_properties);
-
-	if (physical_device_properties.vendorID == 0x10DE) {
-		// our physical device is an nvidia card, we can
-		// potentially select nvidia-specific direct mode.
-
-		// we need to also check if we are confident that we can
-		// create a direct mode display, if not we need to
-		// abandon the attempt here, and allow desktop-window
-		// fallback to occur.
-
-		// get a list of attached displays
-		uint32_t display_count;
-
-		if (temp_vk.vkGetPhysicalDeviceDisplayPropertiesKHR(
-		        temp_vk.physical_device, &display_count, NULL) !=
-		    VK_SUCCESS) {
-			COMP_ERROR(c, "Failed to get vulkan display count");
-			nvidia_tests_passed = false;
-		}
-
-		VkDisplayPropertiesKHR *display_props =
-		    U_TYPED_ARRAY_CALLOC(VkDisplayPropertiesKHR, display_count);
-
-		if (display_props &&
-		    temp_vk.vkGetPhysicalDeviceDisplayPropertiesKHR(
-		        temp_vk.physical_device, &display_count,
-		        display_props) != VK_SUCCESS) {
-			COMP_ERROR(c, "Failed to get display properties");
-			nvidia_tests_passed = false;
-		}
-
-		for (uint32_t i = 0; i < display_count; i++) {
-			VkDisplayPropertiesKHR disp = *(display_props + i);
-			// check this display against our whitelist
-			uint32_t wl_elements = sizeof(NV_DIRECT_WHITELIST) /
-			                       sizeof(NV_DIRECT_WHITELIST[0]);
-			for (uint32_t j = 0; j < wl_elements; j++) {
-				unsigned long wl_entry_length =
-				    strlen(NV_DIRECT_WHITELIST[j]);
-				unsigned long disp_entry_length =
-				    strlen(disp.displayName);
-				if (disp_entry_length >= wl_entry_length) {
-					if (strncmp(NV_DIRECT_WHITELIST[j],
-					            disp.displayName,
-					            wl_entry_length) == 0) {
-						// we have a match with
-						// this whitelist entry.
-						nvidia_tests_passed = true;
-					}
-				}
-			}
-		}
-
-		free(display_props);
-	}
-#endif // VK_USE_PLATFORM_XLIB_XRANDR_EXT
-
-	if (nvidia_tests_passed) {
+	if (_test_for_nvidia(c, &temp_vk)) {
 		c->settings.window_type = WINDOW_DIRECT_NVIDIA;
 		COMP_DEBUG(c, "Selecting direct NVIDIA window type!");
-	} else {
-		COMP_DEBUG(c, "Keeping auto window type!");
 	}
+#endif // VK_USE_PLATFORM_XLIB_XRANDR_EXT
 
 	temp_vk.vkDestroyDevice(temp_vk.device, NULL);
 	temp_vk.vkDestroyInstance(temp_vk.instance, NULL);
@@ -805,12 +933,18 @@ xrt_gfx_provider_create_fd(struct xrt_device *xdev, bool flip_y)
 	struct comp_compositor *c = U_TYPED_CALLOC(struct comp_compositor);
 
 	c->base.base.create_swapchain = comp_swapchain_create;
+	c->base.base.prepare_session = compositor_prepare_session;
 	c->base.base.begin_session = compositor_begin_session;
 	c->base.base.end_session = compositor_end_session;
 	c->base.base.wait_frame = compositor_wait_frame;
 	c->base.base.begin_frame = compositor_begin_frame;
 	c->base.base.discard_frame = compositor_discard_frame;
-	c->base.base.end_frame = compositor_end_frame;
+	c->base.base.layer_begin = compositor_layer_begin;
+	c->base.base.layer_stereo_projection =
+	    compositor_layer_stereo_projection;
+	c->base.base.layer_quad = compositor_layer_quad;
+	c->base.base.layer_commit = compositor_layer_commit;
+	c->base.base.poll_events = compositor_poll_events;
 	c->base.base.destroy = compositor_destroy;
 	c->xdev = xdev;
 
@@ -846,18 +980,30 @@ xrt_gfx_provider_create_fd(struct xrt_device *xdev, bool flip_y)
 	}
 	// clang-format on
 
+	c->window->update_window_title(c->window, WINDOW_TITLE);
+
 	COMP_DEBUG(c, "Done %p", (void *)c);
 
 	/*!
 	 * @todo Support more like, depth/float formats etc,
 	 * remember to update the GL client as well.
 	 */
-	// These are the available formats we will expose to our clients.
-	c->base.base.formats[0] = VK_FORMAT_B8G8R8A8_SRGB;
-	c->base.base.formats[1] = VK_FORMAT_R8G8B8A8_SRGB;
-	c->base.base.formats[2] = VK_FORMAT_B8G8R8A8_UNORM;
-	c->base.base.formats[3] = VK_FORMAT_R8G8B8A8_UNORM;
-	c->base.base.num_formats = 4;
+	/*
+	 * These are the available formats we will expose to our clients.
+	 *
+	 * In order of what we prefer. Start with a SRGB format that works on
+	 * both OpenGL and Vulkan. The two linear formats that works on both
+	 * OpenGL and Vulkan. A SRGB format that only works on Vulkan. The last
+	 * two formats should not be used as they are linear but doesn't have
+	 * enough bits to express it without resulting in banding.
+	 */
+	c->base.base.formats[0] = VK_FORMAT_R8G8B8A8_SRGB;            // OGL VK
+	c->base.base.formats[1] = VK_FORMAT_A2B10G10R10_UNORM_PACK32; // OGL VK
+	c->base.base.formats[2] = VK_FORMAT_R16G16B16A16_SFLOAT;      // OGL VK
+	c->base.base.formats[3] = VK_FORMAT_B8G8R8A8_SRGB;            // VK
+	c->base.base.formats[4] = VK_FORMAT_R8G8B8A8_UNORM;           // OGL VK
+	c->base.base.formats[5] = VK_FORMAT_B8G8R8A8_UNORM;           // VK
+	c->base.base.num_formats = 6;
 
 	u_var_add_root(c, "Compositor", true);
 	u_var_add_ro_f32(c, &c->compositor_frame_times.fps, "FPS (Compositor)");

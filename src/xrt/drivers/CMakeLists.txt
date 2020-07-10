@@ -6,7 +6,7 @@ set(ENABLED_HEADSET_DRIVERS)
 set(ENABLED_DRIVERS)
 
 
-if(BUILD_DRIVER_ARDUINO)
+if(XRT_BUILD_DRIVER_ARDUINO)
 	set(ARDUINO_SOURCE_FILES
 		arduino/arduino_device.c
 		arduino/arduino_interface.h
@@ -18,7 +18,7 @@ if(BUILD_DRIVER_ARDUINO)
 	list(APPEND ENABLED_DRIVERS arduino)
 endif()
 
-if(BUILD_DRIVER_DAYDREAM)
+if(XRT_BUILD_DRIVER_DAYDREAM)
 	set(DAYDREAM_SOURCE_FILES
 		daydream/daydream_device.c
 		daydream/daydream_device.h
@@ -31,7 +31,7 @@ if(BUILD_DRIVER_DAYDREAM)
 	list(APPEND ENABLED_DRIVERS daydream)
 endif()
 
-if(BUILD_DRIVER_DUMMY)
+if(XRT_BUILD_DRIVER_DUMMY)
 	set(DUMMY_SOURCE_FILES
 		dummy/dummy_hmd.c
 		dummy/dummy_interface.h
@@ -43,7 +43,7 @@ if(BUILD_DRIVER_DUMMY)
 	list(APPEND ENABLED_HEADSET_DRIVERS dummy)
 endif()
 
-if(BUILD_DRIVER_HDK)
+if(XRT_BUILD_DRIVER_HDK)
 	set(HDK_SOURCE_FILES
 		hdk/hdk_device.cpp
 		hdk/hdk_device.h
@@ -57,7 +57,7 @@ if(BUILD_DRIVER_HDK)
 endif()
 
 
-if(BUILD_DRIVER_HYDRA)
+if(XRT_BUILD_DRIVER_HYDRA)
 	set(HYDRA_SOURCE_FILES
 		hydra/hydra_driver.c
 		hydra/hydra_interface.h
@@ -68,7 +68,7 @@ if(BUILD_DRIVER_HYDRA)
 	list(APPEND ENABLED_DRIVERS hydra)
 endif()
 
-if(BUILD_DRIVER_NS)
+if(XRT_BUILD_DRIVER_NS)
 	set(NS_SOURCE_FILES
 		north_star/distortion/utility_northstar.h
 		north_star/distortion/deformation_northstar.h
@@ -84,7 +84,7 @@ if(BUILD_DRIVER_NS)
 	list(APPEND ENABLED_HEADSET_DRIVERS ns)
 endif()
 
-if(BUILD_DRIVER_OHMD)
+if(XRT_BUILD_DRIVER_OHMD)
 	set(OHMD_SOURCE_FILES
 		ohmd/oh_device.c
 		ohmd/oh_device.h
@@ -98,7 +98,7 @@ if(BUILD_DRIVER_OHMD)
 endif()
 
 
-if(BUILD_DRIVER_PSMV)
+if(XRT_BUILD_DRIVER_PSMV)
 	set(PSMOVE_SOURCE_FILES
 		psmv/psmv_driver.c
 		psmv/psmv_interface.h
@@ -109,7 +109,7 @@ if(BUILD_DRIVER_PSMV)
 	list(APPEND ENABLED_DRIVERS psmv)
 endif()
 
-if(BUILD_DRIVER_PSVR)
+if(XRT_BUILD_DRIVER_PSVR)
 	set(PSVR_SOURCE_FILES
 		psvr/psvr_device.c
 		psvr/psvr_device.h
@@ -123,7 +123,7 @@ if(BUILD_DRIVER_PSVR)
 	list(APPEND ENABLED_HEADSET_DRIVERS psvr)
 endif()
 
-if(BUILD_DRIVER_RS)
+if(XRT_BUILD_DRIVER_RS)
 	set(RS_SOURCE_FILES
 		realsense/rs_6dof.c
 		)
@@ -133,7 +133,7 @@ if(BUILD_DRIVER_RS)
 	list(APPEND ENABLED_HEADSET_DRIVERS rs)
 endif()
 
-if(BUILD_DRIVER_VIVE)
+if(XRT_BUILD_DRIVER_VIVE)
 	set(VIVE_SOURCE_FILES
 		vive/vive_device.h
 		vive/vive_device.c
@@ -141,8 +141,10 @@ if(BUILD_DRIVER_VIVE)
 		vive/vive_prober.c
 		vive/vive_protocol.c
 		vive/vive_protocol.h
-		vive/vive_controller_interface.h
-		vive/vive_controller_driver.c
+		vive/vive_controller.h
+		vive/vive_controller.c
+		vive/vive_config.h
+		vive/vive_config.c
 		)
 
 	add_library(drv_vive STATIC ${VIVE_SOURCE_FILES})
@@ -152,7 +154,7 @@ if(BUILD_DRIVER_VIVE)
 	list(APPEND ENABLED_HEADSET_DRIVERS vive)
 endif()
 
-if(BUILD_DRIVER_V4L2)
+if(XRT_HAVE_V4L2)
 	set(V4L2_SOURCE_FILES
 		v4l2/v4l2_driver.c
 		)
@@ -160,6 +162,19 @@ if(BUILD_DRIVER_V4L2)
 	add_library(drv_v4l2 STATIC ${V4L2_SOURCE_FILES})
 	target_link_libraries(drv_v4l2 PRIVATE xrt-interfaces aux_os)
 	list(APPEND ENABLED_DRIVERS v4l2)
+endif()
+
+if (XRT_BUILD_DRIVER_SURVIVE)
+	set(SURVIVE_SOURCE_FILES
+		survive/survive_driver.c
+		survive/survive_interface.h
+		survive/survive_wrap.c
+		survive/survive_wrap.h
+		)
+
+	add_library(drv_survive STATIC ${SURVIVE_SOURCE_FILES})
+	target_link_libraries(drv_survive PRIVATE xrt-interfaces aux_os aux_util aux_math PkgConfig::SURVIVE)
+	list(APPEND ENABLED_HEADSET_DRIVERS survive)
 endif()
 
 if(ENABLED_HEADSET_DRIVERS)

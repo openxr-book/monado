@@ -1,4 +1,4 @@
-// Copyright 2018-2019, Collabora, Ltd.
+// Copyright 2018-2020, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -110,12 +110,12 @@ oxr_verify_localized_name(struct oxr_logger *log,
 	}
 
 	if (string[0] == '\0') {
-		return oxr_error(log, XR_ERROR_NAME_INVALID,
+		return oxr_error(log, XR_ERROR_LOCALIZED_NAME_INVALID,
 		                 "(%s) can not be empty", name);
 	}
 
 	if (!contains_zero(string, array_size)) {
-		return oxr_error(log, XR_ERROR_NAME_INVALID,
+		return oxr_error(log, XR_ERROR_LOCALIZED_NAME_INVALID,
 		                 "(%s) must include zero termination '\\0'.",
 		                 name);
 	}
@@ -328,7 +328,7 @@ subaction_path_no_dups(struct oxr_logger *log,
 		size_t length = 0;
 
 		oxr_path_get_string(log, inst, path, &str, &length);
-		return oxr_error(log, XR_ERROR_PATH_INVALID,
+		return oxr_error(log, XR_ERROR_PATH_UNSUPPORTED,
 		                 "(%s[%u] == '%s') path is not a "
 		                 "valid subaction path.",
 		                 variable, index, str);
@@ -340,7 +340,7 @@ subaction_path_no_dups(struct oxr_logger *log,
 
 		oxr_path_get_string(log, inst, path, &str, &length);
 
-		return oxr_error(log, XR_ERROR_PATH_INVALID,
+		return oxr_error(log, XR_ERROR_PATH_UNSUPPORTED,
 		                 "(%s[%u] == '%s') duplicate paths", variable,
 		                 index, str);
 	}
@@ -436,7 +436,7 @@ oxr_verify_subaction_path_get(struct oxr_logger *log,
 
 		oxr_path_get_string(log, inst, path, &str, &length);
 
-		return oxr_error(log, XR_ERROR_PATH_INVALID,
+		return oxr_error(log, XR_ERROR_PATH_UNSUPPORTED,
 		                 "(%s == '%s') the subaction path was "
 		                 "not specified at action creation",
 		                 variable, str);
@@ -455,6 +455,23 @@ oxr_verify_subaction_path_get(struct oxr_logger *log,
  */
 
 XrResult
+oxr_verify_view_config_type(struct oxr_logger *log,
+                            struct oxr_instance *inst,
+                            XrViewConfigurationType view_conf,
+                            const char *view_conf_name)
+{
+	// These are always valid.
+	if (view_conf == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_MONO ||
+	    view_conf == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO) {
+		return XR_SUCCESS;
+	}
+
+	return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,
+	                 "(%s == 0x%08x) invalid view configuration type",
+	                 view_conf_name, view_conf);
+}
+
+XrResult
 oxr_verify_XrSessionCreateInfo(struct oxr_logger *log,
                                const struct oxr_instance *inst,
                                const XrSessionCreateInfo *createInfo)
@@ -466,7 +483,7 @@ oxr_verify_XrSessionCreateInfo(struct oxr_logger *log,
 
 	if (createInfo->createFlags != 0) {
 		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,
-		                 " Non-zero session create flags");
+		                 "Non-zero session create flags");
 	}
 
 	XrResult result = oxr_system_verify_id(log, inst, createInfo->systemId);
@@ -496,15 +513,15 @@ oxr_verify_XrSessionCreateInfo(struct oxr_logger *log,
 	}
 #endif // OXR_HAVE_KHR_vulkan_enable
 
-#if defined(OXR_HAVE_MND_egl_enable) && defined(XR_USE_PLATFORM_EGL)
-	XrGraphicsBindingEGLMND const *egl = OXR_GET_INPUT_FROM_CHAIN(
-	    createInfo, XR_TYPE_GRAPHICS_BINDING_EGL_MND,
-	    XrGraphicsBindingEGLMND);
+#if defined(OXR_HAVE_MNDX_egl_enable) && defined(XR_USE_PLATFORM_EGL)
+	XrGraphicsBindingEGLMNDX const *egl = OXR_GET_INPUT_FROM_CHAIN(
+	    createInfo, XR_TYPE_GRAPHICS_BINDING_EGL_MNDX,
+	    XrGraphicsBindingEGLMNDX);
 	if (egl != NULL) {
-		OXR_VERIFY_EXTENSION(log, inst, MND_egl_enable);
-		return oxr_verify_XrGraphicsBindingEGLMND(log, egl);
+		OXR_VERIFY_EXTENSION(log, inst, MNDX_egl_enable);
+		return oxr_verify_XrGraphicsBindingEGLMNDX(log, egl);
 	}
-#endif // defined(OXR_HAVE_MND_egl_enable) && defined(XR_USE_PLATFORM_EGL_KHR)
+#endif // defined(OXR_HAVE_MNDX_egl_enable) && defined(XR_USE_PLATFORM_EGL_KHR)
 
 	/*
 	 * Add any new graphics binding structs here - before the headless
@@ -568,7 +585,7 @@ oxr_verify_XrGraphicsBindingVulkanKHR(struct oxr_logger *log,
 {
 	if (next->type != XR_TYPE_GRAPHICS_BINDING_VULKAN_KHR) {
 		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,
-		                 " Graphics binding has invalid type");
+		                 "Graphics binding has invalid type");
 	}
 
 	return XR_SUCCESS;
@@ -580,12 +597,12 @@ oxr_verify_XrGraphicsBindingVulkanKHR(struct oxr_logger *log,
 #ifdef XR_USE_PLATFORM_EGL
 
 XrResult
-oxr_verify_XrGraphicsBindingEGLMND(struct oxr_logger *log,
-                                   const XrGraphicsBindingEGLMND *next)
+oxr_verify_XrGraphicsBindingEGLMNDX(struct oxr_logger *log,
+                                    const XrGraphicsBindingEGLMNDX *next)
 {
-	if (next->type != XR_TYPE_GRAPHICS_BINDING_EGL_MND) {
+	if (next->type != XR_TYPE_GRAPHICS_BINDING_EGL_MNDX) {
 		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,
-		                 " Graphics binding has invalid type");
+		                 "Graphics binding has invalid type");
 	}
 
 	return XR_SUCCESS;

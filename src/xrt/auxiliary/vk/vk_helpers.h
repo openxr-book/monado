@@ -40,6 +40,7 @@ struct vk_bundle
 	VkDevice device;
 	uint32_t queue_family_index;
 	uint32_t queue_index;
+	VkQueue queue;
 
 	VkDebugReportCallbackEXT debug_report_cb;
 
@@ -109,6 +110,7 @@ struct vk_bundle
 	PFN_vkDestroyBuffer vkDestroyBuffer;
 	PFN_vkBindBufferMemory vkBindBufferMemory;
 	PFN_vkGetBufferMemoryRequirements vkGetBufferMemoryRequirements;
+	PFN_vkFlushMappedMemoryRanges vkFlushMappedMemoryRanges;
 
 	PFN_vkCreateImage vkCreateImage;
 	PFN_vkGetImageMemoryRequirements vkGetImageMemoryRequirements;
@@ -176,9 +178,27 @@ struct vk_bundle
 	PFN_vkGetSwapchainImagesKHR vkGetSwapchainImagesKHR;
 	PFN_vkAcquireNextImageKHR vkAcquireNextImageKHR;
 	PFN_vkQueuePresentKHR vkQueuePresentKHR;
+
+	PFN_vkImportSemaphoreFdKHR vkImportSemaphoreFdKHR;
+	PFN_vkGetSemaphoreFdKHR vkGetSemaphoreFdKHR;
 	// clang-format on
 };
 
+struct vk_buffer
+{
+	VkBuffer handle;
+	VkDeviceMemory memory;
+	uint32_t size;
+	void *data;
+};
+
+struct vk_image
+{
+	VkImage handle;
+	VkDeviceMemory memory;
+	VkImageView view;
+	VkSampler sampler;
+};
 
 /*
  *
@@ -224,17 +244,12 @@ vk_color_space_string(VkColorSpaceKHR code);
 		fprintf(stderr, "\n");                                         \
 	} while (false)
 
-/*!
- * @ingroup aux_vk
- */
-void
-vk_init_validation_callback(struct vk_bundle *vk);
+bool
+vk_has_error(VkResult res, const char *fun, const char *file, int line);
 
-/*!
- * @ingroup aux_vk
- */
-void
-vk_destroy_validation_callback(struct vk_bundle *vk);
+#define vk_check_error(fun, res, ret)                                          \
+	if (vk_has_error(res, fun, __FILE__, __LINE__))                        \
+	return ret
 
 /*!
  * @ingroup aux_vk
@@ -343,10 +358,16 @@ vk_create_image_from_fd(struct vk_bundle *vk,
  * @ingroup aux_vk
  */
 VkResult
+vk_create_semaphore_from_fd(struct vk_bundle *vk, int fd, VkSemaphore *out_sem);
+
+/*!
+ * @ingroup aux_vk
+ */
+VkResult
 vk_create_image_simple(struct vk_bundle *vk,
-                       uint32_t width,
-                       uint32_t height,
+                       VkExtent2D extent,
                        VkFormat format,
+                       VkImageUsageFlags usage,
                        VkDeviceMemory *out_mem,
                        VkImage *out_image);
 
@@ -365,6 +386,17 @@ vk_create_view(struct vk_bundle *vk,
                VkFormat format,
                VkImageSubresourceRange subresource_range,
                VkImageView *out_view);
+
+/*!
+ * @ingroup aux_vk
+ */
+VkResult
+vk_create_view_swizzle(struct vk_bundle *vk,
+                       VkImage image,
+                       VkFormat format,
+                       VkImageSubresourceRange subresource_range,
+                       VkComponentMapping components,
+                       VkImageView *out_view);
 
 /*!
  * @ingroup aux_vk
@@ -391,6 +423,41 @@ vk_set_image_layout(struct vk_bundle *vk,
 VkResult
 vk_submit_cmd_buffer(struct vk_bundle *vk, VkCommandBuffer cmd_buffer);
 
+
+VkAccessFlags
+vk_get_access_flags(VkImageLayout layout);
+
+VkAccessFlags
+vk_swapchain_access_flags(enum xrt_swapchain_usage_bits bits);
+
+bool
+vk_init_descriptor_pool(struct vk_bundle *vk,
+                        const VkDescriptorPoolSize *pool_sizes,
+                        uint32_t pool_size_count,
+                        uint32_t set_count,
+                        VkDescriptorPool *out_descriptor_pool);
+
+bool
+vk_allocate_descriptor_sets(struct vk_bundle *vk,
+                            VkDescriptorPool descriptor_pool,
+                            uint32_t count,
+                            const VkDescriptorSetLayout *set_layout,
+                            VkDescriptorSet *sets);
+
+bool
+vk_buffer_init(struct vk_bundle *vk,
+               VkDeviceSize size,
+               VkBufferUsageFlags usage,
+               VkMemoryPropertyFlags properties,
+               VkBuffer *out_buffer,
+               VkDeviceMemory *out_mem);
+
+void
+vk_buffer_destroy(struct vk_buffer *self, struct vk_bundle *vk);
+
+
+void
+vk_image_destroy(struct vk_image *self, struct vk_bundle *vk);
 
 #ifdef __cplusplus
 }

@@ -1,4 +1,4 @@
-// Copyright 2018-2019, Collabora, Ltd.
+// Copyright 2018-2020, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -7,16 +7,23 @@
  * @ingroup oxr_main
  */
 
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
+#include "os/os_threading.h"
 
 #include "util/u_misc.h"
 
 #include "oxr_objects.h"
 #include "oxr_logger.h"
 
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
 
+
+/*
+ *
+ * Struct and defines.
+ *
+ */
 
 struct oxr_event
 {
@@ -26,13 +33,23 @@ struct oxr_event
 };
 
 
+/*
+ *
+ * Internal helpers.
+ *
+ */
+
 void
 lock(struct oxr_instance *inst)
-{}
+{
+	os_mutex_lock(&inst->event.mutex);
+}
 
 void
 unlock(struct oxr_instance *inst)
-{}
+{
+	os_mutex_unlock(&inst->event.mutex);
+}
 
 void *
 oxr_event_extra(struct oxr_event *event)
@@ -43,16 +60,16 @@ oxr_event_extra(struct oxr_event *event)
 struct oxr_event *
 pop(struct oxr_instance *inst)
 {
-	struct oxr_event *ret = inst->next_event;
+	struct oxr_event *ret = inst->event.next;
 	if (ret == NULL) {
 		return NULL;
 	}
 
-	inst->next_event = ret->next;
+	inst->event.next = ret->next;
 	ret->next = NULL;
 
-	if (ret == inst->last_event) {
-		inst->last_event = NULL;
+	if (ret == inst->event.last) {
+		inst->event.last = NULL;
 	}
 
 	return ret;
@@ -61,14 +78,14 @@ pop(struct oxr_instance *inst)
 void
 push(struct oxr_instance *inst, struct oxr_event *event)
 {
-	struct oxr_event *last = inst->last_event;
+	struct oxr_event *last = inst->event.last;
 	if (last != NULL) {
 		last->next = event;
 	}
-	inst->last_event = event;
+	inst->event.last = event;
 
-	if (inst->next_event == NULL) {
-		inst->next_event = event;
+	if (inst->event.next == NULL) {
+		inst->event.next = event;
 	}
 }
 
@@ -93,7 +110,7 @@ oxr_event_alloc(struct oxr_logger *log,
 
 	if (event == NULL) {
 		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE,
-		                 " out of memory");
+		                 "Out of memory");
 	}
 
 	event->next = NULL;
@@ -104,6 +121,13 @@ oxr_event_alloc(struct oxr_logger *log,
 
 	return XR_SUCCESS;
 }
+
+
+/*
+ *
+ * 'Exported' functions.
+ *
+ */
 
 XrResult
 oxr_event_push_XrEventDataSessionStateChanged(struct oxr_logger *log,
@@ -134,13 +158,71 @@ oxr_event_push_XrEventDataSessionStateChanged(struct oxr_logger *log,
 }
 
 XrResult
+oxr_event_push_XrEventDataMainSessionVisibilityChangedEXTX(
+    struct oxr_logger *log, struct oxr_session *sess, bool visible)
+{
+	struct oxr_instance *inst = sess->sys->inst;
+	XrEventDataMainSessionVisibilityChangedEXTX *changed;
+	struct oxr_event *event = NULL;
+
+	ALLOC(log, inst, &event, &changed);
+	changed->type = XR_TYPE_EVENT_DATA_MAIN_SESSION_VISIBILITY_CHANGED_EXTX;
+	changed->flags = 0;
+	changed->visible = visible;
+	event->result = XR_SUCCESS;
+	lock(inst);
+	push(inst, event);
+	unlock(inst);
+
+	return XR_SUCCESS;
+}
+
+XrResult
+oxr_event_remove_session_events(struct oxr_logger *log,
+                                struct oxr_session *sess)
+{
+	struct oxr_instance *inst = sess->sys->inst;
+	XrSession session = oxr_session_to_openxr(sess);
+
+	lock(inst);
+
+	struct oxr_event *e = inst->event.next;
+	while (e != NULL) {
+		struct oxr_event *cur = e;
+		e = e->next;
+
+		XrEventDataSessionStateChanged *changed = oxr_event_extra(cur);
+		if (changed->type != XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED) {
+			continue;
+		}
+
+		if (changed->session != session) {
+			continue;
+		}
+
+		if (cur == inst->event.next) {
+			inst->event.next = cur->next;
+		}
+
+		if (cur == inst->event.last) {
+			inst->event.last = NULL;
+		}
+		free(cur);
+	}
+
+	unlock(inst);
+
+	return XR_SUCCESS;
+}
+
+XrResult
 oxr_poll_event(struct oxr_logger *log,
                struct oxr_instance *inst,
                XrEventDataBuffer *eventData)
 {
 	struct oxr_session *sess = inst->sessions;
 	while (sess) {
-		oxr_session_poll(sess);
+		oxr_session_poll(log, sess);
 		sess = sess->next;
 	}
 

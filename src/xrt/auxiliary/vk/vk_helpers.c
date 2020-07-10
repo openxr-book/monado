@@ -115,6 +115,16 @@ vk_color_space_string(VkColorSpaceKHR code)
 	}
 }
 
+bool
+vk_has_error(VkResult res, const char *fun, const char *file, int line)
+{
+	if (res != VK_SUCCESS) {
+		fprintf(stderr, "ERROR: %s failed with %s in %s:%d\n", fun,
+		        vk_result_string(res), file, line);
+		return true;
+	}
+	return false;
+}
 
 /*
  *
@@ -207,31 +217,27 @@ vk_alloc_and_bind_image_memory(struct vk_bundle *vk,
 
 VkResult
 vk_create_image_simple(struct vk_bundle *vk,
-                       uint32_t width,
-                       uint32_t height,
+                       VkExtent2D extent,
                        VkFormat format,
+                       VkImageUsageFlags usage,
                        VkDeviceMemory *out_mem,
                        VkImage *out_image)
 {
-	VkImageUsageFlags usage_flags = 0;
-	usage_flags |= VK_IMAGE_USAGE_SAMPLED_BIT;
-	usage_flags |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-
 	VkImageCreateInfo image_info = {
 	    .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
 	    .imageType = VK_IMAGE_TYPE_2D,
 	    .format = format,
 	    .extent =
 	        {
-	            .width = width,
-	            .height = height,
+	            .width = extent.width,
+	            .height = extent.height,
 	            .depth = 1,
 	        },
 	    .mipLevels = 1,
 	    .arrayLayers = 1,
 	    .samples = VK_SAMPLE_COUNT_1_BIT,
-	    .tiling = VK_IMAGE_TILING_LINEAR,
-	    .usage = usage_flags,
+	    .tiling = VK_IMAGE_TILING_OPTIMAL,
+	    .usage = usage,
 	    .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
 	    .queueFamilyIndexCount = 0,
 	    .pQueueFamilyIndices = NULL,
@@ -270,7 +276,8 @@ vk_create_image_from_fd(struct vk_bundle *vk,
                         VkImage *out_image,
                         VkDeviceMemory *out_mem)
 {
-	VkImageUsageFlags image_usage = (VkImageUsageFlags)0;
+	VkImageUsageFlags image_usage =
+	    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 	VkImage image = VK_NULL_HANDLE;
 	VkResult ret = VK_SUCCESS;
 
@@ -283,9 +290,6 @@ vk_create_image_from_fd(struct vk_bundle *vk,
 		image_usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 	}
 	if ((swapchain_usage & XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL) != 0) {
-		image_usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-	}
-	if ((swapchain_usage & XRT_SWAPCHAIN_USAGE_UNORDERED_ACCESS) != 0) {
 		image_usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
 	}
 	if ((swapchain_usage & XRT_SWAPCHAIN_USAGE_TRANSFER_SRC) != 0) {
@@ -343,6 +347,38 @@ vk_create_image_from_fd(struct vk_bundle *vk,
 }
 
 VkResult
+vk_create_semaphore_from_fd(struct vk_bundle *vk, int fd, VkSemaphore *out_sem)
+{
+	VkResult ret;
+
+	VkSemaphoreCreateInfo semaphore_create_info = {
+	    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+	};
+	ret = vk->vkCreateSemaphore(vk->device, &semaphore_create_info, NULL,
+	                            out_sem);
+	if (ret != VK_SUCCESS) {
+		VK_ERROR(vk, "vkCreateSemaphore: %s", vk_result_string(ret));
+		// Nothing to cleanup
+		return ret;
+	}
+
+	VkImportSemaphoreFdInfoKHR import_semaphore_fd_info = {
+	    .sType = VK_STRUCTURE_TYPE_IMPORT_SEMAPHORE_FD_INFO_KHR,
+	    .semaphore = *out_sem,
+	    .handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT,
+	    .fd = fd,
+	};
+	ret = vk->vkImportSemaphoreFdKHR(vk->device, &import_semaphore_fd_info);
+	if (ret != VK_SUCCESS) {
+		VK_ERROR(vk, "vkImportSemaphoreFdKHR: %s",
+		         vk_result_string(ret));
+		vk->vkDestroySemaphore(vk->device, *out_sem, NULL);
+		return ret;
+	}
+	return ret;
+}
+
+VkResult
 vk_create_sampler(struct vk_bundle *vk, VkSampler *out_sampler)
 {
 	VkSampler sampler;
@@ -378,6 +414,25 @@ vk_create_view(struct vk_bundle *vk,
                VkImageSubresourceRange subresource_range,
                VkImageView *out_view)
 {
+	VkComponentMapping components = {
+	    .r = VK_COMPONENT_SWIZZLE_R,
+	    .g = VK_COMPONENT_SWIZZLE_G,
+	    .b = VK_COMPONENT_SWIZZLE_B,
+	    .a = VK_COMPONENT_SWIZZLE_A,
+	};
+
+	return vk_create_view_swizzle(vk, image, format, subresource_range,
+	                              components, out_view);
+}
+
+VkResult
+vk_create_view_swizzle(struct vk_bundle *vk,
+                       VkImage image,
+                       VkFormat format,
+                       VkImageSubresourceRange subresource_range,
+                       VkComponentMapping components,
+                       VkImageView *out_view)
+{
 	VkImageView view;
 	VkResult ret;
 
@@ -386,13 +441,7 @@ vk_create_view(struct vk_bundle *vk,
 	    .image = image,
 	    .viewType = VK_IMAGE_VIEW_TYPE_2D,
 	    .format = format,
-	    .components =
-	        {
-	            .r = VK_COMPONENT_SWIZZLE_R,
-	            .g = VK_COMPONENT_SWIZZLE_G,
-	            .b = VK_COMPONENT_SWIZZLE_B,
-	            .a = VK_COMPONENT_SWIZZLE_A,
-	        },
+	    .components = components,
 	    .subresourceRange = subresource_range,
 	};
 
@@ -491,7 +540,6 @@ VkResult
 vk_submit_cmd_buffer(struct vk_bundle *vk, VkCommandBuffer cmd_buffer)
 {
 	VkResult ret = VK_SUCCESS;
-	VkQueue queue;
 	VkFence fence;
 	VkFenceCreateInfo fence_info = {
 	    .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
@@ -509,9 +557,6 @@ vk_submit_cmd_buffer(struct vk_bundle *vk, VkCommandBuffer cmd_buffer)
 		goto out;
 	}
 
-	// Get the queue.
-	vk->vkGetDeviceQueue(vk->device, vk->queue_family_index, 0, &queue);
-
 	// Create the fence.
 	ret = vk->vkCreateFence(vk->device, &fence_info, NULL, &fence);
 	if (ret != VK_SUCCESS) {
@@ -520,9 +565,9 @@ vk_submit_cmd_buffer(struct vk_bundle *vk, VkCommandBuffer cmd_buffer)
 	}
 
 	// Do the actual submitting.
-	ret = vk->vkQueueSubmit(queue, 1, &submitInfo, fence);
+	ret = vk->vkQueueSubmit(vk->queue, 1, &submitInfo, fence);
 	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "Error: Could not submit queue.\n");
+		VK_ERROR(vk, "Error: Could not submit to queue.\n");
 		goto out_fence;
 	}
 
@@ -560,80 +605,6 @@ vk_init_cmd_pool(struct vk_bundle *vk)
 	}
 
 	return ret;
-}
-
-
-/*
- *
- * Debug code.
- *
- */
-
-#define ENUM_TO_STR(r)                                                         \
-	case r: return #r
-
-static const char *
-vk_debug_report_string(VkDebugReportFlagsEXT code)
-{
-	switch (code) {
-		ENUM_TO_STR(VK_DEBUG_REPORT_INFORMATION_BIT_EXT);
-		ENUM_TO_STR(VK_DEBUG_REPORT_WARNING_BIT_EXT);
-		ENUM_TO_STR(VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT);
-		ENUM_TO_STR(VK_DEBUG_REPORT_ERROR_BIT_EXT);
-		ENUM_TO_STR(VK_DEBUG_REPORT_DEBUG_BIT_EXT);
-		ENUM_TO_STR(VK_DEBUG_REPORT_FLAG_BITS_MAX_ENUM_EXT);
-	}
-	return "UNKNOWN REPORT";
-}
-
-static VkBool32 VKAPI_PTR
-_validation_cb(VkDebugReportFlagsEXT flags,
-               VkDebugReportObjectTypeEXT object_type,
-               uint64_t object,
-               size_t location,
-               int32_t message_code,
-               const char *layer_prefix,
-               const char *message,
-               void *user_data)
-{
-	fprintf(stderr, "%s %s %zu:%d: %s\n", vk_debug_report_string(flags),
-	        layer_prefix, location, message_code, message);
-	return VK_FALSE;
-}
-
-DEBUG_GET_ONCE_BOOL_OPTION(vulkan_spew, "XRT_COMPOSITOR_VULKAN_SPEW", false)
-
-void
-vk_init_validation_callback(struct vk_bundle *vk)
-{
-	VkDebugReportFlagsEXT flags = 0;
-	flags |= VK_DEBUG_REPORT_ERROR_BIT_EXT;
-	flags |= VK_DEBUG_REPORT_WARNING_BIT_EXT;
-
-	if (debug_get_bool_option_vulkan_spew()) {
-		flags |= VK_DEBUG_REPORT_INFORMATION_BIT_EXT;
-		flags |= VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT;
-		flags |= VK_DEBUG_REPORT_DEBUG_BIT_EXT;
-	}
-
-	VkDebugReportCallbackCreateInfoEXT info = {
-	    .sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CREATE_INFO_EXT,
-	    .flags = flags,
-	    .pfnCallback = _validation_cb,
-	};
-
-	vk->vkCreateDebugReportCallbackEXT(vk->instance, &info, NULL,
-	                                   &vk->debug_report_cb);
-}
-
-void
-vk_destroy_validation_callback(struct vk_bundle *vk)
-{
-	if (vk->debug_report_cb != VK_NULL_HANDLE) {
-		vk->vkDestroyDebugReportCallbackEXT(vk->instance,
-		                                    vk->debug_report_cb, NULL);
-		vk->debug_report_cb = VK_NULL_HANDLE;
-	}
 }
 
 /*
@@ -720,6 +691,7 @@ vk_get_device_functions(struct vk_bundle *vk)
 	vk->vkDestroyBuffer               = GET_DEV_PROC(vk, vkDestroyBuffer);
 	vk->vkBindBufferMemory            = GET_DEV_PROC(vk, vkBindBufferMemory);
 	vk->vkGetBufferMemoryRequirements = GET_DEV_PROC(vk, vkGetBufferMemoryRequirements);
+	vk->vkFlushMappedMemoryRanges     = GET_DEV_PROC(vk, vkFlushMappedMemoryRanges);
 	vk->vkCreateImage                 = GET_DEV_PROC(vk, vkCreateImage);
 	vk->vkGetImageMemoryRequirements  = GET_DEV_PROC(vk, vkGetImageMemoryRequirements);
 	vk->vkBindImageMemory             = GET_DEV_PROC(vk, vkBindImageMemory);
@@ -778,6 +750,8 @@ vk_get_device_functions(struct vk_bundle *vk)
 	vk->vkGetSwapchainImagesKHR       = GET_DEV_PROC(vk, vkGetSwapchainImagesKHR);
 	vk->vkAcquireNextImageKHR         = GET_DEV_PROC(vk, vkAcquireNextImageKHR);
 	vk->vkQueuePresentKHR             = GET_DEV_PROC(vk, vkQueuePresentKHR);
+	vk->vkImportSemaphoreFdKHR        = GET_DEV_PROC(vk, vkImportSemaphoreFdKHR);
+	vk->vkGetSemaphoreFdKHR           = GET_DEV_PROC(vk, vkGetSemaphoreFdKHR);
 	// clang-format on
 
 	return VK_SUCCESS;
@@ -982,6 +956,7 @@ vk_create_device(struct vk_bundle *vk, int forced_index)
 	if (ret != VK_SUCCESS) {
 		goto err_destroy;
 	}
+	vk->vkGetDeviceQueue(vk->device, vk->queue_family_index, 0, &vk->queue);
 
 	return ret;
 
@@ -1033,6 +1008,8 @@ vk_init_from_given(struct vk_bundle *vk,
 		goto err_memset;
 	}
 
+	vk->vkGetDeviceQueue(vk->device, vk->queue_family_index, 0, &vk->queue);
+
 	// Create the pool.
 	ret = vk_init_cmd_pool(vk);
 	if (ret != VK_SUCCESS) {
@@ -1044,4 +1021,161 @@ vk_init_from_given(struct vk_bundle *vk,
 err_memset:
 	U_ZERO(vk);
 	return ret;
+}
+
+VkAccessFlags
+vk_get_access_flags(VkImageLayout layout)
+{
+	switch (layout) {
+	case VK_IMAGE_LAYOUT_UNDEFINED: return 0;
+	case VK_IMAGE_LAYOUT_GENERAL:
+		return VK_ACCESS_TRANSFER_WRITE_BIT |
+		       VK_ACCESS_TRANSFER_READ_BIT;
+	case VK_IMAGE_LAYOUT_PREINITIALIZED: return VK_ACCESS_HOST_WRITE_BIT;
+	case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+		return VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+	case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
+		return VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+	case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+		return VK_ACCESS_TRANSFER_READ_BIT;
+	case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+		return VK_ACCESS_TRANSFER_WRITE_BIT;
+	case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+		return VK_ACCESS_SHADER_READ_BIT;
+	default:
+		fprintf(stderr, "Unhandled access mask case for layout %d.\n",
+		        layout);
+	}
+	return 0;
+}
+
+VkAccessFlags
+vk_swapchain_access_flags(enum xrt_swapchain_usage_bits bits)
+{
+	VkAccessFlags result = 0;
+	if ((bits & XRT_SWAPCHAIN_USAGE_UNORDERED_ACCESS) != 0) {
+		result |= VK_ACCESS_INPUT_ATTACHMENT_READ_BIT;
+		if ((bits & XRT_SWAPCHAIN_USAGE_COLOR) != 0) {
+			result |= VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+		}
+		if ((bits & XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL) != 0) {
+			result |= VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+		}
+	}
+	if ((bits & XRT_SWAPCHAIN_USAGE_COLOR) != 0) {
+		result |= VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+	}
+	if ((bits & XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL) != 0) {
+		result |= VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+	}
+	if ((bits & XRT_SWAPCHAIN_USAGE_TRANSFER_SRC) != 0) {
+		result |= VK_ACCESS_TRANSFER_READ_BIT;
+	}
+	if ((bits & XRT_SWAPCHAIN_USAGE_TRANSFER_DST) != 0) {
+		result |= VK_ACCESS_TRANSFER_WRITE_BIT;
+	}
+	if ((bits & XRT_SWAPCHAIN_USAGE_SAMPLED) != 0) {
+		result |= VK_ACCESS_SHADER_READ_BIT;
+	}
+	return result;
+}
+
+bool
+vk_init_descriptor_pool(struct vk_bundle *vk,
+                        const VkDescriptorPoolSize *pool_sizes,
+                        uint32_t pool_size_count,
+                        uint32_t set_count,
+                        VkDescriptorPool *out_descriptor_pool)
+{
+	VkDescriptorPoolCreateInfo info = {
+	    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+	    .maxSets = set_count,
+	    .poolSizeCount = pool_size_count,
+	    .pPoolSizes = pool_sizes,
+	};
+
+	VkResult res = vk->vkCreateDescriptorPool(vk->device, &info, NULL,
+	                                          out_descriptor_pool);
+	vk_check_error("vkCreateDescriptorPool", res, false);
+
+	return true;
+}
+
+bool
+vk_allocate_descriptor_sets(struct vk_bundle *vk,
+                            VkDescriptorPool descriptor_pool,
+                            uint32_t count,
+                            const VkDescriptorSetLayout *set_layout,
+                            VkDescriptorSet *sets)
+{
+	VkDescriptorSetAllocateInfo alloc_info = {
+	    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+	    .descriptorPool = descriptor_pool,
+	    .descriptorSetCount = count,
+	    .pSetLayouts = set_layout,
+	};
+
+	VkResult res =
+	    vk->vkAllocateDescriptorSets(vk->device, &alloc_info, sets);
+	vk_check_error("vkAllocateDescriptorSets", res, false);
+
+	return true;
+}
+
+bool
+vk_buffer_init(struct vk_bundle *vk,
+               VkDeviceSize size,
+               VkBufferUsageFlags usage,
+               VkMemoryPropertyFlags properties,
+               VkBuffer *out_buffer,
+               VkDeviceMemory *out_mem)
+{
+	VkBufferCreateInfo buffer_info = {
+	    .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+	    .size = size,
+	    .usage = usage,
+	};
+
+	VkResult res =
+	    vk->vkCreateBuffer(vk->device, &buffer_info, NULL, out_buffer);
+	vk_check_error("vkCreateBuffer", res, false);
+
+	VkMemoryRequirements requirements;
+	vk->vkGetBufferMemoryRequirements(vk->device, *out_buffer,
+	                                  &requirements);
+
+	VkMemoryAllocateInfo alloc_info = {
+	    .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+	    .allocationSize = requirements.size};
+
+	if (!vk_get_memory_type(vk, requirements.memoryTypeBits, properties,
+	                        &alloc_info.memoryTypeIndex)) {
+		fprintf(stderr,
+		        "Failed to find matching memoryTypeIndex for buffer\n");
+		return false;
+	}
+
+	res = vk->vkAllocateMemory(vk->device, &alloc_info, NULL, out_mem);
+	vk_check_error("vkAllocateMemory", res, false);
+
+	res = vk->vkBindBufferMemory(vk->device, *out_buffer, *out_mem, 0);
+	vk_check_error("vkBindBufferMemory", res, false);
+
+	return true;
+}
+
+void
+vk_buffer_destroy(struct vk_buffer *self, struct vk_bundle *vk)
+{
+	vk->vkDestroyBuffer(vk->device, self->handle, NULL);
+	vk->vkFreeMemory(vk->device, self->memory, NULL);
+}
+
+void
+vk_image_destroy(struct vk_image *self, struct vk_bundle *vk)
+{
+	vk->vkDestroySampler(vk->device, self->sampler, NULL);
+	vk->vkDestroyImageView(vk->device, self->view, NULL);
+	vk->vkDestroyImage(vk->device, self->handle, NULL);
+	vk->vkFreeMemory(vk->device, self->memory, NULL);
 }

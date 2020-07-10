@@ -328,7 +328,7 @@ initialize(struct prober *p, struct xrt_prober_entry_lists *lists)
 
 	int ret;
 
-	p->json.root = p_json_open_or_create_main_file();
+	p_json_open_or_create_main_file(p);
 
 	ret = collect_entries(p);
 	if (ret != 0) {
@@ -551,7 +551,7 @@ handle_found_device(struct prober *p,
 		return;
 	}
 
-	P_ERROR(p, "Found more then one, HMD closing '%s'", xdev->str);
+	P_ERROR(p, "Found more than one, HMD closing '%s'", xdev->str);
 	xdev->destroy(xdev);
 }
 
@@ -636,15 +636,15 @@ select_device(struct xrt_prober *xp,
 
 	P_DEBUG(p, "Didn't find any HMD devices");
 
-	// Destroy all other found devices.
+	// Even if we've found some controllers, we don't use them without an
+	// HMD. So, destroy all other found devices.
 	for (size_t i = 1; i < num_xdevs; i++) {
 		if (xdevs[i] == NULL) {
 			continue;
 		}
 
 		P_DEBUG(p, "Destroying '%s'", xdevs[i]->str);
-		xdevs[i]->destroy(xdevs[i]);
-		xdevs[i] = NULL;
+		xrt_device_destroy(&xdevs[i]);
 	}
 
 	return 0;

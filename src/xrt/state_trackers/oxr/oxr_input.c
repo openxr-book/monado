@@ -1,4 +1,4 @@
-// Copyright 2018-2019, Collabora, Ltd.
+// Copyright 2018-2020, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -16,6 +16,7 @@
 #include "oxr_objects.h"
 #include "oxr_logger.h"
 #include "oxr_handle.h"
+#include "oxr_input_transform.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -31,50 +32,165 @@
  */
 
 static void
-oxr_session_get_source_set(struct oxr_session *sess,
-                           XrActionSet actionSet,
-                           struct oxr_source_set **src_set,
-                           struct oxr_action_set **act_set);
+oxr_session_get_action_set_attachment(
+    struct oxr_session *sess,
+    XrActionSet actionSet,
+    struct oxr_action_set_attachment **act_set_attached,
+    struct oxr_action_set **act_set);
 
 static void
-oxr_session_get_source(struct oxr_session *sess,
-                       uint32_t act_key,
-                       struct oxr_source **out_src);
+oxr_session_get_action_attachment(
+    struct oxr_session *sess,
+    uint32_t act_key,
+    struct oxr_action_attachment **out_act_attached);
 
 static void
-oxr_source_cache_update(struct oxr_logger *log,
+oxr_action_cache_update(struct oxr_logger *log,
                         struct oxr_session *sess,
-                        struct oxr_source_cache *cache,
+                        struct oxr_action_cache *cache,
                         int64_t time,
                         bool select);
 
 static void
-oxr_source_update(struct oxr_logger *log,
-                  struct oxr_session *sess,
-                  struct oxr_source *src,
-                  int64_t time,
-                  struct oxr_sub_paths sub_paths);
+oxr_action_attachment_update(struct oxr_logger *log,
+                             struct oxr_session *sess,
+                             struct oxr_action_attachment *act_attached,
+                             int64_t time,
+                             struct oxr_sub_paths sub_paths);
 
 static void
-oxr_source_bind_inputs(struct oxr_logger *log,
+oxr_action_bind_inputs(struct oxr_logger *log,
                        struct oxr_sink_logger *slog,
                        struct oxr_session *sess,
                        struct oxr_action *act,
-                       struct oxr_source_cache *cache,
+                       struct oxr_action_cache *cache,
                        struct oxr_interaction_profile *profile,
                        enum oxr_sub_action_path sub_path);
 
-static XrResult
-oxr_source_destroy_cb(struct oxr_logger *log, struct oxr_handle_base *hb);
+/*
+ *
+ * Action attachment functions
+ *
+ */
 
+/*!
+ * De-initialize/de-allocate all dynamic members of @ref oxr_action_cache
+ * @private @memberof oxr_action_cache
+ */
+static void
+oxr_action_cache_teardown(struct oxr_action_cache *cache)
+{
+	// Clean up input transforms
+	for (uint32_t i = 0; i < cache->num_inputs; i++) {
+		struct oxr_action_input *action_input = &cache->inputs[i];
+		oxr_input_transform_destroy(&(action_input->transforms));
+		action_input->num_transforms = 0;
+	}
+	free(cache->inputs);
+	cache->inputs = NULL;
+	free(cache->outputs);
+	cache->outputs = NULL;
+}
+
+/*!
+ * Tear down an action attachment struct.
+ *
+ * Does not deallocate the struct itself.
+ *
+ * @public @memberof oxr_action_attachment
+ */
+static void
+oxr_action_attachment_teardown(struct oxr_action_attachment *act_attached)
+{
+	struct oxr_session *sess = act_attached->sess;
+	u_hashmap_int_erase(sess->act_attachments_by_key,
+	                    act_attached->act_key);
+	oxr_action_cache_teardown(&(act_attached->user));
+	oxr_action_cache_teardown(&(act_attached->head));
+	oxr_action_cache_teardown(&(act_attached->left));
+	oxr_action_cache_teardown(&(act_attached->right));
+	oxr_action_cache_teardown(&(act_attached->gamepad));
+	// Unref this action's refcounted data
+	oxr_refcounted_unref(&act_attached->act_ref->base);
+}
+
+/*!
+ * Set up an action attachment struct.
+ *
+ * @public @memberof oxr_action_attachment
+ */
 static XrResult
-oxr_source_create(struct oxr_logger *log,
-                  struct oxr_source_set *src_set,
-                  struct oxr_action *act,
-                  struct oxr_interaction_profile *head,
-                  struct oxr_interaction_profile *left,
-                  struct oxr_interaction_profile *right,
-                  struct oxr_interaction_profile *gamepad);
+oxr_action_attachment_init(struct oxr_logger *log,
+                           struct oxr_action_set_attachment *act_set_attached,
+                           struct oxr_action_attachment *act_attached,
+                           struct oxr_action *act)
+{
+	struct oxr_session *sess = act_set_attached->sess;
+	act_attached->sess = sess;
+	act_attached->act_set_attached = act_set_attached;
+	u_hashmap_int_insert(sess->act_attachments_by_key, act->act_key,
+	                     act_attached);
+
+	// Reference this action's refcounted data
+	act_attached->act_ref = act->data;
+	oxr_refcounted_ref(&act_attached->act_ref->base);
+
+	// Copy this for efficiency.
+	act_attached->act_key = act->act_key;
+	return XR_SUCCESS;
+}
+
+
+/*
+ *
+ * Action set attachment functions
+ *
+ */
+
+/*!
+ * @public @memberof oxr_action_set_attachment
+ */
+static XrResult
+oxr_action_set_attachment_init(
+    struct oxr_logger *log,
+    struct oxr_session *sess,
+    struct oxr_action_set *act_set,
+    struct oxr_action_set_attachment *act_set_attached)
+{
+	act_set_attached->sess = sess;
+
+	// Reference this action set's refcounted data
+	act_set_attached->act_set_ref = act_set->data;
+	oxr_refcounted_ref(&act_set_attached->act_set_ref->base);
+
+	u_hashmap_int_insert(sess->act_sets_attachments_by_key,
+	                     act_set->act_set_key, act_set_attached);
+
+	// Copy this for efficiency.
+	act_set_attached->act_set_key = act_set->act_set_key;
+
+	return XR_SUCCESS;
+}
+
+void
+oxr_action_set_attachment_teardown(
+    struct oxr_action_set_attachment *act_set_attached)
+{
+	for (size_t i = 0; i < act_set_attached->num_action_attachments; ++i) {
+		oxr_action_attachment_teardown(
+		    &(act_set_attached->act_attachments[i]));
+	}
+	free(act_set_attached->act_attachments);
+	act_set_attached->act_attachments = NULL;
+	act_set_attached->num_action_attachments = 0;
+
+	struct oxr_session *sess = act_set_attached->sess;
+	u_hashmap_int_erase(sess->act_sets_attachments_by_key,
+	                    act_set_attached->act_set_key);
+
+	// Unref this action set's refcounted data
+	oxr_refcounted_unref(&act_set_attached->act_set_ref->base);
+}
 
 
 /*
@@ -82,12 +198,38 @@ oxr_source_create(struct oxr_logger *log,
  * Action set functions
  *
  */
+static void
+oxr_action_set_ref_destroy_cb(struct oxr_refcounted *orc)
+{
+	struct oxr_action_set_ref *act_set_ref =
+	    (struct oxr_action_set_ref *)orc;
+
+	u_hashset_destroy(&act_set_ref->actions.name_store);
+	u_hashset_destroy(&act_set_ref->actions.loc_store);
+
+	free(act_set_ref);
+}
 
 static XrResult
 oxr_action_set_destroy_cb(struct oxr_logger *log, struct oxr_handle_base *hb)
 {
-	//! @todo Move to oxr_objects.h
 	struct oxr_action_set *act_set = (struct oxr_action_set *)hb;
+
+	oxr_refcounted_unref(&act_set->data->base);
+	act_set->data = NULL;
+
+	if (act_set->name_item != NULL) {
+		u_hashset_erase_item(act_set->inst->action_sets.name_store,
+		                     act_set->name_item);
+		free(act_set->name_item);
+		act_set->name_item = NULL;
+	}
+	if (act_set->loc_item != NULL) {
+		u_hashset_erase_item(act_set->inst->action_sets.loc_store,
+		                     act_set->loc_item);
+		free(act_set->loc_item);
+		act_set->loc_item = NULL;
+	}
 
 	free(act_set);
 
@@ -102,17 +244,46 @@ oxr_action_set_create(struct oxr_logger *log,
 {
 	// Mod music for all!
 	static uint32_t key_gen = 1;
+	int h_ret;
 
-	//! @todo Implement more fully.
 	struct oxr_action_set *act_set = NULL;
 	OXR_ALLOCATE_HANDLE_OR_RETURN(log, act_set, OXR_XR_DEBUG_ACTIONSET,
 	                              oxr_action_set_destroy_cb, &inst->handle);
 
-	act_set->key = key_gen++;
+	struct oxr_action_set_ref *act_set_ref =
+	    U_TYPED_CALLOC(struct oxr_action_set_ref);
+	act_set_ref->base.destroy = oxr_action_set_ref_destroy_cb;
+	oxr_refcounted_ref(&act_set_ref->base);
+	act_set->data = act_set_ref;
+
+	act_set_ref->act_set_key = key_gen++;
+	act_set->act_set_key = act_set_ref->act_set_key;
 
 	act_set->inst = inst;
-	strncpy(act_set->name, createInfo->actionSetName,
-	        sizeof(act_set->name));
+
+	h_ret = u_hashset_create(&act_set_ref->actions.name_store);
+	if (h_ret != 0) {
+		oxr_handle_destroy(log, &act_set->handle);
+		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE,
+		                 "Failed to create name_store hashset");
+	}
+
+	h_ret = u_hashset_create(&act_set_ref->actions.loc_store);
+	if (h_ret != 0) {
+		oxr_handle_destroy(log, &act_set->handle);
+		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE,
+		                 "Failed to create loc_store hashset");
+	}
+
+	strncpy(act_set_ref->name, createInfo->actionSetName,
+	        sizeof(act_set_ref->name));
+
+	u_hashset_create_and_insert_str_c(inst->action_sets.name_store,
+	                                  createInfo->actionSetName,
+	                                  &act_set->name_item);
+	u_hashset_create_and_insert_str_c(inst->action_sets.loc_store,
+	                                  createInfo->localizedActionSetName,
+	                                  &act_set->loc_item);
 
 	*out_act_set = act_set;
 
@@ -126,11 +297,33 @@ oxr_action_set_create(struct oxr_logger *log,
  *
  */
 
+static void
+oxr_action_ref_destroy_cb(struct oxr_refcounted *orc)
+{
+	struct oxr_action_ref *act_ref = (struct oxr_action_ref *)orc;
+	free(act_ref);
+}
+
 static XrResult
 oxr_action_destroy_cb(struct oxr_logger *log, struct oxr_handle_base *hb)
 {
-	//! @todo Move to oxr_objects.h
 	struct oxr_action *act = (struct oxr_action *)hb;
+
+	oxr_refcounted_unref(&act->data->base);
+	act->data = NULL;
+
+	if (act->name_item != NULL) {
+		u_hashset_erase_item(act->act_set->data->actions.name_store,
+		                     act->name_item);
+		free(act->name_item);
+		act->name_item = NULL;
+	}
+	if (act->loc_item != NULL) {
+		u_hashset_erase_item(act->act_set->data->actions.loc_store,
+		                     act->loc_item);
+		free(act->loc_item);
+		act->loc_item = NULL;
+	}
 
 	free(act);
 
@@ -149,19 +342,37 @@ oxr_action_create(struct oxr_logger *log,
 	// Mod music for all!
 	static uint32_t key_gen = 1;
 
-	oxr_classify_sub_action_paths(log, inst,
-	                              createInfo->countSubactionPaths,
-	                              createInfo->subactionPaths, &sub_paths);
+	if (!oxr_classify_sub_action_paths(
+	        log, inst, createInfo->countSubactionPaths,
+	        createInfo->subactionPaths, &sub_paths)) {
+		return XR_ERROR_PATH_UNSUPPORTED;
+	}
 
 	struct oxr_action *act = NULL;
 	OXR_ALLOCATE_HANDLE_OR_RETURN(log, act, OXR_XR_DEBUG_ACTION,
 	                              oxr_action_destroy_cb, &act_set->handle);
-	act->key = key_gen++;
-	act->act_set = act_set;
-	act->sub_paths = sub_paths;
-	act->action_type = createInfo->actionType;
 
-	strncpy(act->name, createInfo->actionName, sizeof(act->name));
+
+	struct oxr_action_ref *act_ref = U_TYPED_CALLOC(struct oxr_action_ref);
+	act_ref->base.destroy = oxr_action_ref_destroy_cb;
+	oxr_refcounted_ref(&act_ref->base);
+	act->data = act_ref;
+
+	act_ref->act_key = key_gen++;
+	act->act_key = act_ref->act_key;
+
+	act->act_set = act_set;
+	act_ref->sub_paths = sub_paths;
+	act_ref->action_type = createInfo->actionType;
+
+	strncpy(act_ref->name, createInfo->actionName, sizeof(act_ref->name));
+
+	u_hashset_create_and_insert_str_c(act_set->data->actions.name_store,
+	                                  createInfo->actionName,
+	                                  &act->name_item);
+	u_hashset_create_and_insert_str_c(act_set->data->actions.loc_store,
+	                                  createInfo->localizedActionName,
+	                                  &act->loc_item);
 
 	*out_act = act;
 
@@ -171,11 +382,11 @@ oxr_action_create(struct oxr_logger *log,
 
 /*
  *
- * "Exproted" helper functions.
+ * "Exported" helper functions.
  *
  */
 
-void
+bool
 oxr_classify_sub_action_paths(struct oxr_logger *log,
                               struct oxr_instance *inst,
                               uint32_t num_subaction_paths,
@@ -184,13 +395,14 @@ oxr_classify_sub_action_paths(struct oxr_logger *log,
 {
 	const char *str = NULL;
 	size_t length = 0;
+	bool ret = true;
 
 	// Reset the sub_paths completely.
 	U_ZERO(sub_paths);
 
 	if (num_subaction_paths == 0) {
 		sub_paths->any = true;
-		return;
+		return ret;
 	}
 
 	for (uint32_t i = 0; i < num_subaction_paths; i++) {
@@ -208,50 +420,58 @@ oxr_classify_sub_action_paths(struct oxr_logger *log,
 			sub_paths->right = true;
 		} else if (path == inst->path_cache.gamepad) {
 			sub_paths->gamepad = true;
+		} else if (path == inst->path_cache.treadmill) {
+			sub_paths->treadmill = true;
 		} else {
 			oxr_path_get_string(log, inst, path, &str, &length);
 
 			oxr_warn(log, " unrecognized sub action path '%s'",
 			         str);
+			ret = false;
 		}
 	}
+	return ret;
 }
 
 XrResult
-oxr_source_get_pose_input(struct oxr_logger *log,
+oxr_action_get_pose_input(struct oxr_logger *log,
                           struct oxr_session *sess,
                           uint32_t act_key,
                           const struct oxr_sub_paths *sub_paths,
-                          struct oxr_source_input **out_input)
+                          struct oxr_action_input **out_input)
 {
-	struct oxr_source *src = NULL;
+	struct oxr_action_attachment *act_attached = NULL;
 
-	oxr_session_get_source(sess, act_key, &src);
+	oxr_session_get_action_attachment(sess, act_key, &act_attached);
 
-	if (src == NULL) {
+	if (act_attached == NULL) {
 		return XR_SUCCESS;
 	}
 
 	// Priority of inputs.
-	if (src->head.current.active && (sub_paths->head || sub_paths->any)) {
-		*out_input = src->head.inputs;
+	if (act_attached->head.current.active &&
+	    (sub_paths->head || sub_paths->any)) {
+		*out_input = act_attached->head.inputs;
 		return XR_SUCCESS;
 	}
-	if (src->left.current.active && (sub_paths->left || sub_paths->any)) {
-		*out_input = src->left.inputs;
+	if (act_attached->left.current.active &&
+	    (sub_paths->left || sub_paths->any)) {
+		*out_input = act_attached->left.inputs;
 		return XR_SUCCESS;
 	}
-	if (src->right.current.active && (sub_paths->right || sub_paths->any)) {
-		*out_input = src->right.inputs;
+	if (act_attached->right.current.active &&
+	    (sub_paths->right || sub_paths->any)) {
+		*out_input = act_attached->right.inputs;
 		return XR_SUCCESS;
 	}
-	if (src->gamepad.current.active &&
+	if (act_attached->gamepad.current.active &&
 	    (sub_paths->gamepad || sub_paths->any)) {
-		*out_input = src->gamepad.inputs;
+		*out_input = act_attached->gamepad.inputs;
 		return XR_SUCCESS;
 	}
-	if (src->user.current.active && (sub_paths->user || sub_paths->any)) {
-		*out_input = src->user.inputs;
+	if (act_attached->user.current.active &&
+	    (sub_paths->user || sub_paths->any)) {
+		*out_input = act_attached->user.inputs;
 		return XR_SUCCESS;
 	}
 
@@ -268,7 +488,7 @@ oxr_source_get_pose_input(struct oxr_logger *log,
 static bool
 do_inputs(struct oxr_binding *bind,
           struct xrt_device *xdev,
-          struct oxr_source_input inputs[16],
+          struct oxr_action_input inputs[16],
           uint32_t *num_inputs)
 {
 	struct xrt_input *input = NULL;
@@ -289,7 +509,7 @@ do_inputs(struct oxr_binding *bind,
 static bool
 do_outputs(struct oxr_binding *bind,
            struct xrt_device *xdev,
-           struct oxr_source_output outputs[16],
+           struct oxr_action_output outputs[16],
            uint32_t *num_outputs)
 {
 	struct xrt_output *output = NULL;
@@ -307,18 +527,22 @@ do_outputs(struct oxr_binding *bind,
 	return found;
 }
 
+/*!
+ * Delegate to @ref do_outputs or @ref do_inputs depending on whether the action
+ * is output or input.
+ */
 static bool
 do_io_bindings(struct oxr_binding *b,
                struct oxr_action *act,
                struct xrt_device *xdev,
-               struct oxr_source_input inputs[16],
+               struct oxr_action_input inputs[16],
                uint32_t *num_inputs,
-               struct oxr_source_output outputs[16],
+               struct oxr_action_output outputs[16],
                uint32_t *num_outputs)
 {
 	bool found = false;
 
-	if (act->action_type == XR_ACTION_TYPE_VIBRATION_OUTPUT) {
+	if (act->data->action_type == XR_ACTION_TYPE_VIBRATION_OUTPUT) {
 		found |= do_outputs(b, xdev, outputs, num_outputs);
 	} else {
 		found |= do_inputs(b, xdev, inputs, num_inputs);
@@ -327,60 +551,12 @@ do_io_bindings(struct oxr_binding *b,
 	return found;
 }
 
-static bool
-ends_with(const char *str, const char *suffix)
-{
-	int len = strlen(str);
-	int suffix_len = strlen(suffix);
-
-	return (len >= suffix_len) &&
-	       (0 == strcmp(str + (len - suffix_len), suffix));
-}
-
-static void
-oxr_source_cache_determine_redirect(struct oxr_logger *log,
-                                    struct oxr_session *sess,
-                                    struct oxr_action *act,
-                                    struct oxr_source_cache *cache,
-                                    XrPath bound_path)
-{
-
-	cache->redirect = INPUT_REDIRECT_DEFAULT;
-
-	struct oxr_source_input *input = &cache->inputs[0];
-	if (input == NULL)
-		return;
-
-	const char *str;
-	size_t length;
-	oxr_path_get_string(log, sess->sys->inst, bound_path, &str, &length);
-
-	enum xrt_input_type t = XRT_GET_INPUT_TYPE(input->input->name);
-
-	// trackpad/thumbstick data is kept in vec2f values.
-	// When a float action binds to ../trackpad/x or ../thumbstick/y, store
-	// the information which vec2f component to read.
-	if (act->action_type == XR_ACTION_TYPE_FLOAT_INPUT &&
-	    t == XRT_INPUT_TYPE_VEC2_MINUS_ONE_TO_ONE) {
-		if (ends_with(str, "/x")) {
-			cache->redirect = INPUT_REDIRECT_VEC2_X_TO_VEC1;
-		} else if (ends_with(str, "/y")) {
-			cache->redirect = INPUT_REDIRECT_VEC2_Y_TO_VEC1;
-		} else {
-			oxr_log(log,
-			        "No rule to get float from vec2f for action "
-			        "%s, binding %s\n",
-			        act->name, str);
-		}
-	}
-}
-
 static XrPath
 get_matched_xrpath(struct oxr_binding *b, struct oxr_action *act)
 {
 	XrPath preferred_path = XR_NULL_PATH;
 	for (uint32_t i = 0; i < b->num_keys; i++) {
-		if (b->keys[i] == act->key) {
+		if (b->keys[i] == act->act_key) {
 			uint32_t preferred_path_index = XR_NULL_PATH;
 			preferred_path_index =
 			    b->preferred_binding_path_index[i];
@@ -398,9 +574,9 @@ get_binding(struct oxr_logger *log,
             struct oxr_action *act,
             struct oxr_interaction_profile *profile,
             enum oxr_sub_action_path sub_path,
-            struct oxr_source_input inputs[16],
+            struct oxr_action_input inputs[16],
             uint32_t *num_inputs,
-            struct oxr_source_output outputs[16],
+            struct oxr_action_output outputs[16],
             uint32_t *num_outputs,
             XrPath *bound_path)
 {
@@ -454,7 +630,7 @@ get_binding(struct oxr_logger *log,
 	oxr_slog(slog, "\t\tProfile: %s\n", profile_str);
 
 	size_t num = 0;
-	oxr_binding_find_bindings_from_key(log, profile, act->key, bindings,
+	oxr_binding_find_bindings_from_key(log, profile, act->act_key, bindings,
 	                                   &num);
 	if (num == 0) {
 		oxr_slog(slog, "\t\tNo bindings\n");
@@ -489,120 +665,57 @@ get_binding(struct oxr_logger *log,
 }
 
 
-/*
- *
- * Source set functions
- *
+
+/*!
+ * @public @memberof oxr_action_attachment
  */
-
 static XrResult
-oxr_source_set_destroy_cb(struct oxr_logger *log, struct oxr_handle_base *hb)
+oxr_action_attachment_bind(struct oxr_logger *log,
+                           struct oxr_action_attachment *act_attached,
+                           struct oxr_action *act,
+                           struct oxr_interaction_profile *head,
+                           struct oxr_interaction_profile *left,
+                           struct oxr_interaction_profile *right,
+                           struct oxr_interaction_profile *gamepad)
 {
-	//! @todo Move to oxr_objects.h
-	struct oxr_source_set *src_set = (struct oxr_source_set *)hb;
-
-	free(src_set);
-
-	return XR_SUCCESS;
-}
-
-static XrResult
-oxr_source_set_create(struct oxr_logger *log,
-                      struct oxr_session *sess,
-                      struct oxr_action_set *act_set,
-                      struct oxr_source_set **out_src_set)
-{
-	struct oxr_source_set *src_set = NULL;
-	OXR_ALLOCATE_HANDLE_OR_RETURN(log, src_set, OXR_XR_DEBUG_SOURCESET,
-	                              oxr_source_set_destroy_cb, &sess->handle);
-
-	src_set->sess = sess;
-	u_hashmap_int_insert(sess->act_sets, act_set->key, src_set);
-
-	src_set->next = sess->src_set_list;
-	sess->src_set_list = src_set;
-
-	*out_src_set = src_set;
-
-	return XR_SUCCESS;
-}
-
-
-/*
- *
- * Source functions
- *
- */
-
-static XrResult
-oxr_source_destroy_cb(struct oxr_logger *log, struct oxr_handle_base *hb)
-{
-	//! @todo Move to oxr_objects.h
-	struct oxr_source *src = (struct oxr_source *)hb;
-
-	free(src->user.inputs);
-	free(src->user.outputs);
-	free(src->head.inputs);
-	free(src->head.outputs);
-	free(src->left.inputs);
-	free(src->left.outputs);
-	free(src->right.inputs);
-	free(src->right.outputs);
-	free(src->gamepad.inputs);
-	free(src->gamepad.outputs);
-	free(src);
-
-	return XR_SUCCESS;
-}
-
-static XrResult
-oxr_source_create(struct oxr_logger *log,
-                  struct oxr_source_set *src_set,
-                  struct oxr_action *act,
-                  struct oxr_interaction_profile *head,
-                  struct oxr_interaction_profile *left,
-                  struct oxr_interaction_profile *right,
-                  struct oxr_interaction_profile *gamepad)
-{
-	struct oxr_session *sess = src_set->sess;
-	struct oxr_source *src = NULL;
 	struct oxr_sink_logger slog = {0};
-	OXR_ALLOCATE_HANDLE_OR_RETURN(log, src, OXR_XR_DEBUG_SOURCE,
-	                              oxr_source_destroy_cb, &src_set->handle);
-
-	u_hashmap_int_insert(src_set->sess->sources, act->key, src);
-
-	// Need to copy this.
-	src->action_type = act->action_type;
+	struct oxr_action_ref *act_ref = act->data;
+	struct oxr_session *sess = act_attached->sess;
 
 	// Start logging into a single buffer.
-	oxr_slog(&slog, ": Binding %s/%s\n", act->act_set->name, act->name);
+	oxr_slog(&slog, ": Binding %s/%s\n", act->act_set->data->name,
+	         act_ref->name);
 
-	if (act->sub_paths.user || act->sub_paths.any) {
+	if (act_ref->sub_paths.user || act_ref->sub_paths.any) {
 #if 0
-		oxr_source_bind_inputs(log, slog, sess, act, &src->user, user,
+		oxr_action_bind_inputs(log, &slog, sess, act,
+		                       &act_attached->user, user,
 		                       OXR_SUB_ACTION_PATH_USER);
 #endif
 	}
 
-	if (act->sub_paths.head || act->sub_paths.any) {
-		oxr_source_bind_inputs(log, &slog, sess, act, &src->head, head,
+	if (act_ref->sub_paths.head || act_ref->sub_paths.any) {
+		oxr_action_bind_inputs(log, &slog, sess, act,
+		                       &act_attached->head, head,
 		                       OXR_SUB_ACTION_PATH_HEAD);
 	}
 
-	if (act->sub_paths.left || act->sub_paths.any) {
-		oxr_source_bind_inputs(log, &slog, sess, act, &src->left, left,
+	if (act_ref->sub_paths.left || act_ref->sub_paths.any) {
+		oxr_action_bind_inputs(log, &slog, sess, act,
+		                       &act_attached->left, left,
 		                       OXR_SUB_ACTION_PATH_LEFT);
 	}
 
-	if (act->sub_paths.right || act->sub_paths.any) {
-		oxr_source_bind_inputs(log, &slog, sess, act, &src->right,
-		                       right, OXR_SUB_ACTION_PATH_RIGHT);
+	if (act_ref->sub_paths.right || act_ref->sub_paths.any) {
+		oxr_action_bind_inputs(log, &slog, sess, act,
+		                       &act_attached->right, right,
+		                       OXR_SUB_ACTION_PATH_RIGHT);
 	}
 
-	if (act->sub_paths.gamepad || act->sub_paths.any) {
-		oxr_source_bind_inputs(log, &slog, sess, act, &src->gamepad,
-		                       gamepad, OXR_SUB_ACTION_PATH_GAMEPAD);
+	if (act_ref->sub_paths.gamepad || act_ref->sub_paths.any) {
+		oxr_action_bind_inputs(log, &slog, sess, act,
+		                       &act_attached->gamepad, gamepad,
+		                       OXR_SUB_ACTION_PATH_GAMEPAD);
 	}
 
 	oxr_slog(&slog, "\tDone");
@@ -618,9 +731,9 @@ oxr_source_create(struct oxr_logger *log,
 }
 
 static void
-oxr_source_cache_stop_output(struct oxr_logger *log,
+oxr_action_cache_stop_output(struct oxr_logger *log,
                              struct oxr_session *sess,
-                             struct oxr_source_cache *cache)
+                             struct oxr_action_cache *cache)
 {
 	// Set this as stopped.
 	cache->stop_output_time = 0;
@@ -628,25 +741,30 @@ oxr_source_cache_stop_output(struct oxr_logger *log,
 	union xrt_output_value value = {0};
 
 	for (uint32_t i = 0; i < cache->num_outputs; i++) {
-		struct oxr_source_output *output = &cache->outputs[i];
+		struct oxr_action_output *output = &cache->outputs[i];
 		struct xrt_device *xdev = output->xdev;
 
 		xrt_device_set_output(xdev, output->name, &value);
 	}
 }
 
+/*!
+ * Called during xrSyncActions.
+ *
+ * @private @memberof oxr_action_cache
+ */
 static void
-oxr_source_cache_update(struct oxr_logger *log,
+oxr_action_cache_update(struct oxr_logger *log,
                         struct oxr_session *sess,
-                        struct oxr_source_cache *cache,
+                        struct oxr_action_cache *cache,
                         int64_t time,
                         bool selected)
 {
-	struct oxr_source_state last = cache->current;
+	struct oxr_action_state last = cache->current;
 
 	if (!selected) {
 		if (cache->stop_output_time > 0) {
-			oxr_source_cache_stop_output(log, sess, cache);
+			oxr_action_cache_stop_output(log, sess, cache);
 		}
 		U_ZERO(&cache->current);
 		return;
@@ -655,7 +773,7 @@ oxr_source_cache_update(struct oxr_logger *log,
 	if (cache->num_outputs > 0) {
 		cache->current.active = true;
 		if (cache->stop_output_time < time) {
-			oxr_source_cache_stop_output(log, sess, cache);
+			oxr_action_cache_stop_output(log, sess, cache);
 		}
 	}
 
@@ -676,41 +794,58 @@ oxr_source_cache_update(struct oxr_logger *log,
 		cache->current.active = true;
 
 		/*!
-		 * @todo Combine multiple sources for a single subaction path
-		 * and convert type as required.
+		 * @todo Combine multiple sources for a single subaction path.
 		 */
-
-		struct xrt_input *input = cache->inputs[0].input;
+		struct oxr_action_input *action_input = &(cache->inputs[0]);
+		struct xrt_input *input = action_input->input;
+		struct oxr_input_value_tagged raw_input = {
+		    .type = XRT_GET_INPUT_TYPE(input->name),
+		    .value = input->value,
+		};
+		struct oxr_input_value_tagged transformed = {0};
+		if (!oxr_input_transform_process(action_input->transforms,
+		                                 action_input->num_transforms,
+		                                 &raw_input, &transformed)) {
+			// We couldn't transform, how strange. Reset all state.
+			// At this level we don't know what action this is, etc.
+			// so a warning message isn't very helpful.
+			U_ZERO(&cache->current);
+			return;
+		}
 		int64_t timestamp = input->timestamp;
 		bool changed = false;
-		switch (XRT_GET_INPUT_TYPE(input->name)) {
+		switch (transformed.type) {
 		case XRT_INPUT_TYPE_VEC1_ZERO_TO_ONE:
 		case XRT_INPUT_TYPE_VEC1_MINUS_ONE_TO_ONE: {
-			changed = (input->value.vec1.x != last.vec1.x);
-			cache->current.vec1.x = input->value.vec1.x;
+			changed =
+			    (transformed.value.vec1.x != last.value.vec1.x);
+			cache->current.value.vec1.x = transformed.value.vec1.x;
 			break;
 		}
 		case XRT_INPUT_TYPE_VEC2_MINUS_ONE_TO_ONE: {
-			changed = (input->value.vec2.x != last.vec2.x) ||
-			          (input->value.vec2.y != last.vec2.y);
-			cache->current.vec2.x = input->value.vec2.x;
-			cache->current.vec2.y = input->value.vec2.y;
+			changed =
+			    (transformed.value.vec2.x != last.value.vec2.x) ||
+			    (transformed.value.vec2.y != last.value.vec2.y);
+			cache->current.value.vec2.x = transformed.value.vec2.x;
+			cache->current.value.vec2.y = transformed.value.vec2.y;
 			break;
 		}
 #if 0
 		case XRT_INPUT_TYPE_VEC3_MINUS_ONE_TO_ONE: {
-			changed = (input->value.vec3.x != last.vec3.x) ||
-			          (input->value.vec3.y != last.vec3.y) ||
-			          (input->value.vec3.z != last.vec3.z);
-			cache->current.vec3.x = input->value.vec3.x;
-			cache->current.vec3.y = input->value.vec3.y;
-			cache->current.vec3.z = input->value.vec3.z;
+			changed = (transformed.value.vec3.x != last.vec3.x) ||
+			          (transformed.value.vec3.y != last.vec3.y) ||
+			          (transformed.value.vec3.z != last.vec3.z);
+			cache->current.vec3.x = transformed.value.vec3.x;
+			cache->current.vec3.y = transformed.value.vec3.y;
+			cache->current.vec3.z = transformed.value.vec3.z;
 			break;
 		}
 #endif
 		case XRT_INPUT_TYPE_BOOLEAN: {
-			changed = (input->value.boolean != last.boolean);
-			cache->current.boolean = input->value.boolean;
+			changed =
+			    (transformed.value.boolean != last.value.boolean);
+			cache->current.value.boolean =
+			    transformed.value.boolean;
 			break;
 		}
 		case XRT_INPUT_TYPE_POSE: return;
@@ -720,12 +855,17 @@ oxr_source_cache_update(struct oxr_logger *log,
 		}
 
 		if (last.active && changed) {
+			// We were active last sync, and we've changed since
+			// then
 			cache->current.timestamp = timestamp;
 			cache->current.changed = true;
 		} else if (last.active) {
+			// We were active last sync, but we haven't changed
+			// since then.
 			cache->current.timestamp = last.timestamp;
 			cache->current.changed = false;
 		} else {
+			// We are active now but weren't active last time.
 			cache->current.timestamp = timestamp;
 			cache->current.changed = false;
 		}
@@ -733,42 +873,47 @@ oxr_source_cache_update(struct oxr_logger *log,
 }
 
 #define BOOL_CHECK(NAME)                                                       \
-	if (src->NAME.current.active) {                                        \
+	if (act_attached->NAME.current.active) {                               \
 		active |= true;                                                \
-		value |= src->NAME.current.boolean;                            \
-		timestamp = src->NAME.current.timestamp;                       \
+		value |= act_attached->NAME.current.value.boolean;             \
+		timestamp = act_attached->NAME.current.timestamp;              \
 	}
 #define VEC1_CHECK(NAME)                                                       \
-	if (src->NAME.current.active) {                                        \
+	if (act_attached->NAME.current.active) {                               \
 		active |= true;                                                \
-		if (value < src->NAME.current.vec1.x) {                        \
-			value = src->NAME.current.vec1.x;                      \
-			timestamp = src->NAME.current.timestamp;               \
+		if (value < act_attached->NAME.current.value.vec1.x) {         \
+			value = act_attached->NAME.current.value.vec1.x;       \
+			timestamp = act_attached->NAME.current.timestamp;      \
 		}                                                              \
 	}
 #define VEC2_CHECK(NAME)                                                       \
-	if (src->NAME.current.active) {                                        \
+	if (act_attached->NAME.current.active) {                               \
 		active |= true;                                                \
-		float curr_x = src->NAME.current.vec2.x;                       \
-		float curr_y = src->NAME.current.vec2.y;                       \
+		float curr_x = act_attached->NAME.current.value.vec2.x;        \
+		float curr_y = act_attached->NAME.current.value.vec2.y;        \
 		float curr_d = curr_x * curr_x + curr_y * curr_y;              \
 		if (distance < curr_d) {                                       \
 			x = curr_x;                                            \
 			y = curr_y;                                            \
 			distance = curr_d;                                     \
-			timestamp = src->NAME.current.timestamp;               \
+			timestamp = act_attached->NAME.current.timestamp;      \
 		}                                                              \
 	}
 
+/*!
+ * Called during each xrSyncActions.
+ *
+ * @private @memberof oxr_action_attachment
+ */
 static void
-oxr_source_update(struct oxr_logger *log,
-                  struct oxr_session *sess,
-                  struct oxr_source *src,
-                  int64_t time,
-                  struct oxr_sub_paths sub_paths)
+oxr_action_attachment_update(struct oxr_logger *log,
+                             struct oxr_session *sess,
+                             struct oxr_action_attachment *act_attached,
+                             int64_t time,
+                             struct oxr_sub_paths sub_paths)
 {
 	// This really shouldn't be happening.
-	if (src == NULL) {
+	if (act_attached == NULL) {
 		return;
 	}
 
@@ -781,26 +926,26 @@ oxr_source_update(struct oxr_logger *log,
 	bool select_gamepad = sub_paths.gamepad || sub_paths.any;
 
 	// clang-format off
-	oxr_source_cache_update(log, sess, &src->head, time, select_head);
-	oxr_source_cache_update(log, sess, &src->left, time, select_left);
-	oxr_source_cache_update(log, sess, &src->right, time, select_right);
-	oxr_source_cache_update(log, sess, &src->gamepad, time, select_gamepad);
+	oxr_action_cache_update(log, sess, &act_attached->head, time, select_head);
+	oxr_action_cache_update(log, sess, &act_attached->left, time, select_left);
+	oxr_action_cache_update(log, sess, &act_attached->right, time, select_right);
+	oxr_action_cache_update(log, sess, &act_attached->gamepad, time, select_gamepad);
 	// clang-format on
 
 	if (!select_any) {
-		U_ZERO(&src->any_state);
+		U_ZERO(&act_attached->any_state);
 		return;
 	}
 
 	/*
 	 * Any state.
 	 */
-	struct oxr_source_state last = src->any_state;
+	struct oxr_action_state last = act_attached->any_state;
 	bool active = false;
 	bool changed = false;
 	XrTime timestamp = 0;
 
-	switch (src->action_type) {
+	switch (act_attached->act_ref->action_type) {
 	case XR_ACTION_TYPE_BOOLEAN_INPUT: {
 		bool value = false;
 		BOOL_CHECK(user);
@@ -809,8 +954,8 @@ oxr_source_update(struct oxr_logger *log,
 		BOOL_CHECK(right);
 		BOOL_CHECK(gamepad);
 
-		changed = last.boolean != value;
-		src->any_state.boolean = value;
+		changed = (last.value.boolean != value);
+		act_attached->any_state.value.boolean = value;
 		break;
 	}
 	case XR_ACTION_TYPE_FLOAT_INPUT: {
@@ -821,8 +966,8 @@ oxr_source_update(struct oxr_logger *log,
 		VEC1_CHECK(right);
 		VEC1_CHECK(gamepad);
 
-		changed = last.vec1.x != value;
-		src->any_state.vec1.x = value;
+		changed = last.value.vec1.x != value;
+		act_attached->any_state.value.vec1.x = value;
 		break;
 	}
 	case XR_ACTION_TYPE_VECTOR2F_INPUT: {
@@ -835,9 +980,9 @@ oxr_source_update(struct oxr_logger *log,
 		VEC2_CHECK(right);
 		VEC2_CHECK(gamepad);
 
-		changed = last.vec2.x != x || last.vec2.y != y;
-		src->any_state.vec2.x = x;
-		src->any_state.vec2.y = y;
+		changed = (last.value.vec2.x != x) || (last.value.vec2.y != y);
+		act_attached->any_state.value.vec2.x = x;
+		act_attached->any_state.value.vec2.y = y;
 		break;
 	}
 	default:
@@ -849,37 +994,66 @@ oxr_source_update(struct oxr_logger *log,
 	}
 
 	if (!active) {
-		U_ZERO(&src->any_state);
+		U_ZERO(&act_attached->any_state);
 	} else if (last.active && changed) {
-		src->any_state.timestamp = timestamp;
-		src->any_state.changed = true;
-		src->any_state.active = true;
+		act_attached->any_state.timestamp = timestamp;
+		act_attached->any_state.changed = true;
+		act_attached->any_state.active = true;
 	} else if (last.active) {
-		src->any_state.timestamp = last.timestamp;
-		src->any_state.changed = false;
-		src->any_state.active = true;
+		act_attached->any_state.timestamp = last.timestamp;
+		act_attached->any_state.changed = false;
+		act_attached->any_state.active = true;
 	} else {
-		src->any_state.timestamp = timestamp;
-		src->any_state.changed = false;
-		src->any_state.active = true;
+		act_attached->any_state.timestamp = timestamp;
+		act_attached->any_state.changed = false;
+		act_attached->any_state.active = true;
 	}
+}
+/*!
+ * Try to produce a transform chain to convert the available input into the
+ * desired input type.
+ *
+ * Populates @p action_input->transforms and @p action_input->num_transforms on
+ * success.
+ *
+ * @returns false if it could not, true if it could
+ */
+static bool
+oxr_action_populate_input_transform(struct oxr_logger *log,
+                                    struct oxr_sink_logger *slog,
+                                    struct oxr_session *sess,
+                                    struct oxr_action *act,
+                                    struct oxr_action_input *action_input,
+                                    XrPath bound_path)
+{
+	assert(action_input->transforms == NULL);
+	assert(action_input->num_transforms == 0);
+	const char *str;
+	size_t length;
+	oxr_path_get_string(log, sess->sys->inst, bound_path, &str, &length);
+
+	enum xrt_input_type t = XRT_GET_INPUT_TYPE(action_input->input->name);
+
+	return oxr_input_transform_create_chain(
+	    log, slog, t, act->data->action_type, act->data->name, str,
+	    &action_input->transforms, &action_input->num_transforms);
 }
 
 static void
-oxr_source_bind_inputs(struct oxr_logger *log,
+oxr_action_bind_inputs(struct oxr_logger *log,
                        struct oxr_sink_logger *slog,
                        struct oxr_session *sess,
                        struct oxr_action *act,
-                       struct oxr_source_cache *cache,
+                       struct oxr_action_cache *cache,
                        struct oxr_interaction_profile *profile,
                        enum oxr_sub_action_path sub_path)
 {
-	struct oxr_source_input inputs[16] = {0};
+	struct oxr_action_input inputs[16] = {0};
 	uint32_t num_inputs = 0;
-	struct oxr_source_output outputs[16] = {0};
+	struct oxr_action_output outputs[16] = {0};
 	uint32_t num_outputs = 0;
 
-	//! @todo Should this be asserted to be none-null?
+	//! @todo Should this be asserted to be non-null?
 	XrPath bound_path = XR_NULL_PATH;
 	get_binding(log, slog, sess, act, profile, sub_path, inputs,
 	            &num_inputs, outputs, &num_outputs, &bound_path);
@@ -889,8 +1063,21 @@ oxr_source_bind_inputs(struct oxr_logger *log,
 	if (num_inputs > 0) {
 		cache->current.active = true;
 		cache->inputs =
-		    U_TYPED_ARRAY_CALLOC(struct oxr_source_input, num_inputs);
+		    U_TYPED_ARRAY_CALLOC(struct oxr_action_input, num_inputs);
 		for (uint32_t i = 0; i < num_inputs; i++) {
+			if (!oxr_action_populate_input_transform(
+			        log, slog, sess, act, &(inputs[i]),
+			        bound_path)) {
+				/*!
+				 * @todo de-populate this element if we couldn't
+				 * get a transform?
+				 */
+				oxr_slog(
+				    slog,
+				    "Could not populate a transform for %s "
+				    "despite it being bound!\n",
+				    act->data->name);
+			}
 			cache->inputs[i] = inputs[i];
 		}
 		cache->num_inputs = num_inputs;
@@ -899,14 +1086,12 @@ oxr_source_bind_inputs(struct oxr_logger *log,
 	if (num_outputs > 0) {
 		cache->current.active = true;
 		cache->outputs =
-		    U_TYPED_ARRAY_CALLOC(struct oxr_source_output, num_outputs);
+		    U_TYPED_ARRAY_CALLOC(struct oxr_action_output, num_outputs);
 		for (uint32_t i = 0; i < num_outputs; i++) {
 			cache->outputs[i] = outputs[i];
 		}
 		cache->num_outputs = num_outputs;
 	}
-
-	oxr_source_cache_determine_redirect(log, sess, act, cache, bound_path);
 }
 
 
@@ -916,33 +1101,67 @@ oxr_source_bind_inputs(struct oxr_logger *log,
  *
  */
 
+/*!
+ * Given an Action Set handle, return the @ref oxr_action_set and the associated
+ * @ref oxr_action_set_attachment in the given Session.
+ *
+ * @private @memberof oxr_session
+ */
 static void
-oxr_session_get_source_set(struct oxr_session *sess,
-                           XrActionSet actionSet,
-                           struct oxr_source_set **src_set,
-                           struct oxr_action_set **act_set)
+oxr_session_get_action_set_attachment(
+    struct oxr_session *sess,
+    XrActionSet actionSet,
+    struct oxr_action_set_attachment **act_set_attached,
+    struct oxr_action_set **act_set)
 {
 	void *ptr = NULL;
 	*act_set =
 	    XRT_CAST_OXR_HANDLE_TO_PTR(struct oxr_action_set *, actionSet);
+	*act_set_attached = NULL;
 
-	int ret = u_hashmap_int_find(sess->act_sets, (*act_set)->key, &ptr);
+	// In case no action_sets have been attached.
+	if (sess->act_sets_attachments_by_key == NULL) {
+		return;
+	}
+
+	int ret = u_hashmap_int_find(sess->act_sets_attachments_by_key,
+	                             (*act_set)->act_set_key, &ptr);
 	if (ret == 0) {
-		*src_set = (struct oxr_source_set *)ptr;
+		*act_set_attached = (struct oxr_action_set_attachment *)ptr;
 	}
 }
 
+/*!
+ * Given an action act_key, look up the @ref oxr_action_attachment of the
+ * associated action in the given Session.
+ *
+ * @private @memberof oxr_session
+ */
 static void
-oxr_session_get_source(struct oxr_session *sess,
-                       uint32_t act_key,
-                       struct oxr_source **out_src)
+oxr_session_get_action_attachment(
+    struct oxr_session *sess,
+    uint32_t act_key,
+    struct oxr_action_attachment **out_act_attached)
 {
 	void *ptr = NULL;
 
-	int ret = u_hashmap_int_find(sess->sources, act_key, &ptr);
+	int ret =
+	    u_hashmap_int_find(sess->act_attachments_by_key, act_key, &ptr);
 	if (ret == 0) {
-		*out_src = (struct oxr_source *)ptr;
+		*out_act_attached = (struct oxr_action_attachment *)ptr;
 	}
+}
+
+static inline size_t
+oxr_handle_base_get_num_children(struct oxr_handle_base *hb)
+{
+	size_t ret = 0;
+	for (uint32_t i = 0; i < XRT_MAX_HANDLE_CHILDREN; ++i) {
+		if (hb->children[i] != NULL) {
+			++ret;
+		}
+	}
+	return ret;
 }
 
 XrResult
@@ -954,30 +1173,52 @@ oxr_session_attach_action_sets(struct oxr_logger *log,
 	struct oxr_interaction_profile *head = NULL;
 	struct oxr_interaction_profile *left = NULL;
 	struct oxr_interaction_profile *right = NULL;
-	struct oxr_action_set *act_set = NULL;
-	struct oxr_source_set *src_set = NULL;
-	struct oxr_action *act = NULL;
 
 	oxr_find_profile_for_device(log, inst, sess->sys->head, &head);
 	oxr_find_profile_for_device(log, inst, sess->sys->left, &left);
 	oxr_find_profile_for_device(log, inst, sess->sys->right, &right);
+	//! @todo add other subaction paths here
 
-	// Has any of the bound action sets been updated.
-	for (uint32_t i = 0; i < bindInfo->countActionSets; i++) {
-		act_set = XRT_CAST_OXR_HANDLE_TO_PTR(struct oxr_action_set *,
-		                                     bindInfo->actionSets[i]);
-		act_set->attached = true;
+	// Allocate room for list. No need to check if anything has been
+	// attached the API function does that.
+	sess->num_action_set_attachments = bindInfo->countActionSets;
+	sess->act_set_attachments = U_TYPED_ARRAY_CALLOC(
+	    struct oxr_action_set_attachment, sess->num_action_set_attachments);
 
-		oxr_source_set_create(log, sess, act_set, &src_set);
+	// Set up the per-session data for these action sets.
+	for (uint32_t i = 0; i < sess->num_action_set_attachments; i++) {
+		struct oxr_action_set *act_set = XRT_CAST_OXR_HANDLE_TO_PTR(
+		    struct oxr_action_set *, bindInfo->actionSets[i]);
+		struct oxr_action_set_ref *act_set_ref = act_set->data;
+		act_set_ref->ever_attached = true;
+		struct oxr_action_set_attachment *act_set_attached =
+		    &sess->act_set_attachments[i];
+		oxr_action_set_attachment_init(log, sess, act_set,
+		                               act_set_attached);
 
+		// Allocate the action attachments for this set.
+		act_set_attached->num_action_attachments =
+		    oxr_handle_base_get_num_children(&act_set->handle);
+		act_set_attached->act_attachments = U_TYPED_ARRAY_CALLOC(
+		    struct oxr_action_attachment,
+		    act_set_attached->num_action_attachments);
+
+		// Set up the per-session data for the actions.
+		uint32_t child_index = 0;
 		for (uint32_t k = 0; k < XRT_MAX_HANDLE_CHILDREN; k++) {
-			act = (struct oxr_action *)act_set->handle.children[k];
+			struct oxr_action *act =
+			    (struct oxr_action *)act_set->handle.children[k];
 			if (act == NULL) {
 				continue;
 			}
 
-			oxr_source_create(log, src_set, act, head, left, right,
-			                  NULL);
+			struct oxr_action_attachment *act_attached =
+			    &act_set_attached->act_attachments[child_index];
+			oxr_action_attachment_init(log, act_set_attached,
+			                           act_attached, act);
+			oxr_action_attachment_bind(log, act_attached, act, head,
+			                           left, right, NULL);
+			++child_index;
 		}
 	}
 
@@ -991,8 +1232,6 @@ oxr_session_attach_action_sets(struct oxr_logger *log,
 		sess->right = right->path;
 	}
 
-	sess->actionsAttached = true;
-
 	return oxr_session_success_result(sess);
 }
 
@@ -1003,17 +1242,18 @@ oxr_action_sync_data(struct oxr_logger *log,
                      const XrActiveActionSet *actionSets)
 {
 	struct oxr_action_set *act_set = NULL;
-	struct oxr_source_set *src_set = NULL;
+	struct oxr_action_set_attachment *act_set_attached = NULL;
 
 	// Check that all action sets has been attached.
 	for (uint32_t i = 0; i < countActionSets; i++) {
-		oxr_session_get_source_set(sess, actionSets[i].actionSet,
-		                           &src_set, &act_set);
-		if (src_set == NULL) {
+		oxr_session_get_action_set_attachment(
+		    sess, actionSets[i].actionSet, &act_set_attached, &act_set);
+		if (act_set_attached == NULL) {
 			return oxr_error(
 			    log, XR_ERROR_ACTIONSET_NOT_ATTACHED,
-			    "(actionSets[%i].actionSet) has not been attached",
-			    i);
+			    "(actionSets[%i].actionSet) action set '%s' has "
+			    "not been attached to this session",
+			    i, act_set != NULL ? act_set->data->name : "NULL");
 		}
 	}
 
@@ -1025,55 +1265,54 @@ oxr_action_sync_data(struct oxr_logger *log,
 		oxr_xdev_update(sess->sys->xdevs[i]);
 	}
 
-	// Reset all requested source sets.
-	src_set = sess->src_set_list;
-	while (src_set != NULL) {
-		U_ZERO(&src_set->requested_sub_paths);
-
-		// Grab the next one.
-		src_set = src_set->next;
+	// Reset all action set attachments.
+	for (size_t i = 0; i < sess->num_action_set_attachments; ++i) {
+		act_set_attached = &sess->act_set_attachments[i];
+		U_ZERO(&act_set_attached->requested_sub_paths);
 	}
 
-	// Go over all action sets and update them.
+	// Go over all requested action sets and update their attachment.
+	//! @todo can be listed more than once with different paths!
 	for (uint32_t i = 0; i < countActionSets; i++) {
 		struct oxr_sub_paths sub_paths;
-		oxr_session_get_source_set(sess, actionSets[i].actionSet,
-		                           &src_set, &act_set);
-		assert(src_set != NULL);
+		oxr_session_get_action_set_attachment(
+		    sess, actionSets[i].actionSet, &act_set_attached, &act_set);
+		assert(act_set_attached != NULL);
 
-		oxr_classify_sub_action_paths(log, sess->sys->inst, 1,
-		                              &actionSets[i].subactionPath,
-		                              &sub_paths);
+		if (!oxr_classify_sub_action_paths(log, sess->sys->inst, 1,
+		                                   &actionSets[i].subactionPath,
+		                                   &sub_paths)) {
+			return XR_ERROR_PATH_UNSUPPORTED;
+		}
 
-		src_set->requested_sub_paths.any |= sub_paths.any;
-		src_set->requested_sub_paths.user |= sub_paths.user;
-		src_set->requested_sub_paths.head |= sub_paths.head;
-		src_set->requested_sub_paths.left |= sub_paths.left;
-		src_set->requested_sub_paths.right |= sub_paths.right;
-		src_set->requested_sub_paths.gamepad |= sub_paths.gamepad;
+		act_set_attached->requested_sub_paths.any |= sub_paths.any;
+		act_set_attached->requested_sub_paths.user |= sub_paths.user;
+		act_set_attached->requested_sub_paths.head |= sub_paths.head;
+		act_set_attached->requested_sub_paths.left |= sub_paths.left;
+		act_set_attached->requested_sub_paths.right |= sub_paths.right;
+		act_set_attached->requested_sub_paths.gamepad |=
+		    sub_paths.gamepad;
 	}
 
-	// Reset all source sets.
-	src_set = sess->src_set_list;
-	while (src_set != NULL) {
-		struct oxr_sub_paths sub_paths = src_set->requested_sub_paths;
+	// Now, update all action attachments
+	for (size_t i = 0; i < sess->num_action_set_attachments; ++i) {
+		act_set_attached = &sess->act_set_attachments[i];
+		struct oxr_sub_paths sub_paths =
+		    act_set_attached->requested_sub_paths;
 
 
-		for (uint32_t k = 0; k < XRT_MAX_HANDLE_CHILDREN; k++) {
-			// This assumes that all children of a
-			// source set are actions.
-			struct oxr_source *src =
-			    (struct oxr_source *)src_set->handle.children[k];
+		for (uint32_t k = 0;
+		     k < act_set_attached->num_action_attachments; k++) {
+			struct oxr_action_attachment *act_attached =
+			    &act_set_attached->act_attachments[k];
 
-			if (src == NULL) {
+			if (act_attached == NULL) {
 				continue;
 			}
 
-			oxr_source_update(log, sess, src, now, sub_paths);
+			oxr_action_attachment_update(log, sess, act_attached,
+			                             now, sub_paths);
 		}
-
-		// Grab the next one.
-		src_set = src_set->next;
 	}
 
 
@@ -1087,94 +1326,103 @@ oxr_action_sync_data(struct oxr_logger *log,
  *
  */
 
+#define OXR_ACTION_GET_XR_STATE_FROM_ACTION_STATE_COMMON(ACTION_STATE, DATA)   \
+	do {                                                                   \
+		DATA->lastChangeTime = time_state_monotonic_to_ts_ns(          \
+		    inst->timekeeping, ACTION_STATE->timestamp);               \
+		DATA->changedSinceLastSync = ACTION_STATE->changed;            \
+		DATA->isActive = XR_TRUE;                                      \
+	} while (0)
+
 static void
-get_state_from_state_bool(struct oxr_source_state *state,
-                          XrActionStateBoolean *data,
-                          enum xrt_source_value_redirect redirect)
+get_xr_state_from_action_state_bool(struct oxr_instance *inst,
+                                    struct oxr_action_state *state,
+                                    XrActionStateBoolean *data)
 {
-	data->currentState = state->boolean;
-	data->lastChangeTime = state->timestamp;
-	data->changedSinceLastSync = state->changed;
-	data->isActive = XR_TRUE;
+	/* only get here if the action is active! */
+	assert(state->active);
+	OXR_ACTION_GET_XR_STATE_FROM_ACTION_STATE_COMMON(state, data);
+	data->currentState = state->value.boolean;
 }
 
 static void
-get_state_from_state_vec1(struct oxr_source_state *state,
-                          XrActionStateFloat *data,
-                          enum xrt_source_value_redirect redirect)
+get_xr_state_from_action_state_vec1(struct oxr_instance *inst,
+                                    struct oxr_action_state *state,
+                                    XrActionStateFloat *data)
 {
-	switch (redirect) {
-	case INPUT_REDIRECT_VEC2_X_TO_VEC1:
-		data->currentState = state->vec2.x;
-		break;
-	case INPUT_REDIRECT_VEC2_Y_TO_VEC1:
-		data->currentState = state->vec2.y;
-		break;
-	case INPUT_REDIRECT_DEFAULT:
-	default: data->currentState = state->vec1.x; break;
-	}
-
-	data->lastChangeTime = state->timestamp;
-	data->changedSinceLastSync = state->changed;
-	data->isActive = XR_TRUE;
+	/* only get here if the action is active! */
+	assert(state->active);
+	OXR_ACTION_GET_XR_STATE_FROM_ACTION_STATE_COMMON(state, data);
+	data->currentState = state->value.vec1.x;
 }
 
 static void
-get_state_from_state_vec2(struct oxr_source_state *state,
-                          XrActionStateVector2f *data,
-                          enum xrt_source_value_redirect redirect)
+get_xr_state_from_action_state_vec2(struct oxr_instance *inst,
+                                    struct oxr_action_state *state,
+                                    XrActionStateVector2f *data)
 {
-	data->currentState.x = state->vec2.x;
-	data->currentState.y = state->vec2.y;
-	data->lastChangeTime = state->timestamp;
-	data->changedSinceLastSync = state->changed;
-	data->isActive = XR_TRUE;
+	/* only get here if the action is active! */
+	assert(state->active);
+	OXR_ACTION_GET_XR_STATE_FROM_ACTION_STATE_COMMON(state, data);
+	data->currentState.x = state->value.vec2.x;
+	data->currentState.y = state->value.vec2.y;
 }
 
 #define OXR_ACTION_GET_FILLER(TYPE)                                            \
-	if (sub_paths.any && src->any_state.active) {                          \
-		get_state_from_state_##TYPE(&src->any_state, data,             \
-		                            INPUT_REDIRECT_DEFAULT);           \
+	if (sub_paths.any && act_attached->any_state.active) {                 \
+		get_xr_state_from_action_state_##TYPE(                         \
+		    sess->sys->inst, &act_attached->any_state, data);          \
 	}                                                                      \
-	if (sub_paths.user && src->user.current.active) {                      \
-		get_state_from_state_##TYPE(&src->user.current, data,          \
-		                            src->user.redirect);               \
+	if (sub_paths.user && act_attached->user.current.active) {             \
+		get_xr_state_from_action_state_##TYPE(                         \
+		    sess->sys->inst, &act_attached->user.current, data);       \
 	}                                                                      \
-	if (sub_paths.head && src->head.current.active) {                      \
-		get_state_from_state_##TYPE(&src->head.current, data,          \
-		                            src->head.redirect);               \
+	if (sub_paths.head && act_attached->head.current.active) {             \
+		get_xr_state_from_action_state_##TYPE(                         \
+		    sess->sys->inst, &act_attached->head.current, data);       \
 	}                                                                      \
-	if (sub_paths.left && src->left.current.active) {                      \
-		get_state_from_state_##TYPE(&src->left.current, data,          \
-		                            src->left.redirect);               \
+	if (sub_paths.left && act_attached->left.current.active) {             \
+		get_xr_state_from_action_state_##TYPE(                         \
+		    sess->sys->inst, &act_attached->left.current, data);       \
 	}                                                                      \
-	if (sub_paths.right && src->right.current.active) {                    \
-		get_state_from_state_##TYPE(&src->right.current, data,         \
-		                            src->right.redirect);              \
+	if (sub_paths.right && act_attached->right.current.active) {           \
+		get_xr_state_from_action_state_##TYPE(                         \
+		    sess->sys->inst, &act_attached->right.current, data);      \
 	}                                                                      \
-	if (sub_paths.gamepad && src->gamepad.current.active) {                \
-		get_state_from_state_##TYPE(&src->gamepad.current, data,       \
-		                            src->gamepad.redirect);            \
+	if (sub_paths.gamepad && act_attached->gamepad.current.active) {       \
+		get_xr_state_from_action_state_##TYPE(                         \
+		    sess->sys->inst, &act_attached->gamepad.current, data);    \
 	}
 
+/*!
+ * Clear the actual data members of the XrActionState* types, to have the
+ * correct return value in case of the action being not active
+ */
+#define OXR_ACTION_RESET_XR_ACTION_STATE(data)                                 \
+	do {                                                                   \
+		data->isActive = XR_FALSE;                                     \
+		data->changedSinceLastSync = XR_FALSE;                         \
+		data->lastChangeTime = 0;                                      \
+		U_ZERO(&data->currentState);                                   \
+	} while (0)
 
 XrResult
 oxr_action_get_boolean(struct oxr_logger *log,
                        struct oxr_session *sess,
-                       uint64_t key,
+                       uint32_t act_key,
                        struct oxr_sub_paths sub_paths,
                        XrActionStateBoolean *data)
 {
-	struct oxr_source *src = NULL;
+	struct oxr_action_attachment *act_attached = NULL;
 
-	oxr_session_get_source(sess, key, &src);
-
-	data->isActive = XR_FALSE;
-	U_ZERO(&data->currentState);
-
-	if (src == NULL) {
-		return oxr_session_success_result(sess);
+	oxr_session_get_action_attachment(sess, act_key, &act_attached);
+	if (act_attached == NULL) {
+		return oxr_error(
+		    log, XR_ERROR_ACTIONSET_NOT_ATTACHED,
+		    "Action has not been attached to this session");
 	}
+
+	OXR_ACTION_RESET_XR_ACTION_STATE(data);
 
 	OXR_ACTION_GET_FILLER(bool);
 
@@ -1184,20 +1432,20 @@ oxr_action_get_boolean(struct oxr_logger *log,
 XrResult
 oxr_action_get_vector1f(struct oxr_logger *log,
                         struct oxr_session *sess,
-                        uint64_t key,
+                        uint32_t act_key,
                         struct oxr_sub_paths sub_paths,
                         XrActionStateFloat *data)
 {
-	struct oxr_source *src = NULL;
+	struct oxr_action_attachment *act_attached = NULL;
 
-	oxr_session_get_source(sess, key, &src);
-
-	data->isActive = XR_FALSE;
-	U_ZERO(&data->currentState);
-
-	if (src == NULL) {
-		return oxr_session_success_result(sess);
+	oxr_session_get_action_attachment(sess, act_key, &act_attached);
+	if (act_attached == NULL) {
+		return oxr_error(
+		    log, XR_ERROR_ACTIONSET_NOT_ATTACHED,
+		    "Action has not been attached to this session");
 	}
+
+	OXR_ACTION_RESET_XR_ACTION_STATE(data);
 
 	OXR_ACTION_GET_FILLER(vec1);
 
@@ -1207,20 +1455,20 @@ oxr_action_get_vector1f(struct oxr_logger *log,
 XrResult
 oxr_action_get_vector2f(struct oxr_logger *log,
                         struct oxr_session *sess,
-                        uint64_t key,
+                        uint32_t act_key,
                         struct oxr_sub_paths sub_paths,
                         XrActionStateVector2f *data)
 {
-	struct oxr_source *src = NULL;
+	struct oxr_action_attachment *act_attached = NULL;
 
-	oxr_session_get_source(sess, key, &src);
-
-	data->isActive = XR_FALSE;
-	U_ZERO(&data->currentState);
-
-	if (src == NULL) {
-		return oxr_session_success_result(sess);
+	oxr_session_get_action_attachment(sess, act_key, &act_attached);
+	if (act_attached == NULL) {
+		return oxr_error(
+		    log, XR_ERROR_ACTIONSET_NOT_ATTACHED,
+		    "Action has not been attached to this session");
 	}
+
+	OXR_ACTION_RESET_XR_ACTION_STATE(data);
 
 	OXR_ACTION_GET_FILLER(vec2);
 
@@ -1230,34 +1478,35 @@ oxr_action_get_vector2f(struct oxr_logger *log,
 XrResult
 oxr_action_get_pose(struct oxr_logger *log,
                     struct oxr_session *sess,
-                    uint64_t key,
+                    uint32_t act_key,
                     struct oxr_sub_paths sub_paths,
                     XrActionStatePose *data)
 {
-	struct oxr_source *src = NULL;
+	struct oxr_action_attachment *act_attached = NULL;
 
-	oxr_session_get_source(sess, key, &src);
+	oxr_session_get_action_attachment(sess, act_key, &act_attached);
+	if (act_attached == NULL) {
+		return oxr_error(
+		    log, XR_ERROR_ACTIONSET_NOT_ATTACHED,
+		    "Action has not been attached to this session");
+	}
 
 	data->isActive = XR_FALSE;
 
-	if (src == NULL) {
-		return oxr_session_success_result(sess);
-	}
-
 	if (sub_paths.user || sub_paths.any) {
-		data->isActive |= src->user.current.active;
+		data->isActive |= act_attached->user.current.active;
 	}
 	if (sub_paths.head || sub_paths.any) {
-		data->isActive |= src->head.current.active;
+		data->isActive |= act_attached->head.current.active;
 	}
 	if (sub_paths.left || sub_paths.any) {
-		data->isActive |= src->left.current.active;
+		data->isActive |= act_attached->left.current.active;
 	}
 	if (sub_paths.right || sub_paths.any) {
-		data->isActive |= src->right.current.active;
+		data->isActive |= act_attached->right.current.active;
 	}
 	if (sub_paths.gamepad || sub_paths.any) {
-		data->isActive |= src->gamepad.current.active;
+		data->isActive |= act_attached->gamepad.current.active;
 	}
 
 	return oxr_session_success_result(sess);
@@ -1271,8 +1520,8 @@ oxr_action_get_pose(struct oxr_logger *log,
  */
 
 static void
-set_source_output_vibration(struct oxr_session *sess,
-                            struct oxr_source_cache *cache,
+set_action_output_vibration(struct oxr_session *sess,
+                            struct oxr_action_cache *cache,
                             int64_t stop,
                             const XrHapticVibration *data)
 {
@@ -1284,7 +1533,7 @@ set_source_output_vibration(struct oxr_session *sess,
 	value.vibration.duration = data->duration;
 
 	for (uint32_t i = 0; i < cache->num_outputs; i++) {
-		struct oxr_source_output *output = &cache->outputs[i];
+		struct oxr_action_output *output = &cache->outputs[i];
 		struct xrt_device *xdev = output->xdev;
 
 		xrt_device_set_output(xdev, output->name, &value);
@@ -1296,16 +1545,17 @@ set_source_output_vibration(struct oxr_session *sess,
 XrResult
 oxr_action_apply_haptic_feedback(struct oxr_logger *log,
                                  struct oxr_session *sess,
-                                 uint64_t key,
+                                 uint32_t act_key,
                                  struct oxr_sub_paths sub_paths,
                                  const XrHapticBaseHeader *hapticEvent)
 {
-	struct oxr_source *src = NULL;
+	struct oxr_action_attachment *act_attached = NULL;
 
-	oxr_session_get_source(sess, key, &src);
-
-	if (src == NULL) {
-		return oxr_session_success_result(sess);
+	oxr_session_get_action_attachment(sess, act_key, &act_attached);
+	if (act_attached == NULL) {
+		return oxr_error(
+		    log, XR_ERROR_ACTIONSET_NOT_ATTACHED,
+		    "Action has not been attached to this session");
 	}
 
 	const XrHapticVibration *data = (const XrHapticVibration *)hapticEvent;
@@ -1314,20 +1564,20 @@ oxr_action_apply_haptic_feedback(struct oxr_logger *log,
 	int64_t stop = data->duration <= 0 ? now : now + data->duration;
 
 	// clang-format off
-	if (src->user.current.active && (sub_paths.user || sub_paths.any)) {
-		set_source_output_vibration(sess, &src->user, stop, data);
+	if (act_attached->user.current.active && (sub_paths.user || sub_paths.any)) {
+		set_action_output_vibration(sess, &act_attached->user, stop, data);
 	}
-	if (src->head.current.active && (sub_paths.head || sub_paths.any)) {
-		set_source_output_vibration(sess, &src->head, stop, data);
+	if (act_attached->head.current.active && (sub_paths.head || sub_paths.any)) {
+		set_action_output_vibration(sess, &act_attached->head, stop, data);
 	}
-	if (src->left.current.active && (sub_paths.left || sub_paths.any)) {
-		set_source_output_vibration(sess, &src->left, stop, data);
+	if (act_attached->left.current.active && (sub_paths.left || sub_paths.any)) {
+		set_action_output_vibration(sess, &act_attached->left, stop, data);
 	}
-	if (src->right.current.active && (sub_paths.right || sub_paths.any)) {
-		set_source_output_vibration(sess, &src->right, stop, data);
+	if (act_attached->right.current.active && (sub_paths.right || sub_paths.any)) {
+		set_action_output_vibration(sess, &act_attached->right, stop, data);
 	}
-	if (src->gamepad.current.active && (sub_paths.gamepad || sub_paths.any)) {
-		set_source_output_vibration(sess, &src->gamepad, stop, data);
+	if (act_attached->gamepad.current.active && (sub_paths.gamepad || sub_paths.any)) {
+		set_action_output_vibration(sess, &act_attached->gamepad, stop, data);
 	}
 	// clang-format on
 
@@ -1337,32 +1587,33 @@ oxr_action_apply_haptic_feedback(struct oxr_logger *log,
 XrResult
 oxr_action_stop_haptic_feedback(struct oxr_logger *log,
                                 struct oxr_session *sess,
-                                uint64_t key,
+                                uint32_t act_key,
                                 struct oxr_sub_paths sub_paths)
 {
-	struct oxr_source *src = NULL;
+	struct oxr_action_attachment *act_attached = NULL;
 
-	oxr_session_get_source(sess, key, &src);
-
-	if (src == NULL) {
-		return oxr_session_success_result(sess);
+	oxr_session_get_action_attachment(sess, act_key, &act_attached);
+	if (act_attached == NULL) {
+		return oxr_error(
+		    log, XR_ERROR_ACTIONSET_NOT_ATTACHED,
+		    "Action has not been attached to this session");
 	}
 
 	// clang-format off
-	if (src->user.current.active && (sub_paths.user || sub_paths.any)) {
-		oxr_source_cache_stop_output(log, sess, &src->user);
+	if (act_attached->user.current.active && (sub_paths.user || sub_paths.any)) {
+		oxr_action_cache_stop_output(log, sess, &act_attached->user);
 	}
-	if (src->head.current.active && (sub_paths.head || sub_paths.any)) {
-		oxr_source_cache_stop_output(log, sess, &src->head);
+	if (act_attached->head.current.active && (sub_paths.head || sub_paths.any)) {
+		oxr_action_cache_stop_output(log, sess, &act_attached->head);
 	}
-	if (src->left.current.active && (sub_paths.left || sub_paths.any)) {
-		oxr_source_cache_stop_output(log, sess, &src->left);
+	if (act_attached->left.current.active && (sub_paths.left || sub_paths.any)) {
+		oxr_action_cache_stop_output(log, sess, &act_attached->left);
 	}
-	if (src->right.current.active && (sub_paths.right || sub_paths.any)) {
-		oxr_source_cache_stop_output(log, sess, &src->right);
+	if (act_attached->right.current.active && (sub_paths.right || sub_paths.any)) {
+		oxr_action_cache_stop_output(log, sess, &act_attached->right);
 	}
-	if (src->gamepad.current.active && (sub_paths.gamepad || sub_paths.any)) {
-		oxr_source_cache_stop_output(log, sess, &src->gamepad);
+	if (act_attached->gamepad.current.active && (sub_paths.gamepad || sub_paths.any)) {
+		oxr_action_cache_stop_output(log, sess, &act_attached->gamepad);
 	}
 	// clang-format on
 

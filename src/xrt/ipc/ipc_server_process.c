@@ -8,19 +8,18 @@
  * @ingroup ipc_server
  */
 
-#include "ipc_server.h"
 #include "xrt/xrt_device.h"
 #include "xrt/xrt_instance.h"
 #include "xrt/xrt_compositor.h"
+#include "xrt/xrt_config_have.h"
 
+#include "os/os_time.h"
 #include "util/u_var.h"
 #include "util/u_misc.h"
 #include "util/u_debug.h"
 
+#include "ipc_server.h"
 #include "ipc_server_utils.h"
-
-#include "main/comp_compositor.h"
-#include "main/comp_renderer.h"
 
 #include <stdlib.h>
 #include <unistd.h>
@@ -35,6 +34,12 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <stdio.h>
+#include <string.h>
+#include <assert.h>
+
+#ifdef XRT_HAVE_SYSTEMD
+#include <systemd/sd-daemon.h>
+#endif
 
 
 /*
@@ -43,9 +48,13 @@
  *
  */
 
-#define IPC_MAX_CLIENTS 8
-
 DEBUG_GET_ONCE_BOOL_OPTION(exit_on_disconnect, "IPC_EXIT_ON_DISCONNECT", false)
+
+struct _z_sort_data
+{
+	int32_t index;
+	int32_t z_order;
+};
 
 
 /*
@@ -68,9 +77,44 @@ teardown_all(struct ipc_server *s)
 	xrt_instance_destroy(&s->xinst);
 
 	if (s->listen_socket > 0) {
+		// Close socket on exit
 		close(s->listen_socket);
 		s->listen_socket = -1;
+		if (!s->launched_by_socket && s->socket_filename) {
+			// Unlink it too, but only if we bound it.
+			unlink(s->socket_filename);
+			free(s->socket_filename);
+			s->socket_filename = NULL;
+		}
 	}
+
+	os_mutex_destroy(&s->global_state_lock);
+}
+
+static int
+init_tracking_origins(struct ipc_server *s)
+{
+	for (size_t i = 0; i < IPC_SERVER_NUM_XDEVS; i++) {
+		if (s->xdevs[i] == NULL) {
+			continue;
+		}
+
+		struct xrt_device *xdev = s->xdevs[i];
+		struct xrt_tracking_origin *xtrack = xdev->tracking_origin;
+		assert(xtrack != NULL);
+		size_t index = 0;
+
+		for (; index < IPC_SERVER_NUM_XDEVS; index++) {
+			if (s->xtracks[index] == NULL) {
+				s->xtracks[index] = xtrack;
+				break;
+			} else if (s->xtracks[index] == xtrack) {
+				break;
+			}
+		}
+	}
+
+	return 0;
 }
 
 static int
@@ -109,11 +153,32 @@ init_shm(struct ipc_server *s)
 	 *
 	 */
 
-	uint32_t input_index = 0;
-	uint32_t output_index = 0;
 	uint32_t count = 0;
 	struct ipc_shared_memory *ism = s->ism;
 
+	count = 0;
+	for (size_t i = 0; i < IPC_SERVER_NUM_XDEVS; i++) {
+		struct xrt_tracking_origin *xtrack = s->xtracks[i];
+		if (xtrack == NULL) {
+			continue;
+		}
+
+		// The position of the tracking origin matches that in the
+		// servers memory.
+		assert(i < IPC_SHARED_MAX_DEVICES);
+
+		struct ipc_shared_tracking_origin *itrack =
+		    &ism->itracks[count++];
+		memcpy(itrack->name, xtrack->name, sizeof(itrack->name));
+		itrack->type = xtrack->type;
+		itrack->offset = xtrack->offset;
+	}
+
+	ism->num_itracks = count;
+
+	count = 0;
+	uint32_t input_index = 0;
+	uint32_t output_index = 0;
 	for (size_t i = 0; i < IPC_SERVER_NUM_XDEVS; i++) {
 		struct xrt_device *xdev = s->xdevs[i];
 		if (xdev == NULL) {
@@ -138,6 +203,19 @@ init_shm(struct ipc_server *s)
 			    xdev->hmd->views[1].display.h_pixels;
 			ism->hmd.views[1].fov = xdev->hmd->views[1].fov;
 		}
+
+		// Setup the tracking origin.
+		idev->tracking_origin_index = (uint32_t)-1;
+		for (size_t k = 0; k < IPC_SERVER_NUM_XDEVS; k++) {
+			if (xdev->tracking_origin != s->xtracks[k]) {
+				continue;
+			}
+
+			idev->tracking_origin_index = k;
+			break;
+		}
+
+		assert(idev->tracking_origin_index != (uint32_t)-1);
 
 		// Initial update.
 		xrt_device_update_inputs(xdev);
@@ -174,8 +252,29 @@ init_shm(struct ipc_server *s)
 }
 
 static int
-init_listen_socket(struct ipc_server *s)
+get_systemd_socket(struct ipc_server *s, int *out_fd)
 {
+#ifdef XRT_HAVE_SYSTEMD
+	// We may have been launched with socket activation
+	int num_fds = sd_listen_fds(0);
+	if (num_fds > 1) {
+		fprintf(stderr,
+		        "Too many file descriptors passed by systemd.\n");
+		return -1;
+	}
+	if (num_fds == 1) {
+		*out_fd = SD_LISTEN_FDS_START + 0;
+		s->launched_by_socket = true;
+		printf("Got existing socket from systemd.\n");
+	}
+#endif
+	return 0;
+}
+
+static int
+create_listen_socket(struct ipc_server *s, int *out_fd)
+{
+	// no fd provided
 	struct sockaddr_un addr;
 	int fd, ret;
 
@@ -189,22 +288,54 @@ init_listen_socket(struct ipc_server *s)
 
 	addr.sun_family = AF_UNIX;
 	strcpy(addr.sun_path, IPC_MSG_SOCK_FILE);
-	unlink(IPC_MSG_SOCK_FILE);
 
 	ret = bind(fd, (struct sockaddr *)&addr, sizeof(addr));
 	if (ret < 0) {
+		fprintf(stderr,
+		        "ERROR: Could not bind socket to path %s: is the "
+		        "service running already?\n",
+		        IPC_MSG_SOCK_FILE);
+#ifdef XRT_HAVE_SYSTEMD
+		fprintf(stderr,
+		        "Or, is the systemd unit monado.socket or "
+		        "monado-dev.socket active?\n");
+#endif
 		close(fd);
 		return ret;
 	}
+	// Save for later
+	s->socket_filename = strdup(IPC_MSG_SOCK_FILE);
 
 	ret = listen(fd, IPC_MAX_CLIENTS);
 	if (ret < 0) {
 		close(fd);
 		return ret;
 	}
+	printf("Created listening socket.\n");
+	*out_fd = fd;
+	return 0;
+}
 
+static int
+init_listen_socket(struct ipc_server *s)
+{
+	int fd = -1, ret;
+	s->listen_socket = -1;
+
+	ret = get_systemd_socket(s, &fd);
+	if (ret < 0) {
+		return ret;
+	}
+
+	if (fd == -1) {
+		ret = create_listen_socket(s, &fd);
+		if (ret < 0) {
+			return ret;
+		}
+	}
 	// All ok!
 	s->listen_socket = fd;
+	printf("Listening socket is fd %d\n", s->listen_socket);
 
 	return fd;
 }
@@ -221,12 +352,17 @@ init_epoll(struct ipc_server *s)
 
 	struct epoll_event ev = {0};
 
-	ev.events = EPOLLIN;
-	ev.data.fd = 0; // stdin
-	ret = epoll_ctl(s->epoll_fd, EPOLL_CTL_ADD, 0, &ev);
-	if (ret < 0) {
-		fprintf(stderr, "ERROR: epoll_ctl(stdin) failed '%i'\n", ret);
-		return ret;
+	if (!s->launched_by_socket) {
+		// Can't do this when launched by systemd socket activation by
+		// default
+		ev.events = EPOLLIN;
+		ev.data.fd = 0; // stdin
+		ret = epoll_ctl(s->epoll_fd, EPOLL_CTL_ADD, 0, &ev);
+		if (ret < 0) {
+			fprintf(stderr, "ERROR: epoll_ctl(stdin) failed '%i'\n",
+			        ret);
+			return ret;
+		}
 	}
 
 	ev.events = EPOLLIN;
@@ -248,7 +384,7 @@ init_all(struct ipc_server *s)
 	s->running = true;
 	s->exit_on_disconnect = debug_get_bool_option_exit_on_disconnect();
 
-	int ret = xrt_instance_create(&s->xinst);
+	int ret = xrt_instance_create(NULL, &s->xinst);
 	if (ret < 0) {
 		teardown_all(s);
 		return ret;
@@ -261,6 +397,12 @@ init_all(struct ipc_server *s)
 	}
 
 	if (s->xdevs[0] == NULL) {
+		teardown_all(s);
+		return -1;
+	}
+
+	ret = init_tracking_origins(s);
+	if (ret < 0) {
 		teardown_all(s);
 		return -1;
 	}
@@ -290,6 +432,17 @@ init_all(struct ipc_server *s)
 		return ret;
 	}
 
+	// Init all of the render riming helpers.
+	for (size_t i = 0; i < ARRAY_SIZE(s->threads); i++) {
+		u_rt_helper_init((struct u_rt_helper *)&s->threads[i].ics.urth);
+	}
+
+	ret = os_mutex_init(&s->global_state_lock);
+	if (ret < 0) {
+		teardown_all(s);
+		return ret;
+	}
+
 	// Easier to use.
 	s->xc = &s->xcfd->base;
 
@@ -311,27 +464,60 @@ handle_listen(struct ipc_server *vs)
 		vs->running = false;
 	}
 
-	volatile struct ipc_client_state *cs = &vs->thread_state;
+	volatile struct ipc_client_state *cs = NULL;
+	int32_t cs_index = -1;
 
 	// The return is the new fd;
 	int fd = ret;
 
-	if (vs->thread_started && !vs->thread_stopping) {
-		fprintf(stderr, "ERROR: Client already connected!\n");
+	os_mutex_lock(&vs->global_state_lock);
+
+	// find the next free thread in our array (server_thread_index is -1)
+	// and have it handle this connection
+	for (uint32_t i = 0; i < IPC_MAX_CLIENTS; i++) {
+		volatile struct ipc_client_state *_cs = &vs->threads[i].ics;
+		if (_cs->server_thread_index < 0) {
+			cs = _cs;
+			cs_index = i;
+			break;
+		}
+	}
+	if (cs == NULL) {
 		close(fd);
+
+		// Unlock when we are done.
+		os_mutex_unlock(&vs->global_state_lock);
+
+		fprintf(stderr, "ERROR: Max client count reached!\n");
 		return;
 	}
 
-	if (vs->thread_stopping) {
-		os_thread_join((struct os_thread *)&vs->thread);
-		os_thread_destroy((struct os_thread *)&vs->thread);
-		vs->thread_stopping = false;
+	struct ipc_thread *it = &vs->threads[cs_index];
+	if (it->state != IPC_THREAD_READY && it->state != IPC_THREAD_STOPPING) {
+		// we should not get here
+		close(fd);
+
+		// Unlock when we are done.
+		os_mutex_unlock(&vs->global_state_lock);
+
+		fprintf(stderr, "ERROR: Client state management error!\n");
+		return;
 	}
 
-	vs->thread_started = true;
+	if (it->state != IPC_THREAD_READY) {
+		os_thread_join(&it->thread);
+		os_thread_destroy(&it->thread);
+		it->state = IPC_THREAD_READY;
+	}
+
+	it->state = IPC_THREAD_STARTING;
 	cs->ipc_socket_fd = fd;
-	os_thread_start((struct os_thread *)&vs->thread,
-	                ipc_server_client_thread, (void *)cs);
+	cs->server = vs;
+	cs->server_thread_index = cs_index;
+	os_thread_start(&it->thread, ipc_server_client_thread, (void *)cs);
+
+	// Unlock when we are done.
+	os_mutex_unlock(&vs->global_state_lock);
 }
 
 #define NUM_POLL_EVENTS 8
@@ -366,122 +552,425 @@ check_epoll(struct ipc_server *vs)
 	}
 }
 
-static void
-set_rendering_state(volatile struct ipc_client_state *active_client,
-                    struct comp_swapchain_image **l,
-                    struct comp_swapchain_image **r,
-                    bool *using_idle_images)
+static uint32_t
+find_event_slot(volatile struct ipc_client_state *cs)
 {
-	// our ipc server thread will fill in l & r
-	// swapchain indices and toggle wait to false
-	// when the client calls end_frame, signalling
-	// us to render.
-	volatile struct ipc_render_state *render_state =
-	    &active_client->render_state;
-
-	if (!render_state->rendering) {
-		return;
+	uint64_t oldest_event_timestamp = UINT64_MAX;
+	uint32_t oldest_event_index = 0;
+	for (uint32_t i = 0; i < IPC_EVENT_QUEUE_SIZE; i++) {
+		if (cs->queued_events->timestamp < oldest_event_timestamp) {
+			oldest_event_index = i;
+		}
+		if (!cs->queued_events[i].pending) {
+			return i;
+		}
 	}
 
-	uint32_t li = render_state->l_swapchain_index;
-	uint32_t ri = render_state->r_swapchain_index;
-	struct comp_swapchain *cl = comp_swapchain(active_client->xscs[li]);
-	struct comp_swapchain *cr = comp_swapchain(active_client->xscs[ri]);
-	*l = &cl->images[render_state->l_image_index];
-	*r = &cr->images[render_state->r_image_index];
+	fprintf(stderr, "ERROR! event queue full - unconsumed event lost!\n");
+	return oldest_event_index;
+}
 
-	// set our client state back to waiting.
-	render_state->rendering = false;
+static void
+transition_overlay_visibility(volatile struct ipc_client_state *cs,
+                              bool visible)
+{
+	uint32_t event_slot = find_event_slot(cs);
+	uint64_t timestamp = os_monotonic_get_ns();
 
-	// comp_compositor_garbage_collect(c);
+	volatile struct ipc_queued_event *qe = &cs->queued_events[event_slot];
 
-	*using_idle_images = false;
+	qe->timestamp = timestamp;
+	qe->pending = true;
+	qe->event.type = XRT_COMPOSITOR_EVENT_OVERLAY_CHANGE;
+	qe->event.overlay.visible = visible;
+}
+
+static void
+send_client_state(volatile struct ipc_client_state *ics)
+{
+	uint32_t event_slot = find_event_slot(ics);
+	uint64_t timestamp = os_monotonic_get_ns();
+
+	volatile struct ipc_queued_event *qe = &ics->queued_events[event_slot];
+
+	qe->timestamp = timestamp;
+	qe->pending = true;
+	qe->event.type = XRT_COMPOSITOR_EVENT_STATE_CHANGE;
+	qe->event.state.visible = ics->client_state.session_visible;
+	qe->event.state.focused = ics->client_state.session_focused;
+}
+
+static bool
+_update_projection_layer(struct xrt_compositor *xc,
+                         volatile struct ipc_client_state *ics,
+                         volatile struct ipc_layer_entry *layer,
+                         uint32_t i)
+{
+	// xdev
+	uint32_t xdevi = layer->xdev_id;
+	// left
+	uint32_t lxsci = layer->swapchain_ids[0];
+	// right
+	uint32_t rxsci = layer->swapchain_ids[1];
+
+	struct xrt_device *xdev = ics->server->xdevs[xdevi];
+	struct xrt_swapchain *lxcs = ics->xscs[lxsci];
+	struct xrt_swapchain *rxcs = ics->xscs[rxsci];
+
+	if (lxcs == NULL || rxcs == NULL) {
+		fprintf(stderr,
+		        "ERROR: Invalid swap chain for projection layer.\n");
+		return false;
+	}
+
+	if (xdev == NULL) {
+		fprintf(stderr, "ERROR: Invalid xdev for projection layer.\n");
+		return false;
+	}
+
+	// Cast away volatile.
+	struct xrt_layer_data *data = (struct xrt_layer_data *)&layer->data;
+
+	xrt_comp_layer_stereo_projection(xc, xdev, lxcs, rxcs, data);
+
+	return true;
+}
+
+static bool
+_update_quad_layer(struct xrt_compositor *xc,
+                   volatile struct ipc_client_state *ics,
+                   volatile struct ipc_layer_entry *layer,
+                   uint32_t i)
+{
+	uint32_t xdevi = layer->xdev_id;
+	uint32_t sci = layer->swapchain_ids[0];
+
+	struct xrt_device *xdev = ics->server->xdevs[xdevi];
+	struct xrt_swapchain *xcs = ics->xscs[sci];
+
+	if (xcs == NULL) {
+		fprintf(stderr, "ERROR: Invalid swapchain for quad layer.\n");
+		return false;
+	}
+
+	if (xdev == NULL) {
+		fprintf(stderr, "ERROR: Invalid xdev for quad layer.\n");
+		return false;
+	}
+
+	// Cast away volatile.
+	struct xrt_layer_data *data = (struct xrt_layer_data *)&layer->data;
+
+	xrt_comp_layer_quad(xc, xdev, xcs, data);
+
+	return true;
 }
 
 static int
-main_loop(struct ipc_server *vs)
+_overlay_sort_func(const void *a, const void *b)
 {
-	struct xrt_compositor *xc = vs->xc;
-	struct comp_compositor *c = comp_compositor(xc);
+	struct _z_sort_data *oa = (struct _z_sort_data *)a;
+	struct _z_sort_data *ob = (struct _z_sort_data *)b;
+	if (oa->z_order < ob->z_order) {
+		return -1;
+	} else if (oa->z_order > ob->z_order) {
+		return 1;
+	}
+	return 0;
+}
 
-	// make sure all our client connections have a handle to the compositor
-	// and consistent initial state
-	vs->thread_state.server = vs;
-	vs->thread_state.xc = xc;
+static bool
+_update_layers(struct ipc_server *s, struct xrt_compositor *xc)
+{
+	struct _z_sort_data z_data[IPC_MAX_CLIENTS];
 
-	struct comp_swapchain_image *last_l = NULL;
-	struct comp_swapchain_image *last_r = NULL;
-
-	bool using_idle_images = true;
-
-	while (vs->running) {
-
-		/*
-		 * Check polling.
-		 */
-		check_epoll(vs);
-
-
-		/*
-		 * Update active client.
-		 */
-
-		volatile struct ipc_client_state *active_client = NULL;
-		if (vs->thread_state.active) {
-			active_client = &vs->thread_state;
-		}
-
-
-		/*
-		 * Render the swapchains.
-		 */
-
-		struct comp_swapchain_image *l = NULL;
-		struct comp_swapchain_image *r = NULL;
-
-		if (active_client == NULL || !active_client->active ||
-		    active_client->num_swapchains == 0) {
-			if (!using_idle_images) {
-				COMP_DEBUG(c, "Resetting to idle images.");
-				comp_renderer_set_idle_images(c->r);
-				using_idle_images = true;
-				last_l = NULL;
-				last_r = NULL;
+	// initialise, and fill in overlay app data
+	for (int32_t i = 0; i < IPC_MAX_CLIENTS; i++) {
+		volatile struct ipc_client_state *ics = &s->threads[i].ics;
+		z_data[i].index = -1;
+		z_data[i].z_order = -1;
+		// we need to create a list of overlay applications, sorted by z
+		if (ics->client_state.session_overlay) {
+			if (ics->client_state.session_active) {
+				z_data[i].index = i;
+				z_data[i].z_order = ics->client_state.z_order;
 			}
-		} else {
-			set_rendering_state(active_client, &l, &r,
-			                    &using_idle_images);
 		}
+	}
 
-		// Rendering idle images
-		if (l == NULL || r == NULL) {
-			comp_renderer_frame_cached(c->r);
-			comp_compositor_garbage_collect(c);
+	// ensure our primary application is enabled,
+	// and rendered first in the stack
+	if (s->active_client_index >= 0) {
+		z_data[s->active_client_index].index = s->active_client_index;
+		z_data[s->active_client_index].z_order = INT32_MIN;
+	}
+
+	// sort the stack array
+	qsort(z_data, IPC_MAX_CLIENTS, sizeof(struct _z_sort_data),
+	      _overlay_sort_func);
+
+	// render the layer stack
+	for (uint32_t i = 0; i < IPC_MAX_CLIENTS; i++) {
+		struct _z_sort_data *zd = &z_data[i];
+		if (zd->index < 0) {
 			continue;
 		}
 
-		// Rebuild command buffers if we are showing new buffers.
-		if (last_l != l || last_r != r) {
-			comp_renderer_reset(c->r);
+		volatile struct ipc_client_state *ics =
+		    &s->threads[zd->index].ics;
+
+		for (uint32_t j = 0; j < ics->render_state.num_layers; j++) {
+			volatile struct ipc_layer_entry *layer =
+			    &ics->render_state.layers[j];
+
+			switch (layer->data.type) {
+			case XRT_LAYER_STEREO_PROJECTION:
+				if (!_update_projection_layer(xc, ics, layer,
+				                              i)) {
+					return false;
+				}
+				break;
+			case XRT_LAYER_QUAD:
+				if (!_update_quad_layer(xc, ics, layer, i)) {
+					return false;
+				}
+				break;
+			default: break;
+			}
 		}
-		last_l = l;
-		last_r = r;
+	}
 
-		comp_renderer_frame(c->r, l, 0, r, 0);
+	return true;
+}
 
-		// Now is a good time to destroy objects.
-		comp_compositor_garbage_collect(c);
+
+
+static int
+main_loop(struct ipc_server *s)
+{
+	struct xrt_compositor *xc = s->xc;
+
+	// make sure all our client connections have a handle to the
+	// compositor and consistent initial state
+
+	while (s->running) {
+		int64_t frame_id;
+		uint64_t predicted_display_time;
+		uint64_t predicted_display_period;
+
+		xrt_comp_wait_frame(xc, &frame_id, &predicted_display_time,
+		                    &predicted_display_period);
+
+		uint64_t now = os_monotonic_get_ns();
+		uint64_t diff = predicted_display_time - now;
+
+		os_mutex_lock(&s->global_state_lock);
+
+		// Broadcast the new timing information to the helpers.
+		for (size_t i = 0; i < ARRAY_SIZE(s->threads); i++) {
+			u_rt_helper_new_sample(
+			    (struct u_rt_helper *)&s->threads[i].ics.urth,
+			    predicted_display_time, diff,
+			    predicted_display_period);
+		}
+
+		os_mutex_unlock(&s->global_state_lock);
+
+
+		xrt_comp_begin_frame(xc, frame_id);
+		xrt_comp_layer_begin(xc, frame_id, 0);
+
+		_update_layers(s, xc);
+
+		xrt_comp_layer_commit(xc, frame_id);
+
+		// Check polling last, so we know we have valid timing data.
+		check_epoll(s);
 	}
 
 	return 0;
 }
 
 
+static void
+handle_overlay_client_events(volatile struct ipc_client_state *ics,
+                             int active_id,
+                             int prev_active_id)
+{
+	// this is an overlay session.
+	if (ics->client_state.session_overlay) {
+
+		// switch between main applications
+		if (active_id >= 0 && prev_active_id >= 0) {
+			transition_overlay_visibility(ics, false);
+			transition_overlay_visibility(ics, true);
+		}
+
+		// switch from idle to active application
+		if (active_id >= 0 && prev_active_id < 0) {
+			transition_overlay_visibility(ics, true);
+		}
+
+		// switch from active application to idle
+		if (active_id < 0 && prev_active_id >= 0) {
+			transition_overlay_visibility(ics, false);
+		}
+	}
+}
+
+static void
+handle_focused_client_events(volatile struct ipc_client_state *ics,
+                             int active_id,
+                             int prev_active_id)
+{
+
+	// if our prev active id is -1 and our cur active id is -1, we
+	// can bail out early
+
+	if (active_id == -1 && prev_active_id == -1) {
+		return;
+	}
+
+	// set visibility/focus to false on all applications
+	ics->client_state.session_focused = false;
+	ics->client_state.session_visible = false;
+
+	// do we have a primary application?
+	if (active_id >= 0) {
+
+		// if we are an overlay, we are always visible
+		// if we have a primary application
+		if (ics->client_state.session_overlay) {
+			ics->client_state.session_visible = true;
+		}
+
+		// set visible + focused if we are the primary
+		// application
+		if (ics->server_thread_index == active_id) {
+			ics->client_state.session_visible = true;
+			ics->client_state.session_focused = true;
+		}
+		send_client_state(ics);
+		return;
+	}
+
+	// no primary application, set all overlays to synchronised
+	// state
+	if (ics->client_state.session_overlay) {
+		ics->client_state.session_focused = false;
+		ics->client_state.session_visible = false;
+		send_client_state(ics);
+	}
+}
+
+
+void
+init_server_state(struct ipc_server *s)
+{
+
+	// set up initial state for global vars, and each client state
+
+	s->active_client_index = -1; // we start off with no active client.
+	s->last_active_client_index = -1;
+	s->current_slot_index = 0;
+
+	for (uint32_t i = 0; i < IPC_MAX_CLIENTS; i++) {
+		volatile struct ipc_client_state *cs = &s->threads[i].ics;
+		cs->server = s;
+		cs->xc = s->xc;
+		cs->server_thread_index = -1;
+	}
+}
+
 /*
  *
  * Exported functions.
  *
  */
+
+void
+update_server_state(struct ipc_server *s)
+{
+	// multiple threads could call this at the same time.
+	os_mutex_lock(&s->global_state_lock);
+
+	// if our client that is set to active is still active,
+	// and it is the same as our last active client, we can
+	// early-out, as no events need to be sent
+
+	if (s->active_client_index >= 0) {
+
+		volatile struct ipc_client_state *ics =
+		    &s->threads[s->active_client_index].ics;
+
+		if (ics->client_state.session_active &&
+		    s->active_client_index == s->last_active_client_index) {
+			os_mutex_unlock(&s->global_state_lock);
+			return;
+		}
+	}
+
+
+	// our active application has changed - this would typically be
+	// switched by the monado-ctl application or other app making a
+	// 'set active application' ipc call, or it could be a
+	// connection loss resulting in us needing to 'fall through' to
+	// the first active application
+	//, or finally to the idle 'wallpaper' images.
+
+
+	bool set_idle = true;
+	int fallback_active_application = -1;
+
+	// do we have a fallback application?
+	for (uint32_t i = 0; i < IPC_MAX_CLIENTS; i++) {
+		volatile struct ipc_client_state *ics = &s->threads[i].ics;
+		if (ics->client_state.session_overlay == false &&
+		    ics->server_thread_index >= 0 &&
+		    ics->client_state.session_active) {
+			fallback_active_application = i;
+			set_idle = false;
+		}
+	}
+
+	// if our currently-set active primary application is not
+	// actually active/displayable, use the fallback application
+	// instead.
+	volatile struct ipc_client_state *ics =
+	    &s->threads[s->active_client_index].ics;
+	if (!(ics->client_state.session_overlay == false &&
+	      s->active_client_index >= 0 &&
+	      ics->client_state.session_active)) {
+		s->active_client_index = fallback_active_application;
+	}
+
+
+	// if we have no applications to fallback to, enable the idle
+	// wallpaper.
+	if (set_idle) {
+		s->active_client_index = -1;
+	}
+
+	for (uint32_t i = 0; i < IPC_MAX_CLIENTS; i++) {
+
+		volatile struct ipc_client_state *ics = &s->threads[i].ics;
+		if (ics->server_thread_index >= 0) {
+
+			handle_focused_client_events(
+			    ics, s->active_client_index,
+			    s->last_active_client_index);
+
+			handle_overlay_client_events(
+			    ics, s->active_client_index,
+			    s->last_active_client_index);
+		}
+	}
+
+	s->last_active_client_index = s->active_client_index;
+
+	os_mutex_unlock(&s->global_state_lock);
+	return;
+}
 
 int
 ipc_server_main(int argc, char **argv)
@@ -493,6 +982,7 @@ ipc_server_main(int argc, char **argv)
 		return ret;
 	}
 
+	init_server_state(s);
 	ret = main_loop(s);
 
 	teardown_all(s);

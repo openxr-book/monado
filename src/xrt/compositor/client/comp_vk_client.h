@@ -32,23 +32,32 @@ struct client_vk_compositor;
  * Almost a one to one mapping to a OpenXR swapchain.
  *
  * @ingroup comp_client
+ * @implements xrt_swapchain_vk
  */
 struct client_vk_swapchain
 {
 	struct xrt_swapchain_vk base;
+
+	//! Owning reference to the backing fd swapchain.
 	struct xrt_swapchain_fd *xscfd;
+
+	//! Non-owning reference to our parent compositor.
 	struct client_vk_compositor *c;
 };
 
 /*!
+ * @class client_vk_compositor
+ *
  * Wraps the real compositor providing a Vulkan based interface.
  *
  * @ingroup comp_client
+ * @implements xrt_compositor_vk
  */
 struct client_vk_compositor
 {
 	struct xrt_compositor_vk base;
 
+	//! Owning reference to the backing fd compositor
 	struct xrt_compositor_fd *xcfd;
 
 	struct vk_bundle vk;
@@ -61,32 +70,14 @@ struct client_vk_compositor
  *
  */
 
-/*!
- * Convenience function to convert a xrt_swapchain to a client_vk_swapchain.
- *
- * @ingroup comp_client
- */
-static inline struct client_vk_swapchain *
-client_vk_swapchain(struct xrt_swapchain *xsc)
-{
-	return (struct client_vk_swapchain *)xsc;
-}
-
-/*!
- * Convenience function to convert a xrt_compositor to a client_vk_compositor.
- *
- * @ingroup comp_client
- */
-static inline struct client_vk_compositor *
-client_vk_compositor(struct xrt_compositor *xc)
-{
-	return (struct client_vk_compositor *)xc;
-}
 
 /*!
  * Create a new client_vk_compositor.
  *
- * @ingroup comp_client
+ * Takes owenership of provided xcfd.
+ *
+ * @public @memberof client_vk_compositor
+ * @relatesalso xrt_compositor_fd
  */
 struct client_vk_compositor *
 client_vk_compositor_create(struct xrt_compositor_fd *xcfd,

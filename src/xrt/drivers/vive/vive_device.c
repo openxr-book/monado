@@ -15,7 +15,6 @@
 
 #include "util/u_device.h"
 #include "util/u_debug.h"
-#include "util/u_json.h"
 #include "util/u_var.h"
 #include "util/u_time.h"
 
@@ -24,14 +23,15 @@
 #include "os/os_hid.h"
 #include "os/os_time.h"
 
+#include "vive.h"
 #include "vive_device.h"
 #include "vive_protocol.h"
+#include "vive_config.h"
 
 
 #define VIVE_CLOCK_FREQ 48e6 // 48 MHz
 
-DEBUG_GET_ONCE_BOOL_OPTION(vive_spew, "VIVE_PRINT_SPEW", false)
-DEBUG_GET_ONCE_BOOL_OPTION(vive_debug, "VIVE_PRINT_DEBUG", false)
+DEBUG_GET_ONCE_LOG_OPTION(vive_log, "VIVE_LOG", U_LOGGING_WARN)
 
 static bool
 vive_mainboard_power_off(struct vive_device *d);
@@ -81,7 +81,7 @@ static void
 vive_device_update_inputs(struct xrt_device *xdev)
 {
 	struct vive_device *d = vive_device(xdev);
-	VIVE_SPEW(d, "ENTER!");
+	VIVE_TRACE(d, "ENTER!");
 }
 
 static void
@@ -94,7 +94,7 @@ vive_device_get_tracked_pose(struct xrt_device *xdev,
 	struct vive_device *d = vive_device(xdev);
 
 	if (name != XRT_INPUT_GENERIC_HEAD_POSE) {
-		VIVE_ERROR("unknown input name");
+		U_LOG_E("unknown input name");
 		return;
 	}
 
@@ -173,7 +173,7 @@ vive_mainboard_get_device_info(struct vive_device *d)
 	type = __le16_to_cpu(report.type);
 	if (type != VIVE_HEADSET_MAINBOARD_DEVICE_INFO_REPORT_TYPE ||
 	    report.len != 60) {
-		VIVE_ERROR("Unexpected device info!");
+		VIVE_WARN(d, "Unexpected device info!");
 		return -1;
 	}
 
@@ -182,11 +182,11 @@ vive_mainboard_get_device_info(struct vive_device *d)
 	d->firmware.display_firmware_version =
 	    __le32_to_cpu(report.display_firmware_version);
 
-	VIVE_DEBUG(d, "EDID Manufacturer ID: %c%c%c, Product code: 0x%04x",
-	           '@' + (edid_vid >> 10), '@' + ((edid_vid >> 5) & 0x1f),
-	           '@' + (edid_vid & 0x1f), __le16_to_cpu(report.edid_pid));
-	VIVE_DEBUG(d, "Display firmware version: %u",
-	           d->firmware.display_firmware_version);
+	VIVE_INFO(d, "EDID Manufacturer ID: %c%c%c, Product code: 0x%04x",
+	          '@' + (edid_vid >> 10), '@' + ((edid_vid >> 5) & 0x1f),
+	          '@' + (edid_vid & 0x1f), __le16_to_cpu(report.edid_pid));
+	VIVE_INFO(d, "Display firmware version: %u",
+	          d->firmware.display_firmware_version);
 
 	return 0;
 }
@@ -225,7 +225,7 @@ vive_mainboard_decode_message(struct vive_device *d,
 
 	if (__le16_to_cpu(report->unknown) != 0x2cd0 || report->len != 60 ||
 	    report->reserved1 || report->reserved2[0]) {
-		VIVE_ERROR("Unexpected message content.");
+		VIVE_WARN(d, "Unexpected message content.");
 	}
 
 	ipd = __le16_to_cpu(report->ipd);
@@ -235,18 +235,18 @@ vive_mainboard_decode_message(struct vive_device *d,
 	if (d->board.ipd != ipd) {
 		d->board.ipd = ipd;
 		d->board.lens_separation = lens_separation;
-		VIVE_SPEW(d, "IPD %4.1f mm. Lens separation %4.1f mm.",
-		          1e-2 * ipd, 1e-2 * lens_separation);
+		VIVE_TRACE(d, "IPD %4.1f mm. Lens separation %4.1f mm.",
+		           1e-2 * ipd, 1e-2 * lens_separation);
 	}
 
 	if (d->board.proximity != proximity) {
-		VIVE_SPEW(d, "Proximity %d", proximity);
+		VIVE_TRACE(d, "Proximity %d", proximity);
 		d->board.proximity = proximity;
 	}
 
 	if (d->board.button != report->button) {
 		d->board.button = report->button;
-		VIVE_SPEW(d, "Button %d.", report->button);
+		VIVE_TRACE(d, "Button %d.", report->button);
 		d->rot_filtered = (struct xrt_quat){0, 0, 0, 1};
 	}
 }
@@ -347,11 +347,11 @@ update_imu(struct vive_device *d, struct vive_imu_report *report)
 		    scale * d->imu.gyro_scale.z * gyro[2] - d->imu.gyro_bias.z,
 		};
 
-		VIVE_SPEW(d, "ACC  %f %f %f", acceleration.x, acceleration.y,
-		          acceleration.z);
+		VIVE_TRACE(d, "ACC  %f %f %f", acceleration.x, acceleration.y,
+		           acceleration.z);
 
-		VIVE_SPEW(d, "GYRO %f %f %f", angular_velocity.x,
-		          angular_velocity.y, angular_velocity.z);
+		VIVE_TRACE(d, "GYRO %f %f %f", angular_velocity.x,
+		           angular_velocity.y, angular_velocity.z);
 
 		switch (d->variant) {
 		case VIVE_VARIANT_VIVE:
@@ -388,7 +388,7 @@ update_imu(struct vive_device *d, struct vive_imu_report *report)
 			angular_velocity_fixed.z = -angular_velocity.z;
 			angular_velocity = angular_velocity_fixed;
 		} break;
-		default: VIVE_ERROR("Unhandled Vive variant\n"); return;
+		default: VIVE_ERROR(d, "Unhandled Vive variant"); return;
 		}
 
 		d->imu.time_ns += dt_ns;
@@ -421,21 +421,22 @@ vive_mainboard_read_one_msg(struct vive_device *d)
 		return true;
 	}
 	if (ret < 0) {
-		VIVE_ERROR("Failed to read device '%i'!", ret);
+		VIVE_ERROR(d, "Failed to read device '%i'!", ret);
 		return false;
 	}
 
 	switch (buffer[0]) {
 	case VIVE_MAINBOARD_STATUS_REPORT_ID:
 		if (ret != sizeof(struct vive_mainboard_status_report)) {
-			VIVE_ERROR("Mainboard status report has invalid size.");
+			VIVE_ERROR(d,
+			           "Mainboard status report has invalid size.");
 			return false;
 		}
 		vive_mainboard_decode_message(
 		    d, (struct vive_mainboard_status_report *)buffer);
 		break;
 	default:
-		VIVE_ERROR("Unknown mainboard message type %d", buffer[0]);
+		VIVE_ERROR(d, "Unknown mainboard message type %d", buffer[0]);
 		break;
 	}
 
@@ -480,19 +481,21 @@ vive_sensors_read_one_msg(struct vive_device *d)
 		return true;
 	}
 	if (ret < 0) {
-		VIVE_ERROR("Failed to read device '%i'!", ret);
+		VIVE_ERROR(d, "Failed to read device '%i'!", ret);
 		return false;
 	}
 
 	switch (buffer[0]) {
 	case VIVE_IMU_REPORT_ID:
 		if (ret != 52) {
-			VIVE_ERROR("Wrong IMU report size: %d", ret);
+			VIVE_ERROR(d, "Wrong IMU report size: %d", ret);
 			return false;
 		}
 		update_imu(d, (struct vive_imu_report *)buffer);
 		break;
-	default: VIVE_ERROR("Unknown sensor message type %d", buffer[0]); break;
+	default:
+		VIVE_ERROR(d, "Unknown sensor message type %d", buffer[0]);
+		break;
 	}
 
 	return true;
@@ -516,300 +519,6 @@ vive_sensors_run_thread(void *ptr)
 	}
 
 	return NULL;
-}
-
-static void
-print_vec3(const char *title, struct xrt_vec3 *vec)
-{
-	printf("%s = %f %f %f\n", title, (double)vec->x, (double)vec->y,
-	       (double)vec->z);
-}
-
-
-static void
-_array_to_vec3(const float array[3], struct xrt_vec3 *result)
-{
-	result->x = array[0];
-	result->y = array[1];
-	result->z = array[2];
-}
-
-static void
-_json_to_vec3(const cJSON *json, struct xrt_vec3 *result)
-{
-	float result_array[3];
-
-	assert(cJSON_GetArraySize(json) == 3);
-	const cJSON *item = NULL;
-	size_t i = 0;
-	cJSON_ArrayForEach(item, json)
-	{
-		assert(cJSON_IsNumber(item));
-		result_array[i] = (float)item->valuedouble;
-		++i;
-		if (i == 3) {
-			break;
-		}
-	}
-
-	_array_to_vec3(result_array, result);
-}
-
-static long long
-_json_to_int(const cJSON *item)
-{
-	if (item != NULL) {
-		return item->valueint;
-	} else {
-		return 0;
-	}
-}
-
-static void
-_json_get_vec3(const cJSON *json, const char *name, struct xrt_vec3 *result)
-{
-	const cJSON *item = cJSON_GetObjectItemCaseSensitive(json, name);
-
-	_json_to_vec3(item, result);
-}
-
-static bool
-_json_get_matrix_3x3(const cJSON *json,
-                     const char *name,
-                     struct xrt_matrix_3x3 *result)
-{
-	const cJSON *vec3_arr = cJSON_GetObjectItemCaseSensitive(json, name);
-
-	// Some sanity checking.
-	if (vec3_arr == NULL || cJSON_GetArraySize(vec3_arr) != 3) {
-		return false;
-	}
-
-	size_t total = 0;
-	const cJSON *vec = NULL;
-	cJSON_ArrayForEach(vec, vec3_arr)
-	{
-		assert(cJSON_GetArraySize(vec) == 3);
-		const cJSON *elem = NULL;
-		cJSON_ArrayForEach(elem, vec)
-		{
-			// Just in case.
-			if (total >= 9) {
-				break;
-			}
-
-			assert(cJSON_IsNumber(elem));
-			result->v[total++] = (float)elem->valuedouble;
-		}
-	}
-
-	return true;
-}
-
-static char *
-_json_get_string(const cJSON *json, const char *name)
-{
-	const cJSON *item = cJSON_GetObjectItemCaseSensitive(json, name);
-	return strdup(item->valuestring);
-}
-
-static double
-_json_get_double(const cJSON *json, const char *name)
-{
-	const cJSON *item = cJSON_GetObjectItemCaseSensitive(json, name);
-	return item->valuedouble;
-}
-
-static float
-_json_get_float(const cJSON *json, const char *name)
-{
-	const cJSON *item = cJSON_GetObjectItemCaseSensitive(json, name);
-	return (float)item->valuedouble;
-}
-
-static long long
-_json_get_int(const cJSON *json, const char *name)
-{
-	const cJSON *item = cJSON_GetObjectItemCaseSensitive(json, name);
-	return _json_to_int(item);
-}
-
-static void
-_get_color_coeffs(struct xrt_hmd_parts *hmd,
-                  const cJSON *coeffs,
-                  uint8_t eye,
-                  uint8_t channel)
-{
-	// this is 4 on index, all values populated
-	// assert(coeffs->length == 8);
-	// only 3 coeffs contain values
-	const cJSON *item = NULL;
-	size_t i = 0;
-	cJSON_ArrayForEach(item, coeffs)
-	{
-		hmd->distortion.vive.coefficients[eye][i][channel] =
-		    (float)item->valuedouble;
-		++i;
-		if (i == 3) {
-			break;
-		}
-	}
-}
-
-static void
-_get_color_coeffs_lookup(struct xrt_hmd_parts *hmd,
-                         const cJSON *eye_json,
-                         const char *name,
-                         uint8_t eye,
-                         uint8_t channel)
-{
-	const cJSON *distortion =
-	    cJSON_GetObjectItemCaseSensitive(eye_json, name);
-	if (distortion == NULL) {
-		return;
-	}
-
-	const cJSON *coeffs =
-	    cJSON_GetObjectItemCaseSensitive(distortion, "coeffs");
-	if (coeffs == NULL) {
-		return;
-	}
-
-	_get_color_coeffs(hmd, coeffs, eye, channel);
-}
-
-static void
-_get_pose_from_pos_x_z(const cJSON *obj, struct xrt_pose *pose)
-{
-	struct xrt_vec3 plus_x, plus_z;
-	_json_get_vec3(obj, "plus_x", &plus_x);
-	_json_get_vec3(obj, "plus_z", &plus_z);
-	_json_get_vec3(obj, "position", &pose->position);
-
-	math_quat_from_plus_x_z(&plus_x, &plus_z, &pose->orientation);
-}
-
-static void
-get_distortion_properties(struct vive_device *d,
-                          const cJSON *eye_transform_json,
-                          uint8_t eye)
-{
-	struct xrt_hmd_parts *hmd = d->base.hmd;
-
-	const cJSON *eye_json = cJSON_GetArrayItem(eye_transform_json, eye);
-	if (eye_json == NULL) {
-		return;
-	}
-
-	struct xrt_matrix_3x3 rot = {0};
-	if (_json_get_matrix_3x3(eye_json, "eye_to_head", &rot)) {
-		math_quat_from_matrix_3x3(&rot, &d->display.rot[eye]);
-	}
-
-	// TODO: store grow_for_undistort per eye
-	// clang-format off
-	hmd->distortion.vive.grow_for_undistort = _json_get_float(eye_json, "grow_for_undistort");
-	hmd->distortion.vive.undistort_r2_cutoff[eye] = _json_get_float(eye_json, "undistort_r2_cutoff");
-	// clang-format on
-
-	const cJSON *distortion =
-	    cJSON_GetObjectItemCaseSensitive(eye_json, "distortion");
-	if (distortion != NULL) {
-		// TODO: store center per color
-		// clang-format off
-		hmd->distortion.vive.center[eye][0] = _json_get_float(distortion, "center_x");
-		hmd->distortion.vive.center[eye][1] = _json_get_float(distortion, "center_y");
-		// clang-format on
-
-		// green
-		const cJSON *coeffs =
-		    cJSON_GetObjectItemCaseSensitive(distortion, "coeffs");
-		if (coeffs != NULL) {
-			_get_color_coeffs(hmd, coeffs, eye, 1);
-		}
-	}
-
-	_get_color_coeffs_lookup(hmd, eye_json, "distortion_red", eye, 0);
-	_get_color_coeffs_lookup(hmd, eye_json, "distortion_blue", eye, 2);
-}
-
-static void
-get_lighthouse_config(struct vive_device *d, const cJSON *json)
-{
-	const cJSON *lh =
-	    cJSON_GetObjectItemCaseSensitive(json, "lighthouse_config");
-	if (lh == NULL) {
-		return;
-	}
-
-	const cJSON *json_map =
-	    cJSON_GetObjectItemCaseSensitive(lh, "channelMap");
-	const cJSON *json_normals =
-	    cJSON_GetObjectItemCaseSensitive(lh, "modelNormals");
-	const cJSON *json_points =
-	    cJSON_GetObjectItemCaseSensitive(lh, "modelPoints");
-
-	if (json_map == NULL || json_normals == NULL || json_points == NULL) {
-		return;
-	}
-
-	size_t map_size = cJSON_GetArraySize(json_map);
-	size_t normals_size = cJSON_GetArraySize(json_normals);
-	size_t points_size = cJSON_GetArraySize(json_points);
-
-	if (map_size != normals_size || normals_size != points_size ||
-	    map_size <= 0) {
-		return;
-	}
-
-	uint32_t *map = U_TYPED_ARRAY_CALLOC(uint32_t, map_size);
-	struct lh_sensor *s = U_TYPED_ARRAY_CALLOC(struct lh_sensor, map_size);
-
-	size_t i = 0;
-	const cJSON *item = NULL;
-	cJSON_ArrayForEach(item, json_map)
-	{
-		// Build the channel map.
-		map[i++] = _json_to_int(item);
-	}
-
-	i = 0;
-	item = NULL;
-	cJSON_ArrayForEach(item, json_normals)
-	{
-		// Store in channel map order.
-		_json_to_vec3(item, &s[map[i++]].normal);
-	}
-
-	i = 0;
-	item = NULL;
-	cJSON_ArrayForEach(item, json_points)
-	{
-		// Store in channel map order.
-		_json_to_vec3(item, &s[map[i++]].pos);
-	}
-
-	// Free the map.
-	free(map);
-	map = NULL;
-
-	d->lh.sensors = s;
-	d->lh.num_sensors = map_size;
-
-
-	// Transform the sensors into IMU space.
-	struct xrt_pose trackref_to_imu = {0};
-	math_pose_invert(&d->imu.trackref, &trackref_to_imu);
-
-	for (i = 0; i < d->lh.num_sensors; i++) {
-		struct xrt_vec3 point = d->lh.sensors[i].pos;
-		struct xrt_vec3 normal = d->lh.sensors[i].normal;
-
-		math_quat_rotate_vec3(&trackref_to_imu.orientation, &normal,
-		                      &d->lh.sensors[i].normal);
-		math_pose_transform_point(&trackref_to_imu, &point,
-		                          &d->lh.sensors[i].pos);
-	}
 }
 
 void
@@ -841,125 +550,6 @@ vive_init_defaults(struct vive_device *d)
 	hmd->distortion.vive.undistort_r2_cutoff[1] = 1.0f;
 }
 
-bool
-vive_parse_config(struct vive_device *d, char *json_string)
-{
-	VIVE_DEBUG(d, "JSON config:\n%s\n", json_string);
-
-	cJSON *json = cJSON_Parse(json_string);
-	if (!cJSON_IsObject(json)) {
-		VIVE_ERROR("Could not parse JSON data.");
-		return false;
-	}
-
-	switch (d->variant) {
-	case VIVE_VARIANT_VIVE:
-		_json_get_vec3(json, "acc_bias", &d->imu.acc_bias);
-		_json_get_vec3(json, "acc_scale", &d->imu.acc_scale);
-		_json_get_vec3(json, "gyro_bias", &d->imu.gyro_bias);
-		_json_get_vec3(json, "gyro_scale", &d->imu.gyro_scale);
-		break;
-	case VIVE_VARIANT_PRO: {
-		const cJSON *imu =
-		    cJSON_GetObjectItemCaseSensitive(json, "imu");
-		_json_get_vec3(imu, "acc_bias", &d->imu.acc_bias);
-		_json_get_vec3(imu, "acc_scale", &d->imu.acc_scale);
-		_json_get_vec3(imu, "gyro_bias", &d->imu.gyro_bias);
-		_json_get_vec3(imu, "gyro_scale", &d->imu.gyro_scale);
-	} break;
-	case VIVE_VARIANT_INDEX: {
-		const cJSON *head =
-		    cJSON_GetObjectItemCaseSensitive(json, "head");
-		_get_pose_from_pos_x_z(head, &d->display.trackref);
-
-		const cJSON *imu =
-		    cJSON_GetObjectItemCaseSensitive(json, "imu");
-		_get_pose_from_pos_x_z(imu, &d->imu.trackref);
-
-		_json_get_vec3(imu, "acc_bias", &d->imu.acc_bias);
-		_json_get_vec3(imu, "acc_scale", &d->imu.acc_scale);
-		_json_get_vec3(imu, "gyro_bias", &d->imu.gyro_bias);
-
-		get_lighthouse_config(d, json);
-
-		struct xrt_pose trackref_to_head;
-		struct xrt_pose imu_to_head;
-
-		math_pose_invert(&d->display.trackref, &trackref_to_head);
-		math_pose_transform(&trackref_to_head, &d->imu.trackref,
-		                    &imu_to_head);
-
-		d->display.imuref = imu_to_head;
-	} break;
-	default: VIVE_ERROR("Unknown Vive variant.\n"); return false;
-	}
-
-	d->firmware.model_number = _json_get_string(json, "model_number");
-	if (d->variant != VIVE_VARIANT_INDEX) {
-		// clang-format off
-		d->firmware.mb_serial_number = _json_get_string(json, "mb_serial_number");
-		d->display.lens_separation = _json_get_double(json, "lens_separation");
-		// clang-format on
-	}
-	d->firmware.device_serial_number =
-	    _json_get_string(json, "device_serial_number");
-
-	const cJSON *device_json =
-	    cJSON_GetObjectItemCaseSensitive(json, "device");
-	if (device_json) {
-		if (d->variant != VIVE_VARIANT_INDEX) {
-			d->display.persistence =
-			    _json_get_double(device_json, "persistence");
-			d->base.hmd->distortion.vive.aspect_x_over_y =
-			    _json_get_float(device_json,
-			                    "physical_aspect_x_over_y");
-		}
-		d->display.eye_target_height_in_pixels =
-		    (uint16_t)_json_get_int(device_json,
-		                            "eye_target_height_in_pixels");
-		d->display.eye_target_width_in_pixels = (uint16_t)_json_get_int(
-		    device_json, "eye_target_width_in_pixels");
-	}
-
-	const cJSON *eye_transform_json =
-	    cJSON_GetObjectItemCaseSensitive(json, "tracking_to_eye_transform");
-	if (eye_transform_json) {
-		for (uint8_t eye = 0; eye < 2; eye++) {
-			get_distortion_properties(d, eye_transform_json, eye);
-		}
-	}
-
-	cJSON_Delete(json);
-
-	// clang-format off
-	VIVE_DEBUG(d, "= Vive configuration =");
-	VIVE_DEBUG(d, "lens_separation: %f", d->display.lens_separation);
-	VIVE_DEBUG(d, "persistence: %f", d->display.persistence);
-	VIVE_DEBUG(d, "physical_aspect_x_over_y: %f", (double)d->base.hmd->distortion.vive.aspect_x_over_y);
-
-	VIVE_DEBUG(d, "model_number: %s", d->firmware.model_number);
-	VIVE_DEBUG(d, "mb_serial_number: %s", d->firmware.mb_serial_number);
-	VIVE_DEBUG(d, "device_serial_number: %s", d->firmware.device_serial_number);
-
-	VIVE_DEBUG(d, "eye_target_height_in_pixels: %d", d->display.eye_target_height_in_pixels);
-	VIVE_DEBUG(d, "eye_target_width_in_pixels: %d", d->display.eye_target_width_in_pixels);
-
-	if (d->print_debug) {
-		print_vec3("acc_bias", &d->imu.acc_bias);
-		print_vec3("acc_scale", &d->imu.acc_scale);
-		print_vec3("gyro_bias", &d->imu.gyro_bias);
-		print_vec3("gyro_scale", &d->imu.gyro_scale);
-	}
-
-	VIVE_DEBUG(d, "grow_for_undistort: %f", (double)d->base.hmd->distortion.vive.grow_for_undistort);
-
-	VIVE_DEBUG(d, "undistort_r2_cutoff 0: %f", (double)d->base.hmd->distortion.vive.undistort_r2_cutoff[0]);
-	VIVE_DEBUG(d, "undistort_r2_cutoff 1: %f", (double)d->base.hmd->distortion.vive.undistort_r2_cutoff[1]);
-	// clang-format on
-
-	return true;
-}
-
 struct vive_device *
 vive_device_create(struct os_hid_device *mainboard_dev,
                    struct os_hid_device *sensors_dev,
@@ -979,8 +569,7 @@ vive_device_create(struct os_hid_device *mainboard_dev,
 	d->base.name = XRT_DEVICE_GENERIC_HMD;
 	d->mainboard_dev = mainboard_dev;
 	d->sensors_dev = sensors_dev;
-	d->print_spew = debug_get_bool_option_vive_spew();
-	d->print_debug = debug_get_bool_option_vive_debug();
+	d->ll = debug_get_log_option_vive_log();
 	d->variant = variant;
 
 	vive_init_defaults(d);
@@ -1011,26 +600,26 @@ vive_device_create(struct os_hid_device *mainboard_dev,
 	                   &d->firmware.hardware_version_major);
 
 	/*
-	VIVE_DEBUG(d, "Firmware version %u %s@%s FPGA %u.%u",
-	           d->firmware.firmware_version, report.string1, report.string2,
-	           report.fpga_version_major, report.fpga_version_minor);
+	VIVE_INFO(d, "Firmware version %u %s@%s FPGA %u.%u",
+	          d->firmware.firmware_version, report.string1, report.string2,
+	          report.fpga_version_major, report.fpga_version_minor);
 	*/
 
-	VIVE_DEBUG(d, "Firmware version %u", d->firmware.firmware_version);
-	VIVE_DEBUG(d, "Hardware revision: %d rev %d.%d.%d",
-	           d->firmware.hardware_revision,
-	           d->firmware.hardware_version_major,
-	           d->firmware.hardware_version_minor,
-	           d->firmware.hardware_version_micro);
+	VIVE_INFO(d, "Firmware version %u", d->firmware.firmware_version);
+	VIVE_INFO(d, "Hardware revision: %d rev %d.%d.%d",
+	          d->firmware.hardware_revision,
+	          d->firmware.hardware_version_major,
+	          d->firmware.hardware_version_minor,
+	          d->firmware.hardware_version_micro);
 
 	vive_get_imu_range_report(d->sensors_dev, &d->imu.gyro_range,
 	                          &d->imu.acc_range);
-	VIVE_DEBUG(d, "Vive gyroscope range     %f", d->imu.gyro_range);
-	VIVE_DEBUG(d, "Vive accelerometer range %f", d->imu.acc_range);
+	VIVE_INFO(d, "Vive gyroscope range     %f", d->imu.gyro_range);
+	VIVE_INFO(d, "Vive accelerometer range %f", d->imu.acc_range);
 
 	char *config = vive_read_config(d->sensors_dev);
 	if (config != NULL) {
-		vive_parse_config(d, config);
+		vive_config_parse(d, config);
 		free(config);
 	}
 
@@ -1087,7 +676,7 @@ vive_device_create(struct os_hid_device *mainboard_dev,
 		        (double)d->base.hmd->views[eye].lens_center.y_meters, 0,
 		        &d->base.hmd->views[eye].fov)) {
 			VIVE_ERROR(
-			    "Failed to compute the partial fields of view.");
+			    d, "Failed to compute the partial fields of view.");
 			free(d);
 			return NULL;
 		}
@@ -1114,7 +703,7 @@ vive_device_create(struct os_hid_device *mainboard_dev,
 		ret = os_thread_helper_start(&d->mainboard_thread,
 		                             vive_mainboard_run_thread, d);
 		if (ret != 0) {
-			VIVE_ERROR("Failed to start mainboard thread!");
+			VIVE_ERROR(d, "Failed to start mainboard thread!");
 			vive_device_destroy((struct xrt_device *)d);
 			return NULL;
 		}
@@ -1123,7 +712,7 @@ vive_device_create(struct os_hid_device *mainboard_dev,
 	ret = os_thread_helper_start(&d->sensors_thread,
 	                             vive_sensors_run_thread, d);
 	if (ret != 0) {
-		VIVE_ERROR("Failed to start sensors thread!");
+		VIVE_ERROR(d, "Failed to start sensors thread!");
 		vive_device_destroy((struct xrt_device *)d);
 		return NULL;
 	}

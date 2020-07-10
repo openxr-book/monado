@@ -12,6 +12,7 @@
 #include "xrt/xrt_device.h"
 #include "math/m_imu_3dof.h"
 #include "os/os_threading.h"
+#include "util/u_logging.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -48,6 +49,9 @@ enum VIVE_VARIANT
 	VIVE_VARIANT_INDEX
 };
 
+/*!
+ * @implements xrt_device
+ */
 struct vive_device
 {
 	struct xrt_device base;
@@ -88,8 +92,8 @@ struct vive_device
 	{
 		double lens_separation;
 		double persistence;
-		uint16_t eye_target_height_in_pixels;
-		uint16_t eye_target_width_in_pixels;
+		int eye_target_height_in_pixels;
+		int eye_target_width_in_pixels;
 
 		struct xrt_quat rot[2];
 
@@ -115,15 +119,14 @@ struct vive_device
 		uint8_t hardware_version_micro;
 		uint8_t hardware_version_minor;
 		uint8_t hardware_version_major;
-		char *mb_serial_number;
-		char *model_number;
-		char *device_serial_number;
+		char mb_serial_number[32];
+		char model_number[32];
+		char device_serial_number[32];
 	} firmware;
 
 	struct xrt_quat rot_filtered;
 
-	bool print_spew;
-	bool print_debug;
+	enum u_logging_level ll;
 	bool disconnect_notified;
 
 	struct
@@ -137,36 +140,6 @@ struct vive_device *
 vive_device_create(struct os_hid_device *mainboard_dev,
                    struct os_hid_device *sensors_dev,
                    enum VIVE_VARIANT variant);
-
-/*
- *
- * Printing functions.
- *
- */
-
-#define VIVE_SPEW(p, ...)                                                      \
-	do {                                                                   \
-		if (p->print_spew) {                                           \
-			fprintf(stderr, "%s - ", __func__);                    \
-			fprintf(stderr, __VA_ARGS__);                          \
-			fprintf(stderr, "\n");                                 \
-		}                                                              \
-	} while (false)
-#define VIVE_DEBUG(p, ...)                                                     \
-	do {                                                                   \
-		if (p->print_debug) {                                          \
-			fprintf(stderr, "%s - ", __func__);                    \
-			fprintf(stderr, __VA_ARGS__);                          \
-			fprintf(stderr, "\n");                                 \
-		}                                                              \
-	} while (false)
-
-#define VIVE_ERROR(...)                                                        \
-	do {                                                                   \
-		fprintf(stderr, "%s - ", __func__);                            \
-		fprintf(stderr, __VA_ARGS__);                                  \
-		fprintf(stderr, "\n");                                         \
-	} while (false)
 
 #ifdef __cplusplus
 }

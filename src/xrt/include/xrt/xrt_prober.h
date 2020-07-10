@@ -155,8 +155,41 @@ struct xrt_prober
 	//! Factory for producing tracked objects.
 	struct xrt_tracking_factory *tracking;
 
+	/*!
+	 * Enumerate all connected devices, whether or not we have an associated
+	 * driver.
+	 *
+	 * @note Code consuming this interface should use
+	 * xrt_prober_probe()
+	 */
 	int (*probe)(struct xrt_prober *xp);
 	int (*dump)(struct xrt_prober *xp);
+	/*!
+	 * Iterate through drivers (by ID and auto-probers) checking to see if
+	 * they can handle any connected devices from the last xrt_prober::probe
+	 * call, opening those devices to create instances of xrt_device
+	 * implementations.
+	 *
+	 * If no HMD (not even a dummy HMD) is found, then no devices will be
+	 * returned (all xdevs will be NULL). Otherwise, xdevs will be populated
+	 * with the HMD in xdevs[0], and any subsequent non-NULL values
+	 * referring to additional non-HMD devices.
+	 *
+	 * @param xp Pointer to self
+	 * @param[in,out] xdevs Pointer to xrt_device array. Array elements will
+	 * be populated.
+	 * @param[in] num_xdevs The capacity of the @p xdevs array.
+	 *
+	 * @return 0 on success (including "no HMD found"), <0 on error.
+	 *
+	 * Returned devices have their ownership transferred to the caller: all
+	 * should be cleaned up with xrt_device_destroy().
+	 *
+	 * @note Code consuming this interface should use
+	 * xrt_prober_select(). Typically used through an xrt_instance and the
+	 * xrt_instance_select() method which usually calls xrt_prober_probe()
+	 * and xrt_prober_select().
+	 */
 	int (*select)(struct xrt_prober *xp,
 	              struct xrt_device **xdevs,
 	              size_t num_xdevs);
@@ -178,13 +211,20 @@ struct xrt_prober
 	                             int length);
 	bool (*can_open)(struct xrt_prober *xp,
 	                 struct xrt_prober_device *xpdev);
+	/*!
+	 * Destroy the prober and set the pointer to null.
+	 *
+	 * Code consuming this interface should use xrt_prober_destroy().
+	 *
+	 * @param xp_ptr pointer to self-pointer
+	 */
 	void (*destroy)(struct xrt_prober **xp_ptr);
 };
 
 /*!
  * Helper function for @ref xrt_prober::probe.
  *
- * @ingroup xrt_iface
+ * @public @memberof xrt_prober
  */
 static inline int
 xrt_prober_probe(struct xrt_prober *xp)
@@ -195,7 +235,7 @@ xrt_prober_probe(struct xrt_prober *xp)
 /*!
  * Helper function for @ref xrt_prober::dump.
  *
- * @ingroup xrt_iface
+ * @public @memberof xrt_prober
  */
 static inline int
 xrt_prober_dump(struct xrt_prober *xp)
@@ -206,7 +246,7 @@ xrt_prober_dump(struct xrt_prober *xp)
 /*!
  * Helper function for @ref xrt_prober::select.
  *
- * @ingroup xrt_iface
+ * @public @memberof xrt_prober
  */
 static inline int
 xrt_prober_select(struct xrt_prober *xp,
@@ -219,7 +259,7 @@ xrt_prober_select(struct xrt_prober *xp,
 /*!
  * Helper function for @ref xrt_prober::open_hid_interface.
  *
- * @ingroup xrt_iface
+ * @public @memberof xrt_prober
  */
 static inline int
 xrt_prober_open_hid_interface(struct xrt_prober *xp,
@@ -233,7 +273,7 @@ xrt_prober_open_hid_interface(struct xrt_prober *xp,
 /*!
  * Helper function for @ref xrt_prober::get_string_descriptor.
  *
- * @ingroup xrt_iface
+ * @public @memberof xrt_prober
  */
 static inline int
 xrt_prober_get_string_descriptor(struct xrt_prober *xp,
@@ -249,7 +289,7 @@ xrt_prober_get_string_descriptor(struct xrt_prober *xp,
 /*!
  * Helper function for @ref xrt_prober::can_open.
  *
- * @ingroup xrt_iface
+ * @public @memberof xrt_prober
  */
 static inline bool
 xrt_prober_can_open(struct xrt_prober *xp, struct xrt_prober_device *xpdev)
@@ -261,7 +301,7 @@ xrt_prober_can_open(struct xrt_prober *xp, struct xrt_prober_device *xpdev)
 /*!
  * Helper function for @ref xrt_prober::xrt_prober_open_video_device.
  *
- * @ingroup xrt_iface
+ * @public @memberof xrt_prober
  */
 static inline int
 xrt_prober_open_video_device(struct xrt_prober *xp,
@@ -275,7 +315,7 @@ xrt_prober_open_video_device(struct xrt_prober *xp,
 /*!
  * Helper function for @ref xrt_prober::list_video_devices.
  *
- * @ingroup xrt_iface
+ * @public @memberof xrt_prober
  */
 static inline int
 xrt_prober_list_video_devices(struct xrt_prober *xp,
@@ -288,7 +328,7 @@ xrt_prober_list_video_devices(struct xrt_prober *xp,
 /*!
  * Helper function for @ref xrt_prober::destroy.
  *
- * @ingroup xrt_iface
+ * @public @memberof xrt_prober
  */
 static inline void
 xrt_prober_destroy(struct xrt_prober **xp_ptr)
@@ -302,23 +342,24 @@ xrt_prober_destroy(struct xrt_prober **xp_ptr)
 }
 
 /*!
- * Call this function to create the @ref xrt_prober. This function is setup in
- * the the very small target wrapper.c for each binary.
+ * Create a prober with a list of known devices and autoprobers.
  *
- * @ingroup xrt_iface
- */
-int
-xrt_prober_create(struct xrt_prober **out_xp);
-
-/*!
- * Used by the target binary to create the prober with a list of drivers.
+ * Typically used by xrt_instance_create implementations to create the prober,
+ * often with a shared list called `target_list`.
  *
- * @ingroup xrt_iface
+ * @param[out] out_xp Pointer to xrt_prober pointer, will be populated with
+ * created xrt_prober instance.
+ * @param[in] list Prober entry list
+ *
+ * @public @memberof xrt_prober
  */
 int
 xrt_prober_create_with_lists(struct xrt_prober **out_xp,
                              struct xrt_prober_entry_lists *list);
 
+/*!
+ * @public @memberof xrt_prober
+ */
 bool
 xrt_prober_match_string(struct xrt_prober *xp,
                         struct xrt_prober_device *dev,
@@ -332,7 +373,11 @@ xrt_prober_match_string(struct xrt_prober *xp,
  */
 
 /*!
- * A simple prober to probe for a HMD device connected to the system.
+ * @interface xrt_auto_prober
+ *
+ * An interface to be exposed by a device driver that should probe for the
+ * existence of its own device on the system, rather than using shared probers
+ * with vendor/product IDs, etc.
  *
  * @ingroup xrt_iface
  */
@@ -343,12 +388,27 @@ struct xrt_auto_prober
 	/*!
 	 * Do the internal probing that the driver needs to do in order to find
 	 * devices.
+	 *
+	 * @param xap Self pointer
+	 * @param attached_data JSON "attached data" for this device from
+	 * config, if any.
+	 * @param[in] no_hmds If true, do not probe for HMDs, only other
+	 * devices.
+	 * @param[in] xp Prober: provided for access to the tracking factory,
+	 * among other reasons.
+	 *
+	 * @return New device implementing the xrt_device interface, or NULL.
 	 */
 	struct xrt_device *(*lelo_dallas_autoprobe)(struct xrt_auto_prober *xap,
 	                                            cJSON *attached_data,
 	                                            bool no_hmds,
 	                                            struct xrt_prober *xp);
-	void (*destroy)(struct xrt_auto_prober *xdev);
+	/*!
+	 * Destroy this auto-prober.
+	 *
+	 * @param xap Self pointer
+	 */
+	void (*destroy)(struct xrt_auto_prober *xap);
 };
 
 

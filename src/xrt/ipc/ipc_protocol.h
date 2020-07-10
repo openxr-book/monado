@@ -4,13 +4,21 @@
  * @file
  * @brief  Common protocol definition.
  * @author Pete Black <pblack@collabora.com>
+ * @author Jakob Bornecrantz <jakob@collabora.com>
  * @ingroup ipc
  */
 
 #pragma once
 
-#include "xrt/xrt_device.h"
 #include "xrt/xrt_compiler.h"
+#include "xrt/xrt_compositor.h"
+#include "xrt/xrt_results.h"
+#include "xrt/xrt_defines.h"
+#include "xrt/xrt_instance.h"
+#include "xrt/xrt_compositor.h"
+#include "xrt/xrt_device.h"
+#include "xrt/xrt_tracking.h"
+
 
 #define IPC_MSG_SOCK_FILE "/tmp/monado_comp_ipc"
 #define IPC_MAX_SWAPCHAIN_FDS 8
@@ -20,7 +28,9 @@
 #define IPC_MAX_FORMATS 32 // max formats our server-side compositor supports
 #define IPC_MAX_DEVICES 8  // max number of devices we will map via shared mem
 #define IPC_MAX_LAYERS 16
-#define IPC_MAX_SLOTS 3
+#define IPC_MAX_SLOTS 128
+#define IPC_MAX_CLIENTS 8
+#define IPC_EVENT_QUEUE_SIZE 32
 
 #define IPC_SHARED_MAX_DEVICES 8
 #define IPC_SHARED_MAX_INPUTS 1024
@@ -32,10 +42,25 @@
  *
  */
 
+struct ipc_shared_tracking_origin
+{
+	//! For debugging.
+	char name[XRT_TRACKING_NAME_LEN];
+
+	//! What can the state tracker expect from this tracking system.
+	enum xrt_tracking_type type;
+
+	//! Initial offset of the tracking origin.
+	struct xrt_pose offset;
+};
+
 struct ipc_shared_device
 {
 	//! Enum identifier of the device.
 	enum xrt_device_name name;
+
+	//! Which tracking system origin is this device attached to.
+	uint32_t tracking_origin_index;
 
 	//! A string describing the device.
 	char str[XRT_DEVICE_NAME_LEN];
@@ -52,65 +77,37 @@ struct ipc_shared_device
 	uint32_t first_output_index;
 };
 
-struct ipc_layer_stereo_projection
-{
-	uint64_t timestamp;
-
-	uint32_t xdev_id;
-	enum xrt_input_name name;
-#if 0 /* LAYERS */
-	enum xrt_layer_composition_flags layer_flags;
-#endif
-
-	struct
-	{
-		uint32_t swapchain_id;
-		uint32_t image_index;
-#if 0 /* LAYERS */
-		struct xrt_rect rect;
-#endif
-		uint32_t array_index;
-		struct xrt_fov fov;
-		struct xrt_pose pose;
-	} l, r;
-};
-
-struct ipc_layer_quad
-{
-	uint64_t timestamp;
-
-	uint32_t xdev_id;
-	enum xrt_input_name name;
-#if 0 /* LAYERS */
-	enum xrt_layer_composition_flags layer_flags;
-#endif
-
-	uint32_t swapchain_id;
-	uint32_t image_index;
-#if 0 /* LAYERS */
-	struct xrt_rect rect;
-#endif
-	uint32_t array_index;
-	struct xrt_pose pose;
-	struct xrt_vec2 size;
-};
-
-enum ipc_layer_type
-{
-	IPC_LAYER_STEREO_PROJECTION,
-	IPC_LAYER_QUAD,
-};
-
+/*!
+ * Data for a single composition layer.
+ *
+ * Similar in function to @ref comp_layer
+ *
+ * @ingroup ipc
+ */
 struct ipc_layer_entry
 {
-	enum ipc_layer_type type;
+	//! @todo what is this used for?
+	uint32_t xdev_id;
 
-	union {
-		struct ipc_layer_quad quad;
-		struct ipc_layer_stereo_projection stereo;
-	};
+	/*!
+	 * Up to two indices of swapchains to use.
+	 *
+	 * How many are actually used depends on the value of @p data.type
+	 */
+	uint32_t swapchain_ids[2];
+
+	/*!
+	 * All basic (trivially-serializable) data associated with a layer,
+	 * aside from which swapchain(s) are used.
+	 */
+	struct xrt_layer_data data;
 };
 
+/*!
+ * Render state for a single client, including all layers.
+ *
+ * @ingroup ipc
+ */
 struct ipc_layer_slot
 {
 	enum xrt_blend_mode env_blend_mode;
@@ -133,6 +130,9 @@ struct ipc_layer_slot
  */
 struct ipc_shared_memory
 {
+	// This array may be sparse.
+	size_t num_itracks;
+	struct ipc_shared_tracking_origin itracks[IPC_SHARED_MAX_DEVICES];
 	size_t num_idevs;
 	struct ipc_shared_device idevs[IPC_SHARED_MAX_DEVICES];
 
@@ -169,24 +169,24 @@ struct ipc_shared_memory
 	struct ipc_layer_slot slots[IPC_MAX_SLOTS];
 };
 
-
-/*
- *
- * Enums
- *
- */
-
-typedef enum ipc_result
+struct ipc_client_list
 {
-	IPC_SUCCESS = 0,
-	IPC_FAILURE,
-} ipc_result_t;
+	int32_t ids[IPC_MAX_CLIENTS];
+};
 
-
-/*
+/*!
+ * State for a connected application.
  *
- * Reset of protocol is generated.
- *
+ * @ingroup ipc
  */
-
-#include "ipc_protocol_generated.h"
+struct ipc_app_state
+{
+	bool primary_application;
+	bool session_active;
+	bool session_visible;
+	bool session_focused;
+	bool session_overlay;
+	uint32_t z_order;
+	pid_t pid;
+	struct xrt_instance_info info;
+};

@@ -12,6 +12,8 @@
 #include "xrt/xrt_compiler.h"
 #include "util/u_time.h"
 
+#include "xrt/xrt_results.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -222,6 +224,27 @@ struct xrt_size
 };
 
 /*!
+ * Image offset.
+ *
+ * @ingroup xrt_iface math
+ */
+struct xrt_offset
+{
+	int w, h;
+};
+
+/*!
+ * Image rectangle.
+ *
+ * @ingroup xrt_iface math
+ */
+struct xrt_rect
+{
+	struct xrt_offset offset;
+	struct xrt_size extent;
+};
+
+/*!
  * A pose composed of a position and orientation.
  *
  * @see xrt_qaut
@@ -363,6 +386,8 @@ enum xrt_device_name
 	XRT_DEVICE_DAYDREAM = 4,
 	XRT_DEVICE_INDEX_CONTROLLER = 5,
 	XRT_DEVICE_VIVE_WAND = 6,
+	XRT_DEVICE_VIVE_TRACKER_GEN1 = 7,
+	XRT_DEVICE_VIVE_TRACKER_GEN2 = 8,
 };
 
 /*!
@@ -406,8 +431,8 @@ enum xrt_input_type
  *
  * @param name A xrt_input_name value
  *
- * @see xrt_input_name
- * @see xrt_input_type
+ * @relates xrt_input_name
+ * @returns @ref xrt_input_type
  * @ingroup xrt_iface
  */
 #define XRT_GET_INPUT_TYPE(name) (name & 0xff)
@@ -499,10 +524,8 @@ enum xrt_input_name
 union xrt_input_value {
 	struct xrt_vec1 vec1;
 	struct xrt_vec2 vec2;
-	struct xrt_vec3 vec3;
 	bool boolean;
 };
-
 
 /*!
  * Base type of this output.

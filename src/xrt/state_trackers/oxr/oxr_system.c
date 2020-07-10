@@ -1,4 +1,4 @@
-// Copyright 2018-2019, Collabora, Ltd.
+// Copyright 2018-2020, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -79,7 +79,7 @@ oxr_system_verify_id(struct oxr_logger *log,
 {
 	if (systemId != 1) {
 		return oxr_error(log, XR_ERROR_SYSTEM_INVALID,
-		                 "invalid system %" PRIu64, systemId);
+		                 "Invalid system %" PRIu64, systemId);
 	}
 	return XR_SUCCESS;
 }
@@ -124,7 +124,7 @@ oxr_system_fill_in(struct oxr_logger *log,
 
 	if (head == NULL) {
 		return oxr_error(log, XR_ERROR_INITIALIZATION_FAILED,
-		                 " failed to probe device");
+		                 "Failed to probe device");
 	}
 
 	if (head->tracking_origin->type == XRT_TRACKING_TYPE_NONE) {
@@ -216,11 +216,10 @@ oxr_system_get_properties(struct oxr_logger *log,
 	snprintf(properties->systemName, XR_MAX_SYSTEM_NAME_SIZE,
 	         "Monado: %.*s", 247, sys->head->str);
 
-	/*!
-	 * @todo conforming implementations must support at
-	 * leastXR_MIN_COMPOSITION_LAYERS_SUPPORTED layers.
-	 */
-	properties->graphicsProperties.maxLayerCount = 1;
+	//! Get from compositor.
+	uint32_t max = XR_MIN_COMPOSITION_LAYERS_SUPPORTED;
+
+	properties->graphicsProperties.maxLayerCount = max;
 	properties->graphicsProperties.maxSwapchainImageWidth = 1024 * 16;
 	properties->graphicsProperties.maxSwapchainImageHeight = 1024 * 16;
 	properties->trackingProperties.orientationTracking = XR_TRUE;
@@ -267,7 +266,7 @@ oxr_system_get_view_conf_properties(
 	if (viewConfigurationType != sys->view_config_type) {
 		return oxr_error(log,
 		                 XR_ERROR_VIEW_CONFIGURATION_TYPE_UNSUPPORTED,
-		                 "invalid view configuration type");
+		                 "Invalid view configuration type");
 	}
 
 	// clang-format off
@@ -304,7 +303,7 @@ oxr_system_enumerate_view_conf_views(
 	if (viewConfigurationType != sys->view_config_type) {
 		return oxr_error(log,
 		                 XR_ERROR_VIEW_CONFIGURATION_TYPE_UNSUPPORTED,
-		                 "invalid view configuration type");
+		                 "Invalid view configuration type");
 	}
 
 	OXR_TWO_CALL_FILL_IN_HELPER(log, viewCapacityInput, viewCountOutput,

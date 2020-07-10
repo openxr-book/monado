@@ -1,6 +1,47 @@
 {
+	"$schema": "./proto.schema.json",
+
 	"instance_get_shm_fd": {
 		"out_fds": true
+	},
+
+	"system_get_client_info": {
+		"in": [
+			{"name": "id", "type": "uint32_t"}
+		],
+		"out": [
+			{"name": "desc", "type": "struct ipc_app_state"}
+		]
+	},
+
+	"system_set_client_info": {
+		"in": [
+			{"name": "desc", "type": "struct ipc_app_state"}
+		]
+	},
+
+	"system_get_clients": {
+		"out": [
+			{"name": "clients", "type": "struct ipc_client_list"}
+		]
+	},
+
+	"system_set_primary_client": {
+		"in": [
+			{"name": "id", "type": "uint32_t"}
+		]
+	},
+
+	"system_set_focused_client": {
+		"in": [
+			{"name": "id", "type": "uint32_t"}
+		]
+	},
+
+	"session_create": {
+		"in": [
+			{"name": "overlay_info", "type": "struct xrt_session_prepare_info"}
+		]
 	},
 
 	"session_begin": {},
@@ -15,17 +56,35 @@
 
 	"compositor_wait_frame": {
 		"out": [
+			{"name": "frame_id", "type": "int64_t"},
 			{"name": "predicted_display_time", "type": "uint64_t"},
-			{"name": "predicted_display_period", "type": "uint64_t"}
+			{"name": "wake_up_time", "type": "uint64_t"},
+			{"name": "predicted_display_period", "type": "uint64_t"},
+			{"name": "min_display_period", "type": "uint64_t"}
 		]
 	},
 
-	"compositor_begin_frame": {},
+	"compositor_wait_woke": {
+		"in": [
+			{"name": "frame_id", "type": "int64_t"}
+		]
+	},
 
-	"compositor_discard_frame": {},
+	"compositor_begin_frame": {
+		"in": [
+			{"name": "frame_id", "type": "int64_t"}
+		]
+	},
+
+	"compositor_discard_frame": {
+		"in": [
+			{"name": "frame_id", "type": "int64_t"}
+		]
+	},
 
 	"compositor_layer_sync": {
 		"in": [
+			{"name": "frame_id", "type": "int64_t"},
 			{"name": "slot_id", "type": "uint32_t"}
 		],
 		"out": [
@@ -33,11 +92,15 @@
 		]
 	},
 
+	"compositor_poll_events": {
+		"out": [
+			{"name": "event", "type": "union xrt_compositor_event"}
+		]
+	},
+
 	"swapchain_create": {
 		"in": [
-			{"name": "width", "type": "uint32_t"},
-			{"name": "height", "type": "uint32_t"},
-			{"name": "format", "type": "uint64_t"}
+			{"name": "info", "type": "struct xrt_swapchain_create_info"}
 		],
 		"out": [
 			{"name": "id", "type": "uint32_t"},

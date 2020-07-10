@@ -35,6 +35,10 @@
  *
  */
 
+/*!
+ * An IPC client proxy for an @ref xrt_device.
+ * @implements xrt_device
+ */
 struct ipc_client_device
 {
 	struct xrt_device base;
@@ -78,9 +82,9 @@ ipc_client_device_update_inputs(struct xrt_device *xdev)
 {
 	struct ipc_client_device *icd = ipc_client_device(xdev);
 
-	ipc_result_t r =
+	xrt_result_t r =
 	    ipc_call_device_update_input(icd->ipc_c, icd->device_id);
-	if (r != IPC_SUCCESS) {
+	if (r != XRT_SUCCESS) {
 		IPC_DEBUG(icd->ipc_c, "IPC: Error sending input update!");
 	}
 }
@@ -94,10 +98,10 @@ ipc_client_device_get_tracked_pose(struct xrt_device *xdev,
 {
 	struct ipc_client_device *icd = ipc_client_device(xdev);
 
-	ipc_result_t r = ipc_call_device_get_tracked_pose(
+	xrt_result_t r = ipc_call_device_get_tracked_pose(
 	    icd->ipc_c, icd->device_id, name, at_timestamp_ns,
 	    out_relation_timestamp_ns, out_relation);
-	if (r != IPC_SUCCESS) {
+	if (r != XRT_SUCCESS) {
 		IPC_DEBUG(icd->ipc_c, "IPC: Error sending input update!");
 	}
 }
@@ -118,23 +122,28 @@ ipc_client_device_set_output(struct xrt_device *xdev,
 {
 	struct ipc_client_device *icd = ipc_client_device(xdev);
 
-	ipc_result_t r =
+	xrt_result_t r =
 	    ipc_call_device_set_output(icd->ipc_c, icd->device_id, name, value);
-	if (r != IPC_SUCCESS) {
+	if (r != XRT_SUCCESS) {
 		IPC_DEBUG(icd->ipc_c, "IPC: Error sending set output!");
 	}
 }
 
+/*!
+ * @public @memberof ipc_client_device
+ */
 struct xrt_device *
-ipc_client_device_create(ipc_connection_t *ipc_c, uint32_t device_id)
+ipc_client_device_create(ipc_connection_t *ipc_c,
+                         struct xrt_tracking_origin *xtrack,
+                         uint32_t device_id)
 {
 	// Helpers.
 	struct ipc_shared_memory *ism = ipc_c->ism;
 	struct ipc_shared_device *idev = &ism->idevs[device_id];
 
 	// Allocate and setup the basics.
-	enum u_device_alloc_flags flags = (enum u_device_alloc_flags)(
-	    U_DEVICE_ALLOC_HMD | U_DEVICE_ALLOC_TRACKING_NONE);
+	enum u_device_alloc_flags flags =
+	    (enum u_device_alloc_flags)(U_DEVICE_ALLOC_HMD);
 	struct ipc_client_device *icd =
 	    U_DEVICE_ALLOCATE(struct ipc_client_device, flags, 0, 0);
 	icd->ipc_c = ipc_c;
@@ -145,6 +154,7 @@ ipc_client_device_create(ipc_connection_t *ipc_c, uint32_t device_id)
 	icd->base.destroy = ipc_client_device_destroy;
 
 	// Start copying the information from the idev.
+	icd->base.tracking_origin = xtrack;
 	icd->base.name = idev->name;
 	icd->device_id = device_id;
 
