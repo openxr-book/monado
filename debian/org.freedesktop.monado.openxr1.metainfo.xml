@@ -11,8 +11,7 @@
         </p>
         <p>
             This package provides a runtime that aims to be a complete and conforming
-            implementation of the OpenXR API from Khronos, after further development
-            and once the conformance tests are released.
+            implementation of the OpenXR API from Khronos, after further development.
         </p>
     </description>
     <provides>

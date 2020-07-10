@@ -11,7 +11,7 @@ To build a package for local use:
 - Checkout the branch you want to build (assuming `master` here) and make sure
   your tree is clean (`git reset --hard` will be used later!) A fresh clone or
   one kept clean just for package building is probably a good idea.
-- Do a `git merge --no-commit debian/master` (or `debian/buster-backports`, or
+- Do a `git merge --no-commit debian/sid` (or `debian/buster-backports`, or
   `ubuntu/focal`, or...)
 - `debian/extra/prepare-commit-package.sh master` to make the orig.tar.gz file
   and add the `debian/changelog` entry. (Add an additional command line argument

@@ -2,3 +2,5 @@
 ignore:
   pattern:
   - .reuse/*
+  - .gitlab-ci
+
