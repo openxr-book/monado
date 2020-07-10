@@ -1,2 +1,2 @@
 # Remove mistaken prefix.
-! copyright Files:~/.*/ Copyright=~"s/Text: //"
+! Files:~/.*/ Copyright=~"s/Text: //"

@@ -31,6 +31,10 @@
 
 #include <float.h>
 
+/*!
+ * A GUI scene showing the variable tracking provided by @ref util/u_var.h
+ * @implements gui_scene
+ */
 struct debug_scene
 {
 	struct gui_scene base;
@@ -244,6 +248,10 @@ on_elem(const char *name, enum u_var_kind kind, void *ptr, void *priv)
 		handle_draggable_quat(text, &pose->orientation);
 		break;
 	}
+	case U_VAR_KIND_LOG_LEVEL:
+		igComboStr(name, (int *)ptr,
+		           "Trace\0Debug\0Info\0Warn\0Error\0\0", 5);
+		break;
 	case U_VAR_KIND_RO_TEXT: igText("%s: '%s'", name, (char *)ptr); break;
 	case U_VAR_KIND_RO_I32:
 		igInputScalar(name, ImGuiDataType_S32, ptr, NULL, NULL, NULL,

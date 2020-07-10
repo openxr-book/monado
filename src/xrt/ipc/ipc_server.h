@@ -12,7 +12,11 @@
 
 #include "xrt/xrt_compiler.h"
 
+#include "util/u_render_timing.h"
+
 #include "os/os_threading.h"
+
+#include "ipc_protocol.h"
 
 #include <stdio.h>
 
@@ -59,12 +63,13 @@ extern "C" {
  */
 
 #define IPC_SERVER_NUM_XDEVS 8
-#define IPC_MAX_CLIENT_SWAPCHAINS 8
-#define IPC_MAX_CLIENTS 8
+#define IPC_MAX_CLIENT_SWAPCHAINS 32
+//#define IPC_MAX_CLIENTS 8
 
 struct xrt_instance;
 struct xrt_compositor;
 struct xrt_compositor_fd;
+
 
 /*!
  * Information about a single swapchain.
@@ -77,20 +82,16 @@ struct ipc_swapchain_data
 	uint32_t height;
 	uint64_t format;
 	uint32_t num_images;
+
+	bool active;
 };
 
-/*!
- * Render state for a client.
- *
- * @ingroup ipc_server
- */
-struct ipc_render_state
+
+struct ipc_queued_event
 {
-	bool rendering;
-	uint32_t l_swapchain_index;
-	uint32_t l_image_index;
-	uint32_t r_swapchain_index;
-	uint32_t r_image_index;
+	bool pending;
+	uint64_t timestamp;
+	union xrt_compositor_event event;
 };
 
 /*!
@@ -109,9 +110,6 @@ struct ipc_client_state
 	//! Number of swapchains in use by client
 	uint32_t num_swapchains;
 
-	//! Handles for dealing with swapchains via ipc
-	uint32_t swapchain_handles[IPC_MAX_CLIENT_SWAPCHAINS];
-
 	//! Ptrs to the swapchains
 	struct xrt_swapchain *xscs[IPC_MAX_CLIENT_SWAPCHAINS];
 
@@ -122,9 +120,33 @@ struct ipc_client_state
 	int ipc_socket_fd;
 
 	//! State for rendering.
-	struct ipc_render_state render_state;
+	struct ipc_layer_slot render_state;
 
-	bool active;
+	//! Whether we are currently rendering @ref render_state
+	bool rendering_state;
+
+	//! The frame timing state.
+	struct u_rt_helper urth;
+
+	struct ipc_app_state client_state;
+	struct ipc_queued_event queued_events[IPC_EVENT_QUEUE_SIZE];
+
+	int server_thread_index;
+};
+
+enum ipc_thread_state
+{
+	IPC_THREAD_READY,
+	IPC_THREAD_STARTING,
+	IPC_THREAD_RUNNING,
+	IPC_THREAD_STOPPING,
+};
+
+struct ipc_thread
+{
+	struct os_thread thread;
+	volatile enum ipc_thread_state state;
+	volatile struct ipc_client_state ics;
 };
 
 /*!
@@ -140,6 +162,7 @@ struct ipc_server
 	struct xrt_compositor_fd *xcfd;
 
 	struct xrt_device *xdevs[IPC_SERVER_NUM_XDEVS];
+	struct xrt_tracking_origin *xtracks[IPC_SERVER_NUM_XDEVS];
 
 	struct ipc_shared_memory *ism;
 	int ism_fd;
@@ -156,17 +179,23 @@ struct ipc_server
 	// Should we exit when a client disconnects.
 	bool exit_on_disconnect;
 
+	//! Were we launched by socket activation, instead of explicitly?
+	bool launched_by_socket;
+
+	//! The socket filename we bound to, if any.
+	char *socket_filename;
+
 	bool print_debug;
 	bool print_spew;
 
-	// Hack for now.
-	struct os_thread thread;
-	volatile bool thread_started;
-	volatile bool thread_stopping;
-	volatile struct ipc_client_state thread_state;
+	struct ipc_thread threads[IPC_MAX_CLIENTS];
+
+	volatile uint32_t current_slot_index;
+
+	int active_client_index;
+	int last_active_client_index;
+	struct os_mutex global_state_lock;
 };
-
-
 
 /*!
  * Main entrypoint to the compositor process.
@@ -175,6 +204,14 @@ struct ipc_server
  */
 int
 ipc_server_main(int argc, char **argv);
+
+/*!
+ * Called by client threads to manage global state
+ *
+ * @ingroup ipc_server
+ */
+void
+update_server_state(struct ipc_server *vs);
 
 /*!
  * Thread function for the client side dispatching.

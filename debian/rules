@@ -18,7 +18,7 @@ export DEB_LDFLAGS_MAINT_APPEND = -Wl,--as-needed
 
 # We manage active runtime via update-alternatives
 # We use a relative runtime path to allow Multi-Arch: same to work.
-# We disable the service process for now because of packaging (need to split a new binary package) and missing auto-start.
+# We disable the service process for now because of packaging (need to split a new binary package)
 override_dh_auto_configure:
 	dh_auto_configure -- \
 	  -DXRT_HAVE_SYSTEM_CJSON=ON \
@@ -28,6 +28,15 @@ override_dh_auto_configure:
 	  -DXRT_OPENXR_INSTALL_ABSOLUTE_RUNTIME_PATH=OFF \
 	  -DXRT_FEATURE_SERVICE=OFF \
 	  -DXRT_BUILD_DRIVER_OHMD=OFF
+
+# Make the changelog usable here
+override_dh_install:
+ifeq (,$(findstring nodoc,$(DEB_BUILD_OPTIONS)))
+	mkdir -p debian/tmp/usr/share/doc/monado
+	cp doc/CHANGELOG.md debian/tmp/usr/share/doc/monado/changelog
+	markdown doc/CHANGELOG.md > debian/tmp/usr/share/doc/monado/changelog.html
+endif
+	dh_install
 
 # Remove imgui config file if it's there.
 override_dh_auto_clean:

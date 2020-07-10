@@ -54,11 +54,15 @@ if 'vive' in drivers
 	driver_libs += [lib_drv_vive]
 endif
 
+if 'survive' in drivers
+	driver_libs += [lib_drv_survive]
+endif
+
 subdir('common')
 subdir('openxr')
 subdir('cli')
 
-if sdl2.found()
+if get_option('gui').enabled() or (get_option('gui').auto() and sdl2.found())
 	subdir('gui')
 endif
 

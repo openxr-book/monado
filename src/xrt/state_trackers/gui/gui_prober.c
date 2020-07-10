@@ -7,6 +7,7 @@
  */
 
 #include "xrt/xrt_prober.h"
+#include "xrt/xrt_instance.h"
 #include "util/u_time.h"
 #include "gui_common.h"
 
@@ -36,20 +37,24 @@ gui_prober_init(struct gui_program *p)
 {
 	int ret = 0;
 
-	p->timekeeping = time_state_create();
-
 	// Initialize the prober.
-	ret = xrt_prober_create(&p->xp);
+	ret = xrt_instance_create(NULL, &p->instance);
+	if (ret != 0) {
+		return do_exit(p, ret);
+	}
+	ret = xrt_instance_get_prober(p->instance, &p->xp);
 	if (ret != 0) {
 		return do_exit(p, ret);
 	}
 
-	// Need to prime the prober with devices before dumping and listing.
-	ret = xrt_prober_probe(p->xp);
-	if (ret != 0) {
-		return do_exit(p, ret);
+	if (p->xp != NULL) {
+		// Need to prime the prober with devices before dumping and
+		// listing.
+		ret = xrt_prober_probe(p->xp);
+		if (ret != 0) {
+			return do_exit(p, ret);
+		}
 	}
-
 	return 0;
 }
 
@@ -59,7 +64,7 @@ gui_prober_select(struct gui_program *p)
 	int ret;
 
 	// Multiple devices can be found.
-	ret = xrt_prober_select(p->xp, p->xdevs, NUM_XDEVS);
+	ret = xrt_instance_select(p->instance, p->xdevs, NUM_XDEVS);
 	if (ret != 0) {
 		return ret;
 	}
@@ -70,19 +75,11 @@ gui_prober_select(struct gui_program *p)
 void
 gui_prober_update(struct gui_program *p)
 {
-	// We haven't been initialized
-	if (p->timekeeping == NULL) {
-		return;
-	}
-
-	time_state_get_now_and_update(p->timekeeping);
-
 	for (size_t i = 0; i < NUM_XDEVS; i++) {
 		if (p->xdevs[i] == NULL) {
 			continue;
 		}
-
-		p->xdevs[i]->update_inputs(p->xdevs[i]);
+		xrt_device_update_inputs(p->xdevs[i]);
 	}
 }
 
@@ -94,12 +91,8 @@ gui_prober_teardown(struct gui_program *p)
 			continue;
 		}
 
-		p->xdevs[i]->destroy(p->xdevs[i]);
-		p->xdevs[i] = NULL;
+		xrt_device_destroy(&(p->xdevs[i]));
 	}
 
-	// Does null checking and sets to null.
-	time_state_destroy(&p->timekeeping);
-
-	xrt_prober_destroy(&p->xp);
+	xrt_instance_destroy(&p->instance);
 }

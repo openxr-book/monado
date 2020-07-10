@@ -1,5 +1,5 @@
 // Copyright 2016, Joey Ferwerda.
-// Copyright 2019, Collabora, Ltd.
+// Copyright 2019-2020, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -49,6 +49,7 @@ DEBUG_GET_ONCE_BOOL_OPTION(psvr_disco, "PSVR_DISCO", false)
  * Private struct for the @ref drv_psvr device.
  *
  * @ingroup drv_psvr
+ * @implements xrt_device
  */
 struct psvr_device
 {
@@ -398,7 +399,7 @@ handle_control_status_msg(struct psvr_device *psvr,
                           unsigned char *buffer,
                           int size)
 {
-	struct psvr_parsed_status status;
+	struct psvr_parsed_status status = {0};
 
 	if (!psvr_parse_status_packet(&status, buffer, size)) {
 		PSVR_ERROR(psvr, "couldn't decode tracker sensor message");
@@ -937,12 +938,18 @@ psvr_device_get_tracked_pose(struct xrt_device *xdev,
 		    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
 		    XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
 
+
 		*out_relation_timestamp_ns = os_monotonic_get_ns();
 	} else {
 		xrt_tracked_psvr_get_tracked_pose(
 		    psvr->tracker, at_timestamp_ns, out_relation);
+
 		*out_relation_timestamp_ns = at_timestamp_ns;
 	}
+
+	//! @todo Move this to the tracker.
+	// Make sure that the orientation is valid.
+	math_quat_normalize(&out_relation->pose.orientation);
 }
 
 static void

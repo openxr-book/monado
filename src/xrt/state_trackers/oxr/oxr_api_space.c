@@ -1,4 +1,4 @@
-// Copyright 2019, Collabora, Ltd.
+// Copyright 2019-2020, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -6,10 +6,6 @@
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @ingroup oxr_api
  */
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
 #include "xrt/xrt_compiler.h"
 
@@ -22,6 +18,11 @@
 
 #include "oxr_api_funcs.h"
 #include "oxr_api_verify.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <inttypes.h>
 
 
 XrResult
@@ -41,7 +42,7 @@ oxr_xrCreateActionSpace(XrSession session,
 
 	struct oxr_space *spc;
 	XrResult ret =
-	    oxr_space_action_create(&log, sess, act->key, createInfo, &spc);
+	    oxr_space_action_create(&log, sess, act->act_key, createInfo, &spc);
 	if (ret != XR_SUCCESS) {
 		return ret;
 	}
@@ -82,10 +83,25 @@ oxr_xrGetReferenceSpaceBoundsRect(XrSession session,
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess,
 	                                "xrGetReferenceSpaceBoundsRect");
+	OXR_VERIFY_ARG_NOT_NULL(&log, bounds);
 
-	//! @todo Implement
-	return oxr_error(&log, XR_ERROR_FUNCTION_UNSUPPORTED,
-	                 " not implemented");
+
+	switch (referenceSpaceType) {
+	case XR_REFERENCE_SPACE_TYPE_VIEW:
+	case XR_REFERENCE_SPACE_TYPE_LOCAL:
+	case XR_REFERENCE_SPACE_TYPE_STAGE: break;
+	default:
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
+		                 "(referenceSpaceType == 0x%08x) is not a "
+		                 "valid XrReferenceSpaceType",
+		                 referenceSpaceType);
+	}
+
+	bounds->width = 0.0;
+	bounds->height = 0.0;
+
+	// Silently return that the bounds aren't available.
+	return XR_SPACE_BOUNDS_UNAVAILABLE;
 }
 
 XrResult
@@ -95,7 +111,7 @@ oxr_xrCreateReferenceSpace(XrSession session,
 {
 	XrResult ret;
 	struct oxr_session *sess;
-	struct oxr_space *spc;
+	struct oxr_space *spc = NULL;
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess,
 	                                "xrCreateReferenceSpace");
@@ -126,6 +142,15 @@ oxr_xrLocateSpace(XrSpace space,
 	OXR_VERIFY_SPACE_NOT_NULL(&log, baseSpace, baseSpc);
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, location,
 	                                 XR_TYPE_SPACE_LOCATION);
+
+	OXR_VERIFY_ARG_TYPE_CAN_BE_NULL(
+	    &log, ((XrSpaceVelocity *)location->next), XR_TYPE_SPACE_VELOCITY);
+
+	if (time <= (XrTime)0) {
+		return oxr_error(&log, XR_ERROR_TIME_INVALID,
+		                 "(time == %" PRIi64 ") is not a valid time.",
+		                 time);
+	}
 
 	return oxr_space_locate(&log, spc, baseSpc, time, location);
 }

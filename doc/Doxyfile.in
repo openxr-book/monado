@@ -7,6 +7,9 @@ INPUT                  = \
      @SRCDIR@/src/xrt \
      @SRCDIR@/doc
 
+
+IMAGE_PATH             = @SRCDIR@/doc
+
 USE_MDFILE_AS_MAINPAGE = @SRCDIR@/doc/mainpage.md
 
 RECURSIVE              = YES
@@ -14,6 +17,7 @@ EXCLUDE                = @SRCDIR@/src/external \
                          @SRCDIR@/doc/changes \
                          @BUILDDIR@
 STRIP_FROM_PATH        = @SRCDIR@/src/xrt \
+                         @SRCDIR@/src/xrt/include \
                          @SRCDIR@/doc
 
 
@@ -29,7 +33,18 @@ PREDEFINED             = VK_USE_PLATFORM_XCB_KHR \
                          XR_USE_GRAPHICS_API_VULKAN \
                          XR_USE_PLATFORM_XLIB \
                          XR_USE_TIMESPEC \
-                         XRT_DOXYGEN
+                         XRT_DOXYGEN \
+                         XRT_HAVE_JPEG \
+                         XRT_OS_LINUX \
+                         XRT_BUILD_DRIVER_RS \
+                         XRT_HAVE_SYSTEMD \
+                         XRT_HAVE_OPENCV \
+                         XRT_HAVE_LIBUVC \
+                         XRT_HAVE_LIBUSB \
+                         XRT_HAVE_V4L2 \
+                         XRT_HAVE_LIBUDEV \
+                         XRT_FEATURE_SERVICE \
+
 
 ALIASES                += TODO=todo
 ALIASES                += ep{1}="<b>\1</b>. \xrefitem entrypoints \"OpenXR Entry Point\" \"OpenXR Entry Points\" \1"
@@ -44,6 +59,7 @@ ALWAYS_DETAILED_SEC    = YES
 
 WARN_IF_UNDOCUMENTED   = @DOXYGEN_WARN_UNDOCUMENTED@
 EXTRACT_ALL            = @DOXYGEN_EXTRACT_ALL@
+HIDE_UNDOC_RELATIONS   = NO
 
 # The STRIP_FROM_INC_PATH tag can be used to strip a user-defined part of the
 # path mentioned in the documentation of a class, which tells the reader which
@@ -979,7 +995,7 @@ EXAMPLE_RECURSIVE      = NO
 # that contain images that are to be included in the documentation (see the
 # \image command).
 
-IMAGE_PATH             =
+#IMAGE_PATH             =
 
 # The INPUT_FILTER tag can be used to specify a program that doxygen should
 # invoke to filter for each input file. Doxygen will invoke the filter program
@@ -2239,7 +2255,7 @@ DIA_PATH               =
 # and usage relations if the target is undocumented or is not a class.
 # The default value is: YES.
 
-HIDE_UNDOC_RELATIONS   = YES
+# HIDE_UNDOC_RELATIONS   = YES
 
 # If you set the HAVE_DOT tag to YES then doxygen will assume the dot tool is
 # available from the path. This tool is part of Graphviz (see:

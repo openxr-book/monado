@@ -4,7 +4,7 @@ doc/CHANGELOG.md:
 doc/changes/:
   copyright: 2020, Collabora, Ltd. and the Monado contributors
   license: CC0-1.0
-  skip: false
+  skip: true
 doc/changes/README.md:
   copyright: 2020, Collabora, Ltd. and the Proclamation contributors
   license: CC0-1.0
@@ -14,9 +14,19 @@ src/external/imgui/imgui_monado/:
 # Default to BSL.
 src/xrt:
   license: BSL-1.0
+tests/tests_input_transform.cpp:
+  license: BSL-1.0
+tests/tests_main.cpp:
+  license: BSL-1.0
 debian/extra/:
   license: CC0-1.0
 src/xrt/drivers/north_star/distortion/:
   license: BSD-3-Clause
 src/xrt/auxiliary/math/m_quatexpmap.cpp:
   license: Apache-2.0
+scripts/:
+  license: BSL-1.0
+src/external/flexkalman/flexkalman/AbsolutePositionLeverArmMeasurement.h:
+  license: Apache-2.0 or BSL-1.0
+src/external/flexkalman/flexkalman/SO3.h:
+  license: Apache-2.0 or BSL-1.0

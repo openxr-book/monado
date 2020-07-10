@@ -1,4 +1,4 @@
-// Copyright 2019, Collabora, Ltd.
+// Copyright 2019-2020, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -7,12 +7,13 @@
  * @ingroup comp_main
  */
 
-#include <stdio.h>
-#include <stdlib.h>
-
 #include "util/u_misc.h"
 
 #include "main/comp_compositor.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
 
 
 static void
@@ -25,17 +26,23 @@ swapchain_destroy(struct xrt_swapchain *xsc)
 	u_threading_stack_push(&sc->c->threading.destroy_swapchains, sc);
 }
 
-static bool
-swapchain_acquire_image(struct xrt_swapchain *xsc, uint32_t *index)
+static xrt_result_t
+swapchain_acquire_image(struct xrt_swapchain *xsc, uint32_t *out_index)
 {
 	struct comp_swapchain *sc = comp_swapchain(xsc);
 
 	COMP_SPEW(sc->c, "ACQUIRE_IMAGE");
-	*index = 0;
-	return true;
+
+	// Returns negative on empty fifo.
+	int res = u_index_fifo_pop(&sc->fifo, out_index);
+	if (res >= 0) {
+		return XRT_SUCCESS;
+	} else {
+		return XRT_ERROR_NO_IMAGE_AVAILABLE;
+	}
 }
 
-static bool
+static xrt_result_t
 swapchain_wait_image(struct xrt_swapchain *xsc,
                      uint64_t timeout,
                      uint32_t index)
@@ -43,16 +50,24 @@ swapchain_wait_image(struct xrt_swapchain *xsc,
 	struct comp_swapchain *sc = comp_swapchain(xsc);
 
 	COMP_SPEW(sc->c, "WAIT_IMAGE");
-	return true;
+	return XRT_SUCCESS;
 }
 
-static bool
+static xrt_result_t
 swapchain_release_image(struct xrt_swapchain *xsc, uint32_t index)
 {
 	struct comp_swapchain *sc = comp_swapchain(xsc);
 
 	COMP_SPEW(sc->c, "RELEASE_IMAGE");
-	return true;
+
+	int res = u_index_fifo_push(&sc->fifo, index);
+
+	if (res >= 0) {
+		return XRT_SUCCESS;
+	} else {
+		// FIFO full
+		return XRT_ERROR_NO_IMAGE_AVAILABLE;
+	}
 }
 
 static VkResult
@@ -208,15 +223,7 @@ err_image:
 
 struct xrt_swapchain *
 comp_swapchain_create(struct xrt_compositor *xc,
-                      enum xrt_swapchain_create_flags create,
-                      enum xrt_swapchain_usage_bits bits,
-                      int64_t format,
-                      uint32_t sample_count,
-                      uint32_t width,
-                      uint32_t height,
-                      uint32_t face_count,
-                      uint32_t array_size,
-                      uint32_t mip_count)
+                      struct xrt_swapchain_create_info *info)
 {
 	struct comp_compositor *c = comp_compositor(xc);
 	VkCommandBuffer cmd_buffer;
@@ -224,22 +231,30 @@ comp_swapchain_create(struct xrt_compositor *xc,
 	VkResult ret;
 
 
+	if ((info->create & XRT_SWAPCHAIN_CREATE_STATIC_IMAGE) != 0) {
+		num_images = 1;
+	}
+
 	struct comp_swapchain *sc = U_TYPED_CALLOC(struct comp_swapchain);
 	sc->base.base.destroy = swapchain_destroy;
 	sc->base.base.acquire_image = swapchain_acquire_image;
 	sc->base.base.wait_image = swapchain_wait_image;
 	sc->base.base.release_image = swapchain_release_image;
 	sc->base.base.num_images = num_images;
-	sc->base.base.array_size = array_size;
 	sc->c = c;
 
-	COMP_DEBUG(c, "CREATE %p %dx%d", (void *)sc, width, height);
+	COMP_DEBUG(c, "CREATE %p %dx%d", (void *)sc, info->width, info->height);
+
+	// Make sure the fds are invalid.
+	for (uint32_t i = 0; i < ARRAY_SIZE(sc->base.images); i++) {
+		sc->base.images[i].fd = -1;
+	}
 
 	for (uint32_t i = 0; i < num_images; i++) {
-		ret =
-		    create_image_fd(c, bits, format, width, height, array_size,
-		                    mip_count, &sc->images[i].image,
-		                    &sc->images[i].memory, &sc->base.images[i]);
+		ret = create_image_fd(
+		    c, info->bits, info->format, info->width, info->height,
+		    info->array_size, info->mip_count, &sc->images[i].image,
+		    &sc->images[i].memory, &sc->base.images[i]);
 		if (ret != VK_SUCCESS) {
 			//! @todo memory leak of image fds and swapchain
 			// see
@@ -250,11 +265,21 @@ comp_swapchain_create(struct xrt_compositor *xc,
 		vk_create_sampler(&c->vk, &sc->images[i].sampler);
 	}
 
-	for (uint32_t i = 0; i < num_images; i++) {
-		sc->images[i].views =
-		    U_TYPED_ARRAY_CALLOC(VkImageView, array_size);
+	VkComponentMapping components = {
+	    .r = VK_COMPONENT_SWIZZLE_R,
+	    .g = VK_COMPONENT_SWIZZLE_G,
+	    .b = VK_COMPONENT_SWIZZLE_B,
+	    .a = VK_COMPONENT_SWIZZLE_ONE,
+	};
 
-		for (uint32_t layer = 0; layer < array_size; ++layer) {
+	for (uint32_t i = 0; i < num_images; i++) {
+		sc->images[i].views.alpha =
+		    U_TYPED_ARRAY_CALLOC(VkImageView, info->array_size);
+		sc->images[i].views.no_alpha =
+		    U_TYPED_ARRAY_CALLOC(VkImageView, info->array_size);
+		sc->images[i].array_size = info->array_size;
+
+		for (uint32_t layer = 0; layer < info->array_size; ++layer) {
 			VkImageSubresourceRange subresource_range = {
 			    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
 			    .baseMipLevel = 0,
@@ -263,10 +288,21 @@ comp_swapchain_create(struct xrt_compositor *xc,
 			    .layerCount = 1,
 			};
 
+
 			vk_create_view(&c->vk, sc->images[i].image,
-			               (VkFormat)format, subresource_range,
-			               &sc->images[i].views[layer]);
+			               (VkFormat)info->format,
+			               subresource_range,
+			               &sc->images[i].views.alpha[layer]);
+			vk_create_view_swizzle(
+			    &c->vk, sc->images[i].image, (VkFormat)info->format,
+			    subresource_range, components,
+			    &sc->images[i].views.no_alpha[layer]);
 		}
+	}
+
+	// Prime the fifo
+	for (uint32_t i = 0; i < num_images; i++) {
+		u_index_fifo_push(&sc->fifo, i);
 	}
 
 
@@ -283,7 +319,7 @@ comp_swapchain_create(struct xrt_compositor *xc,
 	    .baseMipLevel = 0,
 	    .levelCount = 1,
 	    .baseArrayLayer = 0,
-	    .layerCount = array_size,
+	    .layerCount = info->array_size,
 	};
 
 	for (uint32_t i = 0; i < num_images; i++) {
@@ -299,26 +335,43 @@ comp_swapchain_create(struct xrt_compositor *xc,
 	return &sc->base.base;
 }
 
-void
+static void
+clean_image_views(struct vk_bundle *vk,
+                  size_t array_size,
+                  VkImageView **views_ptr)
+{
+	VkImageView *views = *views_ptr;
+	if (views == NULL) {
+		return;
+	}
+
+	for (uint32_t i = 0; i < array_size; ++i) {
+		if (views[i] == VK_NULL_HANDLE) {
+			continue;
+		}
+
+		vk->vkDestroyImageView(vk->device, views[i], NULL);
+		views[i] = VK_NULL_HANDLE;
+	}
+
+	free(views);
+	array_size = 0;
+
+	*views_ptr = NULL;
+}
+
+/*!
+ * Free and destroy any initialized fields on the given image, safe to pass in
+ * images that has one or all fields set to NULL.
+ */
+static void
 comp_swapchain_image_cleanup(struct vk_bundle *vk,
-                             uint32_t array_size,
                              struct comp_swapchain_image *image)
 {
 	vk->vkDeviceWaitIdle(vk->device);
 
-	if (image->views != NULL) {
-		for (uint32_t i = 0; i < array_size; ++i) {
-			if (image->views[i] == VK_NULL_HANDLE) {
-				continue;
-			}
-
-			vk->vkDestroyImageView(vk->device, image->views[i],
-			                       NULL);
-			image->views[i] = VK_NULL_HANDLE;
-		}
-		free(image->views);
-		image->views = NULL;
-	}
+	clean_image_views(vk, image->array_size, &image->views.alpha);
+	clean_image_views(vk, image->array_size, &image->views.no_alpha);
 
 	if (image->sampler != VK_NULL_HANDLE) {
 		vk->vkDestroySampler(vk->device, image->sampler, NULL);
@@ -344,8 +397,16 @@ comp_swapchain_really_destroy(struct comp_swapchain *sc)
 	COMP_SPEW(sc->c, "REALLY DESTROY");
 
 	for (uint32_t i = 0; i < sc->base.base.num_images; i++) {
-		comp_swapchain_image_cleanup(vk, sc->base.base.array_size,
-		                             &sc->images[i]);
+		comp_swapchain_image_cleanup(vk, &sc->images[i]);
+	}
+
+	for (uint32_t i = 0; i < sc->base.base.num_images; i++) {
+		if (sc->base.images[i].fd < 0) {
+			continue;
+		}
+
+		close(sc->base.images[i].fd);
+		sc->base.images[i].fd = -1;
 	}
 
 	free(sc);

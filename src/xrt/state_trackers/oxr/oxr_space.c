@@ -1,4 +1,4 @@
-// Copyright 2019, Collabora, Ltd.
+// Copyright 2019-2020, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -37,8 +37,8 @@ check_reference_space_type(struct oxr_logger *log, XrReferenceSpaceType type)
 #endif
 	default:
 		return oxr_error(log, XR_ERROR_REFERENCE_SPACE_UNSUPPORTED,
-		                 "(createInfo->referenceSpaceType = "
-		                 "<UNKNOWN>)");
+		                 "(createInfo->referenceSpaceType == 0x%08x)",
+		                 type);
 	}
 }
 
@@ -197,7 +197,7 @@ oxr_space_action_relation(struct oxr_logger *log,
                           XrTime at_time,
                           struct xrt_space_relation *out_relation)
 {
-	struct oxr_source_input *input = NULL;
+	struct oxr_action_input *input = NULL;
 	struct oxr_space *act_spc, *ref_spc = NULL;
 	uint64_t timestamp = 0;
 	bool invert = false;
@@ -222,7 +222,7 @@ oxr_space_action_relation(struct oxr_logger *log,
 	// Internal error check.
 	if (act_spc == NULL || act_spc->is_reference || ref_spc == NULL ||
 	    !ref_spc->is_reference) {
-		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "this is bad!");
+		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "This is bad!");
 	}
 
 	// Reset so no relation is returned.
@@ -235,7 +235,7 @@ oxr_space_action_relation(struct oxr_logger *log,
 		return XR_SUCCESS;
 	}
 
-	oxr_source_get_pose_input(log, sess, act_spc->act_key,
+	oxr_action_get_pose_input(log, sess, act_spc->act_key,
 	                          &act_spc->sub_paths, &input);
 
 	// If the input isn't active.
@@ -246,13 +246,7 @@ oxr_space_action_relation(struct oxr_logger *log,
 
 	oxr_xdev_get_pose_at(log, sess->sys->inst, input->xdev,
 	                     input->input->name, at_time, &timestamp,
-	                     &out_relation->pose);
-
-	out_relation->relation_flags = (enum xrt_space_relation_flags)(
-	    XRT_SPACE_RELATION_POSITION_VALID_BIT |
-	    XRT_SPACE_RELATION_POSITION_TRACKED_BIT |
-	    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
-	    XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
+	                     out_relation);
 
 	if (invert) {
 		math_pose_invert(&out_relation->pose, &out_relation->pose);
@@ -323,6 +317,41 @@ print_space(const char *name, struct oxr_space *spc)
 	print_pose(spc->sess, "", &spc->pose);
 }
 
+static XrSpaceLocationFlags
+get_xr_space_location_flags(enum xrt_space_relation_flags relation_flags)
+{
+	// clang-format off
+	bool valid_ori = (relation_flags & XRT_SPACE_RELATION_ORIENTATION_VALID_BIT) != 0;
+	bool tracked_ori = (relation_flags & XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT) != 0;
+	bool valid_pos = (relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) != 0;
+	bool tracked_pos = (relation_flags & XRT_SPACE_RELATION_POSITION_TRACKED_BIT) != 0;
+
+	bool linear_vel = (relation_flags & XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT) != 0;
+	bool angular_vel = (relation_flags & XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT) != 0;
+	// clang-format on
+
+	XrSpaceLocationFlags location_flags = (XrSpaceLocationFlags)0;
+	if (valid_ori) {
+		location_flags |= XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
+	}
+	if (tracked_ori) {
+		location_flags |= XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT;
+	}
+	if (valid_pos) {
+		location_flags |= XR_SPACE_LOCATION_POSITION_VALID_BIT;
+	}
+	if (tracked_pos) {
+		location_flags |= XR_SPACE_LOCATION_POSITION_TRACKED_BIT;
+	}
+	if (linear_vel) {
+		location_flags |= XR_SPACE_VELOCITY_LINEAR_VALID_BIT;
+	}
+	if (angular_vel) {
+		location_flags |= XR_SPACE_VELOCITY_ANGULAR_VALID_BIT;
+	}
+	return location_flags;
+}
+
 XrResult
 oxr_space_locate(struct oxr_logger *log,
                  struct oxr_space *spc,
@@ -358,7 +387,24 @@ oxr_space_locate(struct oxr_logger *log,
 	safe_copy.xrt = result.pose;
 
 	location->pose = safe_copy.oxr;
-	location->locationFlags = result.relation_flags;
+	location->locationFlags =
+	    get_xr_space_location_flags(result.relation_flags);
+
+	XrSpaceVelocity *vel = (XrSpaceVelocity *)location->next;
+	if (vel) {
+		vel->linearVelocity.x = result.linear_velocity.x;
+		vel->linearVelocity.y = result.linear_velocity.y;
+		vel->linearVelocity.z = result.linear_velocity.z;
+
+		vel->angularVelocity.x = result.angular_velocity.x;
+		vel->angularVelocity.y = result.angular_velocity.y;
+		vel->angularVelocity.z = result.angular_velocity.z;
+
+		vel->velocityFlags |= (location->locationFlags &
+		                       XR_SPACE_VELOCITY_LINEAR_VALID_BIT);
+		vel->velocityFlags |= (location->locationFlags &
+		                       XR_SPACE_VELOCITY_ANGULAR_VALID_BIT);
+	}
 
 #if 0
 	location->linearVelocity = *(XrVector3f *)&result.linear_velocity;

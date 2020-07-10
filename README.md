@@ -178,6 +178,48 @@ You can verify that it stuck with the command.
 xrandr --prop
 ```
 
+## Running Vulkan Validation
+
+To run Monado with Vulkan validation the loader's layer functionality can be used.
+```
+VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation ./build/src/xrt/targets/service/monado-service
+```
+The same can be done when launching a Vulkan client.
+
+If you want a backtrace to be produced at validation errors, create a `vk_layer_settings.txt`
+file with the following content:
+```
+khronos_validation.debug_action = VK_DBG_LAYER_ACTION_LOG_MSG,VK_DBG_LAYER_ACTION_BREAK
+khronos_validation.report_flags = error,warn
+khronos_validation.log_filename = stdout
+```
+
+## Using libsurvive
+
+To enable the libsurvive driver, libsurvive has to be installed as a library with a pkgconfig file
+(https://github.com/cntools/libsurvive/pull/187).
+
+When starting any libsrvive or OpenXR application, libsurvive will run calibration and save
+configuration and calibration data in the current working directory.
+
+Make sure the HMD can see both basestations and is not moved during calibration.
+
+To remove libsurvive's calibration data (e.g. to force recalibration) delete the following
+files/directories:
+
+    rm -r *config.json calinfo
+
+Though working and somewhat usable, support for the libsurvive driver is **experimental**.
+Therefore with both meson and cmake, the survive driver has to be explicitly enabled with
+
+```
+#cmake
+-DBUILD_WITH_LIBSURVIVE=On
+
+#meson
+-Ddrivers=auto,survive
+```
+
 ## Coding style and formatting
 
 [clang-format][] is used,

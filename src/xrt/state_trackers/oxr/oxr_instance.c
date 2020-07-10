@@ -1,4 +1,4 @@
-// Copyright 2018-2019, Collabora, Ltd.
+// Copyright 2018-2020, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -6,11 +6,6 @@
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @ingroup oxr_main
  */
-
-#include <stdlib.h>
-#include <string.h>
-#include <stdio.h>
-#include <math.h>
 
 #include "util/u_var.h"
 #include "util/u_time.h"
@@ -23,6 +18,13 @@
 #include "oxr_logger.h"
 #include "oxr_handle.h"
 #include "oxr_extension_support.h"
+
+#include <sys/types.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+#include <math.h>
 
 
 DEBUG_GET_ONCE_BOOL_OPTION(debug_views, "OXR_DEBUG_VIEWS", false)
@@ -60,11 +62,11 @@ oxr_instance_destroy(struct oxr_logger *log, struct oxr_handle_base *hb)
 	u_var_remove_root((void *)inst);
 
 	oxr_binding_destroy_all(log, inst);
-	oxr_path_destroy_all(log, inst);
 
-	if (inst->path_store != NULL) {
-		u_hashset_destroy(&inst->path_store);
-	}
+	oxr_path_destroy(log, inst);
+
+	u_hashset_destroy(&inst->action_sets.name_store);
+	u_hashset_destroy(&inst->action_sets.loc_store);
 
 	for (size_t i = 0; i < inst->system.num_xdevs; i++) {
 		oxr_xdev_destroy(&inst->system.xdevs[i]);
@@ -78,6 +80,9 @@ oxr_instance_destroy(struct oxr_logger *log, struct oxr_handle_base *hb)
 
 	// Does null checking and sets to null.
 	time_state_destroy(&inst->timekeeping);
+
+	// Mutex goes last.
+	os_mutex_destroy(&inst->event.mutex);
 
 	free(inst);
 
@@ -102,7 +107,7 @@ oxr_instance_create(struct oxr_logger *log,
 {
 	struct oxr_instance *inst = NULL;
 	struct xrt_device *xdevs[NUM_XDEVS] = {0};
-	int h_ret, xinst_ret;
+	int xinst_ret, m_ret, h_ret;
 	XrResult ret;
 
 	OXR_ALLOCATE_HANDLE_OR_RETURN(log, inst, OXR_XR_DEBUG_INSTANCE,
@@ -113,16 +118,36 @@ oxr_instance_create(struct oxr_logger *log,
 	inst->debug_views = debug_get_bool_option_debug_views();
 	inst->debug_bindings = debug_get_bool_option_debug_bindings();
 
+	m_ret = os_mutex_init(&inst->event.mutex);
+	if (m_ret < 0) {
+		ret = oxr_error(log, XR_ERROR_RUNTIME_FAILURE,
+		                "Failed to init mutex");
+		return ret;
+	}
+
 	/* ---- HACK ---- */
 	oxr_sdl2_hack_create(&inst->hack);
 	/* ---- HACK ---- */
 
-	h_ret = u_hashset_create(&inst->path_store);
-	if (h_ret != 0) {
-		free(inst);
-		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE,
-		                 "Failed to create hashset");
+	ret = oxr_path_init(log, inst);
+	if (ret != XR_SUCCESS) {
+		return ret;
 	}
+
+	h_ret = u_hashset_create(&inst->action_sets.name_store);
+	if (h_ret != 0) {
+		oxr_instance_destroy(log, &inst->handle);
+		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE,
+		                 "Failed to create name_store hashset");
+	}
+
+	h_ret = u_hashset_create(&inst->action_sets.loc_store);
+	if (h_ret != 0) {
+		oxr_instance_destroy(log, &inst->handle);
+		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE,
+		                 "Failed to create loc_store hashset");
+	}
+
 
 	// Cache certain often looked up paths.
 	// clang-format off
@@ -130,7 +155,8 @@ oxr_instance_create(struct oxr_logger *log,
 	cache_path(log, inst, "/user/hand/head", &inst->path_cache.head);
 	cache_path(log, inst, "/user/hand/left", &inst->path_cache.left);
 	cache_path(log, inst, "/user/hand/right", &inst->path_cache.right);
-	cache_path(log, inst, "/user/hand/gamepad", &inst->path_cache.gamepad);
+	cache_path(log, inst, "/user/gamepad", &inst->path_cache.gamepad);
+	cache_path(log, inst, "/user/treadmill", &inst->path_cache.treadmill);
 	cache_path(log, inst, "/interaction_profiles/khr/simple_controller", &inst->path_cache.khr_simple_controller);
 	cache_path(log, inst, "/interaction_profiles/google/daydream_controller", &inst->path_cache.google_daydream_controller);
 	cache_path(log, inst, "/interaction_profiles/htc/vive_controller", &inst->path_cache.htc_vive_controller);
@@ -140,10 +166,18 @@ oxr_instance_create(struct oxr_logger *log,
 	cache_path(log, inst, "/interaction_profiles/oculus/go_controller", &inst->path_cache.oculus_go_controller);
 	cache_path(log, inst, "/interaction_profiles/oculus/touch_controller", &inst->path_cache.oculus_touch_controller);
 	cache_path(log, inst, "/interaction_profiles/valve/index_controller", &inst->path_cache.valve_index_controller);
-	cache_path(log, inst, "/interaction_profiles/mnd/ball_on_stick_controller", &inst->path_cache.mnd_ball_on_stick_controller);
+	cache_path(log, inst, "/interaction_profiles/mndx/ball_on_a_stick_controller", &inst->path_cache.mndx_ball_on_a_stick_controller);
 	// clang-format on
 
-	xinst_ret = xrt_instance_create(&inst->xinst);
+	// fill in our application info - @todo - replicate all createInfo
+	// fields?
+
+	struct xrt_instance_info i_info = {0};
+	snprintf(i_info.application_name,
+	         sizeof(inst->xinst->instance_info.application_name), "%s",
+	         createInfo->applicationInfo.applicationName);
+
+	xinst_ret = xrt_instance_create(&i_info, &inst->xinst);
 	if (xinst_ret != 0) {
 		ret = oxr_error(log, XR_ERROR_RUNTIME_FAILURE,
 		                "Failed to create prober");

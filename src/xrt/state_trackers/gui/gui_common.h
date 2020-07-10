@@ -46,8 +46,8 @@ struct gui_program
 
 	struct gui_scene_manager *gsm;
 
-	struct time_state *timekeeping;
 	struct xrt_device *xdevs[NUM_XDEVS];
+	struct xrt_instance *instance;
 	struct xrt_prober *xp;
 
 	struct gui_ogl_texture *texs[256];
@@ -55,7 +55,10 @@ struct gui_program
 };
 
 /*!
+ * @interface gui_scene
  * A single currently running scene.
+ *
+ * @ingroup gui
  */
 struct gui_scene
 {

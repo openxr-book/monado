@@ -23,11 +23,14 @@ extern "C" {
  */
 
 /*!
+ * @class client_gl_swapchain
+ *
  * Wraps the real compositor swapchain providing a OpenGL based interface.
  *
  * Almost a one to one mapping to a OpenXR swapchain.
  *
  * @ingroup comp_client
+ * @implements xrt_swapchain_gl
  */
 struct client_gl_swapchain
 {
@@ -37,9 +40,12 @@ struct client_gl_swapchain
 };
 
 /*!
+ * @class client_gl_compositor
+ *
  * Wraps the real compositor providing a OpenGL based interface.
  *
  * @ingroup comp_client
+ * @implements xrt_compositor_gl
  */
 struct client_gl_compositor
 {
@@ -55,17 +61,10 @@ struct client_gl_compositor
  *
  */
 
-/*!
- * Convenience function to convert a xrt_swapchain to a client_gl_swapchain.
- */
-static inline struct client_gl_swapchain *
-client_gl_swapchain(struct xrt_swapchain *xsc)
-{
-	return (struct client_gl_swapchain *)xsc;
-}
 
 /*!
- * Convenience function to convert a xrt_compositor to a client_gl_compositor.
+ * Down-cast helper.
+ * @protected @memberof client_gl_compositor
  */
 static inline struct client_gl_compositor *
 client_gl_compositor(struct xrt_compositor *xc)
@@ -79,6 +78,14 @@ typedef client_gl_void_ptr_func (*client_gl_get_procaddr)(const char *name);
 
 /*!
  * Fill in a client_gl_compositor and do common OpenGL sanity checking.
+ *
+ * OpenGL can have multiple backing window systems we have to interact with, so
+ * there isn't just one unified OpenGL client constructor.
+ *
+ * Moves owenership of provided xcfd to the client_gl_compositor.
+ *
+ * @public @memberof client_gl_compositor
+ * @relatesalso xrt_compositor_fd
  */
 bool
 client_gl_compositor_init(struct client_gl_compositor *c,

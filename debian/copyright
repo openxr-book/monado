@@ -60,6 +60,10 @@ Files: doc/changes/xrt/*
 Copyright: 2020, Collabora, Ltd. and the Monado contributors
 License: CC0-1.0
 
+Files: src/external/Catch2/*
+Copyright: 2020, Two Blue Cubes Ltd.
+License: BSL-1.0
+
 Files: src/external/cjson/*
 Copyright: 2009-2017, Dave Gamble and cJSON contributors
 License: Expat
@@ -91,8 +95,8 @@ License: Apache-2.0
 
 Files: src/external/flexkalman/flexkalman/AbsolutePositionLeverArmMeasurement.h
   src/external/flexkalman/flexkalman/SO3.h
-Copyright: 2018-2020, Collabora, Ltd.
-License: Apache-2.0
+Copyright: 2019, 2020, Collabora, Ltd.
+License: Apache-2.0 or BSL-1.0
 
 Files: src/external/flexkalman/flexkalman/AbsolutePositionMeasurement.h
   src/external/flexkalman/flexkalman/AugmentedProcessModel.h
@@ -121,7 +125,7 @@ Copyright: 2017, Sean Barrett
 License: Expat
 
 Files: src/external/openxr_includes/*
-Copyright: 2017-2019, The Khronos Group Inc.
+Copyright: 2017-2020, The Khronos Group Inc.
 License: Apache-2.0
 
 Files: src/external/openxr_includes/openxr/loader_interfaces.h
@@ -173,7 +177,7 @@ Copyright: 2018-2020, Collabora, Ltd.
 License: BSL-1.0
 
 Files: src/xrt/drivers/psvr/*
-Copyright: 2019, Collabora, Ltd.
+Copyright: 2019, 2020, Collabora, Ltd.
   2016, Joey Ferwerda.
 License: BSL-1.0
 
@@ -187,7 +191,8 @@ Copyright: 2020, Nova King.
   2019, 2020, Collabora, Ltd.
 License: BSL-1.0
 
-Files: src/xrt/drivers/vive/vive_controller_driver.c
+Files: src/xrt/drivers/vive/vive.h
+  src/xrt/drivers/vive/vive_controller.c
   src/xrt/drivers/vive/vive_device.c
   src/xrt/drivers/vive/vive_protocol.c
   src/xrt/drivers/vive/vive_protocol.h
