@@ -1,4 +1,4 @@
-// Copyright 2019, Collabora, Ltd.
+// Copyright 2019-2020, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -27,6 +27,7 @@ cli_print_help(int argc, const char **argv)
 	P("Commands:\n");
 	P("  test       - List found devices, for prober testing.\n");
 	P("  probe      - Just probe and then exit.\n");
+	P("  utility    - Perform a utility method on a device.\n");
 	P("  calibrate  - Calibrate a camera and save config (not implemented "
 	  "yet).\n");
 
@@ -48,6 +49,9 @@ main(int argc, const char **argv)
 	}
 	if (strcmp(argv[1], "calibrate") == 0) {
 		return cli_cmd_calibrate(argc, argv);
+	}
+	if (strcmp(argv[1], "utility") == 0) {
+		return cli_cmd_utility(argc, argv);
 	}
 	return cli_print_help(argc, argv);
 }

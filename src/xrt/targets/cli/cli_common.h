@@ -1,4 +1,4 @@
-// Copyright 2019, Collabora, Ltd.
+// Copyright 2019-2020, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -17,3 +17,6 @@ cli_cmd_probe(int argc, const char **argv);
 
 int
 cli_cmd_test(int argc, const char **argv);
+
+int
+cli_cmd_utility(int argc, const char **argv);

@@ -7,6 +7,7 @@ cli = executable(
 		'cli_cmd_calibrate.c',
 		'cli_cmd_probe.c',
 		'cli_cmd_test.c',
+		'cli_cmd_utility.c',
 		'cli_common.h',
 		'cli_main.c',
 	),
