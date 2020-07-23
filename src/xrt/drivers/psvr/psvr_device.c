@@ -130,6 +130,8 @@ struct psvr_device
 		bool control;
 	} gui;
 
+	bool skip_powerdown;
+
 #if 1
 	struct m_imu_3dof fusion;
 #else
@@ -693,6 +695,7 @@ static int
 control_power_and_wait(struct psvr_device *psvr, bool on)
 {
 	const char *status = on ? "on" : "off";
+	PSVR_DEBUG(psvr, "Trying to switch %s the headset", status);
 	const uint8_t data[8] = {
 	    0x17, 0x00, 0xaa, 0x04, on, 0x00, 0x00, 0x00,
 	};
@@ -719,11 +722,12 @@ control_vrmode_and_wait(struct psvr_device *psvr, bool on)
 	const uint8_t data[8] = {
 	    0x23, 0x00, 0xaa, 0x04, on, 0x00, 0x00, 0x00,
 	};
-	int ret;
 
-	ret = send_to_control(psvr, data, sizeof(data));
+	PSVR_DEBUG(psvr, "Trying to %s vr-mode on the headset",
+	           on ? "enable" : "disable");
+	int ret = send_to_control(psvr, data, sizeof(data));
 	if (ret < 0) {
-		PSVR_ERROR(psvr, "Failed %s vr-mode the headset! '%i'",
+		PSVR_ERROR(psvr, "Failed to %s vr-mode on the headset! '%i'",
 		           on ? "enable" : "disable", ret);
 		return ret;
 	}
@@ -876,9 +880,12 @@ teardown(struct psvr_device *psvr)
 
 	if (psvr->hmd_control != NULL) {
 		// Turn off VR-mode and power down headset.
-		if (control_vrmode_and_wait(psvr, false) < 0 ||
-		    control_power_and_wait(psvr, false) < 0) {
-			PSVR_ERROR(psvr, "Failed to shut down the headset!");
+		if (!psvr->skip_powerdown) {
+			if (control_vrmode_and_wait(psvr, false) < 0 ||
+			    control_power_and_wait(psvr, false) < 0) {
+				PSVR_ERROR(psvr,
+				           "Failed to shut down the headset!");
+			}
 		}
 
 		hid_close(psvr->hmd_control);
@@ -989,6 +996,22 @@ psvr_device_destroy(struct xrt_device *xdev)
 	u_device_free(&psvr->base);
 }
 
+static int
+psvr_change_mode(struct xrt_device *xdev, void *data)
+{
+	struct psvr_device *psvr = psvr_device(xdev);
+	// force debug messages on
+	psvr->print_debug = true;
+	// don't "clean up" after ourselves
+	psvr->skip_powerdown = true;
+	return control_vrmode_and_wait(psvr, data != NULL);
+}
+
+static const struct xrt_device_utility_method_entry psvr_entries[] = {
+    {"vrmode", psvr_change_mode, (void *)1},
+    {"cinemamode", psvr_change_mode, NULL},
+    {0},
+};
 
 /*
  *
@@ -1017,6 +1040,7 @@ psvr_device_create(struct hid_device_info *hmd_handle_info,
 	psvr->base.destroy = psvr_device_destroy;
 	psvr->base.inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;
 	psvr->base.name = XRT_DEVICE_GENERIC_HMD;
+	psvr->base.utility_methods = psvr_entries;
 
 	{
 		struct u_panotools_values vals = {0};
