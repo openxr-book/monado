@@ -10,6 +10,7 @@
 #pragma once
 
 #define XRT_DEVICE_NAME_LEN 256
+#define XRT_DEVICE_METHOD_NAME_LEN 256
 
 #include "xrt/xrt_defines.h"
 
@@ -194,6 +195,39 @@ struct xrt_output
 	enum xrt_output_name name;
 };
 
+struct xrt_device;
+
+/*!
+ * Name and function pointer pair used for additional per-device utility
+ * methods.
+ */
+struct xrt_device_utility_method_entry
+{
+	/*!
+	 * Method name.
+	 *
+	 * If the first element is NULL/'\0', it means this is the end of the
+	 * list of methods.
+	 */
+	const char method_name[XRT_DEVICE_METHOD_NAME_LEN];
+
+	/*!
+	 * Function pointer.
+	 *
+	 * The only arguments it takes are the xdev owning it and the value of
+	 * xrt_device_utility_method_entry::data
+	 */
+	int (*function_ptr)(struct xrt_device *xdev, void *data);
+
+	/*!
+	 * An arbitrary pointer that will be passed to the method on invocation.
+	 *
+	 * Can be used for whatever purpose the device desires, or may be left
+	 * as NULL.
+	 */
+	void *data;
+};
+
 /*!
  * @interface xrt_device
  *
@@ -305,6 +339,14 @@ struct xrt_device
 	 * Destroy device.
 	 */
 	void (*destroy)(struct xrt_device *xdev);
+
+	/*!
+	 * Optional utility methods.
+	 *
+	 * If this is not null, it should be an array terminated with an
+	 * all-null entry.
+	 */
+	const struct xrt_device_utility_method_entry *utility_methods;
 };
 
 /*!
@@ -378,6 +420,19 @@ xrt_device_destroy(struct xrt_device **xdev_ptr)
 	*xdev_ptr = NULL;
 }
 
+/*!
+ * Helper function for invoking a utility method from the @ref
+ * xrt_device::utility_methods array.
+ *
+ * @public @memberof xrt_device
+ */
+static inline int
+xrt_device_invoke_utility_method(
+    struct xrt_device *xdev,
+    const struct xrt_device_utility_method_entry *method)
+{
+	return method->function_ptr(xdev, method->data);
+}
 
 #ifdef __cplusplus
 }
