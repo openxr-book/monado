@@ -11,12 +11,11 @@
 
 
 static int
-t_instance_create_fd_compositor_stub(struct xrt_instance *xinst,
-                                     struct xrt_device *xdev,
-                                     bool flip_y,
-                                     struct xrt_compositor_fd **out_xcfd)
+t_instance_create_system_compositor_stub(struct xrt_instance *xinst,
+                                         struct xrt_device *xdev,
+                                         struct xrt_system_compositor **out_xsysc)
 {
-	*out_xcfd = NULL;
+	*out_xsysc = NULL;
 
 	return -1;
 }
@@ -29,8 +28,7 @@ t_instance_create_fd_compositor_stub(struct xrt_instance *xinst,
  */
 
 int
-xrt_instance_create(struct xrt_instance_info *i_info,
-                    struct xrt_instance **out_xinst)
+xrt_instance_create(struct xrt_instance_info *i_info, struct xrt_instance **out_xinst)
 {
 	struct xrt_prober *xp = NULL;
 
@@ -41,7 +39,7 @@ xrt_instance_create(struct xrt_instance_info *i_info,
 
 	struct t_instance *tinst = U_TYPED_CALLOC(struct t_instance);
 	tinst->base.select = t_instance_select;
-	tinst->base.create_fd_compositor = t_instance_create_fd_compositor_stub;
+	tinst->base.create_system_compositor = t_instance_create_system_compositor_stub;
 	tinst->base.get_prober = t_instance_get_prober;
 	tinst->base.destroy = t_instance_destroy;
 	tinst->xp = xp;

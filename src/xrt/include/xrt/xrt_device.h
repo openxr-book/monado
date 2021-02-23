@@ -28,7 +28,8 @@ struct xrt_tracking;
 struct xrt_view
 {
 	/*!
-	 * Viewport position on the screen, in absolute screen coordinates.
+	 * Viewport position on the screen, in absolute screen coordinates on
+	 * an unrotated display, like the HMD presents it to the OS.
 	 * This field is only used by @ref comp to setup the device rendering.
 	 *
 	 * If the view is being rotated by xrt_view.rot 90° right in the
@@ -44,12 +45,14 @@ struct xrt_view
 	} viewport;
 
 	/*!
-	 * Pixel and physical properties of this display, not in absolute
-	 * screen coordinates that the compositor sees. So before any rotation
-	 * is applied by xrt_view::rot.
+	 * Physical properties of this display (or the part of a display that
+	 * covers this view), not in absolute screen coordinates but like the
+	 * clients see them i.e. after rotation is applied by xrt_view::rot.
+	 * This field is only used for the clients' swapchain setup.
 	 *
 	 * The xrt_view::display::w_pixels and xrt_view::display::h_pixels
-	 * become the recommended image size for this view.
+	 * become the recommended image size for this view, after being scaled
+	 * by XRT_COMPOSITOR_SCALE_PERCENTAGE.
 	 */
 	struct
 	{
@@ -58,16 +61,6 @@ struct xrt_view
 		float w_meters;
 		float h_meters;
 	} display;
-
-	/*!
-	 * Position in meters relative to display origin, before any rotation
-	 * is applied by xrt_view::rot.
-	 */
-	struct
-	{
-		float x_meters;
-		float y_meters;
-	} lens_center;
 
 	/*!
 	 * Rotation 2d matrix used to rotate the position of the output of the
@@ -92,7 +85,10 @@ struct xrt_view
 struct xrt_hmd_parts
 {
 	/*!
-	 * The hmd screen, right now hardcoded to one.
+	 * The hmd screen as an unrotated display, like the HMD presents it to
+	 * the OS.
+	 *
+	 * This field is used by @ref comp to setup the extended mode window.
 	 */
 	struct
 	{
@@ -123,31 +119,6 @@ struct xrt_hmd_parts
 		enum xrt_distortion_model models;
 		//! Preferred disortion model, single value.
 		enum xrt_distortion_model preferred;
-
-		struct
-		{
-			//! Panotools universal distortion k.
-			float distortion_k[4];
-			//! Panotools post distortion scale, <r, g, b, _>.
-			float aberration_k[4];
-			//! Panotools warp scale.
-			float warp_scale;
-		} pano;
-
-		struct
-		{
-			float aspect_x_over_y;
-			float grow_for_undistort;
-
-			//! Left/right
-			float undistort_r2_cutoff[2];
-
-			//! Left/right, x/y
-			float center[2][2];
-
-			//! left/right, r/g/b, a/b/c
-			float coefficients[2][3][3];
-		} vive;
 
 		struct
 		{
@@ -189,9 +160,54 @@ struct xrt_input
 	union xrt_input_value value;
 };
 
+/*!
+ * A single named output, that sits on a @ref xrt_device.
+ *
+ * @ingroup xrt_iface
+ */
 struct xrt_output
 {
 	enum xrt_output_name name;
+};
+
+
+/*!
+ * A binding pair, going @p from a binding point to a @p device input.
+ *
+ * @ingroup xrt_iface
+ */
+struct xrt_binding_input_pair
+{
+	enum xrt_input_name from;   //!< From which name.
+	enum xrt_input_name device; //!< To input on the device.
+};
+
+/*!
+ * A binding pair, going @p from a binding point to a @p device output.
+ *
+ * @ingroup xrt_iface
+ */
+struct xrt_binding_output_pair
+{
+	enum xrt_output_name from;   //!< From which name.
+	enum xrt_output_name device; //!< To output on the device.
+};
+
+/*!
+ * A binding profile, has lists of binding pairs to goes from device in @p name
+ * to the device it hangs off on.
+ *
+ * @ingroup xrt_iface
+ */
+struct xrt_binding_profile
+{
+	//! Device this binding emulates.
+	enum xrt_device_name name;
+
+	struct xrt_binding_input_pair *inputs;
+	size_t num_inputs;
+	struct xrt_binding_output_pair *outputs;
+	size_t num_outputs;
 };
 
 /*!
@@ -205,6 +221,7 @@ struct xrt_device
 {
 	//! Enum identifier of the device.
 	enum xrt_device_name name;
+	enum xrt_device_type device_type;
 
 	//! A string describing the device.
 	char str[XRT_DEVICE_NAME_LEN];
@@ -214,6 +231,11 @@ struct xrt_device
 
 	//! Always set, pointing to the tracking system for this device.
 	struct xrt_tracking_origin *tracking_origin;
+
+	//! Number of bindings.
+	size_t num_binding_profiles;
+	// Array of alternative binding profiles.
+	struct xrt_binding_profile *binding_profiles;
 
 	//! Number of inputs.
 	size_t num_inputs;
@@ -225,6 +247,9 @@ struct xrt_device
 	//! Array of output structs.
 	struct xrt_output *outputs;
 
+	bool orientation_tracking_supported;
+	bool position_tracking_supported;
+	bool hand_tracking_supported;
 
 	/*!
 	 * Update any attached inputs.
@@ -234,11 +259,9 @@ struct xrt_device
 	void (*update_inputs)(struct xrt_device *xdev);
 
 	/*!
-	 * Get relationship of a tracked device to the device "base space".
-	 *
-	 * Right now the base space is assumed to be local space.
-	 *
-	 * This is very very WIP and will need to be made a lot more advanced.
+	 * Get relationship of a tracked device to the tracking origin space as
+	 * the base space. It is the responsibility of the device driver to do
+	 * any prediction, there are helper functions available for this.
 	 *
 	 * The timestamps are system monotonic timestamps, such as returned by
 	 * os_monotonic_get_ns().
@@ -250,8 +273,6 @@ struct xrt_device
 	 * @param[in] at_timestamp_ns If the device can predict or has a history
 	 *                            of positions, this is when the caller
 	 *                            wants the pose to be from.
-	 * @param[out] out_relation_timestamp_ns Timestamp when this relation
-	 *                                       was captured.
 	 * @param[out] out_relation The relation read from the device.
 	 *
 	 * @see xrt_input_name
@@ -259,9 +280,32 @@ struct xrt_device
 	void (*get_tracked_pose)(struct xrt_device *xdev,
 	                         enum xrt_input_name name,
 	                         uint64_t at_timestamp_ns,
-	                         uint64_t *out_relation_timestamp_ns,
 	                         struct xrt_space_relation *out_relation);
 
+	/*!
+	 * Get relationship of hand joints to the tracking origin space as
+	 * the base space. It is the responsibility of the device driver to do
+	 * any prediction, there are helper functions available for this.
+	 *
+	 * The timestamps are system monotonic timestamps, such as returned by
+	 * os_monotonic_get_ns().
+	 *
+	 * @param[in] xdev           The device.
+	 * @param[in] name           Some devices may have multiple poses on
+	 *                           them, select the one using this field. For
+	 *                           hand tracking use @p
+	 * XRT_INPUT_GENERIC_HAND_TRACKING_DEFAULT_SET.
+	 * @param[in] at_timestamp_ns If the device can predict or has a history
+	 *                            of positions, this is when the caller
+	 *                            wants the pose to be from.
+	 * @param[out] out_relation The relation read from the device.
+	 *
+	 * @see xrt_input_name
+	 */
+	void (*get_hand_tracking)(struct xrt_device *xdev,
+	                          enum xrt_input_name name,
+	                          uint64_t at_timestamp_ns,
+	                          struct xrt_hand_joint_set *out_value);
 	/*!
 	 * Set a output value.
 	 *
@@ -271,9 +315,7 @@ struct xrt_device
 	 *                           @todo make this param a pointer to const.
 	 * @see xrt_output_name
 	 */
-	void (*set_output)(struct xrt_device *xdev,
-	                   enum xrt_output_name name,
-	                   union xrt_output_value *value);
+	void (*set_output)(struct xrt_device *xdev, enum xrt_output_name name, union xrt_output_value *value);
 
 	/*!
 	 * Get the per view pose in relation to the view space. Does not do any
@@ -297,6 +339,8 @@ struct xrt_device
 	                      struct xrt_vec3 *eye_relation,
 	                      uint32_t view_index,
 	                      struct xrt_pose *out_pose);
+
+	bool (*compute_distortion)(struct xrt_device *xdev, int view, float u, float v, struct xrt_uv_triplet *result);
 
 	/*!
 	 * Destroy device.
@@ -324,11 +368,23 @@ static inline void
 xrt_device_get_tracked_pose(struct xrt_device *xdev,
                             enum xrt_input_name name,
                             uint64_t requested_timestamp_ns,
-                            uint64_t *out_actual_timestamp_ns,
                             struct xrt_space_relation *out_relation)
 {
-	xdev->get_tracked_pose(xdev, name, requested_timestamp_ns,
-	                       out_actual_timestamp_ns, out_relation);
+	xdev->get_tracked_pose(xdev, name, requested_timestamp_ns, out_relation);
+}
+
+/*!
+ * Helper function for @ref xrt_device::get_hand_tracking.
+ *
+ * @public @memberof xrt_device
+ */
+static inline void
+xrt_device_get_hand_tracking(struct xrt_device *xdev,
+                             enum xrt_input_name name,
+                             uint64_t requested_timestamp_ns,
+                             struct xrt_hand_joint_set *out_value)
+{
+	xdev->get_hand_tracking(xdev, name, requested_timestamp_ns, out_value);
 }
 
 /*!
@@ -337,9 +393,7 @@ xrt_device_get_tracked_pose(struct xrt_device *xdev,
  * @public @memberof xrt_device
  */
 static inline void
-xrt_device_set_output(struct xrt_device *xdev,
-                      enum xrt_output_name name,
-                      union xrt_output_value *value)
+xrt_device_set_output(struct xrt_device *xdev, enum xrt_output_name name, union xrt_output_value *value)
 {
 	xdev->set_output(xdev, name, value);
 }

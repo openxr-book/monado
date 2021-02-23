@@ -27,22 +27,18 @@ oxr_session_populate_vk(struct oxr_logger *log,
                         XrGraphicsBindingVulkanKHR const *next,
                         struct oxr_session *sess)
 {
-	struct xrt_compositor_fd *xcfd = NULL;
-	int ret = xrt_instance_create_fd_compositor(sys->inst->xinst, sys->head,
-	                                            false, &xcfd);
-	if (ret < 0 || xcfd == NULL) {
-		return oxr_error(log, XR_ERROR_INITIALIZATION_FAILED,
-		                 "Failed to create an fd compositor '%i'", ret);
-	}
-
-	struct xrt_compositor_vk *xcvk = xrt_gfx_vk_provider_create(
-	    xcfd, next->instance, vkGetInstanceProcAddr, next->physicalDevice,
-	    next->device, next->queueFamilyIndex, next->queueIndex);
+	struct xrt_compositor_native *xcn = sess->xcn;
+	struct xrt_compositor_vk *xcvk = xrt_gfx_vk_provider_create( //
+	    xcn,                                                     //
+	    next->instance,                                          //
+	    vkGetInstanceProcAddr,                                   //
+	    next->physicalDevice,                                    //
+	    next->device,                                            //
+	    next->queueFamilyIndex,                                  //
+	    next->queueIndex);                                       //
 
 	if (xcvk == NULL) {
-		xcfd->base.destroy(&xcfd->base);
-		return oxr_error(log, XR_ERROR_INITIALIZATION_FAILED,
-		                 "Failed to create an vk client compositor");
+		return oxr_error(log, XR_ERROR_INITIALIZATION_FAILED, "Failed to create an vk client compositor");
 	}
 
 	sess->compositor = &xcvk->base;

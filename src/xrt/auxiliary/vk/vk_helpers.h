@@ -12,6 +12,9 @@
 
 #include "xrt/xrt_compositor.h"
 #include "xrt/xrt_vulkan_includes.h"
+#include "xrt/xrt_handles.h"
+#include "util/u_logging.h"
+#include "os/os_threading.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -33,20 +36,27 @@ extern "C" {
  */
 struct vk_bundle
 {
-	bool print;
+	enum u_logging_level ll;
 
 	VkInstance instance;
 	VkPhysicalDevice physical_device;
+	int physical_device_index;
 	VkDevice device;
 	uint32_t queue_family_index;
 	uint32_t queue_index;
 	VkQueue queue;
+
+	struct os_mutex queue_mutex;
+
+	bool has_GOOGLE_display_timing;
 
 	VkDebugReportCallbackEXT debug_report_cb;
 
 	VkPhysicalDeviceMemoryProperties device_memory_props;
 
 	VkCommandPool cmd_pool;
+
+	struct os_mutex cmd_pool_mutex;
 
 	// clang-format off
 	// Loader functions
@@ -60,6 +70,7 @@ struct vk_bundle
 	PFN_vkDestroyDebugReportCallbackEXT vkDestroyDebugReportCallbackEXT;
 	PFN_vkEnumeratePhysicalDevices vkEnumeratePhysicalDevices;
 	PFN_vkDestroySurfaceKHR vkDestroySurfaceKHR;
+	PFN_vkEnumerateDeviceExtensionProperties vkEnumerateDeviceExtensionProperties;
 
 #ifdef VK_USE_PLATFORM_XCB_KHR
 	PFN_vkCreateXcbSurfaceKHR vkCreateXcbSurfaceKHR;
@@ -83,16 +94,26 @@ struct vk_bundle
 	PFN_vkGetRandROutputDisplayEXT vkGetRandROutputDisplayEXT;
 #endif
 
+#ifdef VK_USE_PLATFORM_ANDROID_KHR
+	PFN_vkCreateAndroidSurfaceKHR vkCreateAndroidSurfaceKHR;
+#endif
+
+#ifdef VK_USE_PLATFORM_WIN32_KHR
+	PFN_vkCreateWin32SurfaceKHR vkCreateWin32SurfaceKHR;
+#endif
 
 	// Physical device functions.
 	PFN_vkGetPhysicalDeviceMemoryProperties vkGetPhysicalDeviceMemoryProperties;
 	PFN_vkGetPhysicalDeviceQueueFamilyProperties vkGetPhysicalDeviceQueueFamilyProperties;
 	PFN_vkGetPhysicalDeviceProperties vkGetPhysicalDeviceProperties;
+	PFN_vkGetPhysicalDeviceProperties2 vkGetPhysicalDeviceProperties2;
 
 	PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR vkGetPhysicalDeviceSurfaceCapabilitiesKHR;
 	PFN_vkGetPhysicalDeviceSurfaceFormatsKHR vkGetPhysicalDeviceSurfaceFormatsKHR;
 	PFN_vkGetPhysicalDeviceSurfacePresentModesKHR vkGetPhysicalDeviceSurfacePresentModesKHR;
 	PFN_vkGetPhysicalDeviceSurfaceSupportKHR vkGetPhysicalDeviceSurfaceSupportKHR;
+
+	PFN_vkGetPhysicalDeviceFormatProperties vkGetPhysicalDeviceFormatProperties;
 
 
 	// Device functions.
@@ -105,6 +126,15 @@ struct vk_bundle
 	PFN_vkMapMemory vkMapMemory;
 	PFN_vkUnmapMemory vkUnmapMemory;
 	PFN_vkGetMemoryFdKHR vkGetMemoryFdKHR;
+
+#ifdef VK_USE_PLATFORM_ANDROID_KHR
+	PFN_vkGetMemoryAndroidHardwareBufferANDROID vkGetMemoryAndroidHardwareBufferANDROID;
+	PFN_vkGetAndroidHardwareBufferPropertiesANDROID vkGetAndroidHardwareBufferPropertiesANDROID;
+#endif
+
+#ifdef VK_USE_PLATFORM_WIN32_KHR
+	PFN_vkGetMemoryWin32HandleKHR vkGetMemoryWin32HandleKHR;
+#endif
 
 	PFN_vkCreateBuffer vkCreateBuffer;
 	PFN_vkDestroyBuffer vkDestroyBuffer;
@@ -153,6 +183,7 @@ struct vk_bundle
 	PFN_vkCreateDescriptorPool vkCreateDescriptorPool;
 	PFN_vkDestroyDescriptorPool vkDestroyDescriptorPool;
 	PFN_vkAllocateDescriptorSets vkAllocateDescriptorSets;
+	PFN_vkFreeDescriptorSets vkFreeDescriptorSets;
 	PFN_vkCreateGraphicsPipelines vkCreateGraphicsPipelines;
 	PFN_vkDestroyPipeline vkDestroyPipeline;
 	PFN_vkCreatePipelineLayout vkCreatePipelineLayout;
@@ -179,8 +210,12 @@ struct vk_bundle
 	PFN_vkAcquireNextImageKHR vkAcquireNextImageKHR;
 	PFN_vkQueuePresentKHR vkQueuePresentKHR;
 
+#ifdef VK_USE_PLATFORM_WIN32_KHR
+	PFN_vkImportSemaphoreWin32HandleKHR vkImportSemaphoreWin32HandleKHR;
+#else
 	PFN_vkImportSemaphoreFdKHR vkImportSemaphoreFdKHR;
 	PFN_vkGetSemaphoreFdKHR vkGetSemaphoreFdKHR;
+#endif
 	// clang-format on
 };
 
@@ -192,13 +227,6 @@ struct vk_buffer
 	void *data;
 };
 
-struct vk_image
-{
-	VkImage handle;
-	VkDeviceMemory memory;
-	VkImageView view;
-	VkSampler sampler;
-};
 
 /*
  *
@@ -228,28 +256,24 @@ vk_color_space_string(VkColorSpaceKHR code);
  *
  */
 
-#define VK_DEBUG(vk, ...)                                                      \
-	do {                                                                   \
-		if (vk->print) {                                               \
-			fprintf(stderr, "%s - ", __func__);                    \
-			fprintf(stderr, __VA_ARGS__);                          \
-			fprintf(stderr, "\n");                                 \
-		}                                                              \
-	} while (false)
-
-#define VK_ERROR(vk, ...)                                                      \
-	do {                                                                   \
-		fprintf(stderr, "%s - ", __func__);                            \
-		fprintf(stderr, __VA_ARGS__);                                  \
-		fprintf(stderr, "\n");                                         \
-	} while (false)
+#define VK_TRACE(d, ...) U_LOG_IFL_T(d->ll, __VA_ARGS__)
+#define VK_DEBUG(d, ...) U_LOG_IFL_D(d->ll, __VA_ARGS__)
+#define VK_INFO(d, ...) U_LOG_IFL_I(d->ll, __VA_ARGS__)
+#define VK_WARN(d, ...) U_LOG_IFL_W(d->ll, __VA_ARGS__)
+#define VK_ERROR(d, ...) U_LOG_IFL_E(d->ll, __VA_ARGS__)
 
 bool
 vk_has_error(VkResult res, const char *fun, const char *file, int line);
 
-#define vk_check_error(fun, res, ret)                                          \
-	if (vk_has_error(res, fun, __FILE__, __LINE__))                        \
+#define vk_check_error(fun, res, ret)                                                                                  \
+	if (vk_has_error(res, fun, __FILE__, __LINE__))                                                                \
 	return ret
+
+#define vk_check_error_with_free(fun, res, ret, to_free)                                                               \
+	if (vk_has_error(res, fun, __FILE__, __LINE__)) {                                                              \
+		free(to_free);                                                                                         \
+		return ret;                                                                                            \
+	}
 
 /*!
  * @ingroup aux_vk
@@ -273,7 +297,12 @@ vk_init_cmd_pool(struct vk_bundle *vk);
  * @ingroup aux_vk
  */
 VkResult
-vk_create_device(struct vk_bundle *vk, int forced_index);
+vk_create_device(struct vk_bundle *vk,
+                 int forced_index,
+                 const char *const *required_device_extensions,
+                 size_t num_required_device_extensions,
+                 const char *const *optional_device_extensions,
+                 size_t num_optional_device_extension);
 
 /*!
  * Initialize a bundle with objects given to us by client code,
@@ -294,10 +323,7 @@ vk_init_from_given(struct vk_bundle *vk,
  * @ingroup aux_vk
  */
 bool
-vk_get_memory_type(struct vk_bundle *vk,
-                   uint32_t type_bits,
-                   VkMemoryPropertyFlags memory_props,
-                   uint32_t *out_type_id);
+vk_get_memory_type(struct vk_bundle *vk, uint32_t type_bits, VkMemoryPropertyFlags memory_props, uint32_t *out_type_id);
 
 /*!
  * Allocate memory for an image and bind it to that image.
@@ -343,22 +369,17 @@ vk_alloc_and_bind_image_memory(struct vk_bundle *vk,
  * @ingroup aux_vk
  */
 VkResult
-vk_create_image_from_fd(struct vk_bundle *vk,
-                        enum xrt_swapchain_usage_bits swapchain_usage,
-                        int64_t format,
-                        uint32_t width,
-                        uint32_t height,
-                        uint32_t array_size,
-                        uint32_t mip_count,
-                        struct xrt_image_fd *image_fd,
-                        VkImage *out_image,
-                        VkDeviceMemory *out_mem);
+vk_create_image_from_native(struct vk_bundle *vk,
+                            const struct xrt_swapchain_create_info *info,
+                            struct xrt_image_native *image_native,
+                            VkImage *out_image,
+                            VkDeviceMemory *out_mem);
 
 /*!
  * @ingroup aux_vk
  */
 VkResult
-vk_create_semaphore_from_fd(struct vk_bundle *vk, int fd, VkSemaphore *out_sem);
+vk_create_semaphore_from_native(struct vk_bundle *vk, xrt_graphics_sync_handle_t native, VkSemaphore *out_sem);
 
 /*!
  * @ingroup aux_vk
@@ -375,7 +396,7 @@ vk_create_image_simple(struct vk_bundle *vk,
  * @ingroup aux_vk
  */
 VkResult
-vk_create_sampler(struct vk_bundle *vk, VkSampler *out_sampler);
+vk_create_sampler(struct vk_bundle *vk, VkSamplerAddressMode clamp_mode, VkSampler *out_sampler);
 
 /*!
  * @ingroup aux_vk
@@ -430,6 +451,14 @@ vk_get_access_flags(VkImageLayout layout);
 VkAccessFlags
 vk_swapchain_access_flags(enum xrt_swapchain_usage_bits bits);
 
+/*!
+ * Always adds `VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT` and
+ * `VK_IMAGE_USAGE_SAMPLED_BIT` to color formats so they can be used by the
+ * compositor and client.
+ */
+VkImageUsageFlags
+vk_swapchain_usage_flags(struct vk_bundle *vk, VkFormat format, enum xrt_swapchain_usage_bits bits);
+
 bool
 vk_init_descriptor_pool(struct vk_bundle *vk,
                         const VkDescriptorPoolSize *pool_sizes,
@@ -455,9 +484,11 @@ vk_buffer_init(struct vk_bundle *vk,
 void
 vk_buffer_destroy(struct vk_buffer *self, struct vk_bundle *vk);
 
+bool
+vk_update_buffer(struct vk_bundle *vk, float *buffer, size_t buffer_size, VkDeviceMemory memory);
 
-void
-vk_image_destroy(struct vk_image *self, struct vk_bundle *vk);
+VkResult
+vk_locked_submit(struct vk_bundle *vk, VkQueue queue, uint32_t count, const VkSubmitInfo *infos, VkFence fence);
 
 #ifdef __cplusplus
 }

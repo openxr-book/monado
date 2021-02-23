@@ -1,30 +1,17 @@
 # Copyright 2019-2020, Collabora, Ltd.
 # SPDX-License-Identifier: BSL-1.0
 
-
-###
-# Binding generation
-#
-
-prog_python = import('python').find_installation('python3')
-
-generated = custom_target('bindings code',
-	command: [prog_python, '@INPUT@', '@OUTPUT@'],
-	input: ['bindings.py', 'bindings.json'],
-	output: [
-		'oxr_generated_bindings.h',
-		'oxr_generated_bindings.c',
-	]
-)
-
-
 ###
 # Main code
 #
 
 compile_args = []
 if build_opengl
-	compile_args += ['-DXR_USE_GRAPHICS_API_OPENGL', '-DXR_USE_GRAPHICS_API_OPENGL_ES']
+	compile_args += ['-DXR_USE_GRAPHICS_API_OPENGL']
+endif
+
+if build_opengles
+	compile_args += ['-DXR_USE_GRAPHICS_API_OPENGL_ES']
 endif
 
 if build_egl
@@ -38,8 +25,6 @@ endif
 lib_st_oxr = static_library(
 	'st_oxr',
 	[
-		generated[0],
-		generated[1],
 		'oxr_api_action.c',
 		'oxr_api_funcs.h',
 		'oxr_api_instance.c',

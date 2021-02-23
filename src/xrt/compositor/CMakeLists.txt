@@ -2,52 +2,71 @@
 # SPDX-License-Identifier: BSL-1.0
 
 spirv_shaders(SHADER_HEADERS
-	shaders/distortion.vert
 	shaders/mesh.frag
 	shaders/mesh.vert
-	shaders/none.frag
-	shaders/panotools.frag
-	shaders/vive.frag
-	shaders/quad.frag
-	shaders/quad.vert
+	shaders/layer.frag
+	shaders/layer.vert
+	shaders/equirect1.vert
+	shaders/equirect1.frag
+	shaders/equirect2.vert
+	shaders/equirect2.frag
 	)
 
-set(CLIENT_SOURCE_FILES
-	client/comp_vk_client.c
-	client/comp_vk_client.h
-	client/comp_vk_glue.c
-	)
+set(CLIENT_SOURCE_FILES)
 
 set(MAIN_SOURCE_FILES
 	main/comp_compositor.c
 	main/comp_compositor.h
-	main/comp_distortion.c
-	main/comp_distortion.h
 	main/comp_documentation.h
 	main/comp_renderer.c
 	main/comp_renderer.h
 	main/comp_settings.c
 	main/comp_settings.h
+	main/comp_shaders.c
 	main/comp_swapchain.c
-	main/comp_vk_swapchain.c
-	main/comp_vk_swapchain.h
+	main/comp_target.h
+	main/comp_target_swapchain.c
+	main/comp_target_swapchain.h
 	main/comp_window.h
 	main/comp_layer.h
 	main/comp_layer.c
 	main/comp_layer_renderer.h
 	main/comp_layer_renderer.c
+	render/comp_buffer.c
+	render/comp_render.h
+	render/comp_rendering.c
+	render/comp_resources.c
 	)
 
 ###
 # Client library
 #
 
-if(XRT_HAVE_OPENGL)
+if(XRT_HAVE_VULKAN)
+	list(APPEND CLIENT_SOURCE_FILES
+		client/comp_vk_client.c
+		client/comp_vk_client.h
+		client/comp_vk_glue.c
+		)
+endif()
+if(XRT_HAVE_OPENGL OR XRT_HAVE_OPENGLES)
 	list(APPEND CLIENT_SOURCE_FILES
 		client/comp_gl_client.c
 		client/comp_gl_client.h
+		client/comp_gl_memobj_swapchain.c
+		client/comp_gl_memobj_swapchain.h
+		)
+endif()
+if(XRT_HAVE_OPENGL)
+	list(APPEND CLIENT_SOURCE_FILES
 		client/comp_gl_glue.c
-		client/comp_gles_glue.c # TODO separate config for GLES
+		)
+endif()
+if(XRT_HAVE_OPENGLES)
+	list(APPEND CLIENT_SOURCE_FILES
+		client/comp_gles_glue.c
+		client/comp_gl_eglimage_swapchain.c
+		client/comp_gl_eglimage_swapchain.h
 		)
 endif()
 if(XRT_HAVE_OPENGL AND XRT_HAVE_XLIB)
@@ -57,17 +76,20 @@ if(XRT_HAVE_OPENGL AND XRT_HAVE_XLIB)
 		client/comp_gl_xlib_glue.c
 		)
 endif()
-if(XRT_HAVE_OPENGL AND XRT_HAVE_EGL)
+if(XRT_HAVE_EGL)
 	list(APPEND CLIENT_SOURCE_FILES
 		client/comp_egl_glue.c
 		)
 endif()
 
 add_library(comp_client STATIC ${CLIENT_SOURCE_FILES})
-target_link_libraries(comp_client PUBLIC xrt-interfaces PRIVATE aux_util aux_vk)
+target_link_libraries(comp_client PUBLIC xrt-interfaces PRIVATE aux_util)
 target_include_directories(comp_client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
-if(XRT_HAVE_OPENGL)
+if(XRT_HAVE_VULKAN)
+	target_link_libraries(comp_client PRIVATE aux_vk)
+endif()
+if(XRT_HAVE_OPENGL OR XRT_HAVE_OPENGLES)
 	target_link_libraries(comp_client PRIVATE aux_ogl)
 endif()
 
@@ -90,6 +112,16 @@ if(XRT_FEATURE_COMPOSITOR_MAIN)
 			main/comp_window_direct.c
 			main/comp_window_direct_randr.c
 			main/comp_window_direct_nvidia.c
+			)
+	endif()
+	if(WIN32)
+		list(APPEND MAIN_SOURCE_FILES
+			main/comp_window_mswin.c
+			)
+	endif()
+	if (VK_USE_PLATFORM_DISPLAY_KHR)
+		list(APPEND MAIN_SOURCE_FILES
+			main/comp_window_vk_display.c
 			)
 	endif()
 
@@ -120,6 +152,11 @@ if(XRT_FEATURE_COMPOSITOR_MAIN)
 			main/comp_window_wayland.c
 			)
 	endif()
+	if(ANDROID)
+		list(APPEND MAIN_SOURCE_FILES
+			main/comp_window_android.c
+			)
+	endif()
 
 	add_library(comp_main STATIC ${SHADER_HEADERS} ${MAIN_SOURCE_FILES} ${WL_PROTOS_SRC})
 	target_link_libraries(comp_main PUBLIC xrt-interfaces PRIVATE aux_util aux_os aux_vk)
@@ -141,9 +178,12 @@ if(XRT_FEATURE_COMPOSITOR_MAIN)
 	if(XRT_HAVE_XCB AND XRT_HAVE_XLIB)
 		target_link_libraries(comp_main PRIVATE ${X11_X11_LIB})
 	endif()
-	if(XRT_HAVE_EGL)
+	if(XRT_HAVE_EGL AND XRT_HAVE_XCB)
 		target_include_directories(comp_main SYSTEM PRIVATE ${EGL_INCLUDE_DIRS})
 		target_link_libraries(comp_main PRIVATE ${XCB_LIBRARIES})
+	endif()
+	if(ANDROID)
+		target_link_libraries(comp_main PRIVATE aux_ogl aux_android)
 	endif()
 
 	add_subdirectory(shaders)

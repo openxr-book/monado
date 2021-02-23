@@ -96,15 +96,46 @@ void
 math_vec3_accum(const struct xrt_vec3 *additional, struct xrt_vec3 *inAndOut);
 
 /*!
+ * Subtract from a vector in-place.
+ *
+ * Logically, *inAndOut -= *subtrahend
+ * OK if the two arguments are the same addresses.
+ *
+ * @relates xrt_vec3
+ * @ingroup aux_math
+ */
+void
+math_vec3_subtract(const struct xrt_vec3 *subtrahend, struct xrt_vec3 *inAndOut);
+
+/*!
+ * Multiply a vector in-place.
+ *
+ * Logically, *inAndOut *= scalar
+ *
+ * @relates xrt_vec3
+ * @ingroup aux_math
+ */
+void
+math_vec3_scalar_mul(float scalar, struct xrt_vec3 *inAndOut);
+
+/*!
  * Cross product of a vector.
  *
  * @relates xrt_vec3
  * @ingroup aux_math
  */
 void
-math_vec3_cross(const struct xrt_vec3 *l,
-                const struct xrt_vec3 *r,
-                struct xrt_vec3 *result);
+math_vec3_cross(const struct xrt_vec3 *l, const struct xrt_vec3 *r, struct xrt_vec3 *result);
+
+
+/*!
+ * Normalize a vec3 in place.
+ *
+ * @relates xrt_vec3
+ * @ingroup aux_math
+ */
+void
+math_vec3_normalize(struct xrt_vec3 *in);
 
 /*
  *
@@ -120,9 +151,7 @@ math_vec3_cross(const struct xrt_vec3 *l,
  * @ingroup aux_math
  */
 void
-math_quat_from_angle_vector(float angle_rads,
-                            const struct xrt_vec3 *vector,
-                            struct xrt_quat *result);
+math_quat_from_angle_vector(float angle_rads, const struct xrt_vec3 *vector, struct xrt_quat *result);
 
 /*!
  * Create a rotation from a 3x3 rotation matrix.
@@ -132,8 +161,7 @@ math_quat_from_angle_vector(float angle_rads,
  * @ingroup aux_math
  */
 void
-math_quat_from_matrix_3x3(const struct xrt_matrix_3x3 *mat,
-                          struct xrt_quat *result);
+math_quat_from_matrix_3x3(const struct xrt_matrix_3x3 *mat, struct xrt_quat *result);
 
 /*!
  * Create a rotation from two vectors plus x and z, by creating a rotation
@@ -144,9 +172,7 @@ math_quat_from_matrix_3x3(const struct xrt_matrix_3x3 *mat,
  * @ingroup aux_math
  */
 void
-math_quat_from_plus_x_z(const struct xrt_vec3 *plus_x,
-                        const struct xrt_vec3 *plus_z,
-                        struct xrt_quat *result);
+math_quat_from_plus_x_z(const struct xrt_vec3 *plus_x, const struct xrt_vec3 *plus_z, struct xrt_quat *result);
 
 /*!
  * Check if this quat can be used in transformation operations.
@@ -156,6 +182,24 @@ math_quat_from_plus_x_z(const struct xrt_vec3 *plus_x,
  */
 bool
 math_quat_validate(const struct xrt_quat *quat);
+
+/*!
+ * Check if this quat is within 1% of unit length.
+ *
+ * @relates xrt_quat
+ * @ingroup aux_math
+ */
+bool
+math_quat_validate_within_1_percent(const struct xrt_quat *quat);
+
+/*!
+ * Invert a quaternion.
+ *
+ * @relates xrt_quat
+ * @ingroup aux_math
+ */
+void
+math_quat_invert(const struct xrt_quat *quat, struct xrt_quat *out_quat);
 
 /*!
  * Normalize a quaternion.
@@ -186,9 +230,7 @@ math_quat_ensure_normalized(struct xrt_quat *inout);
  * @ingroup aux_math
  */
 void
-math_quat_rotate_vec3(const struct xrt_quat *left,
-                      const struct xrt_vec3 *right,
-                      struct xrt_vec3 *result);
+math_quat_rotate_vec3(const struct xrt_quat *left, const struct xrt_vec3 *right, struct xrt_vec3 *result);
 
 /*!
  * Rotate a quaternion (compose rotations).
@@ -197,9 +239,7 @@ math_quat_rotate_vec3(const struct xrt_quat *left,
  * @ingroup aux_math
  */
 void
-math_quat_rotate(const struct xrt_quat *left,
-                 const struct xrt_quat *right,
-                 struct xrt_quat *result);
+math_quat_rotate(const struct xrt_quat *left, const struct xrt_quat *right, struct xrt_quat *result);
 
 
 /*!
@@ -238,12 +278,33 @@ math_quat_finite_difference(const struct xrt_quat *quat0,
                             float dt,
                             struct xrt_vec3 *out_ang_vel);
 
+/*!
+ * Used to rotate a derivative like a angular velocity.
+ *
+ * @relates xrt_quat
+ * @relatesalso xrt_vec3
+ * @ingroup aux_math
+ */
+void
+math_quat_rotate_derivative(const struct xrt_quat *rot, const struct xrt_vec3 *deriv, struct xrt_vec3 *result);
+
 
 /*
  *
  * Matrix functions
  *
  */
+
+/*!
+ * Multiply Matrix2x2.
+ *
+ * @relates xrt_matrix_2x2
+ * @ingroup aux_math
+ */
+void
+math_matrix_2x2_multiply(const struct xrt_matrix_2x2 *left,
+                         const struct xrt_matrix_2x2 *right,
+                         struct xrt_matrix_2x2 *result);
 
 void
 math_matrix_3x3_transform_vec3(const struct xrt_matrix_3x3 *left,
@@ -277,8 +338,7 @@ math_matrix_4x4_multiply(const struct xrt_matrix_4x4 *left,
  * @ingroup aux_math
  */
 void
-math_matrix_4x4_view_from_pose(const struct xrt_pose *pose,
-                               struct xrt_matrix_4x4 *result);
+math_matrix_4x4_view_from_pose(const struct xrt_pose *pose, struct xrt_matrix_4x4 *result);
 
 /*!
  * Compute quad layer model matrix from xrt_pose and xrt_vec2 size.
@@ -287,9 +347,19 @@ math_matrix_4x4_view_from_pose(const struct xrt_pose *pose,
  * @ingroup aux_math
  */
 void
-math_matrix_4x4_quad_model(const struct xrt_pose *pose,
-                           const struct xrt_vec2 *size,
-                           struct xrt_matrix_4x4 *result);
+math_matrix_4x4_model(const struct xrt_pose *pose, const struct xrt_vec3 *size, struct xrt_matrix_4x4 *result);
+
+/*!
+ * Compute inverse view projection matrix,
+ * using only the starting 3x3 block of the view.
+ *
+ * @relates xrt_matrix_4x4
+ * @ingroup aux_math
+ */
+void
+math_matrix_4x4_inverse_view_projection(const struct xrt_matrix_4x4 *view,
+                                        const struct xrt_matrix_4x4 *projection,
+                                        struct xrt_matrix_4x4 *result);
 
 /*
  *
@@ -326,9 +396,7 @@ math_pose_invert(const struct xrt_pose *pose, struct xrt_pose *outPose);
  * @ingroup aux_math
  */
 void
-math_pose_transform(const struct xrt_pose *transform,
-                    const struct xrt_pose *pose,
-                    struct xrt_pose *outPose);
+math_pose_transform(const struct xrt_pose *transform, const struct xrt_pose *pose, struct xrt_pose *outPose);
 
 /*!
  * Apply a rigid-body transformation to a point.
@@ -340,87 +408,14 @@ math_pose_transform(const struct xrt_pose *transform,
  * @ingroup aux_math
  */
 void
-math_pose_transform_point(const struct xrt_pose *transform,
-                          const struct xrt_vec3 *point,
-                          struct xrt_vec3 *out_point);
+math_pose_transform_point(const struct xrt_pose *transform, const struct xrt_vec3 *point, struct xrt_vec3 *out_point);
 
-/*!
- * Combine the poses of the target and base space with the relative pose of
- * those spaces. In a way that OpenXR specifies in the function xrLocateSpace.
- *
- * Performs roughly outPose = spacePose * relativePose * baseSpacePose^-1
- *
- * OK if input and output are the same addresses.
- *
- * @relates xrt_pose
- * @ingroup aux_math
- */
-void
-math_pose_openxr_locate(const struct xrt_pose *space_pose,
-                        const struct xrt_pose *relative_pose,
-                        const struct xrt_pose *base_space_pose,
-                        struct xrt_pose *result);
 
 /*
  *
- * Space relation functions
+ * Optics functions.
  *
  */
-
-/*!
- * Reset a relation to zero velocity, located at origin, and all validity flags.
- *
- * @relates xrt_space_relation
- * @ingroup aux_math
- */
-void
-math_relation_reset(struct xrt_space_relation *out);
-
-/*!
- * Apply a static pose on top of an existing relation.
- *
- * Updates all valid pose and derivative fields. Does not modify the validity
- * mask. Treats both position and orientation of transform as valid.
- *
- * @relates xrt_space_relation
- * @see xrt_pose
- * @ingroup aux_math
- */
-void
-math_relation_apply_offset(const struct xrt_pose *offset,
-                           struct xrt_space_relation *in_out_relation);
-
-/*!
- * Apply another step of space relation on top of an existing relation.
- *
- * Updates all valid pose and derivative fields, as well as the validity mask.
- *
- * @relates xrt_space_relation
- * @ingroup aux_math
- */
-void
-math_relation_accumulate_relation(
-    const struct xrt_space_relation *additional_relation,
-    struct xrt_space_relation *in_out_relation);
-
-/*!
- * Combine the poses of the target and base space with the relative relation of
- * those spaces. In a way that OpenXR specifies in the function xrLocateSpace.
- *
- * Performs roughly `out_relation->pose = space_pose * relative_relation->pose *
- * base_space_pose^-1`  for the poses, and appropriate rotation
- *
- * OK if input and output are the same addresses.
- *
- * @relates xrt_space_relation
- * @see xrt_pose
- * @ingroup aux_math
- */
-void
-math_relation_openxr_locate(const struct xrt_pose *space_pose,
-                            const struct xrt_space_relation *relative_relation,
-                            const struct xrt_pose *base_space_pose,
-                            struct xrt_space_relation *result);
 
 /*!
  * Perform the computations from

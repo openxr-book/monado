@@ -9,6 +9,12 @@
  */
 
 #include "util/u_json.h"
+#ifndef XRT_HAVE_SYSTEM_CJSON
+#if defined(_MSC_VER) && !defined(_CRT_SECURE_NO_WARNINGS)
+#define _CRT_SECURE_NO_WARNINGS
+#endif
+#endif
+
 #include "util/u_logging.h"
 
 #include <assert.h>
@@ -51,13 +57,12 @@ u_json_get_string_into_array(const cJSON *json, char *out_str, size_t max_size)
 	if (ret < 0) {
 		U_LOG_E("Printing string failed: %d", ret);
 		return false;
-	} else if ((size_t)ret < max_size) {
-		return true;
-	} else {
-		U_LOG_E("String size %d is bigger than available %zu", ret,
-		        max_size);
-		return false;
 	}
+	if ((size_t)ret < max_size) {
+		return true;
+	}
+	U_LOG_E("String size %d is bigger than available %zu", ret, max_size);
+	return false;
 }
 
 bool
@@ -219,9 +224,7 @@ u_json_get_quat(const cJSON *json, struct xrt_quat *out_quat)
 }
 
 size_t
-u_json_get_float_array(const cJSON *json_array,
-                       float *out_array,
-                       size_t max_size)
+u_json_get_float_array(const cJSON *json_array, float *out_array, size_t max_size)
 {
 	assert(out_array != NULL);
 
@@ -254,9 +257,7 @@ u_json_get_float_array(const cJSON *json_array,
 }
 
 size_t
-u_json_get_double_array(const cJSON *json_array,
-                        double *out_array,
-                        size_t max_size)
+u_json_get_double_array(const cJSON *json_array, double *out_array, size_t max_size)
 {
 	assert(out_array != NULL);
 

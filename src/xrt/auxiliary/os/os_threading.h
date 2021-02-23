@@ -17,8 +17,13 @@
 
 #include "os/os_time.h"
 
-#ifdef XRT_OS_LINUX
+#if defined(XRT_OS_LINUX)
 #include <pthread.h>
+#include <semaphore.h>
+#include <assert.h>
+#elif defined(XRT_OS_WINDOWS)
+#include <pthread.h>
+#include <sched.h>
 #include <semaphore.h>
 #include <assert.h>
 #else
@@ -253,9 +258,7 @@ os_thread_helper_init(struct os_thread_helper *oth)
  * Start the internal thread.
  */
 static inline int
-os_thread_helper_start(struct os_thread_helper *oth,
-                       os_run_func func,
-                       void *ptr)
+os_thread_helper_start(struct os_thread_helper *oth, os_run_func func, void *ptr)
 {
 	pthread_mutex_lock(&oth->mutex);
 
@@ -341,7 +344,7 @@ os_thread_helper_unlock(struct os_thread_helper *oth)
 }
 
 /*!
- * Is the thread running, or suppised to be running.
+ * Is the thread running, or supposed to be running.
  *
  * Must be called with the helper locked.
  */

@@ -20,6 +20,7 @@
 #include "openxr/openxr_reflection.h"
 
 
+DEBUG_GET_ONCE_BOOL_OPTION(no_printing, "OXR_NO_STDERR_PRINTING", false)
 DEBUG_GET_ONCE_BOOL_OPTION(entrypoints, "OXR_DEBUG_ENTRYPOINTS", false)
 DEBUG_GET_ONCE_BOOL_OPTION(break_on_error, "OXR_BREAK_ON_ERROR", false)
 
@@ -64,11 +65,9 @@ print_prefix(struct oxr_logger *logger, const char *fmt, const char *prefix)
 {
 	if (logger->api_func_name != NULL) {
 		if (is_fmt_func_arg_start(fmt)) {
-			fprintf(stderr, "%s: %s", prefix,
-			        logger->api_func_name);
+			fprintf(stderr, "%s: %s", prefix, logger->api_func_name);
 		} else {
-			fprintf(stderr, "%s in %s: ", prefix,
-			        logger->api_func_name);
+			fprintf(stderr, "%s in %s: ", prefix, logger->api_func_name);
 		}
 	} else {
 		fprintf(stderr, "%s: ", prefix);
@@ -102,6 +101,10 @@ oxr_log_set_instance(struct oxr_logger *logger, struct oxr_instance *inst)
 void
 oxr_log(struct oxr_logger *logger, const char *fmt, ...)
 {
+	if (debug_get_bool_option_no_printing()) {
+		return;
+	}
+
 	print_prefix(logger, fmt, "LOG");
 
 	va_list args;
@@ -115,6 +118,10 @@ oxr_log(struct oxr_logger *logger, const char *fmt, ...)
 void
 oxr_warn(struct oxr_logger *logger, const char *fmt, ...)
 {
+	if (debug_get_bool_option_no_printing()) {
+		return;
+	}
+
 	print_prefix(logger, fmt, "WARNING");
 
 	va_list args;
@@ -128,6 +135,10 @@ oxr_warn(struct oxr_logger *logger, const char *fmt, ...)
 XrResult
 oxr_error(struct oxr_logger *logger, XrResult result, const char *fmt, ...)
 {
+	if (debug_get_bool_option_no_printing()) {
+		return result;
+	}
+
 	if (debug_get_bool_option_entrypoints()) {
 		fprintf(stderr, "\t");
 	}
@@ -140,8 +151,7 @@ oxr_error(struct oxr_logger *logger, XrResult result, const char *fmt, ...)
 	va_end(args);
 
 	fprintf(stderr, "\n");
-	if (debug_get_bool_option_break_on_error() &&
-	    result != XR_ERROR_FUNCTION_UNSUPPORTED) {
+	if (debug_get_bool_option_break_on_error() && result != XR_ERROR_FUNCTION_UNSUPPORTED) {
 		/// Trigger a debugger breakpoint.
 		XRT_DEBUGBREAK();
 	}
@@ -208,8 +218,7 @@ oxr_slog(struct oxr_sink_logger *slog, const char *fmt, ...)
 	oxr_slog_ensure(slog, ret + 1);
 
 	va_start(args, fmt);
-	ret = vsnprintf(slog->store + slog->length,
-	                slog->store_size - slog->length, fmt, args);
+	ret = vsnprintf(slog->store + slog->length, slog->store_size - slog->length, fmt, args);
 	va_end(args);
 
 	slog->length += ret;
@@ -236,9 +245,7 @@ oxr_warn_slog(struct oxr_logger *log, struct oxr_sink_logger *slog)
 }
 
 XrResult
-oxr_error_slog(struct oxr_logger *log,
-               XrResult res,
-               struct oxr_sink_logger *slog)
+oxr_error_slog(struct oxr_logger *log, XrResult res, struct oxr_sink_logger *slog)
 {
 	oxr_error(log, res, "%s", slog->store);
 	slog_free_store(slog);

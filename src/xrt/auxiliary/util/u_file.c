@@ -8,6 +8,7 @@
  * @ingroup aux_util
  */
 
+#include "xrt/xrt_config_os.h"
 #include "util/u_file.h"
 
 #include <errno.h>
@@ -15,8 +16,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <linux/limits.h>
 
+
+#ifdef XRT_OS_LINUX
+#include <linux/limits.h>
 
 static int
 mkpath(const char *path)
@@ -55,18 +58,15 @@ u_file_get_config_dir(char *out_path, size_t out_path_size)
 	const char *home = getenv("HOME");
 	if (xgd_home != NULL) {
 		return snprintf(out_path, out_path_size, "%s/monado", xgd_home);
-	} else if (home != NULL) {
-		return snprintf(out_path, out_path_size, "%s/.config/monado",
-		                home);
-	} else {
-		return -1;
 	}
+	if (home != NULL) {
+		return snprintf(out_path, out_path_size, "%s/.config/monado", home);
+	}
+	return -1;
 }
 
 ssize_t
-u_file_get_path_in_config_dir(const char *filename,
-                              char *out_path,
-                              size_t out_path_size)
+u_file_get_path_in_config_dir(const char *filename, char *out_path, size_t out_path_size)
 {
 	char tmp[PATH_MAX];
 	ssize_t i = u_file_get_config_dir(tmp, sizeof(tmp));
@@ -103,3 +103,5 @@ u_file_open_file_in_config_dir(const char *filename, const char *mode)
 	// Do not report error.
 	return fopen(file_str, mode);
 }
+
+#endif

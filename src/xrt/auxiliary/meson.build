@@ -3,6 +3,14 @@
 
 aux_include = include_directories('.')
 
+subdir('bindings')
+
+u_git_tag_c = vcs_tag(
+	input: 'util/u_git_tag.c.in',
+	output: 'u_git_tag.c',
+	replace_string: '@GIT_DESC@',
+)
+
 lib_aux_util = static_library(
 	'aux_util',
 	files(
@@ -12,6 +20,8 @@ lib_aux_util = static_library(
 		'util/u_debug.h',
 		'util/u_device.c',
 		'util/u_device.h',
+		'util/u_distortion.c',
+		'util/u_distortion.h',
 		'util/u_distortion_mesh.c',
 		'util/u_distortion_mesh.h',
 		'util/u_documentation.h',
@@ -21,6 +31,9 @@ lib_aux_util = static_library(
 		'util/u_format.h',
 		'util/u_frame.c',
 		'util/u_frame.h',
+		'util/u_git_tag.h',
+		'util/u_handles.c',
+		'util/u_handles.h',
 		'util/u_hashmap.cpp',
 		'util/u_hashmap.h',
 		'util/u_hashset.cpp',
@@ -43,13 +56,17 @@ lib_aux_util = static_library(
 		'util/u_time.h',
 		'util/u_var.cpp',
 		'util/u_var.h',
-	),
+		'util/u_hand_tracking.c',
+		'util/u_hand_tracking.h',
+	) + [
+		u_git_tag_c,
+	],
 	include_directories: [
 		xrt_include,
 		cjson_include,
 	],
 	dependencies: [
-		xrt_config_have
+		xrt_config_have,
 	]
 )
 
@@ -58,33 +75,59 @@ aux_util = declare_dependency(
 	link_with: lib_aux_util,
 )
 
-lib_aux_ogl = static_library(
-	'aux_ogl',
-	files(
+if build_opengl or build_opengles
+	ogl_files = [
+		'ogl/ogl_documentation.h',
 		'ogl/ogl_api.h',
 		'ogl/ogl_api.c',
-		'ogl/ogl_documentation.h',
-	),
-	include_directories: [
-		xrt_include,
-		glad_include,
-	],
+		'ogl/ogl_helpers.c',
+		'ogl/ogl_helpers.h',
+	]
+
+	if build_opengles or build_egl
+		ogl_files += [
+			'ogl/egl_api.h',
+			'ogl/egl_api.c',
+		]
+	endif
+
+	lib_aux_ogl = static_library(
+		'aux_ogl',
+		files(ogl_files),
+		include_directories: [
+			xrt_include,
+			glad_include,
+		],
+	)
+
+	aux_ogl = declare_dependency(
+		include_directories: aux_include,
+		link_with: lib_aux_ogl,
+	)
+endif
+
+aux_os_files = files(
+	'os/os_documentation.h',
+	'os/os_hid.h',
+	'os/os_hid_hidraw.c',
+	'os/os_threading.h',
+	'os/os_time.h',
+	'os/os_ble.h',
 )
 
-aux_ogl = declare_dependency(
-	include_directories: aux_include,
-	link_with: lib_aux_ogl,
-)
+aux_os_deps = []
+
+if dbus.found() and not get_option('dbus').disabled()
+	aux_os_files += files(
+		'os/os_ble_dbus.c'
+	)
+	aux_os_deps += dbus
+endif
 
 lib_aux_os = static_library(
 	'aux_os',
-	files(
-		'os/os_documentation.h',
-		'os/os_hid.h',
-		'os/os_hid_hidraw.c',
-		'os/os_threading.h',
-		'os/os_time.h',
-	),
+	aux_os_files,
+	dependencies: aux_os_deps,
 	include_directories: xrt_include,
 )
 
@@ -107,7 +150,13 @@ lib_aux_math = static_library(
 		'math/m_imu_pre.c',
 		'math/m_imu_pre.h',
 		'math/m_optics.c',
+		'math/m_permutation.c',
+		'math/m_permutation.h',
+		'math/m_predict.c',
+		'math/m_predict.h',
 		'math/m_quatexpmap.cpp',
+		'math/m_space.cpp',
+		'math/m_space.h',
 		'math/m_vec2.h',
 		'math/m_vec3.h',
 	),
@@ -147,6 +196,7 @@ if build_tracking
 		'tracking/t_tracker_psmv.cpp',
 		'tracking/t_tracker_psmv_fusion.hpp',
 		'tracking/t_tracker_psvr.cpp',
+		'tracking/t_tracker_hand.cpp',
 	]
 	tracking_deps += [opencv]
 endif
@@ -154,7 +204,11 @@ endif
 lib_aux_tracking = static_library(
 	'aux_tracking',
 	files(tracking_srcs),
-	include_directories: [xrt_include, flexkalman_include],
+	include_directories: [
+		xrt_include,
+		flexkalman_include,
+		hungarian_include,
+	],
 	dependencies: tracking_deps
 )
 
@@ -166,9 +220,11 @@ aux_tracking = declare_dependency(
 lib_aux_vk = static_library(
 	'aux_vk',
 	files(
+		'vk/vk_documentation.h',
 		'vk/vk_helpers.h',
 		'vk/vk_helpers.c',
-		'vk/vk_documentation.h',
+		'vk/vk_image_allocator.h',
+		'vk/vk_image_allocator.c',
 	),
 	include_directories: [
 		xrt_include,
@@ -181,6 +237,6 @@ aux_vk = declare_dependency(
 )
 
 
-all_aux = [aux_util, aux_os, aux_math, aux_tracking]
+all_aux = [aux_util, aux_os, aux_math, aux_tracking, aux_generated_bindings]
 
 aux = declare_dependency(dependencies: all_aux)

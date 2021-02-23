@@ -47,7 +47,7 @@ read_u16(const uint8_t **buffer, uint16_t *out_value)
 	*buffer += 2;
 }
 
-inline static void
+inline static XRT_MAYBE_UNUSED void
 read_i16(const uint8_t **buffer, int16_t *out_value)
 {
 	*out_value = (*(*buffer + 0) << 0) | // Byte 0
@@ -99,9 +99,7 @@ read_sample(const uint8_t **buffer, struct psvr_parsed_sample *sample)
  */
 
 bool
-psvr_parse_sensor_packet(struct psvr_parsed_sensor *sensor,
-                         const uint8_t *buffer,
-                         int size)
+psvr_parse_sensor_packet(struct psvr_parsed_sensor *sensor, const uint8_t *buffer, int size)
 {
 	const uint8_t *start = buffer;
 
@@ -150,9 +148,7 @@ psvr_parse_sensor_packet(struct psvr_parsed_sensor *sensor,
 }
 
 bool
-psvr_parse_status_packet(struct psvr_parsed_status *status,
-                         const uint8_t *buffer,
-                         int size)
+psvr_parse_status_packet(struct psvr_parsed_status *status, const uint8_t *buffer, int size)
 {
 	const uint8_t *start = buffer;
 

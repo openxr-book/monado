@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSL-1.0
+# SPDX-FileCopyrightText: 2020, Collabora, Ltd.
+
 [Unit]
 Description=Monado XR runtime service module @extra_desc@
 Requires=%N.socket
@@ -6,7 +9,7 @@ Conflicts=@conflicts@.service
 
 [Service]
 ExecStart=@service_path@
-Environment="XRT_COMPOSITOR_PRINT_DEBUG=on" "XRT_PRINT_OPTIONS=on" "IPC_EXIT_ON_DISCONNECT=@exit_on_disconnect@"
+Environment="XRT_COMPOSITOR_LOG=debug" "XRT_PRINT_OPTIONS=on" "IPC_EXIT_ON_DISCONNECT=@exit_on_disconnect@"
 # MemoryDenyWriteExecute=yes
 # NoNewPrivileges=yes
 Restart=no

@@ -7,23 +7,22 @@
  * @ingroup drv_dummy
  */
 
-
-#include <math.h>
-#include <stdio.h>
-#include <unistd.h>
-#include <stdlib.h>
-#include <string.h>
-#include <assert.h>
+#include "xrt/xrt_device.h"
 
 #include "os/os_time.h"
+
 #include "math/m_api.h"
-#include "xrt/xrt_device.h"
+#include "math/m_mathinclude.h"
+
 #include "util/u_var.h"
 #include "util/u_misc.h"
+#include "util/u_time.h"
 #include "util/u_debug.h"
 #include "util/u_device.h"
-#include "util/u_time.h"
+#include "util/u_logging.h"
 #include "util/u_distortion_mesh.h"
+
+#include <stdio.h>
 
 
 /*
@@ -33,6 +32,8 @@
  */
 
 /*!
+ * A example HMD device.
+ *
  * @implements xrt_device
  */
 struct dummy_hmd
@@ -40,9 +41,12 @@ struct dummy_hmd
 	struct xrt_device base;
 
 	struct xrt_pose pose;
+	struct xrt_vec3 center;
 
-	bool print_spew;
-	bool print_debug;
+	uint64_t created_ns;
+	float diameter_m;
+
+	enum u_logging_level log_level;
 };
 
 
@@ -58,33 +62,11 @@ dummy_hmd(struct xrt_device *xdev)
 	return (struct dummy_hmd *)xdev;
 }
 
-DEBUG_GET_ONCE_BOOL_OPTION(dummy_spew, "DUMMY_PRINT_SPEW", false)
-DEBUG_GET_ONCE_BOOL_OPTION(dummy_debug, "DUMMY_PRINT_DEBUG", false)
+DEBUG_GET_ONCE_LOG_OPTION(dummy_log, "DUMMY_LOG", U_LOGGING_WARN)
 
-#define DH_SPEW(dh, ...)                                                       \
-	do {                                                                   \
-		if (dh->print_spew) {                                          \
-			fprintf(stderr, "%s - ", __func__);                    \
-			fprintf(stderr, __VA_ARGS__);                          \
-			fprintf(stderr, "\n");                                 \
-		}                                                              \
-	} while (false)
-
-#define DH_DEBUG(dh, ...)                                                      \
-	do {                                                                   \
-		if (dh->print_debug) {                                         \
-			fprintf(stderr, "%s - ", __func__);                    \
-			fprintf(stderr, __VA_ARGS__);                          \
-			fprintf(stderr, "\n");                                 \
-		}                                                              \
-	} while (false)
-
-#define DH_ERROR(dh, ...)                                                      \
-	do {                                                                   \
-		fprintf(stderr, "%s - ", __func__);                            \
-		fprintf(stderr, __VA_ARGS__);                                  \
-		fprintf(stderr, "\n");                                         \
-	} while (false)
+#define DH_TRACE(p, ...) U_LOG_XDEV_IFL_T(&dh->base, dh->log_level, __VA_ARGS__)
+#define DH_DEBUG(p, ...) U_LOG_XDEV_IFL_D(&dh->base, dh->log_level, __VA_ARGS__)
+#define DH_ERROR(p, ...) U_LOG_XDEV_IFL_E(&dh->base, dh->log_level, __VA_ARGS__)
 
 static void
 dummy_hmd_destroy(struct xrt_device *xdev)
@@ -100,14 +82,13 @@ dummy_hmd_destroy(struct xrt_device *xdev)
 static void
 dummy_hmd_update_inputs(struct xrt_device *xdev)
 {
-	// Empty
+	// Empty, you should put code to update the attached inputs fields.
 }
 
 static void
 dummy_hmd_get_tracked_pose(struct xrt_device *xdev,
                            enum xrt_input_name name,
                            uint64_t at_timestamp_ns,
-                           uint64_t *out_relation_timestamp_ns,
                            struct xrt_space_relation *out_relation)
 {
 	struct dummy_hmd *dh = dummy_hmd(xdev);
@@ -117,13 +98,25 @@ dummy_hmd_get_tracked_pose(struct xrt_device *xdev,
 		return;
 	}
 
-	uint64_t now = os_monotonic_get_ns();
+	double time_s = time_ns_to_s(at_timestamp_ns - dh->created_ns);
+	double d = dh->diameter_m;
+	double d2 = d * 2;
+	double t = 2.0;
+	double t2 = t * 2;
+	double t3 = t * 3;
+	double t4 = t * 4;
+	dh->pose.position.x = dh->center.x + sin((time_s / t2) * M_PI) * d2 - d;
+	dh->pose.position.y = dh->center.y + sin((time_s / t) * M_PI) * d;
+	dh->pose.orientation.x = sin((time_s / t3) * M_PI) / 64.0;
+	dh->pose.orientation.y = sin((time_s / t4) * M_PI) / 16.0;
+	dh->pose.orientation.z = sin((time_s / t4) * M_PI) / 64.0;
+	dh->pose.orientation.w = 1;
+	math_quat_normalize(&dh->pose.orientation);
 
-	*out_relation_timestamp_ns = now;
 	out_relation->pose = dh->pose;
-	out_relation->relation_flags = (enum xrt_space_relation_flags)(
-	    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
-	    XRT_SPACE_RELATION_POSITION_VALID_BIT);
+	out_relation->relation_flags = (enum xrt_space_relation_flags)(XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
+	                                                               XRT_SPACE_RELATION_POSITION_VALID_BIT |
+	                                                               XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
 }
 
 static void
@@ -156,17 +149,19 @@ dummy_hmd_get_view_pose(struct xrt_device *xdev,
 struct xrt_device *
 dummy_hmd_create(void)
 {
-	enum u_device_alloc_flags flags = (enum u_device_alloc_flags)(
-	    U_DEVICE_ALLOC_HMD | U_DEVICE_ALLOC_TRACKING_NONE);
+	enum u_device_alloc_flags flags =
+	    (enum u_device_alloc_flags)(U_DEVICE_ALLOC_HMD | U_DEVICE_ALLOC_TRACKING_NONE);
 	struct dummy_hmd *dh = U_DEVICE_ALLOCATE(struct dummy_hmd, flags, 1, 0);
 	dh->base.update_inputs = dummy_hmd_update_inputs;
 	dh->base.get_tracked_pose = dummy_hmd_get_tracked_pose;
 	dh->base.get_view_pose = dummy_hmd_get_view_pose;
 	dh->base.destroy = dummy_hmd_destroy;
 	dh->base.name = XRT_DEVICE_GENERIC_HMD;
+	dh->base.device_type = XRT_DEVICE_TYPE_HMD;
 	dh->pose.orientation.w = 1.0f; // All other values set to zero.
-	dh->print_spew = debug_get_bool_option_dummy_spew();
-	dh->print_debug = debug_get_bool_option_dummy_debug();
+	dh->created_ns = os_monotonic_get_ns();
+	dh->diameter_m = 0.05;
+	dh->log_level = debug_get_log_option_dummy_log();
 
 	// Print name.
 	snprintf(dh->base.str, XRT_DEVICE_NAME_LEN, "Dummy HMD");
@@ -176,8 +171,8 @@ dummy_hmd_create(void)
 
 	// Setup info.
 	struct u_device_simple_info info;
-	info.display.w_pixels = 1920;
-	info.display.h_pixels = 1080;
+	info.display.w_pixels = 1280;
+	info.display.h_pixels = 720;
 	info.display.w_meters = 0.13f;
 	info.display.h_meters = 0.07f;
 	info.lens_horizontal_separation_meters = 0.13f / 2.0f;
@@ -194,11 +189,12 @@ dummy_hmd_create(void)
 	// Setup variable tracker.
 	u_var_add_root(dh, "Dummy HMD", true);
 	u_var_add_pose(dh, &dh->pose, "pose");
+	u_var_add_vec3_f32(dh, &dh->center, "center");
+	u_var_add_f32(dh, &dh->diameter_m, "diameter_m");
+	u_var_add_log_level(dh, &dh->log_level, "log_level");
 
-	if (dh->base.hmd->distortion.preferred == XRT_DISTORTION_MODEL_NONE) {
-		// Setup the distortion mesh.
-		u_distortion_mesh_none(dh->base.hmd);
-	}
+	// Distortion information, fills in xdev->compute_distortion().
+	u_distortion_mesh_set_none(&dh->base);
 
 	return &dh->base;
 }

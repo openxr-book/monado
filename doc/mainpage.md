@@ -1,5 +1,10 @@
 # Monado
 
+<!--
+Copyright 2018-2020, Collabora, Ltd. and the Monado contributors
+SPDX-License-Identifier: BSL-1.0
+-->
+
 This documentation is intended for developers wanting to dive into the code of
 Monado. And assumes that you have read [README.md][], the file also holds
 getting started information and general documentation.
@@ -10,6 +15,7 @@ getting started information and general documentation.
 also includes a section for changes that have not yet been in a tagged
 release.
 * @ref md_targets
+* @ref vulkan-extensions
 * @ref md_writing-a-new-driver (**not complete**)
 
 ## Source layout

@@ -66,19 +66,18 @@ p_libusb_probe(struct prober *p)
 		uint16_t product = desc.idProduct;
 		uint8_t ports[8];
 
-		int num =
-		    libusb_get_port_numbers(device, ports, ARRAY_SIZE(ports));
+		int num = libusb_get_port_numbers(device, ports, ARRAY_SIZE(ports));
 
 		ret = p_dev_get_usb_dev(p, bus, addr, vendor, product, &pdev);
 
-		P_SPEW(p,
-		       "libusb\n"
-		       "\t\tptr:        %p (%i)\n"
-		       "\t\tvendor_id:  %04x\n"
-		       "\t\tproduct_id: %04x\n"
-		       "\t\tbus:        %i\n"
-		       "\t\taddr:       %i",
-		       (void *)pdev, ret, vendor, product, bus, addr);
+		P_TRACE(p,
+		        "libusb\n"
+		        "\t\tptr:        %p (%i)\n"
+		        "\t\tvendor_id:  %04x\n"
+		        "\t\tproduct_id: %04x\n"
+		        "\t\tbus:        %i\n"
+		        "\t\taddr:       %i",
+		        (void *)pdev, ret, vendor, product, bus, addr);
 
 		if (ret != 0) {
 			P_ERROR(p, "p_dev_get_usb_device failed!");
@@ -95,7 +94,7 @@ p_libusb_probe(struct prober *p)
 	return 0;
 }
 
-#define ENUM_TO_STR(r)                                                         \
+#define ENUM_TO_STR(r)                                                                                                 \
 	case r: return #r
 
 static const char *
@@ -144,11 +143,11 @@ p_libusb_get_string_descriptor(struct prober *p,
 	case XRT_PROBER_STRING_SERIAL_NUMBER: which = desc.iSerialNumber; break;
 	default: break;
 	}
-	P_SPEW(p,
-	       "libusb\n"
-	       "\t\tptr:        %p\n"
-	       "\t\trequested string index:  %i",
-	       (void *)pdev, which);
+	P_TRACE(p,
+	        "libusb\n"
+	        "\t\tptr:        %p\n"
+	        "\t\trequested string index:  %i",
+	        (void *)pdev, which);
 	if (which == 0) {
 		// Not available?
 		return 0;
@@ -156,12 +155,10 @@ p_libusb_get_string_descriptor(struct prober *p,
 	libusb_device_handle *dev_handle = NULL;
 	result = libusb_open(usb_dev, &dev_handle);
 	if (result < 0) {
-		P_ERROR(p, "libusb_open failed: %s",
-		        p_libusb_error_to_string((enum libusb_error)result));
+		P_ERROR(p, "libusb_open failed: %s", p_libusb_error_to_string((enum libusb_error)result));
 		return result;
 	}
-	int string_length = libusb_get_string_descriptor_ascii(
-	    dev_handle, which, buffer, length);
+	int string_length = libusb_get_string_descriptor_ascii(dev_handle, which, buffer, length);
 	if (string_length < 0) {
 		P_ERROR(p, "libusb_get_string_descriptor_ascii failed!");
 	}
@@ -177,8 +174,7 @@ p_libusb_can_open(struct prober *p, struct prober_device *pdev)
 	libusb_device_handle *dev_handle = NULL;
 	result = libusb_open(usb_dev, &dev_handle);
 	if (result < 0) {
-		P_ERROR(p, "libusb_open failed: %s",
-		        p_libusb_error_to_string((enum libusb_error)result));
+		P_ERROR(p, "libusb_open failed: %s", p_libusb_error_to_string((enum libusb_error)result));
 		return false;
 	}
 

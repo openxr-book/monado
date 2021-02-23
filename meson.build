@@ -4,7 +4,7 @@
 project(
 	'xrt',
 	['c', 'cpp'],
-	version: '0.3.0',
+	version: '21.0.0',
 	license: 'BSL-1.0',
 	meson_version: '>=0.49.0',
 	default_options: [
@@ -19,12 +19,15 @@ cpp = meson.get_compiler('cpp')
 add_project_arguments(cc.get_supported_arguments([
 	'-D_XOPEN_SOURCE=700',
 	'-Wno-unused-parameter',
+	'-Werror-implicit-function-declaration',
+	'-Werror=incompatible-pointer-types'
 ]), language: 'c')
 
 add_project_arguments(cpp.get_supported_arguments([
 	'-D_XOPEN_SOURCE=700',
 	'-Wno-unused-parameter',
 	'-Wno-deprecated-copy', # Eigen
+	'-Wno-c11-extensions' # clang OpenCV
 ]), language: 'cpp')
 
 
@@ -52,20 +55,27 @@ glslangValidator = find_program('glslangValidator')
 pthreads = cc.find_library('pthread', required: true)
 rt = cc.find_library('rt', required: true)
 
-avcodec = dependency('libavcodec', required: false)
-egl     = dependency('egl', required: get_option('egl'))
-egl     = egl.partial_dependency(includes: true)
-eigen3  = dependency('eigen3')
-libjpeg = dependency('libjpeg', required: false)
-libusb  = dependency('libusb-1.0', required: false)
-opengl  = dependency('gl', required: get_option('opengl'))
-rs      = dependency('realsense2', required: false)
-sdl2    = dependency('sdl2', required: get_option('gui'))
-udev    = dependency('libudev', required: false)
-libuvc  = dependency('libuvc', required: false)
-vulkan  = dependency('vulkan', required: true)
-zlib    = dependency('zlib', required: false)
-survive = dependency('survive', required: false)
+avcodec  = dependency('libavcodec', required: false)
+egl      = dependency('egl', required: get_option('egl'))
+egl      = egl.partial_dependency(includes: true)
+eigen3   = dependency('eigen3')
+libjpeg  = dependency('libjpeg', required: false)
+libusb   = dependency('libusb-1.0', required: false)
+opengl   = dependency('gl', required: get_option('opengl'))
+opengles = dependency('glesv2', required: get_option('opengles'))
+rs       = dependency('realsense2', required: false)
+sdl2     = dependency('sdl2', required: get_option('gui'))
+udev     = dependency('libudev', required: false)
+libuvc   = dependency('libuvc', required: false)
+vulkan   = dependency('vulkan', required: true)
+zlib     = dependency('zlib', required: false)
+survive  = dependency('survive', required: false)
+dbus     = dependency('dbus-1', required: get_option('dbus'))
+gst      = dependency('gstreamer-1.0', required: false)
+gst_app  = dependency('gstreamer-app-1.0', required: false)
+gst_video= dependency('gstreamer-video-1.0', required: false)
+
+gst_found = gst.found() and gst_app.found() and gst_video.found()
 
 opencv = dependency('opencv4', required: false)
 if not opencv.found()
@@ -98,6 +108,11 @@ if get_option('opengl').enabled() or get_option('opengl').auto()
         build_opengl = opengl.found()
 endif
 
+build_opengles = false
+if get_option('opengles').enabled() or get_option('opengles').auto()
+        build_opengles = opengles.found() and egl.found()
+endif
+
 
 build_egl = false
 if get_option('egl').enabled() or get_option('egl').auto()
@@ -115,6 +130,9 @@ if get_option('xcb').enabled() or get_option('xcb').auto()
 endif
 
 build_xcb_xrandr_direct = build_xcb and build_xlib and xcb_randr.found() and x11_xcb.found()
+
+# requires only vulkan
+build_vk_khr_display = true
 
 build_wayland = false
 if get_option('wayland').enabled() or get_option('wayland').auto()
@@ -138,16 +156,23 @@ if 'v4l2' in drivers
 endif
 
 if 'auto' in drivers
-	drivers += ['dummy', 'hdk', 'hydra', 'ns', 'psmv']
+	drivers += ['dummy', 'hdk', 'hydra', 'ns', 'psmv', 'remote']
 endif
 
 openhmd = dependency('openhmd', required: openhmd_required)
 hidapi  = dependency('hidapi-libusb', required: hidapi_required)
-v4l2    = dependency('libv4l2', required: v4l2_required)
+
+has_v4l2_header =  cc.has_header('linux/v4l2-common.h')
 
 if openhmd.found() and ('auto' in drivers or 'ohmd' in drivers)
 	if 'ohmd' not in drivers
 		drivers += ['ohmd']
+	endif
+endif
+
+if has_v4l2_header and ('auto' in drivers or 'handtracking' in drivers)
+	if 'handtracking' not in drivers
+		drivers += ['handtracking']
 	endif
 endif
 
@@ -169,16 +194,30 @@ if rs.found() and ('auto' in drivers or 'rs' in drivers)
 	endif
 endif
 
-if v4l2.found() and ('auto' in drivers or 'v4l2' in drivers)
+if has_v4l2_header and ('auto' in drivers or 'v4l2' in drivers)
 	if 'v4l2' not in drivers
 		drivers += ['v4l2']
 	endif
 endif
 
-if survive.found() and ('survive' in drivers)
-  if 'survive' not in drivers
-    drivers += ['survive']
-    endif
+if gst_found and ('auto' in drivers or 'vf' in drivers)
+	if 'vf' not in drivers
+		drivers += ['vf']
+	endif
+endif
+
+if survive.found() and ('auto' in drivers and 'survive' not in drivers)
+	drivers += ['survive']
+endif
+
+if not get_option('dbus').disabled() and dbus.found()
+	if 'daydream' not in drivers
+		drivers += ['daydream']
+	endif
+
+	if 'arduino' not in drivers
+		drivers += ['arduino']
+	endif
 endif
 
 if drivers.length() == 0 or drivers == ['auto']
@@ -195,6 +234,9 @@ if build_docs
 	subdir('doc')
 endif
 
+if not get_option('tests').disabled()
+	subdir('tests')
+endif
 
 #
 # Final bits
@@ -224,4 +266,10 @@ if build_tracking
 	message('    tracking: yes')
 else
 	message('    tracking: no')
+endif
+
+if get_option('steamvr_plugin')
+	message('steamvr plugin: yes')
+else
+	message('steamvr plugin: no')
 endif

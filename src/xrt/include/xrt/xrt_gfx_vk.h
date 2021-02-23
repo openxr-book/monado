@@ -22,11 +22,23 @@ struct time_state;
 
 
 /*!
+ * @brief A space-delimited string of Vulkan instance extensions required from a
+ * client.
+ *
+ * Should be kept synchronized with the "Client" column in @ref
+ * vulkan-extensions
+ *
  * @ingroup xrt_iface
  */
 extern const char *xrt_gfx_vk_instance_extensions;
 
 /*!
+ * @brief A space-delimited string of Vulkan device extensions required from a
+ * client.
+ *
+ * Should be kept synchronized with the "Client" column in @ref
+ * vulkan-extensions
+ *
  * @ingroup xrt_iface
  */
 extern const char *xrt_gfx_vk_device_extensions;
@@ -41,10 +53,10 @@ xrt_gfx_vk_get_versions(struct xrt_api_requirements *ver);
  * Create a Vulkan compositor client.
  *
  * @ingroup xrt_iface
- * @public @memberof xrt_compositor_fd
+ * @public @memberof xrt_compositor_native
  */
 struct xrt_compositor_vk *
-xrt_gfx_vk_provider_create(struct xrt_compositor_fd *xcfd,
+xrt_gfx_vk_provider_create(struct xrt_compositor_native *xcn,
                            VkInstance instance,
                            PFN_vkGetInstanceProcAddr get_instance_proc_addr,
                            VkPhysicalDevice physical_device,

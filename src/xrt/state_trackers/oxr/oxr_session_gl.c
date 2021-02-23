@@ -33,23 +33,12 @@ oxr_session_populate_gl_xlib(struct oxr_logger *log,
                              XrGraphicsBindingOpenGLXlibKHR const *next,
                              struct oxr_session *sess)
 {
-	struct xrt_compositor_fd *xcfd = NULL;
-	int ret = xrt_instance_create_fd_compositor(sys->inst->xinst, sys->head,
-	                                            true, &xcfd);
-	if (ret < 0 || xcfd == NULL) {
-		return oxr_error(log, XR_ERROR_INITIALIZATION_FAILED,
-		                 "Failed to create an fd compositor '%i'", ret);
-	}
-
-
+	struct xrt_compositor_native *xcn = sess->xcn;
 	struct xrt_compositor_gl *xcgl = xrt_gfx_provider_create_gl_xlib(
-	    xcfd, next->xDisplay, next->visualid, next->glxFBConfig,
-	    next->glxDrawable, next->glxContext);
+	    xcn, next->xDisplay, next->visualid, next->glxFBConfig, next->glxDrawable, next->glxContext);
 
 	if (xcgl == NULL) {
-		xcfd->base.destroy(&xcfd->base);
-		return oxr_error(log, XR_ERROR_INITIALIZATION_FAILED,
-		                 "Failed to create an xlib client compositor");
+		return oxr_error(log, XR_ERROR_INITIALIZATION_FAILED, "Failed to create an xlib client compositor");
 	}
 
 	sess->compositor = &xcgl->base;

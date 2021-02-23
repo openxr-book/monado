@@ -32,6 +32,10 @@ if 'ohmd' in drivers
 	driver_libs += [lib_drv_ohmd]
 endif
 
+if 'handtracking' in drivers
+	driver_libs += [lib_drv_ht]
+endif
+
 if 'psmv' in drivers
 	driver_libs += [lib_drv_psmv]
 endif
@@ -47,7 +51,10 @@ endif
 
 if 'v4l2' in drivers
 	driver_libs += [lib_drv_v4l2]
-	driver_deps += [v4l2]
+endif
+
+if 'vf' in drivers
+	driver_libs += [lib_drv_vf]
 endif
 
 if 'vive' in drivers
@@ -58,6 +65,18 @@ if 'survive' in drivers
 	driver_libs += [lib_drv_survive]
 endif
 
+if 'daydream' in drivers
+	driver_libs += [lib_drv_daydream]
+endif
+
+if 'arduino' in drivers
+	driver_libs += [lib_drv_arduino]
+endif
+
+if 'remote' in drivers
+	driver_libs += [lib_drv_remote]
+endif
+
 subdir('common')
 subdir('openxr')
 subdir('cli')
@@ -66,4 +85,11 @@ if get_option('gui').enabled() or (get_option('gui').auto() and sdl2.found())
 	subdir('gui')
 endif
 
-subdir('service')
+if get_option('service')
+	subdir('service')
+	subdir('ctl')
+endif
+
+if get_option('steamvr_plugin')
+	subdir('steamvr_drv')
+endif
