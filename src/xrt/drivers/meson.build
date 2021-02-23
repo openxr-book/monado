@@ -58,6 +58,19 @@ lib_drv_ns = static_library(
 	build_by_default: 'ns' in drivers,
 )
 
+lib_drv_ht = static_library(
+	'drv_ht',
+	files(
+		'ht/ht_driver.c',
+		'ht/ht_driver.h',
+		'ht/ht_interface.h',
+		'ht/ht_prober.c',
+	),
+	include_directories: xrt_include,
+	dependencies: [aux],
+	build_by_default: 'handtracking' in drivers,
+)
+
 lib_drv_ohmd = static_library(
 	'drv_ohmd',
 	files(
@@ -107,13 +120,37 @@ lib_drv_rs = static_library(
 	build_by_default: 'rs' in drivers,
 )
 
+lib_drv_remote = static_library(
+	'drv_remote',
+	files(
+		'remote/r_device.c',
+		'remote/r_hmd.c',
+		'remote/r_hub.c',
+		'remote/r_interface.h',
+		'remote/r_internal.h',
+	),
+	include_directories: xrt_include,
+	dependencies: [aux],
+	build_by_default: 'remote' in drivers,
+)
+
+lib_drv_vf = static_library(
+	'drv_vf',
+	files(
+		'vf/vf_driver.c'
+	),
+	include_directories: xrt_include,
+	dependencies: [aux, gst, gst_app, gst_video],
+	build_by_default: 'vf' in drivers,
+)
+
 lib_drv_v4l2 = static_library(
 	'drv_v4l2',
 	files(
 		'v4l2/v4l2_driver.c',
 	),
 	include_directories: xrt_include,
-	dependencies: [aux, v4l2],
+	dependencies: [aux],
 	build_by_default: 'v4l2' in drivers,
 )
 
@@ -129,7 +166,9 @@ lib_drv_vive = static_library(
 		'vive/vive_controller.c',
 		'vive/vive_controller.h',
 		'vive/vive_config.c',
-		'vive/vive_config.h'
+		'vive/vive_config.h',
+		'vive/vive_lighthouse.c',
+		'vive/vive_lighthouse.h',
 	),
 	include_directories: [
 		xrt_include,
@@ -153,4 +192,33 @@ lib_drv_survive = static_library(
 	],
 	dependencies: [aux, zlib, survive],
 	build_by_default: 'survive' in drivers,
+)
+
+lib_drv_daydream = static_library(
+	'drv_daydream',
+	files(
+		'daydream/daydream_device.c',
+		'daydream/daydream_device.h',
+		'daydream/daydream_interface.h',
+		'daydream/daydream_prober.c',
+	),
+	include_directories: [
+		xrt_include,
+	],
+	dependencies: [dbus, aux],
+	build_by_default: 'daydream' in drivers,
+)
+
+lib_drv_arduino = static_library(
+	'drv_arduino',
+	files(
+		'arduino/arduino_device.c',
+		'arduino/arduino_interface.h',
+		'arduino/arduino_prober.c',
+	),
+		include_directories: [
+		xrt_include,
+	],
+	dependencies: [dbus, aux],
+	build_by_default: 'arduino' in drivers,
 )

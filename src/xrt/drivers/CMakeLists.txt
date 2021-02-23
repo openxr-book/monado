@@ -97,6 +97,18 @@ if(XRT_BUILD_DRIVER_OHMD)
 	list(APPEND ENABLED_HEADSET_DRIVERS openhmd)
 endif()
 
+if(XRT_BUILD_DRIVER_HANDTRACKING)
+	set(HT_SOURCE_FILES
+		ht/ht_driver.c
+		ht/ht_driver.h
+		ht/ht_interface.h
+		ht/ht_prober.c
+		)
+
+	add_library(drv_ht STATIC ${HT_SOURCE_FILES})
+	target_link_libraries(drv_ht PRIVATE xrt-interfaces aux_util aux_math)
+	list(APPEND ENABLED_DRIVERS ht)
+endif()
 
 if(XRT_BUILD_DRIVER_PSMV)
 	set(PSMOVE_SOURCE_FILES
@@ -120,6 +132,7 @@ if(XRT_BUILD_DRIVER_PSVR)
 
 	add_library(drv_psvr STATIC ${PSVR_SOURCE_FILES})
 	target_link_libraries(drv_psvr PRIVATE xrt-interfaces HIDAPI::hidapi aux_util)
+	target_include_directories(drv_psvr PRIVATE ${HIDAPI_INCLUDE_DIRS})
 	list(APPEND ENABLED_HEADSET_DRIVERS psvr)
 endif()
 
@@ -131,6 +144,20 @@ if(XRT_BUILD_DRIVER_RS)
 	add_library(drv_rs STATIC ${RS_SOURCE_FILES})
 	target_link_libraries(drv_rs PRIVATE xrt-interfaces realsense2::realsense2 aux_util)
 	list(APPEND ENABLED_HEADSET_DRIVERS rs)
+endif()
+
+if(XRT_BUILD_DRIVER_REMOTE)
+	set(REMOTE_SOURCE_FILES
+		remote/r_device.c
+		remote/r_hmd.c
+		remote/r_hub.c
+		remote/r_interface.h
+		remote/r_internal.h
+		)
+
+	add_library(drv_remote STATIC ${REMOTE_SOURCE_FILES})
+	target_link_libraries(drv_remote PRIVATE xrt-interfaces aux_util)
+	list(APPEND ENABLED_HEADSET_DRIVERS remote)
 endif()
 
 if(XRT_BUILD_DRIVER_VIVE)
@@ -145,6 +172,8 @@ if(XRT_BUILD_DRIVER_VIVE)
 		vive/vive_controller.c
 		vive/vive_config.h
 		vive/vive_config.c
+		vive/vive_lighthouse.h
+		vive/vive_lighthouse.c
 		)
 
 	add_library(drv_vive STATIC ${VIVE_SOURCE_FILES})
@@ -164,6 +193,18 @@ if(XRT_HAVE_V4L2)
 	list(APPEND ENABLED_DRIVERS v4l2)
 endif()
 
+if(XRT_HAVE_VF)
+	set(VF_SOURCE_FILES
+		vf/vf_driver.c
+		)
+
+	add_library(drv_vf STATIC ${VF_SOURCE_FILES})
+	target_link_libraries(drv_vf PRIVATE xrt-interfaces aux_os ${GST_LIBRARIES})
+	target_include_directories(drv_vf PRIVATE ${GST_INCLUDE_DIRS})
+	MESSAGE("GST include ${GST_INCLUDE_DIRS}")
+	list(APPEND ENABLED_DRIVERS vf)
+endif()
+
 if (XRT_BUILD_DRIVER_SURVIVE)
 	set(SURVIVE_SOURCE_FILES
 		survive/survive_driver.c
@@ -175,6 +216,35 @@ if (XRT_BUILD_DRIVER_SURVIVE)
 	add_library(drv_survive STATIC ${SURVIVE_SOURCE_FILES})
 	target_link_libraries(drv_survive PRIVATE xrt-interfaces aux_os aux_util aux_math PkgConfig::SURVIVE)
 	list(APPEND ENABLED_HEADSET_DRIVERS survive)
+endif()
+
+if(XRT_BUILD_DRIVER_ANDROID)
+	set(ANDROID_SOURCE_FILES
+		android/android_prober.c
+		android/android_prober.h
+		android/android_sensors.c
+		android/android_sensors.h
+		)
+
+	add_library(drv_android STATIC ${ANDROID_SOURCE_FILES})
+	target_link_libraries(drv_android PRIVATE xrt-interfaces aux_util aux_os aux_android ${ANDROID_LIBRARY})
+	list(APPEND ENABLED_DRIVERS android)
+endif()
+
+if (XRT_BUILD_DRIVER_ILLIXR)
+	set(ILLIXR_SOURCE_FILES
+		illixr/illixr_device.cpp
+		illixr/illixr_interface.h
+		illixr/illixr_prober.c
+		illixr/illixr_component.cpp
+		illixr/illixr_component.h
+		)
+
+	add_library(drv_illixr STATIC ${ILLIXR_SOURCE_FILES})
+	target_link_libraries(drv_illixr PUBLIC ${CMAKE_DL_LIBS} xrt-interfaces aux_util aux_os)
+	target_include_directories(drv_illixr PUBLIC ${ILLIXR_PATH})
+	target_compile_options(drv_illixr PUBLIC $<$<COMPILE_LANGUAGE:CXX>:-std=c++17>)
+	list(APPEND ENABLED_HEADSET_DRIVERS illixr)
 endif()
 
 if(ENABLED_HEADSET_DRIVERS)

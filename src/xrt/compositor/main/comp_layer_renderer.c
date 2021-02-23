@@ -12,9 +12,6 @@
 
 #include "comp_layer_renderer.h"
 
-#include "shaders/quad.frag.h"
-#include "shaders/quad.vert.h"
-
 #include <stdio.h>
 #include <math.h>
 
@@ -72,8 +69,7 @@ _init_render_pass(struct vk_bundle *vk,
 	    .pDependencies = NULL,
 	};
 
-	VkResult res = vk->vkCreateRenderPass(vk->device, &renderpass_info,
-	                                      NULL, out_render_pass);
+	VkResult res = vk->vkCreateRenderPass(vk->device, &renderpass_info, NULL, out_render_pass);
 	vk_check_error("vkCreateRenderPass", res, false);
 
 	return true;
@@ -89,26 +85,48 @@ _init_descriptor_layout(struct comp_layer_renderer *self)
 	    .bindingCount = 2,
 	    .pBindings =
 	        (VkDescriptorSetLayoutBinding[]){
-	            // transformation buffer
 	            {
-	                .binding = 0,
+	                .binding = self->transformation_ubo_binding,
 	                .descriptorCount = 1,
 	                .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-	                .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+	                .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
 	            },
-	            // quad texture
 	            {
-	                .binding = 1,
+	                .binding = self->texture_binding,
 	                .descriptorCount = 1,
-	                .descriptorType =
-	                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+	                .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 	                .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
 	            },
 	        },
 	};
 
-	VkResult res = vk->vkCreateDescriptorSetLayout(
-	    vk->device, &info, NULL, &self->descriptor_set_layout);
+	VkResult res = vk->vkCreateDescriptorSetLayout(vk->device, &info, NULL, &self->descriptor_set_layout);
+
+	vk_check_error("vkCreateDescriptorSetLayout", res, false);
+
+	return true;
+}
+
+static bool
+_init_descriptor_layout_equirect(struct comp_layer_renderer *self)
+{
+	struct vk_bundle *vk = self->vk;
+
+	VkDescriptorSetLayoutCreateInfo info = {
+	    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+	    .bindingCount = 1,
+	    .pBindings =
+	        (VkDescriptorSetLayoutBinding[]){
+	            {
+	                .binding = 0,
+	                .descriptorCount = 1,
+	                .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+	                .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+	            },
+	        },
+	};
+
+	VkResult res = vk->vkCreateDescriptorSetLayout(vk->device, &info, NULL, &self->descriptor_set_layout_equirect);
 
 	vk_check_error("vkCreateDescriptorSetLayout", res, false);
 
@@ -120,16 +138,16 @@ _init_pipeline_layout(struct comp_layer_renderer *self)
 {
 	struct vk_bundle *vk = self->vk;
 
+	const VkDescriptorSetLayout set_layouts[2] = {self->descriptor_set_layout,
+	                                              self->descriptor_set_layout_equirect};
+
 	VkPipelineLayoutCreateInfo info = {
 	    .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-	    .setLayoutCount = 1,
-	    .pSetLayouts = &self->descriptor_set_layout,
-	    .pushConstantRangeCount = 0,
-	    .pPushConstantRanges = NULL,
+	    .setLayoutCount = 2,
+	    .pSetLayouts = set_layouts,
 	};
 
-	VkResult res = vk->vkCreatePipelineLayout(vk->device, &info, NULL,
-	                                          &self->pipeline_layout);
+	VkResult res = vk->vkCreatePipelineLayout(vk->device, &info, NULL, &self->pipeline_layout);
 
 	vk_check_error("vkCreatePipelineLayout", res, false);
 
@@ -145,15 +163,17 @@ _init_pipeline_cache(struct comp_layer_renderer *self)
 	    .sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO,
 	};
 
-	VkResult res = vk->vkCreatePipelineCache(vk->device, &info, NULL,
-	                                         &self->pipeline_cache);
+	VkResult res = vk->vkCreatePipelineCache(vk->device, &info, NULL, &self->pipeline_cache);
 
 	vk_check_error("vkCreatePipelineCache", res, false);
 
 	return true;
 }
 
-struct __attribute__((__packed__)) comp_pipeline_config
+// These are MSVC-style pragmas, but supported by GCC since early in the 4
+// series.
+#pragma pack(push, 1)
+struct comp_pipeline_config
 {
 	VkPrimitiveTopology topology;
 	uint32_t stride;
@@ -163,39 +183,18 @@ struct __attribute__((__packed__)) comp_pipeline_config
 	const VkPipelineColorBlendAttachmentState *blend_attachments;
 	const VkPipelineRasterizationStateCreateInfo *rasterization_state;
 };
-
-static VkPipelineShaderStageCreateInfo
-_shader_load(struct vk_bundle *vk,
-             const uint32_t *code,
-             size_t size,
-             VkShaderStageFlagBits flags)
-{
-	VkResult ret;
-
-	VkShaderModuleCreateInfo info = {
-	    .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-	    .codeSize = size,
-	    .pCode = code,
-	};
-
-	VkShaderModule module;
-	ret = vk->vkCreateShaderModule(vk->device, &info, NULL, &module);
-	if (ret != VK_SUCCESS) {
-		VK_DEBUG(vk, "vkCreateShaderModule failed %u", ret);
-	}
-
-	return (VkPipelineShaderStageCreateInfo){
-	    .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-	    .stage = flags,
-	    .module = module,
-	    .pName = "main",
-	};
-}
+#pragma pack(pop)
 
 static bool
-_init_graphics_pipeline(struct comp_layer_renderer *self)
+_init_graphics_pipeline(struct comp_layer_renderer *self,
+                        VkShaderModule shader_vert,
+                        VkShaderModule shader_frag,
+                        bool premultiplied_alpha,
+                        VkPipeline *pipeline)
 {
 	struct vk_bundle *vk = self->vk;
+
+	VkBlendFactor blend_factor = premultiplied_alpha ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_SRC_ALPHA;
 
 	struct comp_pipeline_config config = {
 	    .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
@@ -203,14 +202,12 @@ _init_graphics_pipeline(struct comp_layer_renderer *self)
 	    .attribs =
 	        (VkVertexInputAttributeDescription[]){
 	            {0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0},
-	            {1, 0, VK_FORMAT_R32G32_SFLOAT,
-	             offsetof(struct comp_layer_vertex, uv)},
+	            {1, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(struct comp_layer_vertex, uv)},
 	        },
 	    .attrib_count = 2,
 	    .depth_stencil_state =
 	        &(VkPipelineDepthStencilStateCreateInfo){
-	            .sType =
-	                VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+	            .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
 	            .depthTestEnable = VK_FALSE,
 	            .depthWriteEnable = VK_FALSE,
 	            .depthCompareOp = VK_COMPARE_OP_NEVER,
@@ -218,10 +215,9 @@ _init_graphics_pipeline(struct comp_layer_renderer *self)
 	    .blend_attachments =
 	        &(VkPipelineColorBlendAttachmentState){
 	            .blendEnable = VK_TRUE,
-	            .colorWriteMask =
-	                VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-	                VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
-	            .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
+	            .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT |
+	                              VK_COLOR_COMPONENT_A_BIT,
+	            .srcColorBlendFactor = blend_factor,
 	            .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
 	            .colorBlendOp = VK_BLEND_OP_ADD,
 	            .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
@@ -230,8 +226,7 @@ _init_graphics_pipeline(struct comp_layer_renderer *self)
 	        },
 	    .rasterization_state =
 	        &(VkPipelineRasterizationStateCreateInfo){
-	            .sType =
-	                VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+	            .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
 	            .polygonMode = VK_POLYGON_MODE_FILL,
 	            .cullMode = VK_CULL_MODE_BACK_BIT,
 	            .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
@@ -240,10 +235,18 @@ _init_graphics_pipeline(struct comp_layer_renderer *self)
 	};
 
 	VkPipelineShaderStageCreateInfo shader_stages[2] = {
-	    _shader_load(vk, shaders_quad_vert, sizeof(shaders_quad_vert),
-	                 VK_SHADER_STAGE_VERTEX_BIT),
-	    _shader_load(vk, shaders_quad_frag, sizeof(shaders_quad_frag),
-	                 VK_SHADER_STAGE_FRAGMENT_BIT),
+	    {
+	        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+	        .stage = VK_SHADER_STAGE_VERTEX_BIT,
+	        .module = shader_vert,
+	        .pName = "main",
+	    },
+	    {
+	        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+	        .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+	        .module = shader_frag,
+	        .pName = "main",
+	    },
 	};
 
 	VkGraphicsPipelineCreateInfo pipeline_info = {
@@ -251,8 +254,7 @@ _init_graphics_pipeline(struct comp_layer_renderer *self)
 	    .layout = self->pipeline_layout,
 	    .pVertexInputState =
 	        &(VkPipelineVertexInputStateCreateInfo){
-	            .sType =
-	                VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+	            .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
 	            .pVertexAttributeDescriptions = config.attribs,
 	            .vertexBindingDescriptionCount = 1,
 	            .pVertexBindingDescriptions =
@@ -265,23 +267,20 @@ _init_graphics_pipeline(struct comp_layer_renderer *self)
 	        },
 	    .pInputAssemblyState =
 	        &(VkPipelineInputAssemblyStateCreateInfo){
-	            .sType =
-	                VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+	            .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
 	            .topology = config.topology,
 	            .primitiveRestartEnable = VK_FALSE,
 	        },
 	    .pViewportState =
 	        &(VkPipelineViewportStateCreateInfo){
-	            .sType =
-	                VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+	            .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
 	            .viewportCount = 1,
 	            .scissorCount = 1,
 	        },
 	    .pRasterizationState = config.rasterization_state,
 	    .pMultisampleState =
 	        &(VkPipelineMultisampleStateCreateInfo){
-	            .sType =
-	                VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+	            .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
 	            .rasterizationSamples = self->sample_count,
 	            .minSampleShading = 0.0f,
 	            .pSampleMask = &(uint32_t){0xFFFFFFFF},
@@ -290,8 +289,7 @@ _init_graphics_pipeline(struct comp_layer_renderer *self)
 	    .pDepthStencilState = config.depth_stencil_state,
 	    .pColorBlendState =
 	        &(VkPipelineColorBlendStateCreateInfo){
-	            .sType =
-	                VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+	            .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
 	            .logicOpEnable = VK_FALSE,
 	            .attachmentCount = 1,
 	            .blendConstants = {0, 0, 0, 0},
@@ -302,8 +300,7 @@ _init_graphics_pipeline(struct comp_layer_renderer *self)
 	    .renderPass = self->render_pass,
 	    .pDynamicState =
 	        &(VkPipelineDynamicStateCreateInfo){
-	            .sType =
-	                VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+	            .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
 	            .dynamicStateCount = 2,
 	            .pDynamicStates =
 	                (VkDynamicState[]){
@@ -315,20 +312,16 @@ _init_graphics_pipeline(struct comp_layer_renderer *self)
 	};
 
 	VkResult res;
-	res = vk->vkCreateGraphicsPipelines(vk->device, self->pipeline_cache, 1,
-	                                    &pipeline_info, NULL,
-	                                    &self->pipeline);
+	res = vk->vkCreateGraphicsPipelines(vk->device, self->pipeline_cache, 1, &pipeline_info, NULL, pipeline);
 
 	vk_check_error("vkCreateGraphicsPipelines", res, false);
-
-	vk->vkDestroyShaderModule(vk->device, shader_stages[0].module, NULL);
-	vk->vkDestroyShaderModule(vk->device, shader_stages[1].module, NULL);
 
 	return true;
 }
 
 // clang-format off
-float plane_vertices[6 * 5] = {
+#define PLANE_VERTICES 6
+static float plane_vertices[PLANE_VERTICES * 5] = {
 	-0.5, -0.5, 0, 0, 1,
 	 0.5, -0.5, 0, 1, 1,
 	 0.5,  0.5, 0, 1, 0,
@@ -344,35 +337,16 @@ _init_vertex_buffer(struct comp_layer_renderer *self)
 	struct vk_bundle *vk = self->vk;
 
 	VkBufferUsageFlags usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-	VkMemoryPropertyFlags properties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-	                                   VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+	VkMemoryPropertyFlags properties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 
-	if (!vk_buffer_init(vk, sizeof(float) * ARRAY_SIZE(plane_vertices),
-	                    usage, properties, &self->vertex_buffer.handle,
-	                    &self->vertex_buffer.memory))
+	if (!vk_buffer_init(vk, sizeof(float) * ARRAY_SIZE(plane_vertices), usage, properties,
+	                    &self->vertex_buffer.handle, &self->vertex_buffer.memory))
 		return false;
 
-	self->vertex_buffer.size = 6;
+	self->vertex_buffer.size = PLANE_VERTICES;
 
-	void *tmp;
-	VkResult res = vk->vkMapMemory(vk->device, self->vertex_buffer.memory,
-	                               0, VK_WHOLE_SIZE, 0, &tmp);
-	vk_check_error("vkMapMemory", res, false);
-
-	memcpy(tmp, plane_vertices, sizeof(float) * ARRAY_SIZE(plane_vertices));
-
-	VkMappedMemoryRange memory_range = {
-	    .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
-	    .memory = self->vertex_buffer.memory,
-	    .size = VK_WHOLE_SIZE,
-	};
-
-	res = vk->vkFlushMappedMemoryRanges(vk->device, 1, &memory_range);
-	vk_check_error("vkFlushMappedMemoryRanges", res, false);
-
-	vk->vkUnmapMemory(vk->device, self->vertex_buffer.memory);
-
-	return true;
+	return vk_update_buffer(vk, plane_vertices, sizeof(float) * ARRAY_SIZE(plane_vertices),
+	                        self->vertex_buffer.memory);
 }
 
 static void
@@ -383,35 +357,52 @@ _render_eye(struct comp_layer_renderer *self,
 {
 	struct xrt_matrix_4x4 vp_world;
 	struct xrt_matrix_4x4 vp_eye;
-	math_matrix_4x4_multiply(&self->mat_projection[eye],
-	                         &self->mat_world_view[eye], &vp_world);
-	math_matrix_4x4_multiply(&self->mat_projection[eye],
-	                         &self->mat_eye_view[eye], &vp_eye);
+	struct xrt_matrix_4x4 vp_inv;
+	math_matrix_4x4_multiply(&self->mat_projection[eye], &self->mat_world_view[eye], &vp_world);
+	math_matrix_4x4_multiply(&self->mat_projection[eye], &self->mat_eye_view[eye], &vp_eye);
+
+	math_matrix_4x4_inverse_view_projection(&self->mat_world_view[eye], &self->mat_projection[eye], &vp_inv);
 
 	for (uint32_t i = 0; i < self->num_layers; i++) {
-		comp_layer_draw(self->layers[i], eye, self->pipeline,
-		                pipeline_layout, cmd_buffer,
-		                &self->vertex_buffer, &vp_world, &vp_eye);
+		bool unpremultiplied_alpha = self->layers[i]->flags & XRT_LAYER_COMPOSITION_UNPREMULTIPLIED_ALPHA_BIT;
+
+		struct vk_buffer *vertex_buffer;
+		if (self->layers[i]->type == XRT_LAYER_CYLINDER) {
+			vertex_buffer = comp_layer_get_cylinder_vertex_buffer(self->layers[i]);
+		} else {
+			vertex_buffer = &self->vertex_buffer;
+		}
+
+		VkPipeline pipeline =
+		    unpremultiplied_alpha ? self->pipeline_premultiplied_alpha : self->pipeline_unpremultiplied_alpha;
+
+		if (self->layers[i]->type == XRT_LAYER_EQUIRECT2) {
+			pipeline = self->pipeline_equirect2;
+			comp_layer_draw(self->layers[i], eye, pipeline, pipeline_layout, cmd_buffer, vertex_buffer,
+			                &vp_inv, &vp_inv);
+		} else if (self->layers[i]->type == XRT_LAYER_EQUIRECT1) {
+			pipeline = self->pipeline_equirect1;
+			comp_layer_draw(self->layers[i], eye, pipeline, pipeline_layout, cmd_buffer, vertex_buffer,
+			                &vp_inv, &vp_inv);
+		} else {
+			comp_layer_draw(self->layers[i], eye, pipeline, pipeline_layout, cmd_buffer, vertex_buffer,
+			                &vp_world, &vp_eye);
+		}
 	}
 }
 
 static bool
-_init_frame_buffer(struct comp_layer_renderer *self,
-                   VkFormat format,
-                   VkRenderPass rp,
-                   uint32_t eye)
+_init_frame_buffer(struct comp_layer_renderer *self, VkFormat format, VkRenderPass rp, uint32_t eye)
 {
 	struct vk_bundle *vk = self->vk;
 
-	VkImageUsageFlags usage =
-	    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+	VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 
-	VkResult res = vk_create_image_simple(vk, self->extent, format, usage,
-	                                      &self->framebuffers[eye].memory,
+	VkResult res = vk_create_image_simple(vk, self->extent, format, usage, &self->framebuffers[eye].memory,
 	                                      &self->framebuffers[eye].image);
 	vk_check_error("vk_create_image_simple", res, false);
 
-	vk_create_sampler(vk, &self->framebuffers[eye].sampler);
+	vk_create_sampler(vk, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER, &self->framebuffers[eye].sampler);
 
 	VkImageSubresourceRange subresource_range = {
 	    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -421,8 +412,8 @@ _init_frame_buffer(struct comp_layer_renderer *self,
 	    .layerCount = 1,
 	};
 
-	res = vk_create_view(vk, self->framebuffers[eye].image, format,
-	                     subresource_range, &self->framebuffers[eye].view);
+	res =
+	    vk_create_view(vk, self->framebuffers[eye].image, format, subresource_range, &self->framebuffers[eye].view);
 
 	vk_check_error("vk_create_view", res, false);
 
@@ -436,26 +427,23 @@ _init_frame_buffer(struct comp_layer_renderer *self,
 	    .layers = 1,
 	};
 
-	res = vk->vkCreateFramebuffer(vk->device, &framebuffer_info, NULL,
-	                              &self->framebuffers[eye].handle);
+	res = vk->vkCreateFramebuffer(vk->device, &framebuffer_info, NULL, &self->framebuffers[eye].handle);
 	vk_check_error("vkCreateFramebuffer", res, false);
 
 	return true;
 }
 
 void
-comp_layer_renderer_allocate_layers(struct comp_layer_renderer *self,
-                                    uint32_t num_layers)
+comp_layer_renderer_allocate_layers(struct comp_layer_renderer *self, uint32_t num_layers)
 {
 	struct vk_bundle *vk = self->vk;
 
 	self->num_layers = num_layers;
-	self->layers =
-	    U_TYPED_ARRAY_CALLOC(struct comp_render_layer *, self->num_layers);
+	self->layers = U_TYPED_ARRAY_CALLOC(struct comp_render_layer *, self->num_layers);
 
 	for (uint32_t i = 0; i < self->num_layers; i++) {
-		self->layers[i] = comp_layer_create(
-		    vk, XRT_LAYER_QUAD, &self->descriptor_set_layout);
+		self->layers[i] =
+		    comp_layer_create(vk, &self->descriptor_set_layout, &self->descriptor_set_layout_equirect);
 	}
 }
 
@@ -471,20 +459,22 @@ comp_layer_renderer_destroy_layers(struct comp_layer_renderer *self)
 }
 
 static bool
-_init(struct comp_layer_renderer *self,
-      struct vk_bundle *vk,
-      VkExtent2D extent,
-      VkFormat format)
+_init(
+    struct comp_layer_renderer *self, struct comp_shaders *s, struct vk_bundle *vk, VkExtent2D extent, VkFormat format)
 {
 	self->vk = vk;
 
-	self->near = 0.001f;
-	self->far = 100.0f;
+	self->nearZ = 0.001f;
+	self->farZ = 100.0f;
 	self->sample_count = VK_SAMPLE_COUNT_1_BIT;
 
 	self->num_layers = 0;
 
 	self->extent = extent;
+
+	// binding indices used in layer.vert, layer.frag
+	self->transformation_ubo_binding = 0;
+	self->texture_binding = 1;
 
 	for (uint32_t i = 0; i < 2; i++) {
 		math_matrix_4x4_identity(&self->mat_projection[i]);
@@ -492,9 +482,8 @@ _init(struct comp_layer_renderer *self,
 		math_matrix_4x4_identity(&self->mat_eye_view[i]);
 	}
 
-	if (!_init_render_pass(vk, format,
-	                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-	                       self->sample_count, &self->render_pass))
+	if (!_init_render_pass(vk, format, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, self->sample_count,
+	                       &self->render_pass))
 		return false;
 
 	for (uint32_t i = 0; i < 2; i++)
@@ -503,12 +492,30 @@ _init(struct comp_layer_renderer *self,
 
 	if (!_init_descriptor_layout(self))
 		return false;
+	if (!_init_descriptor_layout_equirect(self))
+		return false;
 	if (!_init_pipeline_layout(self))
 		return false;
 	if (!_init_pipeline_cache(self))
 		return false;
-	if (!_init_graphics_pipeline(self))
+
+
+	if (!_init_graphics_pipeline(self, s->layer_vert, s->layer_frag, false, &self->pipeline_premultiplied_alpha)) {
 		return false;
+	}
+
+	if (!_init_graphics_pipeline(self, s->layer_vert, s->layer_frag, true, &self->pipeline_unpremultiplied_alpha)) {
+		return false;
+	}
+
+	if (!_init_graphics_pipeline(self, s->equirect1_vert, s->equirect1_frag, true, &self->pipeline_equirect1)) {
+		return false;
+	}
+
+	if (!_init_graphics_pipeline(self, s->equirect2_vert, s->equirect2_frag, true, &self->pipeline_equirect2)) {
+		return false;
+	}
+
 	if (!_init_vertex_buffer(self))
 		return false;
 
@@ -516,13 +523,10 @@ _init(struct comp_layer_renderer *self,
 }
 
 struct comp_layer_renderer *
-comp_layer_renderer_create(struct vk_bundle *vk,
-                           VkExtent2D extent,
-                           VkFormat format)
+comp_layer_renderer_create(struct vk_bundle *vk, struct comp_shaders *s, VkExtent2D extent, VkFormat format)
 {
-	struct comp_layer_renderer *r =
-	    U_TYPED_CALLOC(struct comp_layer_renderer);
-	_init(r, vk, extent, format);
+	struct comp_layer_renderer *r = U_TYPED_CALLOC(struct comp_layer_renderer);
+	_init(r, s, vk, extent, format);
 	return r;
 }
 
@@ -563,14 +567,11 @@ _render_pass_begin(struct vk_bundle *vk,
 	        },
 	};
 
-	vk->vkCmdBeginRenderPass(cmd_buffer, &render_pass_info,
-	                         VK_SUBPASS_CONTENTS_INLINE);
+	vk->vkCmdBeginRenderPass(cmd_buffer, &render_pass_info, VK_SUBPASS_CONTENTS_INLINE);
 }
 
 static void
-_render_stereo(struct comp_layer_renderer *self,
-               struct vk_bundle *vk,
-               VkCommandBuffer cmd_buffer)
+_render_stereo(struct comp_layer_renderer *self, struct vk_bundle *vk, VkCommandBuffer cmd_buffer)
 {
 	VkViewport viewport = {
 	    0.0f, 0.0f, self->extent.width, self->extent.height, 0.0f, 1.0f,
@@ -583,8 +584,7 @@ _render_stereo(struct comp_layer_renderer *self,
 	vk->vkCmdSetScissor(cmd_buffer, 0, 1, &scissor);
 
 	for (uint32_t eye = 0; eye < 2; eye++) {
-		_render_pass_begin(vk, self->render_pass, self->extent,
-		                   background_color,
+		_render_pass_begin(vk, self->render_pass, self->extent, background_color,
 		                   self->framebuffers[eye].handle, cmd_buffer);
 
 		_render_eye(self, eye, cmd_buffer, self->pipeline_layout);
@@ -602,7 +602,9 @@ comp_layer_renderer_draw(struct comp_layer_renderer *self)
 	if (vk_init_cmd_buffer(vk, &cmd_buffer) != VK_SUCCESS)
 		return;
 
+	os_mutex_lock(&vk->cmd_pool_mutex);
 	_render_stereo(self, vk, cmd_buffer);
+	os_mutex_unlock(&vk->cmd_pool_mutex);
 
 	VkResult res = vk_submit_cmd_buffer(vk, cmd_buffer);
 	vk_check_error("vk_submit_cmd_buffer", res, );
@@ -615,8 +617,7 @@ _destroy_framebuffer(struct comp_layer_renderer *self, uint32_t i)
 	vk->vkDestroyImageView(vk->device, self->framebuffers[i].view, NULL);
 	vk->vkDestroyImage(vk->device, self->framebuffers[i].image, NULL);
 	vk->vkFreeMemory(vk->device, self->framebuffers[i].memory, NULL);
-	vk->vkDestroyFramebuffer(vk->device, self->framebuffers[i].handle,
-	                         NULL);
+	vk->vkDestroyFramebuffer(vk->device, self->framebuffers[i].handle, NULL);
 	vk->vkDestroySampler(vk->device, self->framebuffers[i].sampler, NULL);
 }
 
@@ -628,7 +629,9 @@ comp_layer_renderer_destroy(struct comp_layer_renderer *self)
 	if (vk->device == VK_NULL_HANDLE)
 		return;
 
+	os_mutex_lock(&vk->queue_mutex);
 	vk->vkDeviceWaitIdle(vk->device);
+	os_mutex_unlock(&vk->queue_mutex);
 
 	comp_layer_renderer_destroy_layers(self);
 
@@ -638,13 +641,15 @@ comp_layer_renderer_destroy(struct comp_layer_renderer *self)
 	vk->vkDestroyRenderPass(vk->device, self->render_pass, NULL);
 
 	vk->vkDestroyPipelineLayout(vk->device, self->pipeline_layout, NULL);
-	vk->vkDestroyDescriptorSetLayout(vk->device,
-	                                 self->descriptor_set_layout, NULL);
-	vk->vkDestroyPipeline(vk->device, self->pipeline, NULL);
+	vk->vkDestroyDescriptorSetLayout(vk->device, self->descriptor_set_layout, NULL);
+	vk->vkDestroyDescriptorSetLayout(vk->device, self->descriptor_set_layout_equirect, NULL);
+	vk->vkDestroyPipeline(vk->device, self->pipeline_premultiplied_alpha, NULL);
+	vk->vkDestroyPipeline(vk->device, self->pipeline_unpremultiplied_alpha, NULL);
+	vk->vkDestroyPipeline(vk->device, self->pipeline_equirect1, NULL);
+	vk->vkDestroyPipeline(vk->device, self->pipeline_equirect2, NULL);
 
 	for (uint32_t i = 0; i < ARRAY_SIZE(self->shader_modules); i++)
-		vk->vkDestroyShaderModule(vk->device, self->shader_modules[i],
-		                          NULL);
+		vk->vkDestroyShaderModule(vk->device, self->shader_modules[i], NULL);
 
 	vk_buffer_destroy(&self->vertex_buffer, vk);
 
@@ -652,9 +657,7 @@ comp_layer_renderer_destroy(struct comp_layer_renderer *self)
 }
 
 void
-comp_layer_renderer_set_fov(struct comp_layer_renderer *self,
-                            const struct xrt_fov *fov,
-                            uint32_t eye)
+comp_layer_renderer_set_fov(struct comp_layer_renderer *self, const struct xrt_fov *fov, uint32_t eye)
 {
 	const float tan_left = tanf(fov->angle_left);
 	const float tan_right = tanf(fov->angle_right);
@@ -670,9 +673,9 @@ comp_layer_renderer_set_fov(struct comp_layer_renderer *self,
 
 	const float a31 = (tan_right + tan_left) / tan_width;
 	const float a32 = (tan_up + tan_down) / tan_height;
-	const float a33 = -self->far / (self->far - self->near);
+	const float a33 = -self->farZ / (self->farZ - self->nearZ);
 
-	const float a43 = -(self->far * self->near) / (self->far - self->near);
+	const float a43 = -(self->farZ * self->nearZ) / (self->farZ - self->nearZ);
 
 	// clang-format off
 	self->mat_projection[eye] = (struct xrt_matrix_4x4) {

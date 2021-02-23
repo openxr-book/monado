@@ -15,8 +15,11 @@ Build-Depends: debhelper-compat (= 12),
                libeigen3-dev,
                libgl1-mesa-dev,
                libglvnd-dev,
+               libgstreamer1.0-dev,
+               libgstreamer-plugins-base1.0-dev,
                libhidapi-dev [!hurd-i386],
                libopencv-dev,
+               libsystemd-dev [linux-any],
                libsdl2-dev,
                libudev-dev,
                libusb-1.0-0-dev,
@@ -37,21 +40,42 @@ Vcs-Git: https://gitlab.freedesktop.org/monado/monado.git -b debian/buster-backp
 Homepage: https://monado.freedesktop.org/
 Rules-Requires-Root: no
 
+Package: monado-service
+Architecture: linux-any
+Multi-Arch: foreign
+Depends: ${shlibs:Depends},
+         ${misc:Depends}
+Recommends: xr-hardware,
+            libopenxr-loader1,
+            libopenxr1-monado (= ${binary:Version})
+Description: Monado XR hardware and composition service
+ Monado is an open-source package for interacting with virtual and
+ augmented reality (collectively known as XR) hardware and software.
+ .
+ This package provides the service that provides the VR compositor and
+ hardware drivers to Monado clients like libopenxr1-monado.
+
 Package: libopenxr1-monado
 Architecture: any
 Multi-Arch: same
 Depends: ${shlibs:Depends},
-         ${misc:Depends}
+         ${misc:Depends},
+         monado-service (= ${binary:Version}) [linux-any]
 Recommends: xr-hardware,
             libopenxr-loader1
 Suggests: bluez [linux-any]
 Provides: libopenxr1
-Description: Monado preview implementation of the OpenXR API
+Description: Monado implementation of the OpenXR API
  Monado is an open-source package for interacting with virtual and
  augmented reality (collectively known as XR) hardware and software.
  .
  This package provides a runtime that aims to be a complete and conforming
- implementation of the OpenXR API from Khronos, after further development.
+ implementation of the OpenXR API from Khronos. When used with the
+ "simulated" device driver, this package is conformant with OpenXR 1.0.
+ When used with any other driver, this package is based on a published
+ Khronos Specification and is expected to pass the Khronos Conformance
+ Process. Current conformance status can be found at
+ www.khronos.org/conformance.
 
 Package: monado-cli
 Architecture: any

@@ -29,9 +29,7 @@
 class Var
 {
 public:
-	std::string name;
-	u_var_kind kind;
-	void *ptr;
+	struct u_var_info info = {};
 };
 
 class Obj
@@ -91,9 +89,9 @@ add_var(void *root, void *ptr, u_var_kind kind, const char *c_name)
 	}
 
 	Var var;
-	var.name = std::string(c_name);
-	var.kind = kind;
-	var.ptr = ptr;
+	snprintf(var.info.name, 256, "%s", c_name);
+	var.info.kind = kind;
+	var.info.ptr = ptr;
 
 	s->second.vars.push_back(var);
 }
@@ -149,10 +147,7 @@ u_var_remove_root(void *root)
 }
 
 extern "C" void
-u_var_visit(u_var_root_cb enter_cb,
-            u_var_root_cb exit_cb,
-            u_var_elm_cb elem_cb,
-            void *priv)
+u_var_visit(u_var_root_cb enter_cb, u_var_root_cb exit_cb, u_var_elm_cb elem_cb, void *priv)
 {
 	if (!get_on()) {
 		return;
@@ -169,22 +164,20 @@ u_var_visit(u_var_root_cb enter_cb,
 		enter_cb(obj->name.c_str(), priv);
 
 		for (auto &var : obj->vars) {
-			elem_cb(var.name.c_str(), (u_var_kind)var.kind, var.ptr,
-			        priv);
+			elem_cb(&var.info, priv);
 		}
 
 		exit_cb(obj->name.c_str(), priv);
 	}
 }
 
-#define ADD_FUNC(SUFFIX, TYPE, ENUM)                                           \
-	extern "C" void u_var_add_##SUFFIX(void *obj, TYPE *ptr,               \
-	                                   const char *c_name)                 \
-	{                                                                      \
-		if (!get_on()) {                                               \
-			return;                                                \
-		}                                                              \
-		add_var(obj, (void *)ptr, U_VAR_KIND_##ENUM, c_name);          \
+#define ADD_FUNC(SUFFIX, TYPE, ENUM)                                                                                   \
+	extern "C" void u_var_add_##SUFFIX(void *obj, TYPE *ptr, const char *c_name)                                   \
+	{                                                                                                              \
+		if (!get_on()) {                                                                                       \
+			return;                                                                                        \
+		}                                                                                                      \
+		add_var(obj, (void *)ptr, U_VAR_KIND_##ENUM, c_name);                                                  \
 	}
 
 U_VAR_ADD_FUNCS()

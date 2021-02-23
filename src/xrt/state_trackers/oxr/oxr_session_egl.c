@@ -42,45 +42,33 @@ oxr_session_populate_egl(struct oxr_logger *log,
                          XrGraphicsBindingEGLMNDX const *next,
                          struct oxr_session *sess)
 {
-	EGLint egl_client_type;
+	EGLint egl_client_type = -1;
 
-	PFNEGLQUERYCONTEXTPROC eglQueryContext =
-	    (PFNEGLQUERYCONTEXTPROC)next->getProcAddress("eglQueryContext");
+	PFNEGLQUERYCONTEXTPROC eglQueryContext = (PFNEGLQUERYCONTEXTPROC)next->getProcAddress("eglQueryContext");
 	if (!eglQueryContext) {
-		return oxr_error(
-		    log, XR_ERROR_INITIALIZATION_FAILED,
-		    "Call to getProcAddress(eglQueryContext) failed");
+		return oxr_error(log, XR_ERROR_INITIALIZATION_FAILED, "Call to getProcAddress(eglQueryContext) failed");
 	}
 
-	if (!eglQueryContext(next->display, next->context,
-	                     EGL_CONTEXT_CLIENT_TYPE, &egl_client_type)) {
-		return oxr_error(
-		    log, XR_ERROR_INITIALIZATION_FAILED,
-		    "Call to eglQueryContext(EGL_CONTEXT_CLIENT_TYPE) failed");
-	}
-
-	if (egl_client_type != EGL_OPENGL_API &&
-	    egl_client_type != EGL_OPENGL_ES_API) {
+	if (!eglQueryContext(next->display, next->context, EGL_CONTEXT_CLIENT_TYPE, &egl_client_type)) {
 		return oxr_error(log, XR_ERROR_INITIALIZATION_FAILED,
-		                 "Unsupported EGL client type");
+		                 "Call to eglQueryContext(EGL_CONTEXT_CLIENT_TYPE) failed");
 	}
 
-	struct xrt_compositor_fd *xcfd = NULL;
-	int ret = xrt_instance_create_fd_compositor(sys->inst->xinst, sys->head,
-	                                            true, &xcfd);
-	if (ret < 0 || xcfd == NULL) {
-		return oxr_error(log, XR_ERROR_INITIALIZATION_FAILED,
-		                 "Failed to create an fd compositor '%i'", ret);
+	if (egl_client_type != EGL_OPENGL_API && egl_client_type != EGL_OPENGL_ES_API) {
+		return oxr_error(log, XR_ERROR_INITIALIZATION_FAILED, "Unsupported EGL client type: '%i'",
+		                 egl_client_type);
 	}
 
-	struct xrt_compositor_gl *xcgl =
-	    xrt_gfx_provider_create_gl_egl(xcfd, next->display, next->config,
-	                                   next->context, next->getProcAddress);
+	struct xrt_compositor_native *xcn = sess->xcn;
+	struct xrt_compositor_gl *xcgl = xrt_gfx_provider_create_gl_egl( //
+	    xcn,                                                         //
+	    next->display,                                               //
+	    next->config,                                                //
+	    next->context,                                               //
+	    next->getProcAddress);                                       //
 
 	if (xcgl == NULL) {
-		xcfd->base.destroy(&xcfd->base);
-		return oxr_error(log, XR_ERROR_INITIALIZATION_FAILED,
-		                 "Failed to create an egl client compositor");
+		return oxr_error(log, XR_ERROR_INITIALIZATION_FAILED, "Failed to create an egl client compositor");
 	}
 
 	sess->compositor = &xcgl->base;

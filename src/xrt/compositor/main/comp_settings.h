@@ -14,6 +14,9 @@
 #include "xrt/xrt_compositor.h"
 #include "xrt/xrt_vulkan_includes.h"
 
+#include "util/u_logging.h"
+
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -25,10 +28,8 @@ extern "C" {
  * We may wish to allow user configuration to extend this list.
  */
 XRT_MAYBE_UNUSED static const char *NV_DIRECT_WHITELIST[] = {
-    "Sony SIE  HMD *08",
-    "HTC Corporation HTC-VIVE",
-    "HTC Corporation VIVE Pro",
-    "Oculus VR Inc. Rift", /* Matches DK1, DK2 and CV1 */
+    "Sony SIE  HMD *08",           "HTC Corporation HTC-VIVE",
+    "HTC Corporation VIVE Pro",    "Oculus VR Inc. Rift", /* Matches DK1, DK2 and CV1 */
     "Valve Corporation Index HMD",
 };
 
@@ -45,6 +46,9 @@ enum window_type
 	WINDOW_WAYLAND,
 	WINDOW_DIRECT_RANDR,
 	WINDOW_DIRECT_NVIDIA,
+	WINDOW_ANDROID,
+	WINDOW_MSWIN,
+	WINDOW_VK_DISPLAY,
 };
 
 
@@ -64,11 +68,17 @@ struct comp_settings
 	//! Window type to use.
 	enum window_type window_type;
 
-	//! Distortion type to use.
-	enum xrt_distortion_model distortion_model;
+	//! display string forced by user or NULL
+	const char *nvidia_display;
 
-	uint32_t width;
-	uint32_t height;
+	//! vk display number to use when forcing vk_display
+	int vk_display;
+
+	struct
+	{
+		uint32_t width;
+		uint32_t height;
+	} preferred;
 
 	struct
 	{
@@ -76,26 +86,35 @@ struct comp_settings
 		bool wireframe;
 	} debug;
 
+	//! Procentage to scale the viewport by.
+	double viewport_scale;
+
 	//! Not used with direct mode.
 	bool fullscreen;
 
-	//! Should we debug print a lot!
-	bool print_spew;
-
-	//! Should we debug print.
-	bool print_debug;
+	//! Logging level.
+	enum u_logging_level log_level;
 
 	//! Print information about available modes for direct mode.
 	bool print_modes;
 
-	//! Should we flip y axis for compositor buffers (for GL)
-	bool flip_y;
-
 	//! Nominal frame interval
 	uint64_t nominal_frame_interval_ns;
 
-	//! Run the compositor on this Vulkan physical device
-	int gpu_index;
+	//! Vulkan physical device selected by comp_settings_check_vulkan_caps
+	//! may be forced by user
+	int selected_gpu_index;
+
+	//! Vulkan physical device index for clients to use, forced by user
+	int client_gpu_index;
+
+
+	//! Vulkan device UUID selected by comp_settings_check_vulkan_caps,
+	//! valid across Vulkan instances
+	uint8_t selected_gpu_deviceUUID[XRT_GPU_UUID_SIZE];
+
+	//! Vulkan device UUID to suggest to clients
+	uint8_t client_gpu_deviceUUID[XRT_GPU_UUID_SIZE];
 
 	//! Try to choose the mode with this index for direct mode
 	int desired_mode;

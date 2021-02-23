@@ -24,6 +24,14 @@ extern "C" {
  * Use instead of a bare calloc, but only when U_TYPED_CALLOC and
  * U_TYPED_ARRAY_CALLOC do not meet your needs.
  *
+ * - If you are using `U_CALLOC_WITH_CAST(struct MyStruct, sizeof(MyStruct))` to
+ *   allocate a single structure of fixed size, you should actually use
+ *   `U_TYPED_CALLOC(struct MyStruct)`.
+ *
+ * - If you are using `U_CALLOC_WITH_CAST(struct MyStruct, sizeof(MyStruct) *
+ *   n)` to allocate an array, you should actually use
+ *   `U_TYPED_ARRAY_CALLOC(struct MyStruct, n)`.
+ *
  * @ingroup aux_util
  */
 #define U_CALLOC_WITH_CAST(TYPE, SIZE) ((TYPE *)calloc(1, SIZE))
@@ -47,8 +55,7 @@ extern "C" {
  *
  * @ingroup aux_util
  */
-#define U_TYPED_ARRAY_CALLOC(TYPE, COUNT)                                      \
-	((TYPE *)calloc((COUNT), sizeof(TYPE)))
+#define U_TYPED_ARRAY_CALLOC(TYPE, COUNT) ((TYPE *)calloc((COUNT), sizeof(TYPE)))
 
 /*!
  * Zeroes the correct amount of memory based on the type pointed-to by the
@@ -103,8 +110,7 @@ u_realloc_or_free(void *ptr, size_t new_size)
  *
  * @ingroup aux_util
  */
-#define U_ARRAY_REALLOC_OR_FREE(VAR, TYPE, COUNT)                              \
-	(VAR) = ((TYPE *)u_realloc_or_free((VAR), sizeof(TYPE) * (COUNT)))
+#define U_ARRAY_REALLOC_OR_FREE(VAR, TYPE, COUNT) (VAR) = ((TYPE *)u_realloc_or_free((VAR), sizeof(TYPE) * (COUNT)))
 
 #ifdef __cplusplus
 }

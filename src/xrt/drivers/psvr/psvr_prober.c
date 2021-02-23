@@ -12,11 +12,12 @@
 #include <stdlib.h>
 #include <wchar.h>
 
-#include <hidapi/hidapi.h>
+#include <hidapi.h>
 #include "xrt/xrt_prober.h"
 
 #include "util/u_misc.h"
 #include "util/u_debug.h"
+#include "util/u_logging.h"
 
 #include "psvr_interface.h"
 #include "psvr_device.h"
@@ -30,8 +31,9 @@
 
 // Should the experimental PSVR driver be enabled.
 DEBUG_GET_ONCE_BOOL_OPTION(psvr_enable, "PSVR_ENABLE", true)
-DEBUG_GET_ONCE_BOOL_OPTION(psvr_spew, "PSVR_PRINT_SPEW", false)
-DEBUG_GET_ONCE_BOOL_OPTION(psvr_debug, "PSVR_PRINT_DEBUG", false)
+DEBUG_GET_ONCE_LOG_OPTION(psvr_log, "PSVR_LOG", U_LOGGING_WARN)
+
+#define PSVR_DEBUG(p, ...) U_LOG_IFL_D(p->log_level, __VA_ARGS__)
 
 /*!
  * PSVR prober struct.
@@ -43,9 +45,9 @@ struct psvr_prober
 {
 	struct xrt_auto_prober base;
 
-	bool print_spew;
-	bool print_debug;
 	bool enabled;
+
+	enum u_logging_level log_level;
 };
 
 
@@ -73,10 +75,7 @@ psvr_prober_destroy(struct xrt_auto_prober *p)
 
 //! @public @memberof psvr_prober
 static struct xrt_device *
-psvr_prober_autoprobe(struct xrt_auto_prober *xap,
-                      cJSON *attached_data,
-                      bool no_hmds,
-                      struct xrt_prober *xp)
+psvr_prober_autoprobe(struct xrt_auto_prober *xap, cJSON *attached_data, bool no_hmds, struct xrt_prober *xp)
 {
 	struct psvr_prober *ppsvr = psvr_prober(xap);
 	struct hid_device_info *info_control = NULL;
@@ -103,12 +102,9 @@ psvr_prober_autoprobe(struct xrt_auto_prober *xap,
 
 	if (info_control != NULL && info_handle != NULL) {
 		if (ppsvr->enabled) {
-			dev = psvr_device_create(info_handle, info_control, xp,
-			                         ppsvr->print_spew,
-			                         ppsvr->print_debug);
+			dev = psvr_device_create(info_handle, info_control, xp, ppsvr->log_level);
 		} else {
-			PSVR_DEBUG(ppsvr,
-			           "Found a PSVR hmd but driver is disabled");
+			PSVR_DEBUG(ppsvr, "Found a PSVR hmd but driver is disabled");
 		}
 	}
 
@@ -132,8 +128,7 @@ psvr_create_auto_prober(void)
 	ppsvr->base.destroy = psvr_prober_destroy;
 	ppsvr->base.lelo_dallas_autoprobe = psvr_prober_autoprobe;
 	ppsvr->enabled = debug_get_bool_option_psvr_enable();
-	ppsvr->print_spew = debug_get_bool_option_psvr_spew();
-	ppsvr->print_debug = debug_get_bool_option_psvr_debug();
+	ppsvr->log_level = debug_get_log_option_psvr_log();
 
 	return &ppsvr->base;
 }

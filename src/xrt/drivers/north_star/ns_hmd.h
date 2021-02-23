@@ -10,49 +10,27 @@
 #pragma once
 
 #include "math/m_api.h"
-#include "util/u_distortion_mesh.h"
 #include "util/u_json.h"
 #include "util/u_misc.h"
 #include "xrt/xrt_defines.h"
 #include "xrt/xrt_device.h"
-
+#include "util/u_logging.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-
 /*
  *
- * Defines
+ * Printing functions.
  *
  */
 
-#define NS_SPEW(c, ...)                                                        \
-	do {                                                                   \
-		if (c->print_spew) {                                           \
-			fprintf(stderr, "%s - ", __func__);                    \
-			fprintf(stderr, __VA_ARGS__);                          \
-			fprintf(stderr, "\n");                                 \
-		}                                                              \
-	} while (false)
-
-#define NS_DEBUG(c, ...)                                                       \
-	do {                                                                   \
-		if (c->print_debug) {                                          \
-			fprintf(stderr, "%s - ", __func__);                    \
-			fprintf(stderr, __VA_ARGS__);                          \
-			fprintf(stderr, "\n");                                 \
-		}                                                              \
-	} while (false)
-
-#define NS_ERROR(c, ...)                                                       \
-	do {                                                                   \
-		fprintf(stderr, "%s - ", __func__);                            \
-		fprintf(stderr, __VA_ARGS__);                                  \
-		fprintf(stderr, "\n");                                         \
-	} while (false)
-
+#define NS_TRACE(d, ...) U_LOG_XDEV_IFL_T(&d->base, d->ll, __VA_ARGS__)
+#define NS_DEBUG(d, ...) U_LOG_XDEV_IFL_D(&d->base, d->ll, __VA_ARGS__)
+#define NS_INFO(d, ...) U_LOG_XDEV_IFL_I(&d->base, d->ll, __VA_ARGS__)
+#define NS_WARN(d, ...) U_LOG_XDEV_IFL_W(&d->base, d->ll, __VA_ARGS__)
+#define NS_ERROR(d, ...) U_LOG_XDEV_IFL_E(&d->base, d->ll, __VA_ARGS__)
 
 /*
  *
@@ -96,7 +74,7 @@ struct ns_leap
  *
  * @ingroup drv_ns
  */
-struct ns_eye
+struct ns_v1_eye
 {
 	float ellipse_minor_axis;
 	float ellipse_major_axis;
@@ -114,40 +92,41 @@ struct ns_eye
 	struct ns_optical_system *optical_system;
 };
 
+struct ns_v2_eye
+{
+	float x_coefficients[16];
+	float y_coefficients[16];
+	struct xrt_pose eye_pose;
+	struct xrt_fov fov;
+};
+
 /*!
  * Information about the whole North Star headset.
  *
  * @ingroup drv_ns
  * @implements xrt_device
  */
+
 struct ns_hmd
 {
+
 	struct xrt_device base;
 	struct xrt_pose pose;
 
 	const char *config_path;
 
-	struct ns_eye eye_configs[2];
-	struct ns_leap leap_config;
+	struct ns_v1_eye eye_configs_v1[2]; // will be NULL if is_v2.
+	struct ns_v2_eye eye_configs_v2[2]; // will be NULL if !is_v2
+	float ipd;
+
+	struct ns_leap leap_config; // will be NULL if is_v2
 
 	struct xrt_device *tracker;
 
-	bool print_spew;
-	bool print_debug;
+	enum u_logging_level ll;
+	bool is_v2; // True if V2, false if V1. If we ever get a v3 this should
+	            // be an enum or something
 };
-
-/*!
- * The mesh generator for the North Star distortion.
- *
- * @ingroup drv_ns
- * @implements u_uv_generator
- */
-struct ns_mesh
-{
-	struct u_uv_generator base;
-	struct ns_hmd *ns;
-};
-
 
 /*
  *
@@ -167,28 +146,15 @@ ns_hmd(struct xrt_device *xdev)
 }
 
 /*!
- * Get the North Star mesh generator from a @ref u_uv_generator.
- *
- * @ingroup drv_ns
- */
-static inline struct ns_mesh *
-ns_mesh(struct u_uv_generator *gen)
-{
-	return (struct ns_mesh *)gen;
-}
-
-/*!
  * Convert the display UV to the render UV using the distortion mesh.
  *
  * @ingroup drv_ns
  */
 void
-ns_display_uv_to_render_uv(struct ns_uv display_uv,
-                           struct ns_uv *render_uv,
-                           struct ns_eye *eye);
+ns_display_uv_to_render_uv(struct ns_uv in, struct ns_uv *out, struct ns_v1_eye *eye);
 
 struct ns_optical_system *
-ns_create_optical_system(struct ns_eye *eye);
+ns_create_optical_system(struct ns_v1_eye *eye);
 
 
 #ifdef __cplusplus

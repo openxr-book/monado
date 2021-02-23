@@ -1,0 +1,17 @@
+.\" Copyright 2020, Collabora, Ltd.
+.\" SPDX-License-Identifier: BSL-1.0
+.\" Author: Ryan Pavlik
+.Dd July 10, 2020
+.Dt MONADO-SERVICE 1
+.Sh NAME
+.Nm monado-service
+.Nd Device and composition service for Monado-based feaetures
+.Sh SYNOPSIS
+.Nm
+.Sh DESCRIPTION
+.Nm
+is the service module of Monado that provides hardware access and composition.
+It may be manually started, or allowed to auto-start through systemd socket activation
+via monado.socket and monado.service.
+.Pp
+It takes no arguments, and detects whether it was started by socket activation automatically.

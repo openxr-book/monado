@@ -85,7 +85,7 @@ public:
 	};
 
 	inline Vector3
-	operator-(Vector3 &rhs)
+	operator-(Vector3 &rhs) const
 	{
 		Vector3 ret;
 		ret.x = (x - rhs.x);
@@ -95,13 +95,13 @@ public:
 	}
 
 	inline Vector3
-	operator-()
+	operator-() const
 	{
 		return Vector3(-x, -y, -z);
 	}
 
 	inline Vector3
-	operator+(const Vector3 &rhs)
+	operator+(const Vector3 &rhs) const
 	{
 		Vector3 ret;
 		ret.x = (x + rhs.x);
@@ -120,16 +120,17 @@ public:
 	}
 
 	inline Vector3
-	operator/(const float &d)
+	operator/(const float &d) const
 	{
-		Vector3 *ret = new Vector3();
-		ret->x = (x / d);
-		ret->y = (y / d);
-		ret->z = (z / d);
-		return *ret;
+		Vector3 ret;
+		ret.x = (x / d);
+		ret.y = (y / d);
+		ret.z = (z / d);
+		return ret;
 	}
 
-	inline Vector3 operator*(const float &d)
+	inline Vector3 // Until clang-format-11 is on the CI.
+	operator*(const float &d) const
 	{
 		Vector3 ret;
 		ret.x = (x * d);
@@ -139,24 +140,19 @@ public:
 	}
 
 	inline Vector3
-	Inverse()
+	Inverse() const
 	{
-		Vector3 ret;
-		ret.x = -x;
-		ret.y = -y;
-		ret.z = -z;
-		return ret;
+		return {-x, -y, -z};
 	}
 
-	inline float static Dot(Vector3 lhs, Vector3 rhs)
+	inline float static Dot(Vector3 const &lhs, Vector3 const &rhs)
 	{
-		float result =
-		    (lhs.x * rhs.x) + (lhs.y * rhs.y) + (lhs.z * rhs.z);
+		float result = (lhs.x * rhs.x) + (lhs.y * rhs.y) + (lhs.z * rhs.z);
 		return result;
 	}
 
 	inline float
-	Dot(Vector3 rhs)
+	Dot(Vector3 const &rhs) const
 	{
 		float result = (x * rhs.x) + (y * rhs.y) + (z * rhs.z);
 		return result;
@@ -177,13 +173,13 @@ public:
 	}
 
 	inline float
-	sqrMagnitude()
+	sqrMagnitude() const
 	{
 		return x * x + y * y + z * z;
 	}
 
 	inline float
-	Magnitude()
+	Magnitude() const
 	{
 		return sqrt(x * x + y * y + z * z);
 	}
@@ -191,28 +187,19 @@ public:
 	inline static Vector3
 	Zero()
 	{
-		Vector3 ret;
-		ret.x = 0.f;
-		ret.y = 0.f;
-		ret.z = 0.f;
-		return ret;
+		return {0.f, 0.f, 0.f};
 	}
 
 	inline static Vector3
 	One()
 	{
-		Vector3 ret;
-		ret.x = 1.f;
-		ret.y = 1.f;
-		ret.z = 1.f;
-		return ret;
+		return {1.f, 1.f, 1.f};
 	}
 
 	inline static Vector3
 	Reflect(Vector3 inDirection, Vector3 inNormal)
 	{
-		return inNormal * -2.F * Dot(inNormal, inDirection) +
-		       inDirection;
+		return inNormal * -2.F * Dot(inNormal, inDirection) + inDirection;
 	}
 
 	inline void
@@ -231,7 +218,7 @@ public:
 	}
 
 	inline Vector3
-	Normalized()
+	Normalized() const
 	{
 		Vector3 ret;
 		float mag = Magnitude();
@@ -265,7 +252,7 @@ public:
 	}
 
 	inline Vector3
-	Cross(const Vector3 in)
+	Cross(const Vector3 in) const
 	{
 		Vector3 ret;
 		ret.x = y * in.z - z * in.y;
@@ -328,7 +315,7 @@ public:
 	}
 
 	inline Vector2
-	operator/(const float &d)
+	operator/(float d) const
 	{
 		Vector2 ret;
 		ret.x = (x / d);
@@ -336,7 +323,8 @@ public:
 		return ret;
 	}
 
-	inline Vector2 operator*(const float &d)
+	inline Vector2 // Until clang-format-11 is on the CI.
+	operator*(float d) const
 	{
 		Vector2 ret;
 		ret.x = (x * d);
@@ -344,7 +332,7 @@ public:
 		return ret;
 	}
 	inline Vector2
-	operator-(const Vector2 &rhs)
+	operator-(const Vector2 &rhs) const
 	{
 		Vector2 ret;
 		ret.x = (x - rhs.x);
@@ -353,7 +341,7 @@ public:
 	}
 
 	inline Vector2
-	operator+(const Vector2 &rhs)
+	operator+(const Vector2 &rhs) const
 	{
 		Vector2 ret;
 		ret.x = (x + rhs.x);
@@ -490,65 +478,48 @@ public:
 
 	// Returns a 3x3 rotation matrix (padded to a Matrix4x4).
 	inline static Matrix4x4
-	RotationAlign(Vector3 fromDir, Vector3 toDir)
+	RotationAlign(Vector3 const &fromDir, Vector3 const &toDir)
 	{
 		const Vector3 v = fromDir.Cross(toDir);
 		const float c = fromDir.Dot(toDir);
 		const float k = 1.0f / (1.0f + c);
 
-		return Matrix4x4(v.x * v.x * k + c, v.y * v.x * k - v.z,
-		                 v.z * v.x * k + v.y, 0.f, v.x * v.y * k + v.z,
-		                 v.y * v.y * k + c, v.z * v.y * k - v.x, 0.f,
-		                 v.x * v.z * k - v.y, v.y * v.z * k + v.x,
+		return Matrix4x4(v.x * v.x * k + c, v.y * v.x * k - v.z, v.z * v.x * k + v.y, 0.f, v.x * v.y * k + v.z,
+		                 v.y * v.y * k + c, v.z * v.y * k - v.x, 0.f, v.x * v.z * k - v.y, v.y * v.z * k + v.x,
 		                 v.z * v.z * k + c, 0.f, 0.f, 0.f, 0.f, 1.f);
 	}
 
-	inline Matrix4x4 operator*(const Matrix4x4 &_in)
+	inline Matrix4x4 // Until clang-format-11 is on the CI.
+	operator*(const Matrix4x4 &_in)
 	{
 		Matrix4x4 ret;
-		ret.m00 = (m00 * _in.m00) + (m01 * _in.m10) + (m02 * _in.m20) +
-		          (m03 * _in.m30);
-		ret.m01 = (m00 * _in.m01) + (m01 * _in.m11) + (m02 * _in.m21) +
-		          (m03 * _in.m31);
-		ret.m02 = (m00 * _in.m02) + (m01 * _in.m12) + (m02 * _in.m22) +
-		          (m03 * _in.m32);
-		ret.m03 = (m00 * _in.m03) + (m01 * _in.m13) + (m02 * _in.m23) +
-		          (m03 * _in.m33);
+		ret.m00 = (m00 * _in.m00) + (m01 * _in.m10) + (m02 * _in.m20) + (m03 * _in.m30);
+		ret.m01 = (m00 * _in.m01) + (m01 * _in.m11) + (m02 * _in.m21) + (m03 * _in.m31);
+		ret.m02 = (m00 * _in.m02) + (m01 * _in.m12) + (m02 * _in.m22) + (m03 * _in.m32);
+		ret.m03 = (m00 * _in.m03) + (m01 * _in.m13) + (m02 * _in.m23) + (m03 * _in.m33);
 
 
-		ret.m10 = (m10 * _in.m00) + (m11 * _in.m10) + (m12 * _in.m20) +
-		          (m13 * _in.m30);
-		ret.m11 = (m10 * _in.m01) + (m11 * _in.m11) + (m12 * _in.m21) +
-		          (m13 * _in.m31);
-		ret.m12 = (m10 * _in.m02) + (m11 * _in.m12) + (m12 * _in.m22) +
-		          (m13 * _in.m32);
-		ret.m13 = (m10 * _in.m03) + (m11 * _in.m13) + (m12 * _in.m23) +
-		          (m13 * _in.m33);
+		ret.m10 = (m10 * _in.m00) + (m11 * _in.m10) + (m12 * _in.m20) + (m13 * _in.m30);
+		ret.m11 = (m10 * _in.m01) + (m11 * _in.m11) + (m12 * _in.m21) + (m13 * _in.m31);
+		ret.m12 = (m10 * _in.m02) + (m11 * _in.m12) + (m12 * _in.m22) + (m13 * _in.m32);
+		ret.m13 = (m10 * _in.m03) + (m11 * _in.m13) + (m12 * _in.m23) + (m13 * _in.m33);
 
 
-		ret.m20 = (m20 * _in.m00) + (m21 * _in.m10) + (m22 * _in.m20) +
-		          (m23 * _in.m30);
-		ret.m21 = (m20 * _in.m01) + (m21 * _in.m11) + (m22 * _in.m21) +
-		          (m23 * _in.m31);
-		ret.m22 = (m20 * _in.m02) + (m21 * _in.m12) + (m22 * _in.m22) +
-		          (m23 * _in.m32);
-		ret.m23 = (m20 * _in.m03) + (m21 * _in.m13) + (m22 * _in.m23) +
-		          (m23 * _in.m33);
+		ret.m20 = (m20 * _in.m00) + (m21 * _in.m10) + (m22 * _in.m20) + (m23 * _in.m30);
+		ret.m21 = (m20 * _in.m01) + (m21 * _in.m11) + (m22 * _in.m21) + (m23 * _in.m31);
+		ret.m22 = (m20 * _in.m02) + (m21 * _in.m12) + (m22 * _in.m22) + (m23 * _in.m32);
+		ret.m23 = (m20 * _in.m03) + (m21 * _in.m13) + (m22 * _in.m23) + (m23 * _in.m33);
 
-		ret.m30 = (m30 * _in.m00) + (m31 * _in.m10) + (m32 * _in.m20) +
-		          (m33 * _in.m30);
-		ret.m31 = (m30 * _in.m01) + (m31 * _in.m11) + (m32 * _in.m21) +
-		          (m33 * _in.m31);
-		ret.m32 = (m30 * _in.m02) + (m31 * _in.m12) + (m32 * _in.m22) +
-		          (m33 * _in.m32);
-		ret.m33 = (m30 * _in.m03) + (m31 * _in.m13) + (m32 * _in.m23) +
-		          (m33 * _in.m33);
+		ret.m30 = (m30 * _in.m00) + (m31 * _in.m10) + (m32 * _in.m20) + (m33 * _in.m30);
+		ret.m31 = (m30 * _in.m01) + (m31 * _in.m11) + (m32 * _in.m21) + (m33 * _in.m31);
+		ret.m32 = (m30 * _in.m02) + (m31 * _in.m12) + (m32 * _in.m22) + (m33 * _in.m32);
+		ret.m33 = (m30 * _in.m03) + (m31 * _in.m13) + (m32 * _in.m23) + (m33 * _in.m33);
 
 		return ret;
 	}
 
 	inline Vector3
-	MultiplyPoint(Vector3 point)
+	MultiplyPoint(Vector3 const &point) const
 	{
 		Vector3 res;
 		float w;
@@ -589,7 +560,7 @@ public:
 	}
 
 	inline Vector3
-	MultiplyVector(Vector3 vector)
+	MultiplyVector(Vector3 vector) const
 	{
 		Vector3 res;
 		res.x = m00 * vector.x + m01 * vector.y + m02 * vector.z;
@@ -599,7 +570,7 @@ public:
 	}
 
 	inline Vector3
-	MultiplyPoint3x4(Vector3 point)
+	MultiplyPoint3x4(Vector3 point) const
 	{
 		Vector3 res;
 		res.x = m00 * point.x + m01 * point.y + m02 * point.z + m03;
@@ -609,7 +580,7 @@ public:
 	}
 
 	inline Matrix4x4
-	Transpose()
+	Transpose() const
 	{
 		Matrix4x4 r;
 		r.m00 = m00;
@@ -632,7 +603,7 @@ public:
 	}
 
 	inline Matrix4x4
-	Inverse()
+	Inverse() const
 	{
 		float A2323 = m22 * m33 - m23 * m32;
 		float A1323 = m21 * m33 - m23 * m31;
@@ -653,29 +624,20 @@ public:
 		float A0113 = m10 * m31 - m11 * m30;
 		float A0112 = m10 * m21 - m11 * m20;
 
-		float det = m00 * (m11 * A2323 - m12 * A1323 + m13 * A1223) -
-		            m01 * (m10 * A2323 - m12 * A0323 + m13 * A0223) +
-		            m02 * (m10 * A1323 - m11 * A0323 + m13 * A0123) -
-		            m03 * (m10 * A1223 - m11 * A0223 + m12 * A0123);
+		float det =
+		    m00 * (m11 * A2323 - m12 * A1323 + m13 * A1223) - m01 * (m10 * A2323 - m12 * A0323 + m13 * A0223) +
+		    m02 * (m10 * A1323 - m11 * A0323 + m13 * A0123) - m03 * (m10 * A1223 - m11 * A0223 + m12 * A0123);
 		det = 1 / det;
 
 		return Matrix4x4(
-		    det * (m11 * A2323 - m12 * A1323 + m13 * A1223),
-		    det * -(m01 * A2323 - m02 * A1323 + m03 * A1223),
-		    det * (m01 * A2313 - m02 * A1313 + m03 * A1213),
-		    det * -(m01 * A2312 - m02 * A1312 + m03 * A1212),
-		    det * -(m10 * A2323 - m12 * A0323 + m13 * A0223),
-		    det * (m00 * A2323 - m02 * A0323 + m03 * A0223),
-		    det * -(m00 * A2313 - m02 * A0313 + m03 * A0213),
-		    det * (m00 * A2312 - m02 * A0312 + m03 * A0212),
-		    det * (m10 * A1323 - m11 * A0323 + m13 * A0123),
-		    det * -(m00 * A1323 - m01 * A0323 + m03 * A0123),
-		    det * (m00 * A1313 - m01 * A0313 + m03 * A0113),
-		    det * -(m00 * A1312 - m01 * A0312 + m03 * A0112),
-		    det * -(m10 * A1223 - m11 * A0223 + m12 * A0123),
-		    det * (m00 * A1223 - m01 * A0223 + m02 * A0123),
-		    det * -(m00 * A1213 - m01 * A0213 + m02 * A0113),
-		    det * (m00 * A1212 - m01 * A0212 + m02 * A0112));
+		    det * (m11 * A2323 - m12 * A1323 + m13 * A1223), det * -(m01 * A2323 - m02 * A1323 + m03 * A1223),
+		    det * (m01 * A2313 - m02 * A1313 + m03 * A1213), det * -(m01 * A2312 - m02 * A1312 + m03 * A1212),
+		    det * -(m10 * A2323 - m12 * A0323 + m13 * A0223), det * (m00 * A2323 - m02 * A0323 + m03 * A0223),
+		    det * -(m00 * A2313 - m02 * A0313 + m03 * A0213), det * (m00 * A2312 - m02 * A0312 + m03 * A0212),
+		    det * (m10 * A1323 - m11 * A0323 + m13 * A0123), det * -(m00 * A1323 - m01 * A0323 + m03 * A0123),
+		    det * (m00 * A1313 - m01 * A0313 + m03 * A0113), det * -(m00 * A1312 - m01 * A0312 + m03 * A0112),
+		    det * -(m10 * A1223 - m11 * A0223 + m12 * A0123), det * (m00 * A1223 - m01 * A0223 + m02 * A0123),
+		    det * -(m00 * A1213 - m01 * A0213 + m02 * A0113), det * (m00 * A1212 - m01 * A0212 + m02 * A0112));
 	}
 
 	float m00;
@@ -722,6 +684,10 @@ public:
 	constexpr Vector4 &
 	operator=(const Vector4 &lhr)
 	{
+		if (this == &lhr) {
+			// avoid self-assign
+			return *this;
+		}
 		this->x = lhr.x;
 		this->y = lhr.y;
 		this->z = lhr.z;
@@ -730,7 +696,7 @@ public:
 	}
 
 	inline Matrix4x4
-	ComposeProjection()
+	ComposeProjection() const
 	{
 		const float zNear = 0.07f;
 		const float zFar = 1000.f;
@@ -798,6 +764,18 @@ public:
 	Vector3 m_Direction;
 };
 
+static inline float
+SIGN(float x)
+{
+	return (x >= 0.0f) ? +1.0f : -1.0f;
+}
+
+static inline float
+NORM(float a, float b, float c, float d)
+{
+	return sqrt(a * a + b * b + c * c + d * d);
+}
+
 class Quaternion
 {
 public:
@@ -817,23 +795,10 @@ public:
 		w = _w;
 	};
 
-	inline Quaternion(const Quaternion &_in)
-	{
-		x = _in.x;
-		y = _in.y;
-		z = _in.z;
-		w = _in.w;
-	};
+	inline Quaternion(const Quaternion &_in) = default;
 
-	constexpr Quaternion &
-	operator=(const Quaternion &lhr)
-	{
-		this->x = lhr.x;
-		this->y = lhr.y;
-		this->z = lhr.z;
-		this->w = lhr.w;
-		return *this;
-	}
+	Quaternion &
+	operator=(const Quaternion &lhr) = default;
 
 	inline static Quaternion
 	Identity()
@@ -842,43 +807,43 @@ public:
 	}
 
 	inline Quaternion
-	conjugate()
+	conjugate() const
 	{
 		return Quaternion(-x, -y, -z, w);
 	}
 
 	inline float
-	norm()
+	norm() const
 	{
 		return sqrt((x * x) + (y * y) + (z * z) + (w * w));
 	}
 
 	inline Quaternion
-	scale(float s)
+	scale(float s) const
 	{
 		return Quaternion(w * s, x * s, y * s, z * s);
 	}
 
 	inline Quaternion
-	Inverse()
+	Inverse() const
 	{
 		return conjugate() / norm();
 	}
 
 	inline Vector3
-	Right()
+	Right() const
 	{
 		return *this * Vector3::Right();
 	}
 
 	inline Vector3
-	Up()
+	Up() const
 	{
 		return *this * Vector3::Up();
 	}
 
 	inline Vector3
-	Forward()
+	Forward() const
 	{
 		return *this * Vector3::Forward();
 	}
@@ -918,14 +883,11 @@ public:
 
 		euler.y = asinf(2.0f * (in.w * in.y - in.x * in.z));
 		if (PI_OVER_2 - fabs(euler.y) > EPSILON) {
-			euler.z = atan2f(2.0f * (in.x * in.y + in.w * in.z),
-			                 sqx - sqy - sqz + sqw);
-			euler.x = atan2f(2.0f * (in.w * in.x + in.y * in.z),
-			                 sqw - sqx - sqy + sqz);
+			euler.z = atan2f(2.0f * (in.x * in.y + in.w * in.z), sqx - sqy - sqz + sqw);
+			euler.x = atan2f(2.0f * (in.w * in.x + in.y * in.z), sqw - sqx - sqy + sqz);
 		} else {
 			// compute heading from local 'down' vector
-			euler.z = atan2f(2.f * in.y * in.z - 2.f * in.x * in.w,
-			                 2.f * in.x * in.z + 2.f * in.y * in.w);
+			euler.z = atan2f(2.f * in.y * in.z - 2.f * in.x * in.w, 2.f * in.x * in.z + 2.f * in.y * in.w);
 			euler.x = 0.0f;
 
 			// If facing down, reverse yaw
@@ -936,7 +898,8 @@ public:
 		return euler;
 	}
 
-	inline Vector3 operator*(Vector3 vec)
+	inline Vector3 // Until clang-format-11 is on the CI.
+	operator*(Vector3 const &vec) const
 	{
 		float num = x * 2.f;
 		float num2 = y * 2.f;
@@ -951,13 +914,9 @@ public:
 		float num11 = w * num2;
 		float num12 = w * num3;
 		Vector3 result;
-		result.x = (1.f - (num5 + num6)) * vec.x +
-		           (num7 - num12) * vec.y + (num8 + num11) * vec.z;
-		result.y = (num7 + num12) * vec.x +
-		           (1.f - (num4 + num6)) * vec.y +
-		           (num9 - num10) * vec.z;
-		result.z = (num8 - num11) * vec.x + (num9 + num10) * vec.y +
-		           (1.f - (num4 + num5)) * vec.z;
+		result.x = (1.f - (num5 + num6)) * vec.x + (num7 - num12) * vec.y + (num8 + num11) * vec.z;
+		result.y = (num7 + num12) * vec.x + (1.f - (num4 + num6)) * vec.y + (num9 - num10) * vec.z;
+		result.z = (num8 - num11) * vec.x + (num9 + num10) * vec.y + (1.f - (num4 + num5)) * vec.z;
 		return result;
 	}
 
@@ -982,42 +941,35 @@ public:
 
 
 	Matrix4x4
-	ToMatrix4x4()
+	ToMatrix4x4() const
 	{
 		float qw = w;
 		float qx = x;
 		float qy = y;
 		float qz = z;
 
-		const float n =
-		    1.0f / sqrt(qx * qx + qy * qy + qz * qz + qw * qw);
+		const float n = 1.0f / sqrt(qx * qx + qy * qy + qz * qz + qw * qw);
 		qx *= n;
 		qy *= n;
 		qz *= n;
 		qw *= n;
 
-		return Matrix4x4(1.0f - 2.0f * qy * qy - 2.0f * qz * qz,
-		                 2.0f * qx * qy - 2.0f * qz * qw,
-		                 2.0f * qx * qz + 2.0f * qy * qw, 0.0f,
-		                 2.0f * qx * qy + 2.0f * qz * qw,
-		                 1.0f - 2.0f * qx * qx - 2.0f * qz * qz,
-		                 2.0f * qy * qz - 2.0f * qx * qw, 0.0f,
-		                 2.0f * qx * qz - 2.0f * qy * qw,
-		                 2.0f * qy * qz + 2.0f * qx * qw,
-		                 1.0f - 2.0f * qx * qx - 2.0f * qy * qy, 0.0f,
-		                 0.0f, 0.0f, 0.0f, 1.0f);
+		return Matrix4x4(1.0f - 2.0f * qy * qy - 2.0f * qz * qz, 2.0f * qx * qy - 2.0f * qz * qw,
+		                 2.0f * qx * qz + 2.0f * qy * qw, 0.0f, 2.0f * qx * qy + 2.0f * qz * qw,
+		                 1.0f - 2.0f * qx * qx - 2.0f * qz * qz, 2.0f * qy * qz - 2.0f * qx * qw, 0.0f,
+		                 2.0f * qx * qz - 2.0f * qy * qw, 2.0f * qy * qz + 2.0f * qx * qw,
+		                 1.0f - 2.0f * qx * qx - 2.0f * qy * qy, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f);
 	}
 
-	inline Quaternion operator*(const Quaternion &q)
+	inline Quaternion // Until clang-format-11 is on the CI.
+	operator*(const Quaternion &q) const
 	{
-		return Quaternion(y * q.z - z * q.y + x * q.w + w * q.x,
-		                  z * q.x - x * q.z + y * q.w + w * q.y,
-		                  x * q.y - y * q.x + z * q.w + w * q.z,
-		                  w * q.w - x * q.x - y * q.y - z * q.z);
+		return Quaternion(y * q.z - z * q.y + x * q.w + w * q.x, z * q.x - x * q.z + y * q.w + w * q.y,
+		                  x * q.y - y * q.x + z * q.w + w * q.z, w * q.w - x * q.x - y * q.y - z * q.z);
 	}
 
 	Quaternion
-	operator/(const float div)
+	operator/(const float div) const
 	{
 		return Quaternion(x / div, y / div, z / div, w / div);
 	}
@@ -1043,8 +995,7 @@ public:
 		float dot = Vector3::Dot(Vector3::Forward(), forwardVector);
 
 		if (fabs(dot - (-1.0f)) < 0.000001f) {
-			return Quaternion(Vector3::Up().x, Vector3::Up().y,
-			                  Vector3::Up().z, 3.1415926535897932f);
+			return Quaternion(Vector3::Up().x, Vector3::Up().y, Vector3::Up().z, 3.1415926535897932f);
 		}
 		if (fabs(dot - (1.0f)) < 0.000001f) {
 			return Quaternion();
@@ -1113,19 +1064,6 @@ public:
 		quaternion.z = 0.5f * num5;
 		quaternion.w = (m01 - m10) * num2;
 		return quaternion;
-	}
-
-
-	inline float
-	SIGN(float x)
-	{
-		return (x >= 0.0f) ? +1.0f : -1.0f;
-	}
-
-	inline float
-	NORM(float a, float b, float c, float d)
-	{
-		return sqrt(a * a + b * b + c * c + d * d);
 	}
 
 	inline static Quaternion
@@ -1219,7 +1157,7 @@ public:
 	//		z *= +1.0f;
 	//	}
 	//	else {
-	//		//printf("coding error\n");
+	//		//U_LOG_E("coding error");
 	//	}
 	//	float r = NORM(w, x, w, z);
 	//	w /= r;
@@ -1250,17 +1188,17 @@ public:
 	Vector3 position;
 	Quaternion rotation;
 
-	Pose(Vector3 pos)
+	explicit Pose(Vector3 const &pos)
 	{
 		position = pos;
 		rotation = Quaternion::Identity();
 	}
-	Pose(Quaternion rot)
+	explicit Pose(Quaternion const &rot)
 	{
 		position = Vector3::Zero();
 		rotation = rot;
 	}
-	Pose(Vector3 pos, Quaternion rot)
+	Pose(Vector3 const &pos, Quaternion const &rot)
 	{
 		position = pos;
 		rotation = rot;
@@ -1273,25 +1211,26 @@ public:
 	}
 
 	inline Pose
-	Inverse()
+	Inverse() const
 	{
 		Quaternion invQ = rotation.Inverse();
 		return Pose(invQ * -position, invQ);
 	}
 
 	inline Matrix4x4
-	Matrix()
+	Matrix() const
 	{
 		return Matrix4x4::Translate(position) * rotation.ToMatrix4x4();
 	}
 
-	inline Pose operator*(Pose rhs)
+	inline Pose // Until clang-format-11 is on the CI.
+	operator*(Pose const &rhs) const
 	{
-		return Pose(position + (rotation * rhs.position),
-		            rotation * rhs.rotation);
+		return Pose(position + (rotation * rhs.position), rotation * rhs.rotation);
 	}
 
-	inline Pose operator*(Vector3 rhs)
+	inline Pose // Until clang-format-11 is on the CI.
+	operator*(Vector3 const &rhs) const
 	{
 		return Pose(position + rotation * rhs, rotation);
 	}
@@ -1299,7 +1238,6 @@ public:
 	inline static Pose
 	FromMatrix(Matrix4x4 m)
 	{
-		return Pose(Vector3(m.m03, m.m13, m.m23),
-		            Quaternion::FromMatrix(m));
+		return Pose(Vector3(m.m03, m.m13, m.m23), Quaternion::FromMatrix(m));
 	}
 };

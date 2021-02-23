@@ -15,22 +15,30 @@ compositor_srcs = [
 	'client/comp_vk_glue.c',
 	'main/comp_compositor.c',
 	'main/comp_compositor.h',
-	'main/comp_distortion.c',
-	'main/comp_distortion.h',
 	'main/comp_documentation.h',
 	'main/comp_renderer.c',
 	'main/comp_renderer.h',
 	'main/comp_settings.c',
 	'main/comp_settings.h',
+	'main/comp_shaders.c',
 	'main/comp_swapchain.c',
-	'main/comp_vk_swapchain.c',
-	'main/comp_vk_swapchain.h',
+	'main/comp_target.h',
+	'main/comp_target_swapchain.c',
+	'main/comp_target_swapchain.h',
 	'main/comp_window.h',
 	'main/comp_layer_renderer.c',
 	'main/comp_layer.c',
+	'render/comp_buffer.c',
+	'render/comp_render.h',
+	'render/comp_rendering.c',
+	'render/comp_resources.c',
 ]
 
 compile_args = []
+
+if build_vk_khr_display
+	compositor_srcs += ['main/comp_window_vk_display.c']
+endif
 
 if build_xcb
 	compositor_srcs += ['main/comp_window_xcb.c']
@@ -44,15 +52,34 @@ if build_xcb_xrandr_direct
 	compositor_deps += [xcb_randr, x11_xcb]
 endif
 
-if build_opengl
+if build_opengl or build_opengles
 	compositor_srcs += [
 		'client/comp_gl_client.c',
 		'client/comp_gl_client.h',
+		'client/comp_gl_memobj_swapchain.c',
+		'client/comp_gl_memobj_swapchain.h',
+	]
+endif
+
+if build_opengl
+	compositor_srcs += [
 		'client/comp_gl_glue.c',
-		'client/comp_gles_glue.c',
 	]
 	compositor_deps += [opengl]
 	compositor_includes += [glad_include]
+endif
+if build_opengles
+	compositor_srcs += [
+		'client/comp_gles_glue.c',
+	]
+	compositor_deps += [opengles]
+	compositor_includes += [glad_include]
+endif
+if build_egl
+	compositor_srcs += [
+		'client/comp_gl_eglimage_swapchain.c',
+		'client/comp_gl_eglimage_swapchain.h',
+	]
 endif
 
 if build_opengl and build_xlib

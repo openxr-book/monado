@@ -63,6 +63,29 @@ if build_xcb_xrandr_direct
 	openxr_deps += [xcb_randr]
 endif
 
+libs = [
+	lib_aux_vk,
+	lib_aux_os,
+	lib_aux_ogl,
+	lib_aux_util,
+	lib_aux_math,
+	lib_comp,
+	lib_st_oxr
+] + hack_libs
+
+if get_option('service')
+	libs += lib_ipc_client
+else
+	libs += [
+		lib_target_instance,
+		driver_libs
+	]
+endif
+
+if 'remote' in drivers
+	libs += lib_drv_remote
+endif
+
 mapfile = 'libopenxr.version'
 version_script_flag = '-Wl,--version-script,@0@/@1@'.format(meson.current_source_dir(), mapfile)
 openxr = library(
@@ -71,16 +94,7 @@ openxr = library(
 		'target.c',
 		hack_src,
 	),
-	link_whole: [
-		lib_aux_vk,
-		lib_aux_os,
-		lib_aux_ogl,
-		lib_aux_util,
-		lib_aux_math,
-		lib_comp,
-		lib_ipc_client,
-		lib_st_oxr,
-	] + hack_libs,
+	link_whole: libs,
 	include_directories: [
 		openxr_include,
 		st_include, # Sigh debian meson requires this.
@@ -104,7 +118,7 @@ sopath = join_paths(get_option('prefix'),
 manifest_conf.set('runtime_path', sopath)
 
 manifest_path = join_paths(
-	get_option('prefix'), get_option('datadir'), xr_api_major.to_string())
+	get_option('prefix'), get_option('datadir'), 'openxr', xr_api_major.to_string())
 
 manifest_json = configure_file(
 	input: manifest_in,
@@ -113,5 +127,7 @@ manifest_json = configure_file(
 	install_dir: manifest_path,
 )
 
-meson.add_install_script('install_active_runtime.sh', get_option('sysconfdir'),
-	join_paths(manifest_path, runtime_target + '.json'), xr_api_major.to_string())
+if get_option('install-active-runtime')
+	meson.add_install_script('install_active_runtime.sh', get_option('sysconfdir'),
+		join_paths(manifest_path, runtime_target + '.json'), xr_api_major.to_string())
+endif
