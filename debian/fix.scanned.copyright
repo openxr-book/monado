@@ -1,2 +1,5 @@
 # Remove mistaken prefix.
 ! Files:~/.*/ Copyright=~"s/Text: //"
+
+! Files:~/.*imstb_.*/ License short_name=~"s/and\/or/or/"
+
