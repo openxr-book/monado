@@ -1,0 +1,4 @@
+usr/bin/monado-service
+usr/bin/monado-ctl
+usr/lib/systemd/user/monado.service
+usr/lib/systemd/user/monado.socket

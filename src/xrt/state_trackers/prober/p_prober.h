@@ -15,14 +15,19 @@
 #include "xrt/xrt_prober.h"
 #include "xrt/xrt_settings.h"
 
+#include "util/u_logging.h"
+
 #ifdef XRT_HAVE_LIBUSB
-#include <libusb-1.0/libusb.h>
+#include <libusb.h>
 #endif
 
 #ifdef XRT_HAVE_LIBUVC
 #include <libuvc/libuvc.h>
 #endif
 
+#ifndef __KERNEL__
+#include <sys/types.h>
+#endif
 
 /*
  *
@@ -30,33 +35,23 @@
  *
  */
 
-#define P_SPEW(p, ...)                                                         \
-	do {                                                                   \
-		if (p->print_spew) {                                           \
-			fprintf(stderr, "%s - ", __func__);                    \
-			fprintf(stderr, __VA_ARGS__);                          \
-			fprintf(stderr, "\n");                                 \
-		}                                                              \
-	} while (false)
-
-#define P_DEBUG(p, ...)                                                        \
-	do {                                                                   \
-		if (p->print_debug) {                                          \
-			fprintf(stderr, "%s - ", __func__);                    \
-			fprintf(stderr, __VA_ARGS__);                          \
-			fprintf(stderr, "\n");                                 \
-		}                                                              \
-	} while (false)
-
-#define P_ERROR(p, ...)                                                        \
-	do {                                                                   \
-		fprintf(stderr, "%s - ", __func__);                            \
-		fprintf(stderr, __VA_ARGS__);                                  \
-		fprintf(stderr, "\n");                                         \
-	} while (false)
+#define P_TRACE(d, ...) U_LOG_IFL_T(d->ll, __VA_ARGS__)
+#define P_DEBUG(d, ...) U_LOG_IFL_D(d->ll, __VA_ARGS__)
+#define P_INFO(d, ...) U_LOG_IFL_I(d->ll, __VA_ARGS__)
+#define P_WARN(d, ...) U_LOG_IFL_W(d->ll, __VA_ARGS__)
+#define P_ERROR(d, ...) U_LOG_IFL_E(d->ll, __VA_ARGS__)
 
 #define MAX_AUTO_PROBERS 8
 
+/*!
+ * What config is currently active in the config file.
+ */
+enum p_active_config
+{
+	P_ACTIVE_CONFIG_NONE = 0,
+	P_ACTIVE_CONFIG_TRACKING = 1,
+	P_ACTIVE_CONFIG_REMOTE = 2,
+};
 
 #ifdef XRT_OS_LINUX
 /*!
@@ -93,12 +88,10 @@ struct prober_device
 		uint16_t bus;
 		uint16_t addr;
 
-#ifdef XRT_OS_LINUX
 		const char *product;
 		const char *manufacturer;
 		const char *serial;
 		const char *path;
-#endif
 
 		uint8_t ports[8];
 		uint32_t num_ports;
@@ -120,10 +113,12 @@ struct prober_device
 	} uvc;
 #endif
 
-#ifdef XRT_OS_LINUX
+#ifdef XRT_HAVE_V4L2
 	size_t num_v4ls;
 	struct prober_v4l *v4ls;
+#endif
 
+#ifdef XRT_OS_LINUX
 	size_t num_hidraws;
 	struct prober_hidraw *hidraws;
 #endif
@@ -172,8 +167,7 @@ struct prober
 	size_t num_entries;
 	struct xrt_prober_entry **entries;
 
-	bool print_debug;
-	bool print_spew;
+	enum u_logging_level ll;
 };
 
 
@@ -192,6 +186,15 @@ void
 p_json_open_or_create_main_file(struct prober *p);
 
 /*!
+ * Read from the JSON loaded json config file and returns the active config,
+ * can be overridden by `P_OVERRIDE_ACTIVE_CONFIG` envirmental variable.
+ *
+ * @public @memberof prober
+ */
+void
+p_json_get_active(struct prober *p, enum p_active_config *out_active);
+
+/*!
  * Extract tracking settings from the JSON.
  *
  * @public @memberof prober
@@ -199,6 +202,14 @@ p_json_open_or_create_main_file(struct prober *p);
  */
 bool
 p_json_get_tracking_settings(struct prober *p, struct xrt_settings_tracking *s);
+
+/*!
+ * Extract remote settings from the JSON.
+ *
+ * @public @memberof prober
+ */
+bool
+p_json_get_remote_port(struct prober *p, int *out_port);
 
 /*!
  * Dump the given device to stdout.
@@ -227,11 +238,8 @@ p_dev_get_usb_dev(struct prober *p,
  * @public @memberof prober
  */
 int
-p_dev_get_bluetooth_dev(struct prober *p,
-                        uint64_t id,
-                        uint16_t vendor_id,
-                        uint16_t product_id,
-                        struct prober_device **out_pdev);
+p_dev_get_bluetooth_dev(
+    struct prober *p, uint64_t id, uint16_t vendor_id, uint16_t product_id, struct prober_device **out_pdev);
 
 /*!
  * @name Tracking systems

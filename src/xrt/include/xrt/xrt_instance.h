@@ -20,7 +20,8 @@ extern "C" {
 
 struct xrt_prober;
 struct xrt_device;
-struct xrt_compositor_fd;
+struct xrt_compositor_native;
+struct xrt_system_compositor;
 
 
 /*!
@@ -81,32 +82,28 @@ struct xrt_instance
 	 *
 	 * @see xrt_prober::probe, xrt_prober::select
 	 */
-	int (*select)(struct xrt_instance *xinst,
-	              struct xrt_device **xdevs,
-	              size_t num_xdevs);
+	int (*select)(struct xrt_instance *xinst, struct xrt_device **xdevs, size_t num_xdevs);
 
 	/*!
-	 * Creates a @ref xrt_compositor_fd.
+	 * Creates a @ref xrt_system_compositor.
 	 *
 	 * Should only be called once.
 	 *
 	 * @note Code consuming this interface should use
-	 * xrt_instance_create_fd_compositor()
+	 * xrt_instance_create_system_compositor()
 	 *
 	 * @param xinst Pointer to self
 	 * @param[in] xdev Device to use for creating the compositor
-	 * @param[in] flip_y Whether to flip the direction of the y axis
-	 * @param[out] out_xcfd Pointer to xrt_compositor_fd pointer, will be
-	 * populated.
+	 * @param[out] out_xsc Pointer to create_system_compositor pointer, will
+	 * be populated.
 	 *
 	 * @return 0 on success, <0 on error.
 	 *
-	 * @see xrt_gfx_provider_create_fd
+	 * @see xrt_gfx_provider_create_native
 	 */
-	int (*create_fd_compositor)(struct xrt_instance *xinst,
-	                            struct xrt_device *xdev,
-	                            bool flip_y,
-	                            struct xrt_compositor_fd **out_xcfd);
+	int (*create_system_compositor)(struct xrt_instance *xinst,
+	                                struct xrt_device *xdev,
+	                                struct xrt_system_compositor **out_xsc);
 
 	/*!
 	 * Get the instance @ref xrt_prober, if any.
@@ -129,8 +126,7 @@ struct xrt_instance
 	 * @return 0 on success, <0 on error. (Note that success may mean
 	 * returning a null pointer!)
 	 */
-	int (*get_prober)(struct xrt_instance *xinst,
-	                  struct xrt_prober **out_xp);
+	int (*get_prober)(struct xrt_instance *xinst, struct xrt_prober **out_xp);
 
 	/*!
 	 * Destroy the instance and its owned objects, including the prober (if
@@ -155,27 +151,24 @@ struct xrt_instance
  * @public @memberof xrt_instance
  */
 static inline int
-xrt_instance_select(struct xrt_instance *xinst,
-                    struct xrt_device **xdevs,
-                    size_t num_xdevs)
+xrt_instance_select(struct xrt_instance *xinst, struct xrt_device **xdevs, size_t num_xdevs)
 {
 	return xinst->select(xinst, xdevs, num_xdevs);
 }
 
 /*!
- * @copydoc xrt_instance::create_fd_compositor
+ * @copydoc xrt_instance::create_system_compositor
  *
  * Helper for calling through the function pointer.
  *
  * @public @memberof xrt_instance
  */
 static inline int
-xrt_instance_create_fd_compositor(struct xrt_instance *xinst,
-                                  struct xrt_device *xdev,
-                                  bool flip_y,
-                                  struct xrt_compositor_fd **out_xcfd)
+xrt_instance_create_system_compositor(struct xrt_instance *xinst,
+                                      struct xrt_device *xdev,
+                                      struct xrt_system_compositor **out_xsc)
 {
-	return xinst->create_fd_compositor(xinst, xdev, flip_y, out_xcfd);
+	return xinst->create_system_compositor(xinst, xdev, out_xsc);
 }
 
 /*!
@@ -236,8 +229,7 @@ xrt_instance_destroy(struct xrt_instance **xinst_ptr)
  * @relates xrt_instance
  */
 int
-xrt_instance_create(struct xrt_instance_info *ii,
-                    struct xrt_instance **out_xinst
+xrt_instance_create(struct xrt_instance_info *ii, struct xrt_instance **out_xinst
 
 );
 

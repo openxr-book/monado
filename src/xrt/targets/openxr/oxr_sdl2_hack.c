@@ -83,10 +83,8 @@ sdl2_window_init(struct sdl2_program *p)
 	SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
 	SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
 	SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,
-	                    SDL_GL_CONTEXT_PROFILE_CORE);
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS,
-	                    SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);
 
 	int window_flags = 0;
 	window_flags |= SDL_WINDOW_SHOWN;
@@ -99,13 +97,13 @@ sdl2_window_init(struct sdl2_program *p)
 
 	p->win = SDL_CreateWindow(title, x, y, w, h, window_flags);
 	if (p->win == NULL) {
-		fprintf(stderr, "Failed to create window!\n");
+		U_LOG_E("Failed to create window!");
 		return;
 	}
 
 	p->ctx = SDL_GL_CreateContext(p->win);
 	if (p->ctx == NULL) {
-		fprintf(stderr, "Failed to create GL context!\n");
+		U_LOG_E("Failed to create GL context!");
 		return;
 	}
 
@@ -115,7 +113,7 @@ sdl2_window_init(struct sdl2_program *p)
 	// Setup OpenGL bindings.
 	bool err = gladLoadGL((GLADloadfunc)SDL_GL_GetProcAddress) == 0;
 	if (err) {
-		fprintf(stderr, "Failed to load GL functions!\n");
+		U_LOG_E("Failed to load GL functions!");
 		return;
 	}
 
@@ -162,8 +160,7 @@ sdl2_loop(struct sdl2_program *p)
 				p->base.stopped = true;
 			}
 
-			if (event.type == SDL_WINDOWEVENT &&
-			    event.window.event == SDL_WINDOWEVENT_CLOSE &&
+			if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE &&
 			    event.window.windowID == SDL_GetWindowID(p->win)) {
 				p->base.stopped = true;
 			}
@@ -188,8 +185,7 @@ sdl2_loop(struct sdl2_program *p)
 		igRender();
 
 		// Clear the background.
-		glViewport(0, 0, (int)io->DisplaySize.x,
-		           (int)io->DisplaySize.y);
+		glViewport(0, 0, (int)io->DisplaySize.x, (int)io->DisplaySize.y);
 		glClearColor(gui.clear.r, gui.clear.g, gui.clear.b, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT);
 
@@ -224,7 +220,8 @@ sdl2_close(struct sdl2_program *p)
 	}
 
 	if (p->sdl_initialized) {
-		SDL_Quit();
+		//! @todo: Properly quit SDL without crashing SDL client apps
+		// SDL_Quit();
 		p->sdl_initialized = false;
 	}
 }
@@ -275,7 +272,7 @@ oxr_sdl2_hack_start(void *hack, struct xrt_instance *xinst)
 	xrt_instance_get_prober(xinst, &p->base.xp);
 
 	if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
-		fprintf(stderr, "Failed to init SDL2!\n");
+		U_LOG_E("Failed to init SDL2!");
 		return;
 	}
 	p->sdl_initialized = true;

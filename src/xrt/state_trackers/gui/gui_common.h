@@ -124,9 +124,7 @@ gui_prober_teardown(struct gui_program *p);
  * @ingroup gui
  */
 struct gui_ogl_texture *
-gui_ogl_sink_create(const char *name,
-                    struct xrt_frame_context *xfctx,
-                    struct xrt_frame_sink **out_sink);
+gui_ogl_sink_create(const char *name, struct xrt_frame_context *xfctx, struct xrt_frame_sink **out_sink);
 
 /*!
  * Update the texture to the latest received frame.
@@ -206,6 +204,14 @@ gui_scene_select_video_calibrate(struct gui_program *p);
  */
 void
 gui_scene_debug(struct gui_program *p);
+
+/*!
+ * Remote control debugging UI.
+ *
+ * @ingroup gui
+ */
+void
+gui_scene_remote(struct gui_program *p);
 
 /*!
  * Given the frameserver runs the calibration code on it.

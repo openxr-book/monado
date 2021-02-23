@@ -29,8 +29,6 @@
 
 // Should the experimental Daydream driver be enabled.
 DEBUG_GET_ONCE_BOOL_OPTION(daydream_enable, "DAYDREAM_ENABLE", true)
-DEBUG_GET_ONCE_BOOL_OPTION(daydream_spew, "DAYDREAM_PRINT_SPEW", false)
-DEBUG_GET_ONCE_BOOL_OPTION(daydream_debug, "DAYDREAM_PRINT_DEBUG", false)
 
 /*!
  * Daydream prober struct.
@@ -41,9 +39,6 @@ DEBUG_GET_ONCE_BOOL_OPTION(daydream_debug, "DAYDREAM_PRINT_DEBUG", false)
 struct daydream_prober
 {
 	struct xrt_auto_prober base;
-
-	bool print_spew;
-	bool print_debug;
 	bool enabled;
 };
 
@@ -72,10 +67,7 @@ daydream_prober_destroy(struct xrt_auto_prober *p)
 
 //! @public @memberof daydream_prober
 static struct xrt_device *
-daydream_prober_autoprobe(struct xrt_auto_prober *xap,
-                          cJSON *attached_data,
-                          bool no_hmds,
-                          struct xrt_prober *xp)
+daydream_prober_autoprobe(struct xrt_auto_prober *xap, cJSON *attached_data, bool no_hmds, struct xrt_prober *xp)
 {
 	struct daydream_prober *pdaydream = daydream_prober(xap);
 	if (!pdaydream->enabled) {
@@ -91,8 +83,7 @@ daydream_prober_autoprobe(struct xrt_auto_prober *xap,
 		return NULL;
 	}
 
-	struct daydream_device *dd = daydream_device_create(
-	    ble, pdaydream->print_spew, pdaydream->print_debug);
+	struct daydream_device *dd = daydream_device_create(ble);
 
 	return &dd->base;
 }
@@ -107,14 +98,11 @@ daydream_prober_autoprobe(struct xrt_auto_prober *xap,
 struct xrt_auto_prober *
 daydream_create_auto_prober()
 {
-	struct daydream_prober *pdaydream =
-	    U_TYPED_CALLOC(struct daydream_prober);
+	struct daydream_prober *pdaydream = U_TYPED_CALLOC(struct daydream_prober);
 	pdaydream->base.name = "DayDream";
 	pdaydream->base.destroy = daydream_prober_destroy;
 	pdaydream->base.lelo_dallas_autoprobe = daydream_prober_autoprobe;
 	pdaydream->enabled = debug_get_bool_option_daydream_enable();
-	pdaydream->print_spew = debug_get_bool_option_daydream_spew();
-	pdaydream->print_debug = debug_get_bool_option_daydream_debug();
 
 	return &pdaydream->base;
 }

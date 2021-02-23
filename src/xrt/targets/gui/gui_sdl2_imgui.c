@@ -49,6 +49,7 @@ gui_sdl2_imgui_loop(struct sdl2_program *p)
 	// Need to call this before any other Imgui call.
 	igCreateContext(NULL);
 
+
 	// Local state
 	ImGuiIO *io = igGetIO();
 
@@ -58,6 +59,10 @@ gui_sdl2_imgui_loop(struct sdl2_program *p)
 
 	// Setup Dear ImGui style
 	igStyleColorsDark(NULL);
+
+	// Setup the plot context.
+	ImPlotContext *plot_ctx = ImPlot_CreateContext();
+	ImPlot_SetCurrentContext(plot_ctx);
 
 	// Main loop
 	struct gui_imgui gui = {0};
@@ -79,8 +84,7 @@ gui_sdl2_imgui_loop(struct sdl2_program *p)
 				p->base.stopped = true;
 			}
 
-			if (event.type == SDL_WINDOWEVENT &&
-			    event.window.event == SDL_WINDOWEVENT_CLOSE &&
+			if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE &&
 			    event.window.windowID == SDL_GetWindowID(p->win)) {
 				p->base.stopped = true;
 			}
@@ -105,8 +109,7 @@ gui_sdl2_imgui_loop(struct sdl2_program *p)
 		igRender();
 
 		// Clear the background.
-		glViewport(0, 0, (int)io->DisplaySize.x,
-		           (int)io->DisplaySize.y);
+		glViewport(0, 0, (int)io->DisplaySize.x, (int)io->DisplaySize.y);
 		glClearColor(gui.clear.r, gui.clear.g, gui.clear.b, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT);
 
@@ -119,6 +122,7 @@ gui_sdl2_imgui_loop(struct sdl2_program *p)
 
 	// Cleanup
 	u_var_remove_root(&gui);
+	ImPlot_DestroyContext(plot_ctx);
 	igImGui_ImplOpenGL3_Shutdown();
 	igImGui_ImplSDL2_Shutdown();
 	igDestroyContext(NULL);

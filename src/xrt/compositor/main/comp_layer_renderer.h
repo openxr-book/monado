@@ -37,8 +37,13 @@ struct comp_layer_renderer
 	VkSampleCountFlagBits sample_count;
 
 	VkShaderModule shader_modules[2];
-	VkPipeline pipeline;
+	VkPipeline pipeline_premultiplied_alpha;
+	VkPipeline pipeline_unpremultiplied_alpha;
+	VkPipeline pipeline_equirect1;
+	VkPipeline pipeline_equirect2;
 	VkDescriptorSetLayout descriptor_set_layout;
+	VkDescriptorSetLayout descriptor_set_layout_equirect;
+
 	VkPipelineLayout pipeline_layout;
 	VkPipelineCache pipeline_cache;
 
@@ -48,17 +53,18 @@ struct comp_layer_renderer
 
 	struct vk_buffer vertex_buffer;
 
-	float near;
-	float far;
+	float nearZ;
+	float farZ;
 
 	struct comp_render_layer **layers;
 	uint32_t num_layers;
+
+	uint32_t transformation_ubo_binding;
+	uint32_t texture_binding;
 };
 
 struct comp_layer_renderer *
-comp_layer_renderer_create(struct vk_bundle *vk,
-                           VkExtent2D extent,
-                           VkFormat format);
+comp_layer_renderer_create(struct vk_bundle *vk, struct comp_shaders *s, VkExtent2D extent, VkFormat format);
 
 void
 comp_layer_renderer_destroy(struct comp_layer_renderer *self);
@@ -67,9 +73,7 @@ void
 comp_layer_renderer_draw(struct comp_layer_renderer *self);
 
 void
-comp_layer_renderer_set_fov(struct comp_layer_renderer *self,
-                            const struct xrt_fov *fov,
-                            uint32_t eye);
+comp_layer_renderer_set_fov(struct comp_layer_renderer *self, const struct xrt_fov *fov, uint32_t eye);
 
 void
 comp_layer_renderer_set_pose(struct comp_layer_renderer *self,
@@ -78,8 +82,7 @@ comp_layer_renderer_set_pose(struct comp_layer_renderer *self,
                              uint32_t eye);
 
 void
-comp_layer_renderer_allocate_layers(struct comp_layer_renderer *self,
-                                    uint32_t num_layers);
+comp_layer_renderer_allocate_layers(struct comp_layer_renderer *self, uint32_t num_layers);
 
 void
 comp_layer_renderer_destroy_layers(struct comp_layer_renderer *self);

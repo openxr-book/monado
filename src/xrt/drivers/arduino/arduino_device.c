@@ -26,6 +26,7 @@
 #include "util/u_debug.h"
 #include "util/u_device.h"
 #include "util/u_bitwise.h"
+#include "util/u_logging.h"
 
 #include "arduino_interface.h"
 
@@ -33,6 +34,8 @@
 #include <math.h>
 #include <assert.h>
 
+
+DEBUG_GET_ONCE_LOG_OPTION(arduino_log, "ARDUINO_LOG", U_LOGGING_WARN)
 
 /*
  *
@@ -91,8 +94,7 @@ struct arduino_device
 		bool last;
 	} gui;
 
-	bool print_spew;
-	bool print_debug;
+	enum u_logging_level ll;
 };
 
 
@@ -102,30 +104,11 @@ struct arduino_device
  *
  */
 
-#define ARDUINO_SPEW(c, ...)                                                   \
-	do {                                                                   \
-		if (c->print_spew) {                                           \
-			fprintf(stderr, "%s - ", __func__);                    \
-			fprintf(stderr, __VA_ARGS__);                          \
-			fprintf(stderr, "\n");                                 \
-		}                                                              \
-	} while (false)
-
-#define ARDUINO_DEBUG(c, ...)                                                  \
-	do {                                                                   \
-		if (c->print_debug) {                                          \
-			fprintf(stderr, "%s - ", __func__);                    \
-			fprintf(stderr, __VA_ARGS__);                          \
-			fprintf(stderr, "\n");                                 \
-		}                                                              \
-	} while (false)
-
-#define ARDUINO_ERROR(c, ...)                                                  \
-	do {                                                                   \
-		fprintf(stderr, "%s - ", __func__);                            \
-		fprintf(stderr, __VA_ARGS__);                                  \
-		fprintf(stderr, "\n");                                         \
-	} while (false)
+#define ARDUINO_TRACE(d, ...) U_LOG_XDEV_IFL_T(&d->base, d->ll, __VA_ARGS__)
+#define ARDUINO_DEBUG(d, ...) U_LOG_XDEV_IFL_D(&d->base, d->ll, __VA_ARGS__)
+#define ARDUINO_INFO(d, ...) U_LOG_XDEV_IFL_I(&d->base, d->ll, __VA_ARGS__)
+#define ARDUINO_WARN(d, ...) U_LOG_XDEV_IFL_W(&d->base, d->ll, __VA_ARGS__)
+#define ARDUINO_ERROR(d, ...) U_LOG_XDEV_IFL_E(&d->base, d->ll, __VA_ARGS__)
 
 static inline struct arduino_device *
 arduino_device(struct xrt_device *xdev)
@@ -167,8 +150,7 @@ update_fusion(struct arduino_device *ad,
               time_duration_ns delta_ns)
 {
 	struct xrt_vec3 accel, gyro;
-	m_imu_pre_filter_data(&ad->pre_filter, &sample->accel, &sample->gyro,
-	                      &accel, &gyro);
+	m_imu_pre_filter_data(&ad->pre_filter, &sample->accel, &sample->gyro, &accel, &gyro);
 
 	ad->device_time += (uint64_t)sample->delta * 1000;
 
@@ -177,32 +159,26 @@ update_fusion(struct arduino_device *ad,
 	double delta_device_ms = (double)sample->delta / 1000.0;
 	double delta_host_ms = (double)delta_ns / (1000.0 * 1000.0);
 	ARDUINO_DEBUG(ad, "%+fms %+fms", delta_host_ms, delta_device_ms);
-	ARDUINO_DEBUG(
-	    ad, "fusion sample %u (ax %d ay %d az %d) (gx %d gy %d gz %d)",
-	    sample->time, sample->accel.x, sample->accel.y, sample->accel.z,
-	    sample->gyro.x, sample->gyro.y, sample->gyro.z);
-	ARDUINO_DEBUG(ad, "\n");
+	ARDUINO_DEBUG(ad, "fusion sample %u (ax %d ay %d az %d) (gx %d gy %d gz %d)", sample->time, sample->accel.x,
+	              sample->accel.y, sample->accel.z, sample->gyro.x, sample->gyro.y, sample->gyro.z);
+	ARDUINO_DEBUG(ad, " ");
 }
 
 static void
-arduino_parse_input(struct arduino_device *ad,
-                    void *data,
-                    struct arduino_parsed_input *input)
+arduino_parse_input(struct arduino_device *ad, void *data, struct arduino_parsed_input *input)
 {
 	U_ZERO(input);
 	unsigned char *b = (unsigned char *)data;
-	ARDUINO_SPEW(
-	    ad,
-	    "raw input: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x "
-	    "%02x %02x %02x %02x %02x %02x %02x %02x %02x",
-	    b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9], b[10],
-	    b[11], b[12], b[13], b[14], b[15], b[16], b[17], b[18], b[19]);
+	ARDUINO_TRACE(ad,
+	              "raw input: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x "
+	              "%02x %02x %02x %02x %02x %02x %02x %02x %02x",
+	              b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9], b[10], b[11], b[12], b[13], b[14],
+	              b[15], b[16], b[17], b[18], b[19]);
 
 	uint32_t time = b[5] | b[4] << 8 | b[3] << 16;
 
 	input->sample.time = time;
-	input->sample.delta =
-	    calc_delta_and_handle_rollover(time, ad->last_time);
+	input->sample.delta = calc_delta_and_handle_rollover(time, ad->last_time);
 	ad->last_time = time;
 
 	input->sample.accel.x = read_i16(b, 6);
@@ -235,14 +211,13 @@ arduino_read_one_packet(struct arduino_device *ad, uint8_t *buffer, size_t size)
 			retries--;
 		}
 		if (ret == 0) {
-			fprintf(stderr, "%s\n", __func__);
+			ARDUINO_ERROR(ad, "%s", __func__);
 			// Must lock thread before check in while.
 			os_thread_helper_lock(&ad->oth);
 			continue;
 		}
 		if (ret < 0) {
-			ARDUINO_ERROR(arduino, "Failed to read device '%i'!",
-			              ret);
+			ARDUINO_ERROR(ad, "Failed to read device '%i'!", ret);
 			return false;
 		}
 		return true;
@@ -297,16 +272,13 @@ arduino_run_thread(void *ptr)
  */
 
 static void
-arduino_get_fusion_pose(struct arduino_device *ad,
-                        enum xrt_input_name name,
-                        struct xrt_space_relation *out_relation)
+arduino_get_fusion_pose(struct arduino_device *ad, enum xrt_input_name name, struct xrt_space_relation *out_relation)
 {
 	out_relation->pose.orientation = ad->fusion.rot;
 
 	//! @todo assuming that orientation is actually currently tracked.
-	out_relation->relation_flags = (enum xrt_space_relation_flags)(
-	    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
-	    XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
+	out_relation->relation_flags = (enum xrt_space_relation_flags)(XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
+	                                                               XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
 }
 
 static void
@@ -359,17 +331,37 @@ static void
 arduino_device_get_tracked_pose(struct xrt_device *xdev,
                                 enum xrt_input_name name,
                                 uint64_t at_timestamp_ns,
-                                uint64_t *out_relation_timestamp_ns,
                                 struct xrt_space_relation *out_relation)
 {
 	struct arduino_device *ad = arduino_device(xdev);
 
-	uint64_t now = os_monotonic_get_ns();
-
 	(void)at_timestamp_ns;
 	arduino_get_fusion_pose(ad, name, out_relation);
-	*out_relation_timestamp_ns = now;
 }
+
+
+/*
+ *
+ * Bindings
+ *
+ */
+
+static struct xrt_binding_input_pair simple_inputs[4] = {
+    {XRT_INPUT_SIMPLE_SELECT_CLICK, XRT_INPUT_DAYDREAM_BAR_CLICK},
+    {XRT_INPUT_SIMPLE_MENU_CLICK, XRT_INPUT_DAYDREAM_CIRCLE_CLICK},
+    {XRT_INPUT_SIMPLE_GRIP_POSE, XRT_INPUT_DAYDREAM_POSE},
+    {XRT_INPUT_SIMPLE_AIM_POSE, XRT_INPUT_DAYDREAM_POSE},
+};
+
+static struct xrt_binding_profile binding_profiles[1] = {
+    {
+        .name = XRT_DEVICE_SIMPLE_CONTROLLER,
+        .inputs = simple_inputs,
+        .num_inputs = ARRAY_SIZE(simple_inputs),
+        .outputs = NULL,
+        .num_outputs = 0,
+    },
+};
 
 
 /*
@@ -379,14 +371,10 @@ arduino_device_get_tracked_pose(struct xrt_device *xdev,
  */
 
 struct xrt_device *
-arduino_device_create(struct os_ble_device *ble,
-                      bool print_spew,
-                      bool print_debug)
+arduino_device_create(struct os_ble_device *ble)
 {
-	enum u_device_alloc_flags flags =
-	    (enum u_device_alloc_flags)(U_DEVICE_ALLOC_TRACKING_NONE);
-	struct arduino_device *ad =
-	    U_DEVICE_ALLOCATE(struct arduino_device, flags, 8, 0);
+	enum u_device_alloc_flags flags = (enum u_device_alloc_flags)(U_DEVICE_ALLOC_TRACKING_NONE);
+	struct arduino_device *ad = U_DEVICE_ALLOCATE(struct arduino_device, flags, 8, 0);
 
 	ad->base.name = XRT_DEVICE_DAYDREAM;
 	ad->base.destroy = arduino_device_destroy;
@@ -399,10 +387,11 @@ arduino_device_create(struct os_ble_device *ble,
 	ad->base.inputs[4].name = XRT_INPUT_DAYDREAM_VOLDN_CLICK;
 	ad->base.inputs[5].name = XRT_INPUT_DAYDREAM_VOLUP_CLICK;
 	ad->base.inputs[6].name = XRT_INPUT_DAYDREAM_TOUCHPAD;
+	ad->base.binding_profiles = binding_profiles;
+	ad->base.num_binding_profiles = ARRAY_SIZE(binding_profiles);
 
 	ad->ble = ble;
-	ad->print_spew = print_spew;
-	ad->print_debug = print_debug;
+	ad->ll = debug_get_log_option_arduino_log();
 
 	m_imu_3dof_init(&ad->fusion, M_IMU_3DOF_USE_GRAVITY_DUR_300MS);
 
@@ -410,8 +399,7 @@ arduino_device_create(struct os_ble_device *ble,
 	float accel_ticks_to_float = (4.0 * MATH_GRAVITY_M_S2) / INT16_MAX;
 	float gyro_ticks_to_float = (2000.0 * DEG_TO_RAD) / INT16_MAX;
 
-	m_imu_pre_filter_init(&ad->pre_filter, accel_ticks_to_float,
-	                      gyro_ticks_to_float);
+	m_imu_pre_filter_init(&ad->pre_filter, accel_ticks_to_float, gyro_ticks_to_float);
 	m_imu_pre_filter_set_switch_x_and_y(&ad->pre_filter);
 
 #if 0
@@ -422,7 +410,7 @@ arduino_device_create(struct os_ble_device *ble,
 	// Everything done, finally start the thread.
 	int ret = os_thread_helper_start(&ad->oth, arduino_run_thread, ad);
 	if (ret != 0) {
-		ARDUINO_ERROR(dd, "Failed to start thread!");
+		ARDUINO_ERROR(ad, "Failed to start thread!");
 		arduino_device_destroy(&ad->base);
 		return NULL;
 	}
@@ -431,6 +419,10 @@ arduino_device_create(struct os_ble_device *ble,
 	u_var_add_gui_header(ad, &ad->gui.last, "Last");
 	u_var_add_ro_vec3_f32(ad, &ad->fusion.last.accel, "last.accel");
 	u_var_add_ro_vec3_f32(ad, &ad->fusion.last.gyro, "last.gyro");
+
+	ad->base.orientation_tracking_supported = true;
+	ad->base.position_tracking_supported = false;
+	ad->base.device_type = XRT_DEVICE_TYPE_ANY_HAND_CONTROLLER;
 
 	ARDUINO_DEBUG(ad, "Created device!");
 

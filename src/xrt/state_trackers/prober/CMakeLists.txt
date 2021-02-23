@@ -60,7 +60,7 @@ endif()
 
 if(XRT_HAVE_LIBUSB)
 	target_include_directories(st_prober
-		PRIVATE
+		PUBLIC
 		${LIBUSB1_INCLUDE_DIRS}
 		)
 	target_link_libraries(st_prober PRIVATE
@@ -82,5 +82,11 @@ if(XRT_HAVE_V4L2)
 	# Uses v4l2_fs_create
 	target_link_libraries(st_prober PRIVATE
 		drv_v4l2
+		)
+endif()
+
+if(XRT_BUILD_DRIVER_REMOTE)
+	target_link_libraries(st_prober PRIVATE
+		drv_remote
 		)
 endif()

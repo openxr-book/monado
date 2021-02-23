@@ -13,6 +13,8 @@
 
 #include "xrt/xrt_defines.h"
 
+#include "util/u_hand_tracking.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -24,6 +26,7 @@ struct xrt_tracking;
 struct xrt_tracking_factory;
 struct xrt_tracked_psmv;
 struct xrt_tracked_psvr;
+struct xrt_tracked_hand;
 
 //! @todo This is from u_time, duplicated to avoid layer violation.
 typedef int64_t timepoint_ns;
@@ -45,6 +48,15 @@ enum xrt_tracking_type
 
 	// The device(s) are tracked by RGB camera(s).
 	XRT_TRACKING_TYPE_RGB,
+
+	// The device(s) are tracked by Ligthhouse
+	XRT_TRACKING_TYPE_LIGHTHOUSE,
+
+	// The device(s) are tracked by Hydra
+	XRT_TRACKING_TYPE_HYDRA,
+
+	// The device(s) are tracked by external SLAM
+	XRT_TRACKING_TYPE_EXTERNAL_SLAM,
 };
 
 /*!
@@ -84,11 +96,18 @@ struct xrt_tracking_factory
 	                           struct xrt_tracked_psmv **out_psmv);
 
 	/*!
-	 * Create a tracked PSVR ball.
+	 * Create a tracked PSVR HMD.
 	 */
 	int (*create_tracked_psvr)(struct xrt_tracking_factory *,
 	                           struct xrt_device *xdev,
 	                           struct xrt_tracked_psvr **out_psvr);
+
+	/*!
+	 * Create a tracked hand.
+	 */
+	int (*create_tracked_hand)(struct xrt_tracking_factory *,
+	                           struct xrt_device *xdev,
+	                           struct xrt_tracked_hand **out_hand);
 };
 
 /*!
@@ -121,9 +140,7 @@ struct xrt_tracked_psmv
 	/*!
 	 * Push a IMU sample into the tracking system.
 	 */
-	void (*push_imu)(struct xrt_tracked_psmv *,
-	                 timepoint_ns timestamp_ns,
-	                 struct xrt_tracking_sample *sample);
+	void (*push_imu)(struct xrt_tracked_psmv *, timepoint_ns timestamp_ns, struct xrt_tracking_sample *sample);
 
 	/*!
 	 * Called by the owning @ref xrt_device @ref xdev to get the pose of
@@ -162,9 +179,7 @@ struct xrt_tracked_psvr
 	/*!
 	 * Push a IMU sample into the tracking system.
 	 */
-	void (*push_imu)(struct xrt_tracked_psvr *,
-	                 timepoint_ns timestamp_ns,
-	                 struct xrt_tracking_sample *sample);
+	void (*push_imu)(struct xrt_tracked_psvr *, timepoint_ns timestamp_ns, struct xrt_tracking_sample *sample);
 
 	/*!
 	 * Called by the owning @ref xrt_device @ref xdev to get the pose of
@@ -180,6 +195,34 @@ struct xrt_tracked_psvr
 	void (*destroy)(struct xrt_tracked_psvr *);
 };
 
+/*!
+ * @interface xrt_tracked_hand
+ *
+ * A single tracked Hand
+ */
+struct xrt_tracked_hand
+{
+	//! The tracking system origin for this hand.
+	struct xrt_tracking_origin *origin;
+
+	//! Device owning this hand.
+	struct xrt_device *xdev;
+
+	/*!
+	 * Called by the owning @ref xrt_device @ref xdev to get the pose of
+	 * the hand in the tracking space at the given time.
+	 */
+	void (*get_tracked_joints)(struct xrt_tracked_hand *,
+	                           enum xrt_input_name name,
+	                           timepoint_ns when_ns,
+	                           struct u_hand_joint_default_set *out_joints,
+	                           struct xrt_space_relation *out_relation);
+
+	/*!
+	 * Destroy this tracked hand.
+	 */
+	void (*destroy)(struct xrt_tracked_hand *);
+};
 
 /*
  *
@@ -199,9 +242,7 @@ xrt_tracked_psmv_get_tracked_pose(struct xrt_tracked_psmv *psmv,
 
 //! @public @memberof xrt_tracked_psmv
 static inline void
-xrt_tracked_psmv_push_imu(struct xrt_tracked_psmv *psmv,
-                          timepoint_ns timestamp_ns,
-                          struct xrt_tracking_sample *sample)
+xrt_tracked_psmv_push_imu(struct xrt_tracked_psmv *psmv, timepoint_ns timestamp_ns, struct xrt_tracking_sample *sample)
 {
 	psmv->push_imu(psmv, timestamp_ns, sample);
 }
@@ -230,9 +271,7 @@ xrt_tracked_psvr_get_tracked_pose(struct xrt_tracked_psvr *psvr,
 
 //! @public @memberof xrt_tracked_psmv
 static inline void
-xrt_tracked_psvr_push_imu(struct xrt_tracked_psvr *psvr,
-                          timepoint_ns timestamp_ns,
-                          struct xrt_tracking_sample *sample)
+xrt_tracked_psvr_push_imu(struct xrt_tracked_psvr *psvr, timepoint_ns timestamp_ns, struct xrt_tracking_sample *sample)
 {
 	psvr->push_imu(psvr, timestamp_ns, sample);
 }
@@ -250,6 +289,17 @@ xrt_tracked_psvr_destroy(struct xrt_tracked_psvr **xtvr_ptr)
 	*xtvr_ptr = NULL;
 }
 
+
+//! @public @memberof xrt_tracked_hand
+static inline void
+xrt_tracked_hand_get_joints(struct xrt_tracked_hand *h,
+                            enum xrt_input_name name,
+                            timepoint_ns when_ns,
+                            struct u_hand_joint_default_set *out_joints,
+                            struct xrt_space_relation *out_relation)
+{
+	h->get_tracked_joints(h, name, when_ns, out_joints, out_relation);
+}
 
 /*!
  * @}

@@ -13,18 +13,13 @@
 
 #include "xrt/xrt_defines.h"
 
-#include <math.h>
+#include "m_mathinclude.h"
 
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-
-/*!
- * @ingroup aux_math
- * @{
- */
 
 static inline struct xrt_vec2
 m_vec2_mul(struct xrt_vec2 l, struct xrt_vec2 r)
@@ -81,11 +76,64 @@ m_vec2_len(struct xrt_vec2 l)
 	return sqrtf(m_vec2_len_sqrd(l));
 }
 
-/*!
- * @}
- */
+static inline float
+m_vec2_dot(struct xrt_vec2 l, struct xrt_vec2 r)
+{
+	return l.x * r.x + l.y * r.y;
+}
 
 
 #ifdef __cplusplus
 }
+
+
+static inline struct xrt_vec2
+operator+(const struct xrt_vec2 &a, const struct xrt_vec2 &b)
+{
+	return m_vec2_add(a, b);
+}
+
+static inline struct xrt_vec2
+operator-(const struct xrt_vec2 &a, const struct xrt_vec2 &b)
+{
+	return m_vec2_sub(a, b);
+}
+
+static inline struct xrt_vec2 // Until clang-format-11 is on the CI.
+operator*(const struct xrt_vec2 &a, const struct xrt_vec2 &b)
+{
+	return m_vec2_mul(a, b);
+}
+
+static inline struct xrt_vec2
+operator/(const struct xrt_vec2 &a, const struct xrt_vec2 &b)
+{
+	return m_vec2_div(a, b);
+}
+
+static inline void
+operator+=(struct xrt_vec2 &a, const struct xrt_vec2 &b)
+{
+	a = a + b;
+}
+
+static inline void
+operator-=(struct xrt_vec2 &a, const struct xrt_vec2 &b)
+{
+	a = a - b;
+}
+
+static inline void
+operator*=(struct xrt_vec2 &a, const struct xrt_vec2 &b)
+{
+	a = a * b;
+}
+
+static inline void
+operator/=(struct xrt_vec2 &a, const struct xrt_vec2 &b)
+{
+	a = a / b;
+}
+
+
 #endif

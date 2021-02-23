@@ -1,32 +1,11 @@
 # Copyright 2019-2020, Collabora, Ltd.
 # SPDX-License-Identifier: BSL-1.0
 
-
-###
-# Binding generation
-#
-
-function(bindings_gen output)
-	add_custom_command(OUTPUT ${output}
-		COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/bindings.py
-			${CMAKE_CURRENT_SOURCE_DIR}/bindings.json
-			${output}
-		DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/bindings.py
-			${CMAKE_CURRENT_SOURCE_DIR}/bindings.json
-			)
-endfunction(bindings_gen)
-
-bindings_gen(${CMAKE_CURRENT_BINARY_DIR}/oxr_generated_bindings.h)
-bindings_gen(${CMAKE_CURRENT_BINARY_DIR}/oxr_generated_bindings.c)
-
-
 ###
 # Main code
 #
 
 set(OXR_SOURCE_FILES
-	${CMAKE_CURRENT_BINARY_DIR}/oxr_generated_bindings.h
-	${CMAKE_CURRENT_BINARY_DIR}/oxr_generated_bindings.c
 	oxr_api_action.c
 	oxr_api_funcs.h
 	oxr_api_instance.c
@@ -50,19 +29,30 @@ set(OXR_SOURCE_FILES
 	oxr_objects.h
 	oxr_path.c
 	oxr_session.c
-	oxr_session_vk.c
 	oxr_space.c
 	oxr_swapchain.c
-	oxr_swapchain_vk.c
 	oxr_system.c
 	oxr_two_call.h
 	oxr_verify.c
-	oxr_vulkan.c
 	oxr_xdev.c
 	)
 
+if(XRT_HAVE_VULKAN)
+	list(APPEND OXR_SOURCE_FILES
+		oxr_session_vk.c
+		oxr_swapchain_vk.c
+		oxr_vulkan.c
+		)
+endif()
+
 if(XRT_HAVE_OPENGL)
-	add_definitions(-DXR_USE_GRAPHICS_API_OPENGL -DXR_USE_GRAPHICS_API_OPENGL_ES)
+	add_definitions(-DXR_USE_GRAPHICS_API_OPENGL)
+endif()
+if(XRT_HAVE_OPENGLES)
+	add_definitions(-DXR_USE_GRAPHICS_API_OPENGL_ES)
+endif()
+
+if(XRT_HAVE_OPENGL OR XRT_HAVE_OPENGLES)
 	list(APPEND OXR_SOURCE_FILES
 		oxr_session_gl.c
 		oxr_swapchain_gl.c
@@ -78,15 +68,36 @@ if(XRT_HAVE_EGL)
 	list(APPEND OXR_SOURCE_FILES oxr_session_egl.c)
 endif()
 
+
+if(ANDROID)
+	add_definitions(-DXR_USE_PLATFORM_ANDROID)
+	list(APPEND OXR_SOURCE_FILES
+		oxr_session_gles_android.c
+		)
+endif()
+
 add_library(st_oxr STATIC ${OXR_SOURCE_FILES})
 target_link_libraries(st_oxr PRIVATE
 	xrt-interfaces
 	xrt-external-openxr
 	aux_util
 	aux_math
-	Vulkan::Vulkan
+	aux_generated_bindings
 	comp_client
+	aux-includes
+	PUBLIC
+	aux_os
+	Vulkan::Vulkan
 	)
+if(XRT_HAVE_VULKAN)
+	target_link_libraries(st_oxr PRIVATE Vulkan::Vulkan)
+endif()
+if(XRT_HAVE_OPENGL OR XRT_HAVE_OPENGLES)
+	target_link_libraries(st_oxr PRIVATE aux_ogl)
+endif()
+if(ANDROID)
+	target_link_libraries(st_oxr PRIVATE aux_android)
+endif()
 target_include_directories(st_oxr
 	PRIVATE
 	${CMAKE_CURRENT_BINARY_DIR}

@@ -4,6 +4,7 @@
 
 add_executable(monado-service
 	main.c
+	../openxr/oxr_sdl2_hack.c
 	)
 
 target_link_libraries(monado-service PRIVATE
@@ -67,14 +68,26 @@ if(XRT_INSTALL_SYSTEMD_UNIT_FILES)
 		mark_as_advanced(XRT_SYSTEMD_UNIT_INSTALL_DIR)
 	endif()
 	if(XRT_SYSTEMD_UNIT_INSTALL_DIR MATCHES "^/")
-		# Destination is absolute: prepend only destdir at install time
-		set(UNIT_DIR "\$ENV{DESTDIR}${XRT_SYSTEMD_UNIT_INSTALL_DIR}")
+		# Destination is absolute: prepend only destdir (implicitly) at install time
+		set(UNIT_DIR "${XRT_SYSTEMD_UNIT_INSTALL_DIR}")
 	else()
-		# Destination is relative: prepend destdir and install prefix at install time
-		set(UNIT_DIR "\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${XRT_SYSTEMD_UNIT_INSTALL_DIR}")
+		# Destination is relative: prepend destdir (implicitly) and install prefix at install time
+		set(UNIT_DIR "\${CMAKE_INSTALL_PREFIX}/${XRT_SYSTEMD_UNIT_INSTALL_DIR}")
 	endif()
 	configure_file(configure_and_install_units.cmake ${CMAKE_CURRENT_BINARY_DIR}/configure_and_install_units.cmake @ONLY)
 
 	# This script will configure the units and install them at install time.
 	install(SCRIPT ${CMAKE_CURRENT_BINARY_DIR}/configure_and_install_units.cmake)
+endif()
+
+if(XRT_HAVE_SDL2)
+	target_link_libraries(monado-service PRIVATE
+		st_gui
+		imgui_impl_sdl
+		${SDL2_LIBRARIES}
+		aux_ogl
+		)
+	target_include_directories(monado-service PRIVATE
+		${SDL2_INCLUDE_DIRS}
+		)
 endif()

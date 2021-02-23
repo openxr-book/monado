@@ -1,3 +1,37 @@
+monado (21.0.0~dfsg1-1) unstable; urgency=medium
+
+  * New upstream version 21.0.0~dfsg1
+  * Fix gbp.conf for sid.
+  * Exclude bitmap icons for SteamVR driver due to unclear
+    license/source
+  * Disable building new SteamVR driver.
+  * d/control
+    - Fix Vcs- fields for sid
+    - Update metadata based on conformance results
+    - Update Standards-Version to 4.5.1 - no changes required.
+    - Add Build-Depends on gstreamer for video-file support
+  * d/copyright: Update
+  * Drop 0001-Fix-destdir-repetition-with-systemd-unit.patch:
+    merged upstream.
+  * Add patch to allow overriding package version
+  * d/rules: Provide the Debian version to the build
+
+ -- Ryan Pavlik <ryan@ryanpavlik.com>  Thu, 11 Feb 2021 15:36:12 -0600
+
+monado (0.3.0-3) unstable; urgency=medium
+
+  * Source-only upload.
+
+ -- Andrew Lee (李健秋) <ajqlee@debian.org>  Sat, 18 Jul 2020 07:58:47 +0800
+
+monado (0.3.0-2) experimental; urgency=medium
+
+  * Adjust build to use service-enabled mode on Linux.
+    - Adds a patch to fix systemd unit install location
+    - Adds a new binary package, monado-service, on Linux.
+
+ -- Ryan Pavlik <ryan@ryanpavlik.com>  Tue, 14 Jul 2020 16:01:24 -0500
+
 monado (0.3.0-1~ubuntu20.04~ppa20200710) focal; urgency=medium
 
   * Rebuild for Ubuntu Focal.

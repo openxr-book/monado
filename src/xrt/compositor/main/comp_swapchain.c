@@ -8,13 +8,22 @@
  */
 
 #include "util/u_misc.h"
+#include "util/u_handles.h"
 
 #include "main/comp_compositor.h"
 
+#include <xrt/xrt_handles.h>
+#include <xrt/xrt_config_os.h>
+
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
 
+
+/*
+ *
+ * Swapchain member functions.
+ *
+ */
 
 static void
 swapchain_destroy(struct xrt_swapchain *xsc)
@@ -37,15 +46,12 @@ swapchain_acquire_image(struct xrt_swapchain *xsc, uint32_t *out_index)
 	int res = u_index_fifo_pop(&sc->fifo, out_index);
 	if (res >= 0) {
 		return XRT_SUCCESS;
-	} else {
-		return XRT_ERROR_NO_IMAGE_AVAILABLE;
 	}
+	return XRT_ERROR_NO_IMAGE_AVAILABLE;
 }
 
 static xrt_result_t
-swapchain_wait_image(struct xrt_swapchain *xsc,
-                     uint64_t timeout,
-                     uint32_t index)
+swapchain_wait_image(struct xrt_swapchain *xsc, uint64_t timeout, uint32_t index)
 {
 	struct comp_swapchain *sc = comp_swapchain(xsc);
 
@@ -64,177 +70,27 @@ swapchain_release_image(struct xrt_swapchain *xsc, uint32_t index)
 
 	if (res >= 0) {
 		return XRT_SUCCESS;
-	} else {
-		// FIFO full
-		return XRT_ERROR_NO_IMAGE_AVAILABLE;
 	}
-}
-
-static VkResult
-get_device_memory_fd(struct comp_compositor *c,
-                     VkDeviceMemory device_memory,
-                     int *out_fd)
-{
-
-	// vkGetMemoryFdKHR parameter
-	VkMemoryGetFdInfoKHR fd_info = {
-	    .sType = VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR,
-	    .memory = device_memory,
-	    .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT_KHR,
-	};
-	int fd;
-	VkResult ret = c->vk.vkGetMemoryFdKHR(c->vk.device, &fd_info, &fd);
-	if (ret != VK_SUCCESS) {
-		COMP_ERROR(c, "->image - vkGetMemoryFdKHR: %s",
-		           vk_result_string(ret));
-		return VK_ERROR_FEATURE_NOT_PRESENT;
-	}
-	*out_fd = fd;
-	return ret;
-}
-
-static VkResult
-create_image_fd(struct comp_compositor *c,
-                enum xrt_swapchain_usage_bits swapchain_usage,
-                int64_t format,
-                uint32_t width,
-                uint32_t height,
-                uint32_t array_size,
-                uint32_t mip_count,
-                VkImage *out_image,
-                VkDeviceMemory *out_mem,
-                struct xrt_image_fd *out_image_fd)
-{
-	VkImageUsageFlags image_usage =
-	    VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-	VkDeviceMemory device_memory = VK_NULL_HANDLE;
-	VkImage image = VK_NULL_HANDLE;
-	VkResult ret = VK_SUCCESS;
-	VkDeviceSize size;
-	int fd;
-
-	COMP_SPEW(c, "->image - vkCreateImage %dx%d", width, height);
-
-
-	/*
-	 * Create the image.
-	 */
-
-	VkExternalMemoryImageCreateInfoKHR external_memory_image_create_info = {
-	    .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO_KHR,
-	    .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT_KHR,
-	};
-
-	if ((swapchain_usage & XRT_SWAPCHAIN_USAGE_COLOR) != 0) {
-		image_usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-	}
-	if ((swapchain_usage & XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL) != 0) {
-		image_usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-	}
-	if ((swapchain_usage & XRT_SWAPCHAIN_USAGE_UNORDERED_ACCESS) != 0) {
-		image_usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-	}
-	if ((swapchain_usage & XRT_SWAPCHAIN_USAGE_TRANSFER_SRC) != 0) {
-		image_usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-	}
-	if ((swapchain_usage & XRT_SWAPCHAIN_USAGE_TRANSFER_DST) != 0) {
-		image_usage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-	}
-	if ((swapchain_usage & XRT_SWAPCHAIN_USAGE_SAMPLED) != 0) {
-		image_usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
-	}
-
-	VkImageCreateInfo info = {
-	    .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-	    .pNext = &external_memory_image_create_info,
-	    .imageType = VK_IMAGE_TYPE_2D,
-	    .format = (VkFormat)format,
-	    .extent = {.width = width, .height = height, .depth = 1},
-	    .mipLevels = mip_count,
-	    .arrayLayers = array_size,
-	    .samples = VK_SAMPLE_COUNT_1_BIT,
-	    .tiling = VK_IMAGE_TILING_OPTIMAL,
-	    .usage = image_usage,
-	    .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-	    .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-	};
-
-	ret = c->vk.vkCreateImage(c->vk.device, &info, NULL, &image);
-	if (ret != VK_SUCCESS) {
-		COMP_ERROR(c, "->image - vkCreateImage: %s",
-		           vk_result_string(ret));
-		// Nothing to cleanup
-		return ret;
-	}
-
-	/*
-	 * Create and bind the memory.
-	 */
-	// vkAllocateMemory parameters
-	VkMemoryDedicatedAllocateInfoKHR dedicated_memory_info = {
-	    .sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO_KHR,
-	    .image = image,
-	    .buffer = VK_NULL_HANDLE,
-	};
-
-	VkExportMemoryAllocateInfo export_alloc_info = {
-	    .sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO_KHR,
-	    .pNext = &dedicated_memory_info,
-	    .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT_KHR,
-	};
-
-	ret = vk_alloc_and_bind_image_memory(
-	    &c->vk, image, SIZE_MAX, &export_alloc_info, &device_memory, &size);
-	if (ret != VK_SUCCESS) {
-		COMP_ERROR(c, "->image - vkAllocateMemory: %s",
-		           vk_result_string(ret));
-		goto err_image;
-	}
-
-	/*
-	 * Get the fd.
-	 */
-	ret = get_device_memory_fd(c, device_memory, &fd);
-	if (ret != VK_SUCCESS) {
-		goto err_mem;
-	}
-
-
-	*out_image = image;
-	*out_mem = device_memory;
-	out_image_fd->fd = fd;
-	out_image_fd->size = size;
-
-	return ret;
-
-err_mem:
-	c->vk.vkFreeMemory(c->vk.device, device_memory, NULL);
-err_image:
-	c->vk.vkDestroyImage(c->vk.device, image, NULL);
-	return ret;
+	// FIFO full
+	return XRT_ERROR_NO_IMAGE_AVAILABLE;
 }
 
 
 /*
  *
- * Exported functions.
+ * Helper functions.
  *
  */
 
-struct xrt_swapchain *
-comp_swapchain_create(struct xrt_compositor *xc,
-                      struct xrt_swapchain_create_info *info)
-{
-	struct comp_compositor *c = comp_compositor(xc);
-	VkCommandBuffer cmd_buffer;
-	uint32_t num_images = 3;
-	VkResult ret;
-
-
-	if ((info->create & XRT_SWAPCHAIN_CREATE_STATIC_IMAGE) != 0) {
-		num_images = 1;
+#define D(TYPE, thing)                                                                                                 \
+	if (thing != VK_NULL_HANDLE) {                                                                                 \
+		vk->vkDestroy##TYPE(vk->device, thing, NULL);                                                          \
+		thing = VK_NULL_HANDLE;                                                                                \
 	}
 
+static struct comp_swapchain *
+alloc_and_set_funcs(struct comp_compositor *c, uint32_t num_images)
+{
 	struct comp_swapchain *sc = U_TYPED_CALLOC(struct comp_swapchain);
 	sc->base.base.destroy = swapchain_destroy;
 	sc->base.base.acquire_image = swapchain_acquire_image;
@@ -243,27 +99,41 @@ comp_swapchain_create(struct xrt_compositor *xc,
 	sc->base.base.num_images = num_images;
 	sc->c = c;
 
-	COMP_DEBUG(c, "CREATE %p %dx%d", (void *)sc, info->width, info->height);
-
-	// Make sure the fds are invalid.
+	// Make sure the handles are invalid.
 	for (uint32_t i = 0; i < ARRAY_SIZE(sc->base.images); i++) {
-		sc->base.images[i].fd = -1;
+		sc->base.images[i].handle = XRT_GRAPHICS_BUFFER_HANDLE_INVALID;
 	}
 
-	for (uint32_t i = 0; i < num_images; i++) {
-		ret = create_image_fd(
-		    c, info->bits, info->format, info->width, info->height,
-		    info->array_size, info->mip_count, &sc->images[i].image,
-		    &sc->images[i].memory, &sc->base.images[i]);
-		if (ret != VK_SUCCESS) {
-			//! @todo memory leak of image fds and swapchain
-			// see
-			// https://gitlab.freedesktop.org/monado/monado/issues/20
-			return NULL;
-		}
+	return sc;
+}
 
-		vk_create_sampler(&c->vk, &sc->images[i].sampler);
-	}
+static bool
+is_depth_only_format(VkFormat format)
+{
+	return format == VK_FORMAT_D16_UNORM || format == VK_FORMAT_D32_SFLOAT;
+}
+
+static bool
+is_depth_stencil_format(VkFormat format)
+{
+
+	return format == VK_FORMAT_D16_UNORM_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT ||
+	       format == VK_FORMAT_D32_SFLOAT_S8_UINT;
+}
+
+static bool
+is_stencil_only_format(VkFormat format)
+{
+	return format == VK_FORMAT_S8_UINT;
+}
+
+static void
+do_post_create_vulkan_setup(struct comp_compositor *c,
+                            const struct xrt_swapchain_create_info *info,
+                            struct comp_swapchain *sc)
+{
+	uint32_t num_images = sc->vkic.num_images;
+	VkCommandBuffer cmd_buffer;
 
 	VkComponentMapping components = {
 	    .r = VK_COMPONENT_SWIZZLE_R,
@@ -272,31 +142,54 @@ comp_swapchain_create(struct xrt_compositor *xc,
 	    .a = VK_COMPONENT_SWIZZLE_ONE,
 	};
 
+	bool depth = (info->bits & XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL) != 0;
+
+	VkImageAspectFlagBits aspect = 0;
+	if (depth) {
+		if (is_depth_only_format(info->format)) {
+			aspect |= VK_IMAGE_ASPECT_DEPTH_BIT;
+		}
+		if (is_depth_stencil_format(info->format)) {
+			aspect |= VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+		}
+		if (is_stencil_only_format(info->format)) {
+			aspect |= VK_IMAGE_ASPECT_STENCIL_BIT;
+		}
+	} else {
+		aspect |= VK_IMAGE_ASPECT_COLOR_BIT;
+	}
+
+	VkFormat format = info->format;
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER)
+	// Force gamma conversion for sRGB on Android
+	if (format == VK_FORMAT_R8G8B8A8_SRGB) {
+		format = VK_FORMAT_R8G8B8A8_UNORM;
+	}
+#endif
+
 	for (uint32_t i = 0; i < num_images; i++) {
-		sc->images[i].views.alpha =
-		    U_TYPED_ARRAY_CALLOC(VkImageView, info->array_size);
-		sc->images[i].views.no_alpha =
-		    U_TYPED_ARRAY_CALLOC(VkImageView, info->array_size);
+		sc->images[i].views.alpha = U_TYPED_ARRAY_CALLOC(VkImageView, info->array_size);
+		sc->images[i].views.no_alpha = U_TYPED_ARRAY_CALLOC(VkImageView, info->array_size);
 		sc->images[i].array_size = info->array_size;
+
+		vk_create_sampler(&c->vk, VK_SAMPLER_ADDRESS_MODE_REPEAT, &sc->images[i].repeat_sampler);
+
+		vk_create_sampler(&c->vk, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, &sc->images[i].sampler);
+
 
 		for (uint32_t layer = 0; layer < info->array_size; ++layer) {
 			VkImageSubresourceRange subresource_range = {
-			    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+			    .aspectMask = aspect,
 			    .baseMipLevel = 0,
 			    .levelCount = 1,
 			    .baseArrayLayer = layer,
 			    .layerCount = 1,
 			};
 
-
-			vk_create_view(&c->vk, sc->images[i].image,
-			               (VkFormat)info->format,
-			               subresource_range,
+			vk_create_view(&c->vk, sc->vkic.images[i].handle, (VkFormat)info->format, subresource_range,
 			               &sc->images[i].views.alpha[layer]);
-			vk_create_view_swizzle(
-			    &c->vk, sc->images[i].image, (VkFormat)info->format,
-			    subresource_range, components,
-			    &sc->images[i].views.no_alpha[layer]);
+			vk_create_view_swizzle(&c->vk, sc->vkic.images[i].handle, format, subresource_range, components,
+			                       &sc->images[i].views.no_alpha[layer]);
 		}
 	}
 
@@ -315,7 +208,7 @@ comp_swapchain_create(struct xrt_compositor *xc,
 	vk_init_cmd_buffer(&c->vk, &cmd_buffer);
 
 	VkImageSubresourceRange subresource_range = {
-	    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+	    .aspectMask = aspect,
 	    .baseMipLevel = 0,
 	    .levelCount = 1,
 	    .baseArrayLayer = 0,
@@ -323,22 +216,16 @@ comp_swapchain_create(struct xrt_compositor *xc,
 	};
 
 	for (uint32_t i = 0; i < num_images; i++) {
-		vk_set_image_layout(&c->vk, cmd_buffer, sc->images[i].image, 0,
-		                    VK_ACCESS_SHADER_READ_BIT,
-		                    VK_IMAGE_LAYOUT_UNDEFINED,
-		                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+		vk_set_image_layout(&c->vk, cmd_buffer, sc->vkic.images[i].handle, 0, VK_ACCESS_SHADER_READ_BIT,
+		                    VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 		                    subresource_range);
 	}
 
 	vk_submit_cmd_buffer(&c->vk, cmd_buffer);
-
-	return &sc->base.base;
 }
 
 static void
-clean_image_views(struct vk_bundle *vk,
-                  size_t array_size,
-                  VkImageView **views_ptr)
+clean_image_views(struct vk_bundle *vk, size_t array_size, VkImageView **views_ptr)
 {
 	VkImageView *views = *views_ptr;
 	if (views == NULL) {
@@ -350,8 +237,7 @@ clean_image_views(struct vk_bundle *vk,
 			continue;
 		}
 
-		vk->vkDestroyImageView(vk->device, views[i], NULL);
-		views[i] = VK_NULL_HANDLE;
+		D(ImageView, views[i]);
 	}
 
 	free(views);
@@ -365,28 +251,114 @@ clean_image_views(struct vk_bundle *vk,
  * images that has one or all fields set to NULL.
  */
 static void
-comp_swapchain_image_cleanup(struct vk_bundle *vk,
-                             struct comp_swapchain_image *image)
+image_cleanup(struct vk_bundle *vk, struct comp_swapchain_image *image)
 {
+	/*
+	 * This makes sure that any pending command buffer has completed and all
+	 * resources referred by it can now be manipulated. This make sure that
+	 * validation doesn't complain. This is done during image destruction so
+	 * isn't time critical.
+	 */
+	os_mutex_lock(&vk->queue_mutex);
 	vk->vkDeviceWaitIdle(vk->device);
+	os_mutex_unlock(&vk->queue_mutex);
 
 	clean_image_views(vk, image->array_size, &image->views.alpha);
 	clean_image_views(vk, image->array_size, &image->views.no_alpha);
 
-	if (image->sampler != VK_NULL_HANDLE) {
-		vk->vkDestroySampler(vk->device, image->sampler, NULL);
-		image->sampler = VK_NULL_HANDLE;
+	D(Sampler, image->sampler);
+	D(Sampler, image->repeat_sampler);
+}
+
+/*
+ *
+ * Exported functions.
+ *
+ */
+
+xrt_result_t
+comp_swapchain_create(struct xrt_compositor *xc,
+                      const struct xrt_swapchain_create_info *info,
+                      struct xrt_swapchain **out_xsc)
+{
+	struct comp_compositor *c = comp_compositor(xc);
+	uint32_t num_images = 3;
+	VkResult ret;
+
+	if (!comp_is_format_supported(c, info->format)) {
+		return XRT_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED;
 	}
 
-	if (image->image != VK_NULL_HANDLE) {
-		vk->vkDestroyImage(vk->device, image->image, NULL);
-		image->image = VK_NULL_HANDLE;
+	if ((info->create & XRT_SWAPCHAIN_CREATE_PROTECTED_CONTENT) != 0) {
+		// This compositor doesn't support creating protected content
+		// swapchains.
+		return XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED;
 	}
 
-	if (image->memory != VK_NULL_HANDLE) {
-		vk->vkFreeMemory(vk->device, image->memory, NULL);
-		image->memory = VK_NULL_HANDLE;
+	if ((info->create & XRT_SWAPCHAIN_CREATE_STATIC_IMAGE) != 0) {
+		num_images = 1;
 	}
+
+	struct comp_swapchain *sc = alloc_and_set_funcs(c, num_images);
+
+	COMP_DEBUG(c, "CREATE %p %dx%d %s", (void *)sc, //
+	           info->width, info->height,           //
+	           vk_color_format_string(info->format));
+
+	// Use the image helper to allocate the images.
+	ret = vk_ic_allocate(&c->vk, info, num_images, &sc->vkic);
+	if (ret == VK_ERROR_FEATURE_NOT_PRESENT) {
+		free(sc);
+		return XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED;
+	} else if (ret == VK_ERROR_FORMAT_NOT_SUPPORTED) {
+		free(sc);
+		return XRT_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED;
+	}
+	if (ret != VK_SUCCESS) {
+		free(sc);
+		return XRT_ERROR_VULKAN;
+	}
+
+	xrt_graphics_buffer_handle_t handles[ARRAY_SIZE(sc->vkic.images)];
+
+	vk_ic_get_handles(&c->vk, &sc->vkic, ARRAY_SIZE(handles), handles);
+	for (uint32_t i = 0; i < sc->vkic.num_images; i++) {
+		sc->base.images[i].handle = handles[i];
+		sc->base.images[i].size = sc->vkic.images[i].size;
+	}
+
+	do_post_create_vulkan_setup(c, info, sc);
+
+	*out_xsc = &sc->base.base;
+
+	return XRT_SUCCESS;
+}
+
+xrt_result_t
+comp_swapchain_import(struct xrt_compositor *xc,
+                      const struct xrt_swapchain_create_info *info,
+                      struct xrt_image_native *native_images,
+                      uint32_t num_images,
+                      struct xrt_swapchain **out_xsc)
+{
+	struct comp_compositor *c = comp_compositor(xc);
+	VkResult ret;
+
+	struct comp_swapchain *sc = alloc_and_set_funcs(c, num_images);
+
+	COMP_DEBUG(c, "CREATE FROM NATIVE %p %dx%d", (void *)sc, info->width, info->height);
+
+	// Use the image helper to get the images.
+	ret = vk_ic_from_natives(&c->vk, info, native_images, num_images, &sc->vkic);
+	if (ret != VK_SUCCESS) {
+		return XRT_ERROR_VULKAN;
+	}
+
+	do_post_create_vulkan_setup(c, info, sc);
+
+	*out_xsc = &sc->base.base;
+
+	return XRT_SUCCESS;
 }
 
 void
@@ -397,17 +369,14 @@ comp_swapchain_really_destroy(struct comp_swapchain *sc)
 	COMP_SPEW(sc->c, "REALLY DESTROY");
 
 	for (uint32_t i = 0; i < sc->base.base.num_images; i++) {
-		comp_swapchain_image_cleanup(vk, &sc->images[i]);
+		image_cleanup(vk, &sc->images[i]);
 	}
 
 	for (uint32_t i = 0; i < sc->base.base.num_images; i++) {
-		if (sc->base.images[i].fd < 0) {
-			continue;
-		}
-
-		close(sc->base.images[i].fd);
-		sc->base.images[i].fd = -1;
+		u_graphics_buffer_unref(&sc->base.images[i].handle);
 	}
+
+	vk_ic_destroy(vk, &sc->vkic);
 
 	free(sc);
 }

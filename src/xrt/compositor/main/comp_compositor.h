@@ -11,13 +11,20 @@
 #pragma once
 
 #include "xrt/xrt_gfx_vk.h"
+#include "xrt/xrt_config_build.h"
 
 #include "util/u_threading.h"
 #include "util/u_index_fifo.h"
+#include "util/u_logging.h"
+
+#include "vk/vk_image_allocator.h"
 
 #include "main/comp_settings.h"
 #include "main/comp_window.h"
 #include "main/comp_renderer.h"
+#include "main/comp_target.h"
+
+#include "render/comp_render.h"
 
 
 #ifdef __cplusplus
@@ -41,12 +48,9 @@ extern "C" {
  */
 struct comp_swapchain_image
 {
-	//! Vulkan image to create view from.
-	VkImage image;
-	//! Exported memory backing the image.
-	VkDeviceMemory memory;
 	//! Sampler used by the renderer and distortion code.
 	VkSampler sampler;
+	VkSampler repeat_sampler;
 	//! Views used by the renderer and distortion code, for each array
 	//! layer.
 	struct
@@ -64,15 +68,16 @@ struct comp_swapchain_image
  * Not used by the window backend that uses the vk_swapchain to render to.
  *
  * @ingroup comp_main
- * @implements xrt_swapchain_fd
+ * @implements xrt_swapchain_native
  * @see comp_compositor
  */
 struct comp_swapchain
 {
-	struct xrt_swapchain_fd base;
+	struct xrt_swapchain_native base;
 
 	struct comp_compositor *c;
 
+	struct vk_image_collection vkic;
 	struct comp_swapchain_image images[XRT_MAX_SWAPCHAIN_IMAGES];
 
 	/*!
@@ -125,31 +130,45 @@ struct comp_layer_slot
  */
 enum comp_state
 {
-	COMP_STATE_READY = 0,
-	COMP_STATE_PREPARED = 1,
-	COMP_STATE_WAITED = 2,
+	COMP_STATE_UNINITIALIZED = 0,
+	COMP_STATE_READY = 1,
+	COMP_STATE_PREPARED = 2,
 	COMP_STATE_VISIBLE = 3,
 	COMP_STATE_FOCUSED = 4,
+};
+
+struct comp_shaders
+{
+	VkShaderModule mesh_vert;
+	VkShaderModule mesh_frag;
+
+	VkShaderModule equirect1_vert;
+	VkShaderModule equirect1_frag;
+
+	VkShaderModule equirect2_vert;
+	VkShaderModule equirect2_frag;
+
+	VkShaderModule layer_vert;
+	VkShaderModule layer_frag;
 };
 
 /*!
  * Main compositor struct tying everything in the compositor together.
  *
  * @ingroup comp_main
- * @implements xrt_compositor_fd
+ * @implements xrt_compositor_native
  */
 struct comp_compositor
 {
-	struct xrt_compositor_fd base;
+	struct xrt_compositor_native base;
 
-	//! A link back to the compositor we are presenting to the client.
-	struct xrt_compositor *client;
+	struct xrt_system_compositor system;
 
 	//! Renderer helper.
 	struct comp_renderer *r;
 
-	//! The window or display we are using.
-	struct comp_window *window;
+	//! The target we are displaying to.
+	struct comp_target *target;
 
 	//! The device we are displaying to.
 	struct xrt_device *xdev;
@@ -159,6 +178,9 @@ struct comp_compositor
 
 	//! Vulkan bundle of things.
 	struct vk_bundle vk;
+
+	//! Vulkan shaders that the compositor uses.
+	struct comp_shaders shaders;
 
 	//! Timestamp of last-rendered (immersive) frame.
 	int64_t last_frame_time_ns;
@@ -210,22 +232,17 @@ struct comp_compositor
 	//! The last time we provided in the results of wait_frame
 	int64_t last_next_display_time;
 
-	/*!
-	 * The current state we are tracking.
-	 *
-	 * Settings is supposed to be read only.
-	 */
-	struct
-	{
-		uint32_t width;
-		uint32_t height;
-	} current;
-
 	struct
 	{
 		//! Thread object for safely destroying swapchain.
 		struct u_threading_stack destroy_swapchains;
 	} threading;
+
+
+	struct comp_resources nr;
+
+	//! To insure only one compositor is created.
+	bool compositor_created;
 };
 
 
@@ -234,6 +251,12 @@ struct comp_compositor
  * Functions and helpers.
  *
  */
+
+/*!
+ * Check if the compositor can create swapchains with this format.
+ */
+bool
+comp_is_format_supported(struct comp_compositor *c, VkFormat format);
 
 /*!
  * Convenience function to convert a xrt_swapchain to a comp_swapchain.
@@ -271,9 +294,22 @@ comp_compositor_garbage_collect(struct comp_compositor *c);
  *
  * @public @memberof comp_compositor
  */
-struct xrt_swapchain *
+xrt_result_t
 comp_swapchain_create(struct xrt_compositor *xc,
-                      struct xrt_swapchain_create_info *info);
+                      const struct xrt_swapchain_create_info *info,
+                      struct xrt_swapchain **out_xsc);
+
+/*!
+ * A compositor function that is implemented in the swapchain code.
+ *
+ * @public @memberof comp_compositor
+ */
+xrt_result_t
+comp_swapchain_import(struct xrt_compositor *xc,
+                      const struct xrt_swapchain_create_info *info,
+                      struct xrt_image_native *native_images,
+                      uint32_t num_images,
+                      struct xrt_swapchain **out_xsc);
 
 /*!
  * Swapchain destruct is delayed until it is safe to destroy them, this function
@@ -286,61 +322,61 @@ void
 comp_swapchain_really_destroy(struct comp_swapchain *sc);
 
 /*!
- * Printer helper.
- *
- * @public @memberof comp_compositor
+ * Loads all of the shaders that the compositor uses.
+ */
+bool
+comp_shaders_load(struct vk_bundle *vk, struct comp_shaders *s);
+
+/*!
+ * Loads all of the shaders that the compositor uses.
  */
 void
-comp_compositor_print(struct comp_compositor *c,
-                      const char *func,
-                      const char *fmt,
-                      ...) XRT_PRINTF_FORMAT(3, 4);
+comp_shaders_close(struct vk_bundle *vk, struct comp_shaders *s);
 
 /*!
  * Spew level logging.
  *
  * @relates comp_compositor
  */
-#define COMP_SPEW(c, ...)                                                      \
-	do {                                                                   \
-		if (c->settings.print_spew) {                                  \
-			comp_compositor_print(c, __func__, __VA_ARGS__);       \
-		}                                                              \
-	} while (false)
+#define COMP_SPEW(c, ...) U_LOG_IFL_T(c->settings.log_level, __VA_ARGS__);
 
 /*!
  * Debug level logging.
  *
  * @relates comp_compositor
  */
-#define COMP_DEBUG(c, ...)                                                     \
-	do {                                                                   \
-		if (c->settings.print_debug) {                                 \
-			comp_compositor_print(c, __func__, __VA_ARGS__);       \
-		}                                                              \
-	} while (false)
+#define COMP_DEBUG(c, ...) U_LOG_IFL_D(c->settings.log_level, __VA_ARGS__);
 
 /*!
- * Mode printing.
+ * Info level logging.
  *
  * @relates comp_compositor
  */
-#define COMP_PRINT_MODE(c, ...)                                                \
-	do {                                                                   \
-		if (c->settings.print_modes) {                                 \
-			comp_compositor_print(c, __func__, __VA_ARGS__);       \
-		}                                                              \
-	} while (false)
+#define COMP_INFO(c, ...) U_LOG_IFL_I(c->settings.log_level, __VA_ARGS__);
+
+/*!
+ * Warn level logging.
+ *
+ * @relates comp_compositor
+ */
+#define COMP_WARN(c, ...) U_LOG_IFL_W(c->settings.log_level, __VA_ARGS__);
 
 /*!
  * Error level logging.
  *
  * @relates comp_compositor
  */
-#define COMP_ERROR(c, ...)                                                     \
-	do {                                                                   \
-		comp_compositor_print(c, __func__, __VA_ARGS__);               \
-	} while (false)
+#define COMP_ERROR(c, ...) U_LOG_IFL_E(c->settings.log_level, __VA_ARGS__);
+
+/*!
+ * Mode printing.
+ *
+ * @relates comp_compositor
+ */
+#define COMP_PRINT_MODE(c, ...)                                                                                        \
+	if (c->settings.print_modes) {                                                                                 \
+		U_LOG_I(__VA_ARGS__);                                                                                  \
+	}
 
 
 #ifdef __cplusplus

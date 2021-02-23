@@ -48,6 +48,10 @@ if(XRT_BUILD_DRIVER_OHMD)
 	target_link_libraries(target_lists PRIVATE drv_ohmd)
 endif()
 
+if(XRT_BUILD_DRIVER_HANDTRACKING)
+	target_link_libraries(target_lists PRIVATE drv_ht)
+endif()
+
 if(XRT_BUILD_DRIVER_PSMV)
 	target_link_libraries(target_lists PRIVATE drv_psmv)
 endif()
@@ -60,8 +64,16 @@ if(XRT_BUILD_DRIVER_RS)
 	target_link_libraries(target_lists PRIVATE drv_rs)
 endif()
 
+if(XRT_BUILD_DRIVER_REMOTE)
+	target_link_libraries(target_lists PRIVATE drv_remote)
+endif()
+
 if(XRT_HAVE_V4L2)
 	target_link_libraries(target_lists PRIVATE drv_v4l2)
+endif()
+
+if(XRT_HAVE_VF)
+	target_link_libraries(target_lists PRIVATE drv_vf)
 endif()
 
 if(XRT_BUILD_DRIVER_VIVE)
@@ -70,6 +82,14 @@ endif()
 
 if(XRT_BUILD_DRIVER_SURVIVE)
 	target_link_libraries(target_lists PRIVATE drv_survive)
+endif()
+
+if(XRT_BUILD_DRIVER_ANDROID)
+	target_link_libraries(target_lists PRIVATE drv_android)
+endif()
+
+if(XRT_BUILD_DRIVER_ILLIXR)
+	target_link_libraries(target_lists PRIVATE drv_illixr)
 endif()
 
 ####

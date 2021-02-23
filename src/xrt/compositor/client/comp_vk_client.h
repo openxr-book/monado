@@ -38,11 +38,18 @@ struct client_vk_swapchain
 {
 	struct xrt_swapchain_vk base;
 
-	//! Owning reference to the backing fd swapchain.
-	struct xrt_swapchain_fd *xscfd;
+	//! Owning reference to the backing native swapchain.
+	struct xrt_swapchain_native *xscn;
 
 	//! Non-owning reference to our parent compositor.
 	struct client_vk_compositor *c;
+
+	// Memory
+	VkDeviceMemory mems[XRT_MAX_SWAPCHAIN_IMAGES];
+
+	// Prerecorded swapchain image ownership/layout transition barriers
+	VkCommandBuffer acquire[XRT_MAX_SWAPCHAIN_IMAGES];
+	VkCommandBuffer release[XRT_MAX_SWAPCHAIN_IMAGES];
 };
 
 /*!
@@ -57,8 +64,8 @@ struct client_vk_compositor
 {
 	struct xrt_compositor_vk base;
 
-	//! Owning reference to the backing fd compositor
-	struct xrt_compositor_fd *xcfd;
+	//! Owning reference to the backing native compositor
+	struct xrt_compositor_native *xcn;
 
 	struct vk_bundle vk;
 };
@@ -74,13 +81,13 @@ struct client_vk_compositor
 /*!
  * Create a new client_vk_compositor.
  *
- * Takes owenership of provided xcfd.
+ * Takes owenership of provided xcn.
  *
  * @public @memberof client_vk_compositor
- * @relatesalso xrt_compositor_fd
+ * @relatesalso xrt_compositor_native
  */
 struct client_vk_compositor *
-client_vk_compositor_create(struct xrt_compositor_fd *xcfd,
+client_vk_compositor_create(struct xrt_compositor_native *xcn,
                             VkInstance instance,
                             PFN_vkGetInstanceProcAddr getProc,
                             VkPhysicalDevice physicalDevice,

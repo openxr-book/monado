@@ -1,12 +1,15 @@
+# Copyright 2019-2020, Collabora, Ltd.
+# SPDX-License-Identifier: BSL-1.0
+
 shader_srcs = [
-	'distortion.vert',
 	'mesh.frag',
 	'mesh.vert',
-	'none.frag',
-	'panotools.frag',
-	'vive.frag',
-	'quad.vert',
-	'quad.frag'
+	'layer.vert',
+	'layer.frag',
+	'equirect1.vert',
+	'equirect1.frag',
+	'equirect2.vert',
+	'equirect2.frag'
 ]
 
 shader_headers = []

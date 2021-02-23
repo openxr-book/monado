@@ -11,10 +11,14 @@
 #include <stdlib.h>
 
 #include "util/u_misc.h"
+#include "util/u_logging.h"
 
 #include "xrt/xrt_gfx_xlib.h"
 
 #include "client/comp_gl_xlib_client.h"
+#include "client/comp_gl_memobj_swapchain.h"
+
+#include "ogl/ogl_api.h"
 
 
 /*!
@@ -32,8 +36,7 @@ static void
 client_gl_xlib_compositor_destroy(struct xrt_compositor *xc)
 {
 	struct client_gl_xlib_compositor *c = client_gl_xlib_compositor(xc);
-	// Pipe down call into fd compositor.
-	xrt_comp_fd_destroy(&c->base.xcfd);
+
 	free(c);
 }
 
@@ -46,17 +49,33 @@ extern "C"
     glXGetProcAddress(const char *procName);
 
 struct client_gl_xlib_compositor *
-client_gl_xlib_compositor_create(struct xrt_compositor_fd *xcfd,
+client_gl_xlib_compositor_create(struct xrt_compositor_native *xcn,
                                  Display *xDisplay,
                                  uint32_t visualid,
                                  GLXFBConfig glxFBConfig,
                                  GLXDrawable glxDrawable,
                                  GLXContext glxContext)
 {
-	struct client_gl_xlib_compositor *c =
-	    U_TYPED_CALLOC(struct client_gl_xlib_compositor);
+	gladLoadGL(glXGetProcAddress);
 
-	if (!client_gl_compositor_init(&c->base, xcfd, glXGetProcAddress)) {
+#define CHECK_REQUIRED_EXTENSION(EXT)                                                                                  \
+	do {                                                                                                           \
+		if (!GLAD_##EXT) {                                                                                     \
+			U_LOG_E("%s - Required OpenGL extension " #EXT " not available", __func__);                    \
+			return NULL;                                                                                   \
+		}                                                                                                      \
+	} while (0)
+
+	CHECK_REQUIRED_EXTENSION(GL_EXT_memory_object);
+#ifdef XRT_OS_LINUX
+	CHECK_REQUIRED_EXTENSION(GL_EXT_memory_object_fd);
+#endif
+
+#undef CHECK_REQUIRED_EXTENSION
+
+	struct client_gl_xlib_compositor *c = U_TYPED_CALLOC(struct client_gl_xlib_compositor);
+
+	if (!client_gl_compositor_init(&c->base, xcn, client_gl_memobj_swapchain_create, NULL)) {
 		free(c);
 		return NULL;
 	}

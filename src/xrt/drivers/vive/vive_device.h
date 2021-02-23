@@ -13,6 +13,9 @@
 #include "math/m_imu_3dof.h"
 #include "os/os_threading.h"
 #include "util/u_logging.h"
+#include "util/u_distortion_mesh.h"
+
+#include "vive_lighthouse.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -57,9 +60,14 @@ struct vive_device
 	struct xrt_device base;
 	struct os_hid_device *mainboard_dev;
 	struct os_hid_device *sensors_dev;
+	struct os_hid_device *watchman_dev;
+
+	struct lighthouse_watchman watchman;
+
 	enum VIVE_VARIANT variant;
 
 	struct os_thread_helper sensors_thread;
+	struct os_thread_helper watchman_thread;
 	struct os_thread_helper mainboard_thread;
 
 	struct lh_model lh;
@@ -134,11 +142,14 @@ struct vive_device
 		bool calibration;
 		bool last;
 	} gui;
+
+	struct u_vive_values distortion[2];
 };
 
 struct vive_device *
 vive_device_create(struct os_hid_device *mainboard_dev,
                    struct os_hid_device *sensors_dev,
+                   struct os_hid_device *watchman_dev,
                    enum VIVE_VARIANT variant);
 
 #ifdef __cplusplus

@@ -1,8 +1,18 @@
 # Monado - XR Runtime (XRT)
 
+<!--
+Copyright 2018-2020, Collabora, Ltd.
+SPDX-License-Identifier: CC-BY-4.0
+
+This must stay in sync with the last section!
+-->
+
+> * Main homepage and documentation: <https://monado.freedesktop.org/>
 > * Promotional homepage: <https://monado.dev>
 > * Maintained at <https://gitlab.freedesktop.org/monado/monado>
 > * Latest API documentation: <https://monado.pages.freedesktop.org/monado>
+> * Continuously-updated changelog of the default branch:
+>   <https://monado.pages.freedesktop.org/monado/md__c_h_a_n_g_e_l_o_g.html>
 
 Monado is an open source XR runtime delivering immersive experiences such as VR
 and AR on mobile, PC/desktop, and any other device
@@ -28,13 +38,13 @@ and aims to support other operating systems in the near future.
 
 Dependencies include:
 
-* [CMake][] 3.13 or newer (Note Ubuntu 18.04 only has 3.10)
-* Vulkan headers
+* [CMake][] 3.13 or newer (Note Ubuntu 18.04 only has 3.10) or meson >= 0.49
+* Vulkan headers and loader - Fedora package `vulkan-loader-devel`
 * OpenGL headers
 * Eigen3
-* glslangValidator - Debian/Ubuntu package `glslang-tools`.
+* glslangValidator - Debian/Ubuntu package `glslang-tools`, Fedora package `glslang`.
 * libusb
-* libudev
+* libudev - Fedora package `systemd-devel`
 * Video 4 Linux - Debian/Ubuntu package `libv4l-dev`.
 
 Optional (but recommended) dependencies:
@@ -53,6 +63,11 @@ Truly optional dependencies, useful for some drivers, app support, etc.:
 * ffmpeg
 * libjpeg
 
+Experimental Windows support requires the Vulkan SDK and also needs or works
+best with the following vcpkg packages installed:
+
+* pthreads eigen3 libusb hidapi zlib doxygen
+
 Tested distributions that are fully compatible,
 on Intel (Vulkan only) and AMD graphics (Vulkan and OpenGL):
 
@@ -60,6 +75,7 @@ on Intel (Vulkan only) and AMD graphics (Vulkan and OpenGL):
 * Debian 10 `buster`
   * Up-to-date package lists can be found in our CI config file,
     `.gitlab-ci.yml`
+* Archlinux
 
 These distributions include recent-enough versions of all the
 software to use direct mode,
@@ -69,10 +85,13 @@ package sources.
 See also [Status of DRM Leases][drm-lease]
 for more details on specific packages, versions, and commits.
 
-Due to the lack of a OpenGL extension: GL_EXT_memory_object_fd, only the AMD
+Due to the lack of a OpenGL extension: GL_EXT_memory_object_fd on Intel's
+OpenGL driver, only the AMD
 radeonsi driver and the proprietary NVIDIA driver will work for OpenGL OpenXR
 clients. This is due to a requirement of the Compositor. Support status of the
 extension can be found on the [mesamatrix website][mesamatrix-ext].
+
+### CMake
 
 Build process is similar to other CMake builds,
 so something like the following will build it.
@@ -117,18 +136,38 @@ make install
 
 Documentation can be browsed by opening `doc/html/index.html` in the build directory in a web browser.
 
+### Meson
+
+The build process is similar to other Meson builds.
+For a system wide installation requiring root privileges:
+
+```bash
+meson --prefix=/usr build
+ninja -C build install
+```
+
+For a local installation in ~/.local:
+
+```bash
+meson --prefix=~/.local -Dinstall-active-runtime=false build
+ninja -C build install
+```
+
+Note that the installation of the `active_runtime.json` file should be disabled for installations without
+root privileges because this file is always installed in meson's syconfdir (usually /etc).
+
 ## Getting started using OpenXR with Monado
 
 This implements the [OpenXR][] API,
 so to do anything with it, you'll need an application
 that uses OpenXR, along with the OpenXR loader.
 The OpenXR loader is a glue library that connects OpenXR applications to OpenXR runtimes such as Monado
-It determines which runtime to use by reading config file default `/usr/local/share/openxr/0/active_runtime.json`
+It determines which runtime to use by looking for the config file `active_runtime.json` (either a symlink to
+or a copy of a runtime manifest) in the usual XDG config paths
 and processes environment variables such as `XR_RUNTIME_JSON=/usr/share/openxr/0/openxr_monado.json`.
 It can also insert OpenXR API Layers without the application or the runtime having to do it.
 
-You can use the `hello_xr` sample provided with the
-OpenXR loader and API layers.
+You can use the `hello_xr` sample provided with the OpenXR SDK.
 
 The OpenXR loader can be pointed to a runtime json file in a nonstandard location with the environment variable `XR_RUNTIME_JSON`. Example:
 
@@ -136,33 +175,25 @@ The OpenXR loader can be pointed to a runtime json file in a nonstandard locatio
 XR_RUNTIME_JSON=~/monado/build/openxr_monado-dev.json ./openxr-example
 ```
 
-For this reason this runtime creates two manifest files within the build directory:
-
-* `openxr_monado.json` uses a relative path to the runtime, and is intended to be installed with `make install`.
-* `openxr_monado_dev.json` uses an absolute path to the runtime in its build directory,
-  and is intended to be used for development without installing the runtime.
-
-If Monado has been installed through a distribution package
-and provides the "active runtime" file /usr/local/share/openxr/0/active_runtime.json,
-then the loader will automatically use Monado when starting any OpenXR application.
-
-If Monado has been compiled in a custom directory like ~/monado/build,
-the OpenXR loader can be pointed to the runtime when starting an OpenXR application
-by setting the environment variable XR_RUNTIME_JSON to the `openxr_monado_dev.json` manifest
-that was generated by the build: see above.
+For ease of development Monado creates a runtime manifest file in its build directory using an absolute path to the
+Monado runtime in the build directory called `openxr_monado-dev.json`. Pointing `XR_RUNTIME_JSON` to this
+file allows using Monado after building, without installing.
 
 Note that the loader can always find and load the runtime
 if the path to the runtime library given in the json manifest is an absolute path,
 but if a relative path like `libopenxr_monado.so.0` is given,
 then `LD_LIBRARY_PATH` must include the directory that contains `libopenxr_monado.so.0`.
-The absolute path in `openxr_monado_dev.json` takes care of this for you.
+The absolute path in `openxr_monado-dev.json` takes care of this for you.
+
+Distribution packages for monado may provide the  "active runtime" file `/etc/xdg/openxr/1/active_runtime.json`.
+In this case the loader will automatically use Monado when starting an OpenXR application. This global configuration
+can be overridden on a per user basis by creating `~/.config/openxr/1/active_runtime.json`.
 
 ## Direct mode
 
-Our direct mode code requires a connected HMD to have the `non-desktop` xrandr
-property set to 1.
+On AMD and Intel GPUs our direct mode code requires a connected HMD to have
+the `non-desktop` xrandr property set to 1.
 Only the most common HMDs have the needed quirks added to the linux kernel.
-Just keep on reading for more info on how to work around that.
 
 If you know that your HMD lacks the quirk you can run this command **before** or
 after connecting the HMD and it will have it. Where `HDMI-A-0` is the xrandr
@@ -192,32 +223,6 @@ file with the following content:
 khronos_validation.debug_action = VK_DBG_LAYER_ACTION_LOG_MSG,VK_DBG_LAYER_ACTION_BREAK
 khronos_validation.report_flags = error,warn
 khronos_validation.log_filename = stdout
-```
-
-## Using libsurvive
-
-To enable the libsurvive driver, libsurvive has to be installed as a library with a pkgconfig file
-(https://github.com/cntools/libsurvive/pull/187).
-
-When starting any libsrvive or OpenXR application, libsurvive will run calibration and save
-configuration and calibration data in the current working directory.
-
-Make sure the HMD can see both basestations and is not moved during calibration.
-
-To remove libsurvive's calibration data (e.g. to force recalibration) delete the following
-files/directories:
-
-    rm -r *config.json calinfo
-
-Though working and somewhat usable, support for the libsurvive driver is **experimental**.
-Therefore with both meson and cmake, the survive driver has to be explicitly enabled with
-
-```
-#cmake
--DBUILD_WITH_LIBSURVIVE=On
-
-#meson
--Ddrivers=auto,survive
 ```
 
 ## Coding style and formatting
@@ -250,7 +255,12 @@ to just re-format your changes, in case version differences in tools result in o
 
 ## Contributing, Code of Conduct
 
-See `CONTRIBUTING.md` for details of contribution guidelines.
+See `CONTRIBUTING.md` for details of contribution guidelines. GitLab Issues and
+Merge Requests are the preferred wait to discuss problems, suggest enhancements,
+or submit changes for review. **In case of a security issue**, you should choose
+the "confidential" option when using the GitLab issues page. For highest
+security, you can send encrypted email (using GPG/OpenPGP) to Ryan Pavlik, with
+the address below and the associated key on <https://keys.openpgp.org>.
 
 Please note that this project is released with a Contributor Code of Conduct.
 By participating in this project you agree to abide by its terms.
@@ -271,7 +281,7 @@ reported by contacting:
 
 For this file only:
 
-> Copyright 2018-2019 Collabora, Ltd.
+> Copyright 2018-2020, Collabora, Ltd.
 > Code of Conduct section: excerpt adapted from the [Contributor Covenant](https://www.contributor-covenant.org), version 1.4.1,
 > available at <https://www.contributor-covenant.org/version/1/4/code-of-conduct.html>,
 > and from the freedesktop.org-specific version of that code,
@@ -279,3 +289,5 @@ For this file only:
 >
 >
 > SPDX-License-Identifier: CC-BY-4.0
+
+<!-- This must stay in sync with the comment at the start! -->

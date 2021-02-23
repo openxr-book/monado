@@ -26,6 +26,10 @@
 #include "ohmd/oh_interface.h"
 #endif
 
+#ifdef XRT_BUILD_DRIVER_HANDTRACKING
+#include "ht/ht_interface.h"
+#endif
+
 #ifdef XRT_BUILD_DRIVER_NS
 #include "north_star/ns_interface.h"
 #endif
@@ -52,6 +56,14 @@
 
 #ifdef XRT_BUILD_DRIVER_DAYDREAM
 #include "daydream/daydream_interface.h"
+#endif
+
+#ifdef XRT_BUILD_DRIVER_ANDROID
+#include "android/android_prober.h"
+#endif
+
+#ifdef XRT_BUILD_DRIVER_ILLIXR
+#include "illixr/illixr_interface.h"
 #endif
 
 /*!
@@ -95,10 +107,8 @@ struct xrt_prober_entry target_entry_list[] = {
     {HTC_VID, VIVE_PID, vive_found, "HTC Vive"},
     {HTC_VID, VIVE_PRO_MAINBOARD_PID, vive_found, "HTC Vive Pro"},
     {VALVE_VID, VIVE_PRO_LHR_PID, vive_found, "Valve Index"},
-    {VALVE_VID, VIVE_WATCHMAN_DONGLE, vive_controller_found,
-     "HTC Vive Watchman Wireless Device"},
-    {VALVE_VID, VIVE_WATCHMAN_DONGLE_GEN2, vive_controller_found,
-     "Valve Watchman Wireless Device"},
+    {VALVE_VID, VIVE_WATCHMAN_DONGLE, vive_controller_found, "HTC Vive Watchman Wireless Device"},
+    {VALVE_VID, VIVE_WATCHMAN_DONGLE_GEN2, vive_controller_found, "Valve Watchman Wireless Device"},
 #endif
 
     {0x0000, 0x0000, NULL, NULL}, // Terminate
@@ -129,9 +139,21 @@ xrt_auto_prober_creator target_auto_list[] = {
     oh_create_auto_prober,
 #endif
 
+#ifdef XRT_BUILD_DRIVER_HANDTRACKING
+    ht_create_auto_prober,
+#endif
+
 #ifdef XRT_BUILD_DRIVER_NS
     // North star driver here for now.
     ns_create_auto_prober,
+#endif
+
+#ifdef XRT_BUILD_DRIVER_ANDROID
+    android_create_auto_prober,
+#endif
+
+#ifdef XRT_BUILD_DRIVER_ILLIXR
+    illixr_create_auto_prober,
 #endif
 
 #ifdef XRT_BUILD_DRIVER_DUMMY
