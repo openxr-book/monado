@@ -86,11 +86,14 @@ init_epoll(struct ipc_server_mainloop *ml)
 static void
 handle_listen(struct ipc_server *vs, struct ipc_server_mainloop *ml)
 {
+	U_LOG_I("in handle_listen()");
 	int newfd = 0;
 	pthread_mutex_lock(&ml->accept_mutex);
 	if (read(ml->pipe_read, &newfd, sizeof(newfd)) == sizeof(newfd)) {
 		// client_push_mutex should prevent dropping acknowledgements
 		assert(ml->last_accepted_fd == 0);
+
+		U_LOG_I("handle_listen() accepted fd %d", newfd);
 		// Release the thread that gave us this fd.
 		ml->last_accepted_fd = newfd;
 		ipc_server_start_client_listener_thread(vs, newfd);
@@ -137,6 +140,7 @@ ipc_server_mainloop_poll(struct ipc_server *vs, struct ipc_server_mainloop *ml)
 int
 ipc_server_mainloop_init(struct ipc_server_mainloop *ml)
 {
+	U_LOG_I("in ipc_server_mainloop_init()");
 	int ret = init_pipe(ml);
 	if (ret < 0) {
 		ipc_server_mainloop_deinit(ml);
@@ -155,6 +159,7 @@ ipc_server_mainloop_init(struct ipc_server_mainloop *ml)
 void
 ipc_server_mainloop_deinit(struct ipc_server_mainloop *ml)
 {
+	U_LOG_I("in ipc_server_mainloop_deinit()");
 	if (ml == NULL) {
 		return;
 	}
@@ -180,6 +185,7 @@ ipc_server_mainloop_deinit(struct ipc_server_mainloop *ml)
 int
 ipc_server_mainloop_add_fd(struct ipc_server *vs, struct ipc_server_mainloop *ml, int newfd)
 {
+	U_LOG_I("ipc_server_mainloop_add_fd()");
 	// Take the client push lock here, serializing clients attempting to connect.
 	// This one won't be unlocked when waiting on the condition variable, ensuring we keep other clients out.
 	pthread_mutex_lock(&ml->client_push_mutex);
@@ -194,6 +200,7 @@ ipc_server_mainloop_add_fd(struct ipc_server *vs, struct ipc_server_mainloop *ml
 		goto exit;
 	}
 
+	U_LOG_I("ipc_server_mainloop_add_fd() wrote to pipe, awaiting acceptance");
 	// Normal looping on the condition variable's condition.
 	while (ml->last_accepted_fd != newfd && ml->last_accepted_fd != SHUTTING_DOWN) {
 		ret = pthread_cond_wait(&ml->accept_cond, &ml->accept_mutex);
@@ -207,6 +214,7 @@ ipc_server_mainloop_add_fd(struct ipc_server *vs, struct ipc_server_mainloop *ml
 		U_LOG_W("server was shutting down.");
 		ret = -1;
 	} else {
+		U_LOG_I("ipc_server_mainloop_add_fd() accepted");
 		// OK, we have now been accepted. Zero out the last accepted fd.
 		ml->last_accepted_fd = 0;
 		ret = 0;
