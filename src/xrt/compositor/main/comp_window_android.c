@@ -136,9 +136,11 @@ comp_window_android_init_swapchain(struct comp_target *ct, uint32_t width, uint3
 
 	if (android_globals_get_activity() != NULL) {
 		/* In process: Creating surface from activity */
+		COMP_INFO(cwa->base.base.c, "We have an activity, so assuming in-process.");
 		window = _create_android_window(cwa);
 	} else {
 		/* Out of process: Getting cached surface */
+		COMP_INFO(cwa->base.base.c, "No activity, so assuming out-of-process.");
 		window = (struct ANativeWindow *)android_globals_get_window();
 	}
 
