@@ -11,6 +11,7 @@
 
 #include "xrt/xrt_compiler.h"
 #include "xrt/xrt_defines.h"
+#include "xrt/xrt_android.h"
 
 
 #ifdef __cplusplus
@@ -61,7 +62,7 @@ struct xrt_instance
 	/*!
 	 * @name Interface Methods
 	 *
-	 * All implementations of the xrt_instance implementation must
+	 * All implementations of the xrt_instance interface must
 	 * populate all these function pointers with their implementation
 	 * methods. To use this interface, see the helper functions.
 	 * @{
@@ -122,6 +123,15 @@ struct xrt_instance
 	struct xrt_instance_info instance_info;
 
 	uint64_t startup_timestamp;
+
+#ifdef XRT_OS_ANDROID
+	/*!
+	 * An extension of the xrt_instance interface used only on Android.
+	 *
+	 * @see xrt_instance_android
+	 */
+	struct xrt_instance_android android_instance;
+#endif // XRT_OS_ANDROID
 };
 
 /*!
