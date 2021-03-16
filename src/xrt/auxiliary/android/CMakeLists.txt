@@ -21,6 +21,8 @@ add_library(
 	android_load_class.hpp
 	android_looper.cpp
 	android_looper.h
+	android_surface_callbacks.cpp
+	android_surface_callbacks.h
 	org.freedesktop.monado.auxiliary.cpp
 	org.freedesktop.monado.auxiliary.hpp
 	org.freedesktop.monado.auxiliary.impl.hpp
