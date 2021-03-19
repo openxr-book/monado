@@ -35,8 +35,8 @@ Build-Depends: debhelper-compat (= 12),
                markdown <!nodoc>,
                pkg-config
 Standards-Version: 4.5.1
-Vcs-Browser: https://gitlab.freedesktop.org/monado/monado/-/tree/ubuntu/focal
-Vcs-Git: https://gitlab.freedesktop.org/monado/monado.git -b ubuntu/focal
+Vcs-Browser: https://gitlab.freedesktop.org/monado/monado/-/tree/ubuntu/groovy
+Vcs-Git: https://gitlab.freedesktop.org/monado/monado.git -b ubuntu/groovy
 Homepage: https://monado.freedesktop.org/
 Rules-Requires-Root: no
 

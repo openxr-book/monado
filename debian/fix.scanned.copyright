@@ -3,3 +3,5 @@
 
 ! Files:~/.*imstb_.*/ License short_name=~"s/and\/or/or/"
 
+# Some code accidentally tagged from the future.
+! Files:~/.*/ Copyright=~"s/2021, 2029/2021/"

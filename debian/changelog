@@ -1,9 +1,9 @@
-monado (21.0.0~dfsg1-1~ubuntu20.04~ppa20210223) focal; urgency=medium
+monado (21.0.0~dfsg1-1~ubuntu20.10~ppa20210319) groovy; urgency=medium
 
-  * Rebuild for Ubuntu Focal.
-  * Re-enable -Wl,--as-needed for focal
+  * Rebuild for Ubuntu Groovy.
+  * Re-enable -Wl,--as-needed for groovy.
 
- -- Ryan Pavlik <ryan@ryanpavlik.com>  Tue, 23 Feb 2021 13:42:43 -0600
+ -- Ryan Pavlik <ryan@ryanpavlik.com>  Fri, 19 Mar 2021 09:30:05 -0500
 
 monado (21.0.0~dfsg1-1) unstable; urgency=medium
 
@@ -38,12 +38,6 @@ monado (0.3.0-2) experimental; urgency=medium
     - Adds a new binary package, monado-service, on Linux.
 
  -- Ryan Pavlik <ryan@ryanpavlik.com>  Tue, 14 Jul 2020 16:01:24 -0500
-
-monado (0.3.0-1~ubuntu20.04~ppa20200710) focal; urgency=medium
-
-  * Rebuild for Ubuntu Focal.
-
- -- Ryan Pavlik <ryan@ryanpavlik.com>  Fri, 10 Jul 2020 17:04:11 -0500
 
 monado (0.3.0-1) unstable; urgency=medium
 

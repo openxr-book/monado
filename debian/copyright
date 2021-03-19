@@ -1,8 +1,9 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: monado
 Source: <https://gitlab.freedesktop.org/monado/monado>
-Copyright: 2018-2021, Collabora, Ltd.
-License: BSL-1.0
+Comment: Exclude these bitmap icons, unused anyway.
+Files-Excluded:
+ src/xrt/targets/steamvr_drv/resources/icons
 
 Files: *
 Copyright: 2018-2020, Collabora, Ltd.
