@@ -49,6 +49,7 @@
 #ifdef XRT_OS_ANDROID
 #include "android/android_globals.h"
 #include "android/ipc_client_android.h"
+#include "android/android_instance_base.h"
 #endif // XRT_OS_ANDROID
 
 DEBUG_GET_ONCE_LOG_OPTION(ipc_log, "IPC_LOG", U_LOGGING_WARN)
@@ -75,6 +76,10 @@ struct ipc_client_instance
 
 	struct xrt_device *xdevs[XRT_SYSTEM_MAX_DEVICES];
 	size_t xdev_count;
+
+#ifdef XRT_OS_ANDROID
+	struct android_instance_base android;
+#endif
 };
 
 static inline struct ipc_client_instance *
@@ -399,6 +404,7 @@ ipc_client_instance_destroy(struct xrt_instance *xinst)
 	os_mutex_destroy(&ii->ipc_c.mutex);
 
 #ifdef XRT_OS_ANDROID
+	android_instance_base_cleanup(&(ii->android));
 	ipc_client_android_destroy(&(ii->ipc_c.ica));
 #endif
 
@@ -428,6 +434,16 @@ ipc_instance_create(struct xrt_instance_info *i_info, struct xrt_instance **out_
 	ii->ipc_c.imc.ipc_handle = XRT_IPC_HANDLE_INVALID;
 	ii->ipc_c.ism_handle = XRT_SHMEM_HANDLE_INVALID;
 
+#ifdef XRT_OS_ANDROID
+	int ret = android_instance_base_init(&ii->android, &ii->base, android_globals_get_vm(),
+	                                     android_globals_get_activity());
+	if (ret < 0) {
+		free(ii);
+		return ret;
+	}
+	ii->base.android_instance = &(ii->android.base);
+#endif
+
 	os_mutex_init(&ii->ipc_c.mutex);
 
 	if (!ipc_connect(&ii->ipc_c)) {
@@ -442,16 +458,14 @@ ipc_instance_create(struct xrt_instance_info *i_info, struct xrt_instance **out_
 		          "\"build-dir/src/xrt/targets/service/monado-service\"\n"
 		          "#\n"
 		          "###");
-		free(ii);
-		return XRT_ERROR_IPC_FAILURE;
+		goto cleanup;
 	}
 
 	// get our xdev shm from the server and mmap it
 	xrt_result_t xret = ipc_call_instance_get_shm_fd(&ii->ipc_c, &ii->ipc_c.ism_handle, 1);
 	if (xret != XRT_SUCCESS) {
 		IPC_ERROR((&ii->ipc_c), "Failed to retrieve shm fd!");
-		free(ii);
-		return xret;
+		goto cleanup;
 	}
 
 	struct ipc_app_state desc = {0};
@@ -461,8 +475,7 @@ ipc_instance_create(struct xrt_instance_info *i_info, struct xrt_instance **out_
 	xret = ipc_call_system_set_client_info(&ii->ipc_c, &desc);
 	if (xret != XRT_SUCCESS) {
 		IPC_ERROR((&ii->ipc_c), "Failed to set instance info!");
-		free(ii);
-		return xret;
+		goto cleanup;
 	}
 
 	const size_t size = sizeof(struct ipc_shared_memory);
@@ -486,8 +499,7 @@ ipc_instance_create(struct xrt_instance_info *i_info, struct xrt_instance **out_
 		          ii->ipc_c.ism->u_git_tag);
 		if (!debug_get_bool_option_ipc_ignore_version()) {
 			IPC_ERROR((&ii->ipc_c), "Set IPC_IGNORE_VERSION=1 to ignore this version conflict");
-			free(ii);
-			return XRT_ERROR_IPC_FAILURE;
+			goto cleanup;
 		}
 	}
 
@@ -533,4 +545,11 @@ ipc_instance_create(struct xrt_instance_info *i_info, struct xrt_instance **out_
 	*out_xinst = &ii->base;
 
 	return XRT_SUCCESS;
+
+cleanup:
+#ifdef XRT_OS_ANDROID
+	android_instance_base_cleanup(&(ii->android));
+#endif
+	free(ii);
+	return XRT_ERROR_IPC_FAILURE;
 }
