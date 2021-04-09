@@ -10,6 +10,7 @@
  */
 
 #include "xrt/xrt_compiler.h"
+#include "xrt/xrt_config_build.h"
 
 #include "util/u_misc.h"
 
@@ -59,10 +60,30 @@ get_vk(struct comp_window_android *cwa)
 }
 
 static bool
-comp_window_android_init(struct comp_target *ct)
+comp_window_android_init_pre_vulkan(struct comp_target *ct)
 {
+#ifdef XRT_FEATURE_SERVICE
 	(void)ct;
+#else
+	struct comp_window_android *cwa = (struct comp_window_android *)ct;
 
+	if (android_globals_get_activity() == NULL) {
+		COMP_ERROR(cwa->base.base.c,
+		           "comp_window_android_init_pre_vulkan: could not "
+		           "find our activity to attach the custom surface");
+		return false;
+	}
+
+	cwa->custom_surface =
+	    android_custom_surface_async_start(android_globals_get_vm(), android_globals_get_activity());
+	if (cwa->custom_surface == NULL) {
+		COMP_ERROR(cwa->base.base.c,
+		           "comp_window_android_init_pre_vulkan: could not "
+		           "start asynchronous attachment of our custom surface");
+		return false;
+	}
+
+#endif
 	return true;
 }
 
@@ -82,21 +103,6 @@ static void
 comp_window_android_update_window_title(struct comp_target *ct, const char *title)
 {
 	(void)ct;
-}
-
-static struct ANativeWindow *
-_create_android_window(struct comp_window_android *cwa)
-{
-	cwa->custom_surface =
-	    android_custom_surface_async_start(android_globals_get_vm(), android_globals_get_activity());
-	if (cwa->custom_surface == NULL) {
-		COMP_ERROR(cwa->base.base.c,
-		           "comp_window_android_create_surface: could not "
-		           "start asynchronous attachment of our custom surface");
-		return NULL;
-	}
-
-	return android_custom_surface_wait_get_surface(cwa->custom_surface, 2000);
 }
 
 static VkResult
@@ -127,20 +133,17 @@ comp_window_android_create_surface(struct comp_window_android *cwa,
 }
 
 static bool
-comp_window_android_init_swapchain(struct comp_target *ct, uint32_t width, uint32_t height)
+comp_window_android_init_post_vulkan(struct comp_target *ct, uint32_t width, uint32_t height)
 {
 	struct comp_window_android *cwa = (struct comp_window_android *)ct;
 	VkResult ret;
 
-	struct ANativeWindow *window = NULL;
-
-	if (android_globals_get_activity() != NULL) {
-		/* In process: Creating surface from activity */
-		window = _create_android_window(cwa);
-	} else {
-		/* Out of process: Getting cached surface */
-		window = (struct ANativeWindow *)android_globals_get_window();
-	}
+#ifdef XRT_FEATURE_SERVICE
+	/* Out of process: Getting cached surface */
+	ANativeWindow *window = (ANativeWindow *)android_globals_get_window();
+#else
+	ANativeWindow *window = android_custom_surface_wait_get_surface(cwa->custom_surface, 2000);
+#endif
 
 	if (window == NULL) {
 		COMP_ERROR(cwa->base.base.c, "could not get ANativeWindow");
@@ -173,8 +176,8 @@ comp_window_android_create(struct comp_compositor *c)
 	w->base.base.name = "Android";
 	w->base.base.destroy = comp_window_android_destroy;
 	w->base.base.flush = comp_window_android_flush;
-	w->base.base.init_pre_vulkan = comp_window_android_init;
-	w->base.base.init_post_vulkan = comp_window_android_init_swapchain;
+	w->base.base.init_pre_vulkan = comp_window_android_init_pre_vulkan;
+	w->base.base.init_post_vulkan = comp_window_android_init_post_vulkan;
 	w->base.base.set_title = comp_window_android_update_window_title;
 	w->base.base.c = c;
 
