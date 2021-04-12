@@ -1,4 +1,4 @@
-// Copyright 2020, Collabora, Ltd.
+// Copyright 2020-2021, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -18,8 +18,8 @@ namespace org::freedesktop::monado::ipc {
 	      markAsDiscardedByNative(classRef().getMethod("markAsDiscardedByNative", "()V")),
 	      blockingConnect(classRef().getMethod("blockingConnect", "(Landroid/content/Context;Ljava/lang/String;)I"))
 	{}
-	IMonado::Meta::Meta(jni::jclass clazz)
-	    : MetaBase(IMonado::getTypeName(), clazz),
+	IMonado::Meta::Meta()
+	    : MetaBase(IMonado::getTypeName()),
 	      passAppSurface(classRef().getMethod("passAppSurface", "(Landroid/view/Surface;)V"))
 	{}
 } // namespace org::freedesktop::monado::ipc
