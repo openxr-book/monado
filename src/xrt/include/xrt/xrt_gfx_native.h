@@ -9,12 +9,15 @@
 
 #pragma once
 
-#include "xrt/xrt_device.h"
-#include "xrt/xrt_compositor.h"
+#include "xrt/xrt_results.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+struct xrt_instance;
+struct xrt_device;
+struct xrt_system_compositor;
 
 /*!
  * Creates the main system compositor (and its nested native compositor).
@@ -23,7 +26,9 @@ extern "C" {
  * @relates xrt_system_compositor
  */
 xrt_result_t
-xrt_gfx_provider_create_system(struct xrt_device *xdev, struct xrt_system_compositor **out_xsysc);
+xrt_gfx_provider_create_system(struct xrt_instance *xinst,
+                               struct xrt_device *xdev,
+                               struct xrt_system_compositor **out_xsysc);
 
 
 #ifdef __cplusplus

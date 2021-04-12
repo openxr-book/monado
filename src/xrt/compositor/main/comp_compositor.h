@@ -80,6 +80,9 @@ struct comp_compositor
 	//! The settings.
 	struct comp_settings settings;
 
+	//! The instance we were created by
+	struct xrt_instance *xinst;
+
 	//! The device we are displaying to.
 	struct xrt_device *xdev;
 
