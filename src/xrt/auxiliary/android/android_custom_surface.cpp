@@ -9,6 +9,7 @@
  */
 
 #include "android_custom_surface.h"
+#include "android_surface_callbacks.h"
 #include "android_load_class.hpp"
 
 #include "xrt/xrt_config_android.h"
@@ -23,6 +24,7 @@
 
 
 using wrap::android::app::Activity;
+using wrap::android::view::Surface;
 using wrap::android::content::Context;
 using wrap::android::view::SurfaceHolder;
 using wrap::org::freedesktop::monado::auxiliary::MonadoView;
@@ -36,6 +38,7 @@ struct android_custom_surface
 	Activity activity{};
 	MonadoView monadoView{};
 	jni::Class monadoViewClass{};
+	struct android_surface_callbacks *asc;
 };
 
 
@@ -43,6 +46,7 @@ android_custom_surface::android_custom_surface(jobject act) : activity(act) {}
 
 android_custom_surface::~android_custom_surface()
 {
+	android_surface_callbacks_destroy(&asc);
 	// Tell Java that native code is done with this.
 	try {
 		if (!monadoView.isNull()) {
@@ -52,6 +56,38 @@ android_custom_surface::~android_custom_surface()
 		// Must catch and ignore any exceptions in the destructor!
 		U_LOG_E("Failure while marking MonadoView as discarded: %s", e.what());
 	}
+}
+
+constexpr auto FULLY_QUALIFIED_CLASSNAME = "org.freedesktop.monado.auxiliary.MonadoView";
+
+extern "C" JNIEXPORT void JNICALL
+Java_org_freedesktop_monado_auxiliary_MonadoView_surfaceCreatedNative(JNIEnv *env, jobject thiz, jobject surface_holder)
+{
+	jni::init(env);
+	auto holder = SurfaceHolder{surface_holder};
+	Surface surface = holder.getSurface();
+
+	ANativeWindow *nativeWindow = ANativeWindow_fromSurface(env, surface.object().getHandle());
+	auto custom_surface = static_cast<android_custom_surface *>(MonadoView{thiz}.getNativePointer());
+	int callbacks = android_surface_callbacks_invoke(custom_surface->asc, (struct _ANativeWindow *)nativeWindow,
+	                                                 XRT_ANDROID_SURFACE_EVENT_ACQUIRED);
+	U_LOG_W("Told %d callbacks about acquiring a surface", callbacks);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_org_freedesktop_monado_auxiliary_MonadoView_surfaceDestroyedNative(JNIEnv *env,
+                                                                        jobject thiz,
+                                                                        jobject surface_holder)
+{
+	jni::init(env);
+	auto holder = SurfaceHolder{surface_holder};
+	Surface surface = holder.getSurface();
+
+	ANativeWindow *nativeWindow = ANativeWindow_fromSurface(env, surface.object().getHandle());
+	auto custom_surface = static_cast<android_custom_surface *>(MonadoView{thiz}.getNativePointer());
+	int callbacks = android_surface_callbacks_invoke(custom_surface->asc, (struct _ANativeWindow *)nativeWindow,
+	                                                 XRT_ANDROID_SURFACE_EVENT_LOST);
+	U_LOG_W("Told %d callbacks about losing a surface", callbacks);
 }
 
 struct android_custom_surface *
@@ -88,13 +124,12 @@ android_custom_surface_async_start(struct _JavaVM *vm, void *activity)
 
 		ret->monadoView = MonadoView::attachToActivity(ret->activity, ret.get());
 
+		//! @todo instance?
+		ret->asc = android_surface_callbacks_create(nullptr);
 		return ret.release();
 	} catch (std::exception const &e) {
 
-		U_LOG_E(
-		    "Could not start attaching our custom surface to activity: "
-		    "%s",
-		    e.what());
+		U_LOG_E("Could not start attaching our custom surface to activity: %s", e.what());
 		return nullptr;
 	}
 }
@@ -123,10 +158,7 @@ android_custom_surface_wait_get_surface(struct android_custom_surface *custom_su
 
 	} catch (std::exception const &e) {
 		// do nothing right now.
-		U_LOG_E(
-		    "Could not wait for our custom surface: "
-		    "%s",
-		    e.what());
+		U_LOG_E("Could not wait for our custom surface: %s", e.what());
 		return nullptr;
 	}
 
@@ -178,4 +210,21 @@ android_custom_surface_get_display_metrics(struct _JavaVM *vm,
 		U_LOG_E("Could not get display metrics: %s", e.what());
 		return false;
 	}
+}
+int
+android_custom_surface_register_callback(struct android_custom_surface *custom_surface,
+                                         xrt_android_surface_event_handler_t callback,
+                                         enum xrt_android_surface_event event_mask,
+                                         void *userdata)
+{
+	return android_surface_callbacks_register_callback(custom_surface->asc, callback, event_mask, userdata);
+}
+
+int
+android_custom_surface_remove_callback(struct android_custom_surface *custom_surface,
+                                       xrt_android_surface_event_handler_t callback,
+                                       enum xrt_android_surface_event event_mask,
+                                       void *userdata)
+{
+	return android_surface_callbacks_remove_callback(custom_surface->asc, callback, event_mask, userdata);
 }
