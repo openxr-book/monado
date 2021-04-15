@@ -1,9 +1,15 @@
-monado (21.0.0~dfsg1-1~ubuntu20.10~ppa20210319) groovy; urgency=medium
+monado (21.0.0~dfsg1-2~ubuntu20.10~ppa20210319) groovy; urgency=medium
 
   * Rebuild for Ubuntu Groovy.
   * Re-enable -Wl,--as-needed for groovy.
 
  -- Ryan Pavlik <ryan@ryanpavlik.com>  Fri, 19 Mar 2021 09:30:05 -0500
+
+monado (21.0.0~dfsg1-2) UNRELEASED; urgency=medium
+
+  * d/control: Add Build-Depends on libbsd-dev for pidfile support when building service.
+
+ -- Ryan Pavlik <ryan@ryanpavlik.com>  Thu, 15 Apr 2021 16:58:33 -0500
 
 monado (21.0.0~dfsg1-1) unstable; urgency=medium
 
