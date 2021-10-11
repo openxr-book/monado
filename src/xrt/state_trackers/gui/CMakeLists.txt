@@ -1,4 +1,4 @@
-# Copyright 2019-2020, Collabora, Ltd.
+# Copyright 2019-2021, Collabora, Ltd.
 # SPDX-License-Identifier: BSL-1.0
 
 # c-imgui doesn't do well with IPO - lots of warnings.
@@ -13,8 +13,13 @@ set(GUI_SOURCE_FILES
 	gui_scene_calibrate.c
 	gui_scene_debug.c
 	gui_scene_main_menu.c
+	gui_scene_record.c
 	gui_scene_remote.c
 	gui_scene_video.c
+	gui_scene_tracking_overrides.c
+	gui_stb.c
+	gui_window_record.c
+	gui_window_record.h
 	../../../external/imgui/imgui/cimgui.cpp
 	../../../external/imgui/imgui/cimgui.h
 	../../../external/imgui/imgui/cimplot.cpp
@@ -30,6 +35,7 @@ set(GUI_SOURCE_FILES
 	../../../external/imgui/imgui/imgui_widgets.cpp
 	../../../external/imgui/imgui/implot.cpp
 	../../../external/imgui/imgui/implot.h
+	../../../external/imgui/imgui/implot_demo.cpp
 	../../../external/imgui/imgui/implot_internal.h
 	../../../external/imgui/imgui/implot_items.cpp
 	../../../external/imgui/imgui/imstb_rectpack.h
@@ -44,6 +50,7 @@ add_library(st_gui STATIC
 
 target_link_libraries(st_gui PRIVATE
 	xrt-external-glad
+	xrt-external-stb
 	aux_util
 	aux_os
 	)
@@ -55,6 +62,18 @@ target_include_directories(st_gui PUBLIC
 target_compile_definitions(st_gui PUBLIC
 	CIMGUI_NO_EXPORT
 	)
+
+if(XRT_HAVE_GST)
+	target_link_libraries(st_gui PRIVATE
+		aux_gstreamer
+		)
+endif()
+
+if(XRT_BUILD_DRIVER_DEPTHAI)
+    target_link_libraries(st_gui PRIVATE
+        drv_depthai
+        )
+endif()
 
 if(XRT_BUILD_DRIVER_REMOTE)
 	target_link_libraries(st_gui PRIVATE

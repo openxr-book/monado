@@ -16,13 +16,15 @@
 
 #include <memory>
 
+using xrt::auxiliary::tracking::SimpleIMUFusion;
+using namespace xrt::auxiliary::math;
 
 struct imu_fusion
 {
 public:
 	uint64_t time_ns{0};
 
-	xrt_fusion::SimpleIMUFusion simple_fusion;
+	SimpleIMUFusion simple_fusion;
 
 
 public:

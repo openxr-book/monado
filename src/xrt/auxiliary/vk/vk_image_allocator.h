@@ -19,7 +19,7 @@ extern "C" {
 
 
 /*!
- * @ingroup aux_vk
+ * @addtogroup aux_vk
  * @{
  */
 
@@ -28,6 +28,7 @@ struct vk_image
 	VkImage handle;
 	VkDeviceMemory memory;
 	VkDeviceSize size;
+	bool use_dedicated_allocation;
 };
 
 struct vk_image_collection

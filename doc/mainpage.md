@@ -1,7 +1,7 @@
 # Monado
 
 <!--
-Copyright 2018-2020, Collabora, Ltd. and the Monado contributors
+Copyright 2018-2021, Collabora, Ltd. and the Monado contributors
 SPDX-License-Identifier: BSL-1.0
 -->
 
@@ -11,12 +11,17 @@ getting started information and general documentation.
 
 ## Useful pages
 
-* @ref md_CHANGELOG - If this is the web version of the docs, the changelog
-also includes a section for changes that have not yet been in a tagged
-release.
-* @ref md_targets
+* @ref CHANGELOG - If this is the web version of the docs, the changelog also
+  includes a section for changes that have not yet been in a tagged release.
+* @ref conventions
+* @ref understanding-targets - How all the pieces (`xrt_instance`, IPC, OpenXR)
+  fit together.
 * @ref vulkan-extensions
-* @ref md_writing-a-new-driver (**not complete**)
+* @ref writing-driver (**not complete**)
+* @ref ipc-design
+* @ref frame-timing
+* @ref tracing
+* @ref implementing-extension
 
 ## Source layout
 

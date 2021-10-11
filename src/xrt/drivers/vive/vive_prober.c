@@ -11,10 +11,15 @@
 
 
 #include "util/u_debug.h"
+#include "util/u_trace_marker.h"
 
 #include "vive_device.h"
 #include "vive_controller.h"
 #include "vive_prober.h"
+
+#include "../ht/ht_interface.h"
+#include "../multi_wrapper/multi.h"
+#include "xrt/xrt_config_drivers.h"
 
 static const char VIVE_PRODUCT_STRING[] = "HTC Vive";
 static const char VIVE_PRO_PRODUCT_STRING[] = "VIVE Pro";
@@ -23,6 +28,10 @@ static const char VALVE_INDEX_MANUFACTURER_STRING[] = "Valve";
 static const char VIVE_MANUFACTURER_STRING[] = "HTC";
 
 DEBUG_GET_ONCE_LOG_OPTION(vive_log, "VIVE_LOG", U_LOGGING_WARN)
+
+#ifdef XRT_BUILD_DRIVER_HANDTRACKING
+DEBUG_GET_ONCE_BOOL_OPTION(vive_use_handtracking, "VIVE_USE_HANDTRACKING", false)
+#endif
 
 static int
 log_vive_string(struct xrt_prober *xp, struct xrt_prober_device *dev, enum xrt_prober_string type)
@@ -129,6 +138,8 @@ init_vive_pro(struct xrt_prober *xp,
               enum u_logging_level ll,
               struct xrt_device **out_xdev)
 {
+	XRT_TRACE_MARKER();
+
 	log_vive_device(ll, xp, dev);
 
 	if (!xrt_prober_match_string(xp, dev, XRT_PROBER_STRING_MANUFACTURER, VIVE_MANUFACTURER_STRING) ||
@@ -199,8 +210,10 @@ init_valve_index(struct xrt_prober *xp,
                  struct xrt_prober_device **devices,
                  size_t num_devices,
                  enum u_logging_level ll,
-                 struct xrt_device **out_xdev)
+                 struct xrt_device **out_xdevs)
 {
+	XRT_TRACE_MARKER();
+
 	log_vive_device(ll, xp, dev);
 
 	if (!xrt_prober_match_string(xp, dev, XRT_PROBER_STRING_MANUFACTURER, VALVE_INDEX_MANUFACTURER_STRING) ||
@@ -239,9 +252,32 @@ init_valve_index(struct xrt_prober *xp,
 		return -1;
 	}
 
-	*out_xdev = &d->base;
+	int out_idx = 0;
 
-	return 1;
+	out_xdevs[out_idx++] = &d->base;
+
+#ifdef XRT_BUILD_DRIVER_HANDTRACKING
+	if (debug_get_bool_option_vive_use_handtracking()) {
+		struct t_stereo_camera_calibration *cal = NULL;
+
+		struct xrt_pose head_in_left_cam;
+		// vive_get_stereo_camera_calibration(&ss->hmd->hmd.config, &cal, &head_in_left_cam);
+		vive_get_stereo_camera_calibration(&d->config, &cal, &head_in_left_cam);
+
+		struct xrt_device *ht = ht_device_create(xp, cal);
+		if (ht != NULL) { // Returns NULL if there's a problem and the hand tracker can't start. By no means a
+			          // fatal error.
+			struct xrt_device *wrap =
+			    multi_create_tracking_override(XRT_TRACKING_OVERRIDE_ATTACHED, ht, &d->base,
+			                                   XRT_INPUT_GENERIC_HEAD_POSE, &head_in_left_cam);
+			out_xdevs[out_idx++] = wrap;
+		}
+		// Don't need it anymore. And it's not even created unless we hit this codepath, which is somewhat hard.
+		t_stereo_camera_calibration_reference(&cal, NULL);
+	}
+#endif
+
+	return out_idx;
 }
 
 int
@@ -252,6 +288,8 @@ vive_found(struct xrt_prober *xp,
            cJSON *attached_data,
            struct xrt_device **out_xdev)
 {
+	XRT_TRACE_MARKER();
+
 	struct xrt_prober_device *dev = devices[index];
 
 	enum u_logging_level ll = debug_get_log_option_vive_log();
@@ -281,6 +319,8 @@ vive_controller_found(struct xrt_prober *xp,
                       cJSON *attached_data,
                       struct xrt_device **out_xdevs)
 {
+	XRT_TRACE_MARKER();
+
 	struct xrt_prober_device *dev = devices[index];
 	int ret;
 

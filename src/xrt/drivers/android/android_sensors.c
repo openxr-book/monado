@@ -170,29 +170,12 @@ android_device_get_tracked_pose(struct xrt_device *xdev,
 
 static void
 android_device_get_view_pose(struct xrt_device *xdev,
-                             struct xrt_vec3 *eye_relation,
+                             const struct xrt_vec3 *eye_relation,
                              uint32_t view_index,
                              struct xrt_pose *out_pose)
 {
-	struct xrt_pose pose = {{0.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 0.0f}};
-	bool adjust = view_index == 0;
-
-	pose.position.x = eye_relation->x / 2.0f;
-	pose.position.y = eye_relation->y / 2.0f;
-	pose.position.z = eye_relation->z / 2.0f;
-
-	// Adjust for left/right while also making sure there aren't any -0.f.
-	if (pose.position.x > 0.0f && adjust) {
-		pose.position.x = -pose.position.x;
-	}
-	if (pose.position.y > 0.0f && adjust) {
-		pose.position.y = -pose.position.y;
-	}
-	if (pose.position.z > 0.0f && adjust) {
-		pose.position.z = -pose.position.z;
-	}
-
-	*out_pose = pose;
+	(void)xdev;
+	u_device_get_view_pose(eye_relation, view_index, out_pose);
 }
 
 /*
@@ -225,6 +208,7 @@ android_device_create()
 	d->base.inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;
 	d->base.device_type = XRT_DEVICE_TYPE_HMD;
 	snprintf(d->base.str, XRT_DEVICE_NAME_LEN, "Android Sensors");
+	snprintf(d->base.serial, XRT_DEVICE_NAME_LEN, "Android Sensors");
 
 	d->ll = debug_get_log_option_android_log();
 

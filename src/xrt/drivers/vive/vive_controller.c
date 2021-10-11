@@ -1,5 +1,5 @@
-// Copyright 2020, Collabora, Ltd.
 // Copyright 2016 Philipp Zabel
+// Copyright 2020-2021, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -13,33 +13,38 @@
  * originally written by Ryan Pavlik and available under the BSL-1.0.
  */
 
+#include "xrt/xrt_prober.h"
+
+#include "os/os_hid.h"
+#include "os/os_threading.h"
+#include "os/os_time.h"
+
+#include "math/m_api.h"
+#include "math/m_predict.h"
+
+#include "util/u_json.h"
+#include "util/u_misc.h"
+#include "util/u_time.h"
+#include "util/u_debug.h"
+#include "util/u_device.h"
+#include "util/u_trace_marker.h"
+
+#include "vive/vive_config.h"
+
+#include "vive.h"
+#include "vive_protocol.h"
+#include "vive_controller.h"
 
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "xrt/xrt_prober.h"
-
-#include "math/m_api.h"
-#include "util/u_debug.h"
-#include "util/u_device.h"
-#include "util/u_json.h"
-#include "util/u_misc.h"
-#include "util/u_time.h"
-#include "os/os_hid.h"
-#include "os/os_threading.h"
-#include "os/os_time.h"
-
-#include "vive.h"
-#include "vive_protocol.h"
-#include "vive_controller.h"
-#include "vive_config.h"
-
 #ifdef XRT_OS_LINUX
 #include <unistd.h>
 #include <math.h>
 #endif
+
 
 /*
  *
@@ -106,6 +111,9 @@ vive_controller_device_destroy(struct xrt_device *xdev)
 
 	os_thread_helper_destroy(&d->controller_thread);
 
+	// Now that the thread is not running we can destroy the lock.
+	os_mutex_destroy(&d->lock);
+
 	m_imu_3dof_close(&d->fusion);
 
 	if (d->controller_hid)
@@ -119,7 +127,8 @@ vive_controller_device_update_wand_inputs(struct xrt_device *xdev)
 {
 	struct vive_controller_device *d = vive_controller_device(xdev);
 
-	os_thread_helper_lock(&d->controller_thread);
+	os_mutex_lock(&d->lock);
+
 	uint8_t buttons = d->state.buttons;
 
 	/*
@@ -169,15 +178,17 @@ vive_controller_device_update_wand_inputs(struct xrt_device *xdev)
 	trigger_input->value.vec1.x = d->state.trigger;
 	VIVE_TRACE(d, "Trigger: %f", d->state.trigger);
 
-	os_thread_helper_unlock(&d->controller_thread);
+	os_mutex_unlock(&d->lock);
 }
 
 static void
 vive_controller_device_update_index_inputs(struct xrt_device *xdev)
 {
+	XRT_TRACE_MARKER();
+
 	struct vive_controller_device *d = vive_controller_device(xdev);
 
-	os_thread_helper_lock(&d->controller_thread);
+	os_mutex_lock(&d->lock);
 	uint8_t buttons = d->state.buttons;
 
 	/*
@@ -285,7 +296,7 @@ vive_controller_device_update_index_inputs(struct xrt_device *xdev)
 		VIVE_DEBUG(d, "Trackpad force: %f\n", (float)d->state.trackpad_force / UINT8_MAX);
 	}
 
-	os_thread_helper_unlock(&d->controller_thread);
+	os_mutex_unlock(&d->lock);
 }
 
 
@@ -298,9 +309,12 @@ _update_tracker_inputs(struct xrt_device *xdev)
 static void
 vive_controller_get_hand_tracking(struct xrt_device *xdev,
                                   enum xrt_input_name name,
-                                  uint64_t at_timestamp_ns,
-                                  struct xrt_hand_joint_set *out_value)
+                                  uint64_t requested_timestamp_ns,
+                                  struct xrt_hand_joint_set *out_value,
+                                  uint64_t *out_timestamp_ns)
 {
+	XRT_TRACE_MARKER();
+
 	struct vive_controller_device *d = vive_controller_device(xdev);
 
 	if (name != XRT_INPUT_GENERIC_HAND_TRACKING_LEFT && name != XRT_INPUT_GENERIC_HAND_TRACKING_RIGHT) {
@@ -308,7 +322,7 @@ vive_controller_get_hand_tracking(struct xrt_device *xdev,
 		return;
 	}
 
-	enum xrt_hand hand = d->variant == CONTROLLER_INDEX_LEFT ? XRT_HAND_LEFT : XRT_HAND_RIGHT;
+	enum xrt_hand hand = d->config.variant == CONTROLLER_INDEX_LEFT ? XRT_HAND_LEFT : XRT_HAND_RIGHT;
 
 	float thumb_curl = 0.0f;
 	//! @todo place thumb preciely on the button that is touched/pressed
@@ -325,7 +339,7 @@ vive_controller_get_hand_tracking(struct xrt_device *xdev,
 	                                             .index = (float)d->state.index_finger_trigger / UINT8_MAX,
 	                                             .thumb = thumb_curl};
 
-	u_hand_joints_update_curl(&d->hand_tracking, hand, at_timestamp_ns, &values);
+	u_hand_joints_update_curl(&d->hand_tracking, hand, requested_timestamp_ns, &values);
 
 
 	/* Because IMU is at the very -z end of the controller, the rotation
@@ -348,6 +362,30 @@ vive_controller_get_hand_tracking(struct xrt_device *xdev,
 	u_hand_joints_offset_valve_index_controller(hand, &static_offset, &hand_on_handle_pose);
 
 	u_hand_joints_set_out_data(&d->hand_tracking, hand, &controller_relation, &hand_on_handle_pose, out_value);
+
+	// This is a lie: currently, no pose-prediction or history is implemented for this driver.
+	*out_timestamp_ns = requested_timestamp_ns;
+
+	out_value->is_active = true;
+}
+
+static void
+predict_pose(struct vive_controller_device *d, uint64_t at_timestamp_ns, struct xrt_space_relation *out_relation)
+{
+	timepoint_ns prediction_ns = at_timestamp_ns - d->imu.ts_received_ns;
+	double prediction_s = time_ns_to_s(prediction_ns);
+
+	timepoint_ns monotonic_now_ns = os_monotonic_get_ns();
+	timepoint_ns remaining_ns = at_timestamp_ns - monotonic_now_ns;
+	VIVE_TRACE(d, "dev %s At %ldns: Pose requested for +%ldns (%ldns), predicting %ldns", d->base.str,
+	           monotonic_now_ns, remaining_ns, at_timestamp_ns, prediction_ns);
+
+	//! @todo integrate position here
+	struct xrt_space_relation relation = {0};
+	relation.pose.orientation = d->rot_filtered;
+	relation.relation_flags = XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT;
+
+	m_predict_relation(&relation, prediction_s, out_relation);
 }
 
 static void
@@ -368,22 +406,9 @@ vive_controller_device_get_tracked_pose(struct xrt_device *xdev,
 	// Clear out the relation.
 	U_ZERO(out_relation);
 
-	os_thread_helper_lock(&d->controller_thread);
-
-	// Don't do anything if we have stopped.
-	if (!os_thread_helper_is_running_locked(&d->controller_thread)) {
-		os_thread_helper_unlock(&d->controller_thread);
-		return;
-	}
-
-	out_relation->pose.orientation = d->rot_filtered;
-
-	//! @todo assuming that orientation is actually currently tracked.
-	out_relation->relation_flags = (enum xrt_space_relation_flags)(
-	    XRT_SPACE_RELATION_POSITION_VALID_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT |
-	    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
-
-	os_thread_helper_unlock(&d->controller_thread);
+	os_mutex_lock(&d->lock);
+	predict_pose(d, at_timestamp_ns, out_relation);
+	os_mutex_unlock(&d->lock);
 
 	struct xrt_vec3 pos = out_relation->pose.position;
 	struct xrt_quat quat = out_relation->pose.orientation;
@@ -462,7 +487,9 @@ vive_controller_device_set_output(struct xrt_device *xdev, enum xrt_output_name 
 		return;
 	}
 
+	os_mutex_lock(&d->lock);
 	vive_controller_haptic_pulse(d, value);
+	os_mutex_unlock(&d->lock);
 }
 
 static void
@@ -526,10 +553,14 @@ cald_dt_ns(uint32_t dt_raw)
 static void
 vive_controller_handle_imu_sample(struct vive_controller_device *d, struct watchman_imu_sample *sample)
 {
+	XRT_TRACE_MARKER();
+
 	/* ouvrt: "Time in 48 MHz ticks, but we are missing the low byte" */
 	uint32_t time_raw = d->last_ticks | (sample->timestamp_hi << 8);
 	uint32_t dt_raw = calc_dt_raw_and_handle_overflow(d, time_raw);
 	uint64_t dt_ns = cald_dt_ns(dt_raw);
+
+	d->imu.ts_received_ns = os_monotonic_get_ns();
 
 	int16_t acc[3] = {
 	    __le16_to_cpu(sample->acc[0]),
@@ -543,18 +574,18 @@ vive_controller_handle_imu_sample(struct vive_controller_device *d, struct watch
 	    __le16_to_cpu(sample->gyro[2]),
 	};
 
-	float scale = (float)d->imu.acc_range / 32768.0f;
+	float scale = (float)d->config.imu.acc_range / 32768.0f;
 	struct xrt_vec3 acceleration = {
-	    scale * d->imu.acc_scale.x * acc[0] - d->imu.acc_bias.x,
-	    scale * d->imu.acc_scale.y * acc[1] - d->imu.acc_bias.y,
-	    scale * d->imu.acc_scale.z * acc[2] - d->imu.acc_bias.z,
+	    scale * d->config.imu.acc_scale.x * acc[0] - d->config.imu.acc_bias.x,
+	    scale * d->config.imu.acc_scale.y * acc[1] - d->config.imu.acc_bias.y,
+	    scale * d->config.imu.acc_scale.z * acc[2] - d->config.imu.acc_bias.z,
 	};
 
-	scale = (float)d->imu.gyro_range / 32768.0f;
+	scale = (float)d->config.imu.gyro_range / 32768.0f;
 	struct xrt_vec3 angular_velocity = {
-	    scale * d->imu.gyro_scale.x * gyro[0] - d->imu.gyro_bias.x,
-	    scale * d->imu.gyro_scale.y * gyro[1] - d->imu.gyro_bias.y,
-	    scale * d->imu.gyro_scale.z * gyro[2] - d->imu.gyro_bias.z,
+	    scale * d->config.imu.gyro_scale.x * gyro[0] - d->config.imu.gyro_bias.x,
+	    scale * d->config.imu.gyro_scale.y * gyro[1] - d->config.imu.gyro_bias.y,
+	    scale * d->config.imu.gyro_scale.z * gyro[2] - d->config.imu.gyro_bias.z,
 	};
 
 	VIVE_TRACE(d, "ACC  %f %f %f", acceleration.x, acceleration.y, acceleration.z);
@@ -562,21 +593,21 @@ vive_controller_handle_imu_sample(struct vive_controller_device *d, struct watch
 	/*
 	 */
 
-	if (d->variant == CONTROLLER_VIVE_WAND) {
+	if (d->config.variant == CONTROLLER_VIVE_WAND) {
 		struct xrt_vec3 fixed_acceleration = {.x = -acceleration.x, .y = -acceleration.z, .z = -acceleration.y};
 		acceleration = fixed_acceleration;
 
 		struct xrt_vec3 fixed_angular_velocity = {
 		    .x = -angular_velocity.x, .y = -angular_velocity.z, .z = -angular_velocity.y};
 		angular_velocity = fixed_angular_velocity;
-	} else if (d->variant == CONTROLLER_INDEX_RIGHT) {
+	} else if (d->config.variant == CONTROLLER_INDEX_RIGHT) {
 		struct xrt_vec3 fixed_acceleration = {.x = acceleration.z, .y = -acceleration.y, .z = acceleration.x};
 		acceleration = fixed_acceleration;
 
 		struct xrt_vec3 fixed_angular_velocity = {
 		    .x = angular_velocity.z, .y = -angular_velocity.y, .z = angular_velocity.x};
 		angular_velocity = fixed_angular_velocity;
-	} else if (d->variant == CONTROLLER_INDEX_LEFT) {
+	} else if (d->config.variant == CONTROLLER_INDEX_LEFT) {
 		struct xrt_vec3 fixed_acceleration = {.x = -acceleration.z, .y = acceleration.x, .z = -acceleration.y};
 		acceleration = fixed_acceleration;
 
@@ -916,12 +947,16 @@ vive_controller_device_update(struct vive_controller_device *d)
 
 	switch (buf[0]) {
 	case VIVE_CONTROLLER_REPORT1_ID:
+		os_mutex_lock(&d->lock);
 		vive_controller_decode_message(d, &((struct vive_controller_report1 *)buf)->message);
+		os_mutex_unlock(&d->lock);
 		break;
 
 	case VIVE_CONTROLLER_REPORT2_ID:
+		os_mutex_lock(&d->lock);
 		vive_controller_decode_message(d, &((struct vive_controller_report2 *)buf)->message[0]);
 		vive_controller_decode_message(d, &((struct vive_controller_report2 *)buf)->message[1]);
+		os_mutex_unlock(&d->lock);
 		break;
 	case VIVE_CONTROLLER_DISCONNECT_REPORT_ID: VIVE_DEBUG(d, "Controller disconnected."); break;
 	default: VIVE_ERROR(d, "Unknown controller message type: %u", buf[0]);
@@ -1023,29 +1058,29 @@ vive_controller_create(struct os_hid_device *controller_hid, enum watchman_gen w
 
 	d->ll = debug_get_log_option_vive_log();
 	d->watchman_gen = WATCHMAN_GEN_UNKNOWN;
-	d->variant = CONTROLLER_UNKNOWN;
+	d->config.variant = CONTROLLER_UNKNOWN;
 
 	d->watchman_gen = watchman_gen;
 
 	m_imu_3dof_init(&d->fusion, M_IMU_3DOF_USE_GRAVITY_DUR_20MS);
 
 	/* default values, will be queried from device */
-	d->imu.gyro_range = 8.726646f;
-	d->imu.acc_range = 39.226600f;
+	d->config.imu.gyro_range = 8.726646f;
+	d->config.imu.acc_range = 39.226600f;
 
-	d->imu.acc_scale.x = 1.0f;
-	d->imu.acc_scale.y = 1.0f;
-	d->imu.acc_scale.z = 1.0f;
-	d->imu.gyro_scale.x = 1.0f;
-	d->imu.gyro_scale.y = 1.0f;
-	d->imu.gyro_scale.z = 1.0f;
+	d->config.imu.acc_scale.x = 1.0f;
+	d->config.imu.acc_scale.y = 1.0f;
+	d->config.imu.acc_scale.z = 1.0f;
+	d->config.imu.gyro_scale.x = 1.0f;
+	d->config.imu.gyro_scale.y = 1.0f;
+	d->config.imu.gyro_scale.z = 1.0f;
 
-	d->imu.acc_bias.x = 0.0f;
-	d->imu.acc_bias.y = 0.0f;
-	d->imu.acc_bias.z = 0.0f;
-	d->imu.gyro_bias.x = 0.0f;
-	d->imu.gyro_bias.y = 0.0f;
-	d->imu.gyro_bias.z = 0.0f;
+	d->config.imu.acc_bias.x = 0.0f;
+	d->config.imu.acc_bias.y = 0.0f;
+	d->config.imu.acc_bias.z = 0.0f;
+	d->config.imu.gyro_bias.x = 0.0f;
+	d->config.imu.gyro_bias.y = 0.0f;
+	d->config.imu.gyro_bias.z = 0.0f;
 
 	d->controller_hid = controller_hid;
 
@@ -1053,33 +1088,32 @@ vive_controller_create(struct os_hid_device *controller_hid, enum watchman_gen w
 	d->base.get_tracked_pose = vive_controller_device_get_tracked_pose;
 	d->base.set_output = vive_controller_device_set_output;
 
-	snprintf(d->base.str, XRT_DEVICE_NAME_LEN, "%s %i", "Vive Controller", (int)(controller_num));
-
-	d->index = controller_num;
-
-	//! @todo: reading range report fails for powered off controller
-	if (vive_get_imu_range_report(d->controller_hid, &d->imu.gyro_range, &d->imu.acc_range) != 0) {
-		VIVE_ERROR(d, "Could not get watchman IMU range packet!");
-		free(d);
-		return 0;
+	if (vive_get_imu_range_report(d->controller_hid, &d->config.imu.gyro_range, &d->config.imu.acc_range) != 0) {
+		// reading range report fails for powered off controller
+		vive_controller_device_destroy(&d->base);
+		return NULL;
 	}
 
-	VIVE_DEBUG(d, "Vive controller gyroscope range     %f", d->imu.gyro_range);
-	VIVE_DEBUG(d, "Vive controller accelerometer range %f", d->imu.acc_range);
+	VIVE_DEBUG(d, "Vive controller gyroscope range     %f", d->config.imu.gyro_range);
+	VIVE_DEBUG(d, "Vive controller accelerometer range %f", d->config.imu.acc_range);
 
-	// successful config parsing determines d->variant
+	// successful config parsing determines d->config.variant
 	char *config = vive_read_config(d->controller_hid);
+
 	if (config != NULL) {
-		vive_config_parse_controller(d, config);
+		vive_config_parse_controller(&d->config, config, d->ll);
 		free(config);
 	} else {
 		VIVE_ERROR(d, "Could not get Vive controller config\n");
-		free(d);
-		return 0;
+		vive_controller_device_destroy(&d->base);
+		return NULL;
 	}
 
-	if (d->variant == CONTROLLER_VIVE_WAND) {
+	snprintf(d->base.serial, XRT_DEVICE_NAME_LEN, "%s", d->config.firmware.device_serial_number);
+
+	if (d->config.variant == CONTROLLER_VIVE_WAND) {
 		d->base.name = XRT_DEVICE_VIVE_WAND;
+		snprintf(d->base.str, XRT_DEVICE_NAME_LEN, "Vive Wand Controller (vive)");
 
 		SET_WAND_INPUT(SYSTEM_CLICK, SYSTEM_CLICK);
 		SET_WAND_INPUT(SQUEEZE_CLICK, SQUEEZE_CLICK);
@@ -1101,7 +1135,7 @@ vive_controller_create(struct os_hid_device *controller_hid, enum watchman_gen w
 		d->base.num_binding_profiles = ARRAY_SIZE(binding_profiles_vive);
 
 		d->base.device_type = XRT_DEVICE_TYPE_ANY_HAND_CONTROLLER;
-	} else if (d->variant == CONTROLLER_INDEX_LEFT || d->variant == CONTROLLER_INDEX_RIGHT) {
+	} else if (d->config.variant == CONTROLLER_INDEX_LEFT || d->config.variant == CONTROLLER_INDEX_RIGHT) {
 		d->base.name = XRT_DEVICE_INDEX_CONTROLLER;
 
 		SET_INDEX_INPUT(SYSTEM_CLICK, SYSTEM_CLICK);
@@ -1132,28 +1166,32 @@ vive_controller_create(struct os_hid_device *controller_hid, enum watchman_gen w
 
 		d->base.get_hand_tracking = vive_controller_get_hand_tracking;
 
-		enum xrt_hand hand = d->variant == CONTROLLER_INDEX_LEFT ? XRT_HAND_LEFT : XRT_HAND_RIGHT;
+		enum xrt_hand hand = d->config.variant == CONTROLLER_INDEX_LEFT ? XRT_HAND_LEFT : XRT_HAND_RIGHT;
 
 		u_hand_joints_init_default_set(&d->hand_tracking, hand, XRT_HAND_TRACKING_MODEL_FINGERL_CURL, 1.0);
 
 		d->base.binding_profiles = binding_profiles_index;
 		d->base.num_binding_profiles = ARRAY_SIZE(binding_profiles_index);
 
-		if (d->variant == CONTROLLER_INDEX_LEFT) {
+		if (d->config.variant == CONTROLLER_INDEX_LEFT) {
 			d->base.device_type = XRT_DEVICE_TYPE_LEFT_HAND_CONTROLLER;
 			d->base.inputs[VIVE_CONTROLLER_HAND_TRACKING].name = XRT_INPUT_GENERIC_HAND_TRACKING_LEFT;
-		} else if (d->variant == CONTROLLER_INDEX_RIGHT) {
+			snprintf(d->base.str, XRT_DEVICE_NAME_LEN, "Valve Index Left Controller (vive)");
+		} else if (d->config.variant == CONTROLLER_INDEX_RIGHT) {
 			d->base.device_type = XRT_DEVICE_TYPE_RIGHT_HAND_CONTROLLER;
 			d->base.inputs[VIVE_CONTROLLER_HAND_TRACKING].name = XRT_INPUT_GENERIC_HAND_TRACKING_RIGHT;
+			snprintf(d->base.str, XRT_DEVICE_NAME_LEN, "Valve Index Right Controller (vive)");
 		}
-	} else if (d->variant == CONTROLLER_TRACKER_GEN1) {
+	} else if (d->config.variant == CONTROLLER_TRACKER_GEN1) {
 		d->base.name = XRT_DEVICE_VIVE_TRACKER_GEN1;
 		d->base.update_inputs = _update_tracker_inputs;
 		d->base.device_type = XRT_DEVICE_TYPE_GENERIC_TRACKER;
-	} else if (d->variant == CONTROLLER_TRACKER_GEN2) {
+		snprintf(d->base.str, XRT_DEVICE_NAME_LEN, "Vive Tracker Gen1 (vive)");
+	} else if (d->config.variant == CONTROLLER_TRACKER_GEN2) {
 		d->base.name = XRT_DEVICE_VIVE_TRACKER_GEN2;
 		d->base.update_inputs = _update_tracker_inputs;
 		d->base.device_type = XRT_DEVICE_TYPE_GENERIC_TRACKER;
+		snprintf(d->base.str, XRT_DEVICE_NAME_LEN, "Vive Tracker Gen2 (vive)");
 	} else {
 		d->base.name = XRT_DEVICE_GENERIC_HMD;
 		d->base.device_type = XRT_DEVICE_TYPE_GENERIC_TRACKER;
@@ -1161,18 +1199,27 @@ vive_controller_create(struct os_hid_device *controller_hid, enum watchman_gen w
 	}
 
 	if (d->controller_hid) {
-		int ret = os_thread_helper_start(&d->controller_thread, vive_controller_run_thread, d);
+		// Mutex before thread.
+		int ret = os_mutex_init(&d->lock);
+		if (ret != 0) {
+			VIVE_ERROR(d, "Failed to init mutex!");
+			vive_controller_device_destroy(&d->base);
+			return NULL;
+		}
+
+		ret = os_thread_helper_start(&d->controller_thread, vive_controller_run_thread, d);
 		if (ret != 0) {
 			VIVE_ERROR(d, "Failed to start mainboard thread!");
-			vive_controller_device_destroy((struct xrt_device *)d);
-			return 0;
+			vive_controller_device_destroy(&d->base);
+			return NULL;
 		}
 	}
 
 	VIVE_DEBUG(d, "Opened vive controller!\n");
 	d->base.orientation_tracking_supported = true;
 	d->base.position_tracking_supported = false;
-	d->base.hand_tracking_supported = d->variant == CONTROLLER_INDEX_LEFT || d->variant == CONTROLLER_INDEX_RIGHT;
+	d->base.hand_tracking_supported =
+	    d->config.variant == CONTROLLER_INDEX_LEFT || d->config.variant == CONTROLLER_INDEX_RIGHT;
 
 	return d;
 }

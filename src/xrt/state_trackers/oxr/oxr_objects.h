@@ -118,6 +118,7 @@ struct oxr_hand_tracker;
 
 #define XRT_MAX_HANDLE_CHILDREN 256
 #define OXR_MAX_SWAPCHAIN_IMAGES 8
+#define OXR_MAX_BINDINGS_PER_ACTION 16
 
 struct time_state;
 
@@ -369,7 +370,7 @@ oxr_action_to_openxr(struct oxr_action *act)
  * @return false if an invalid subaction path is provided.
  *
  * @public @memberof oxr_instance
- * @relatesalso oxr_sub_paths
+ * @see oxr_sub_paths
  */
 bool
 oxr_classify_sub_action_paths(struct oxr_logger *log,
@@ -410,7 +411,7 @@ oxr_action_create(struct oxr_logger *log,
 
 /*!
  * @public @memberof oxr_session
- * @relatesalso oxr_action_set
+ * @see oxr_action_set
  */
 XrResult
 oxr_session_attach_action_sets(struct oxr_logger *log,
@@ -545,7 +546,7 @@ void
 oxr_binding_find_bindings_from_key(struct oxr_logger *log,
                                    struct oxr_interaction_profile *profile,
                                    uint32_t key,
-                                   struct oxr_binding *bindings[32],
+                                   struct oxr_binding *bindings[OXR_MAX_BINDINGS_PER_ACTION],
                                    size_t *num_bindings);
 
 /*!
@@ -611,6 +612,12 @@ oxr_session_enumerate_formats(struct oxr_logger *log,
                               uint32_t *formatCountOutput,
                               int64_t *formats);
 
+/*!
+ * Change the state of the session, queues a event.
+ */
+void
+oxr_session_change_state(struct oxr_logger *log, struct oxr_session *sess, XrSessionState state);
+
 XrResult
 oxr_session_begin(struct oxr_logger *log, struct oxr_session *sess, const XrSessionBeginInfo *beginInfo);
 
@@ -634,13 +641,13 @@ oxr_session_get_view_relation_at(struct oxr_logger *,
                                  struct xrt_space_relation *out_relation);
 
 XrResult
-oxr_session_views(struct oxr_logger *log,
-                  struct oxr_session *sess,
-                  const XrViewLocateInfo *viewLocateInfo,
-                  XrViewState *viewState,
-                  uint32_t viewCapacityInput,
-                  uint32_t *viewCountOutput,
-                  XrView *views);
+oxr_session_locate_views(struct oxr_logger *log,
+                         struct oxr_session *sess,
+                         const XrViewLocateInfo *viewLocateInfo,
+                         XrViewState *viewState,
+                         uint32_t viewCapacityInput,
+                         uint32_t *viewCountOutput,
+                         XrView *views);
 
 XrResult
 oxr_session_frame_wait(struct oxr_logger *log, struct oxr_session *sess, XrFrameState *frameState);
@@ -1092,9 +1099,13 @@ struct oxr_system
 	uint32_t num_blend_modes;
 	XrEnvironmentBlendMode blend_modes[3];
 
+#ifdef XR_USE_GRAPHICS_API_VULKAN
 	//! The instance/device we create when vulkan_enable2 is used
 	VkInstance vulkan_enable2_instance;
-	VkPhysicalDevice vulkan_enable2_physical_device;
+	//! The device returned with the last xrGetVulkanGraphicsDeviceKHR or xrGetVulkanGraphicsDevice2KHR call.
+	//! XR_NULL_HANDLE if neither has been called.
+	VkPhysicalDevice suggested_vulkan_physical_device;
+#endif
 };
 
 #define GET_XDEV_BY_ROLE(SYS, ROLE) SYS->role.ROLE == XRT_DEVICE_ROLE_UNASSIGNED ? NULL : SYS->xdevs[SYS->role.ROLE]
@@ -1184,7 +1195,28 @@ struct oxr_instance
 		XrPath oculus_touch_controller;
 		XrPath valve_index_controller;
 		XrPath mndx_ball_on_a_stick_controller;
+		XrPath msft_hand_interaction;
 	} path_cache;
+
+	struct
+	{
+		struct
+		{
+			struct
+			{
+				uint32_t major;
+				uint32_t minor;
+				uint32_t patch;
+				const char *name; //< Engine name, not freed.
+			} engine;
+		} detected;
+	} appinfo;
+
+	struct
+	{
+		//! Unreal has a bug in the VulkanRHI backend.
+		bool disable_vulkan_format_depth_stencil;
+	} quirks;
 
 	//! Debug messengers
 	struct oxr_debug_messenger *messengers[XRT_MAX_HANDLE_CHILDREN];
@@ -1300,6 +1332,9 @@ struct oxr_session
 	 * Frame timing debug output.
 	 */
 	bool frame_timing_spew;
+
+	//! Extra sleep in wait frame.
+	uint32_t frame_timing_wait_sleep_ms;
 
 	/*!
 	 * To pipe swapchain creation to right code.
@@ -1531,8 +1566,6 @@ struct oxr_action_output
 	XrPath bound_path;
 };
 
-
-#define OXR_MAX_BINDINGS_PER_ACTION 16
 
 /*!
  * The set of inputs/outputs for a single sub-action path for an action.

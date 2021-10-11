@@ -1,4 +1,4 @@
-// Copyright 2019-2020, Collabora, Ltd.
+// Copyright 2019-2021, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -37,7 +37,7 @@ typedef uint64_t VkDeviceMemory;
 
 
 /*!
- * @ingroup xrt_iface
+ * @addtogroup xrt_iface
  * @{
  */
 
@@ -141,6 +141,8 @@ struct xrt_sub_image
 	uint32_t array_index;
 	//! The rectangle in the image to use
 	struct xrt_rect rect;
+	//! Normalized sub image coordinates and size.
+	struct xrt_normalized_rect norm_rect;
 };
 
 /*!
@@ -363,6 +365,11 @@ struct xrt_layer_data
 struct xrt_swapchain
 {
 	/*!
+	 * Reference helper.
+	 */
+	struct xrt_reference reference;
+
+	/*!
 	 * Number of images.
 	 *
 	 * The images themselves are on the subclasses.
@@ -398,6 +405,39 @@ struct xrt_swapchain
 	 */
 	xrt_result_t (*release_image)(struct xrt_swapchain *xsc, uint32_t index);
 };
+
+/*!
+ * Update the reference counts on swapchain(s).
+ *
+ * @param     dst Pointer to a object reference, if the object reference is
+ *                non-null will decrement it's counter. The reference that
+ *                @p dst points to will be set to @p src.
+ * @param[in] src Object to be have it's refcount increased @p dst is set to
+ *                this.
+ * @ingroup xrt_iface
+ * @relates xrt_swapchain
+ */
+static inline void
+xrt_swapchain_reference(struct xrt_swapchain **dst, struct xrt_swapchain *src)
+{
+	struct xrt_swapchain *old_dst = *dst;
+
+	if (old_dst == src) {
+		return;
+	}
+
+	if (src) {
+		xrt_reference_inc(&src->reference);
+	}
+
+	*dst = src;
+
+	if (old_dst) {
+		if (xrt_reference_dec(&old_dst->reference)) {
+			old_dst->destroy(old_dst);
+		}
+	}
+}
 
 /*!
  * @copydoc xrt_swapchain::acquire_image
@@ -438,25 +478,68 @@ xrt_swapchain_release_image(struct xrt_swapchain *xsc, uint32_t index)
 	return xsc->release_image(xsc, index);
 }
 
+
+/*
+ *
+ * Fence.
+ *
+ */
+
 /*!
- * @copydoc xrt_swapchain::destroy
+ * Compositor fence used for syncornization.
+ */
+struct xrt_compositor_fence
+{
+	/*!
+	 * Destroys the fence.
+	 */
+	xrt_result_t (*wait)(struct xrt_compositor_fence *xcf, uint64_t timeout);
+
+	/*!
+	 * Destroys the fence.
+	 */
+	void (*destroy)(struct xrt_compositor_fence *xcf);
+};
+
+/*!
+ * @copydoc xrt_compositor_fence::wait
+ *
+ * Helper for calling through the function pointer.
+ *
+ * @public @memberof xrt_compositor_fence
+ */
+static inline xrt_result_t
+xrt_compositor_fence_wait(struct xrt_compositor_fence *xcf, uint64_t timeout)
+{
+	return xcf->wait(xcf, timeout);
+}
+
+/*!
+ * @copydoc xrt_compositor_fence::destroy
  *
  * Helper for calling through the function pointer: does a null check and sets
- * xsc_ptr to null if freed.
+ * xcf_ptr to null if freed.
  *
- * @public @memberof xrt_swapchain
+ * @public @memberof xrt_compositor_fence
  */
 static inline void
-xrt_swapchain_destroy(struct xrt_swapchain **xsc_ptr)
+xrt_compositor_fence_destroy(struct xrt_compositor_fence **xcf_ptr)
 {
-	struct xrt_swapchain *xsc = *xsc_ptr;
-	if (xsc == NULL) {
+	struct xrt_compositor_fence *xcf = *xcf_ptr;
+	if (xcf == NULL) {
 		return;
 	}
 
-	xsc->destroy(xsc);
-	*xsc_ptr = NULL;
+	xcf->destroy(xcf);
+	*xcf_ptr = NULL;
 }
+
+
+/*
+ *
+ * Events.
+ *
+ */
 
 /*!
  * Event type for compositor events, none means no event was returned.
@@ -494,6 +577,18 @@ union xrt_compositor_event {
 	enum xrt_compositor_event_type type;
 	struct xrt_compositor_event_state_change state;
 	struct xrt_compositor_event_state_change overlay;
+};
+
+
+/*
+ *
+ * Compositor.
+ *
+ */
+
+enum xrt_compositor_frame_point
+{
+	XRT_COMPOSITOR_FRAME_POINT_WOKE, //!< The client woke up after waiting.
 };
 
 /*!
@@ -553,6 +648,10 @@ struct xrt_compositor
 
 	/*!
 	 * Create a swapchain with a set of images.
+	 *
+	 * The pointer pointed to by @p out_xsc has to either be NULL or a valid
+	 * @ref xrt_swapchain pointer. If there is a valid @ref xrt_swapchain
+	 * pointed by the pointed pointer it will have it reference decremented.
 	 */
 	xrt_result_t (*create_swapchain)(struct xrt_compositor *xc,
 	                                 const struct xrt_swapchain_create_info *info,
@@ -560,12 +659,23 @@ struct xrt_compositor
 
 	/*!
 	 * Create a swapchain from a set of native images.
+	 *
+	 * The pointer pointed to by @p out_xsc has to either be NULL or a valid
+	 * @ref xrt_swapchain pointer. If there is a valid @ref xrt_swapchain
+	 * pointed by the pointed pointer it will have it reference decremented.
 	 */
 	xrt_result_t (*import_swapchain)(struct xrt_compositor *xc,
 	                                 const struct xrt_swapchain_create_info *info,
 	                                 struct xrt_image_native *native_images,
 	                                 uint32_t num_images,
 	                                 struct xrt_swapchain **out_xsc);
+
+	/*!
+	 * Create a compositor fence from a native sync handle.
+	 */
+	xrt_result_t (*import_fence)(struct xrt_compositor *xc,
+	                             xrt_graphics_sync_handle_t handle,
+	                             struct xrt_compositor_fence **out_xcf);
 
 	/*!
 	 * Poll events from this compositor.
@@ -585,6 +695,39 @@ struct xrt_compositor
 	 * discard_frame.
 	 */
 	xrt_result_t (*end_session)(struct xrt_compositor *xc);
+
+	/*!
+	 * This function and @ref mark_frame function calls are a alternative to
+	 * @ref wait_frame.
+	 *
+	 * The only requirement on the compositor for the @p frame_id
+	 * is that it is a positive number.
+	 *
+	 * @param[out] xc                              The compositor
+	 * @param[out] out_frame_id                    Frame id
+	 * @param[out] out_wake_time_ns                When we want the client to be awoken to begin rendering.
+	 * @param[out] out_predicted_gpu_time_ns       When we expect the client to finish the GPU work.
+	 * @param[out] out_predicted_display_time_ns   When the pixels turns into photons.
+	 * @param[out] out_predicted_display_period_ns The period for the frames.
+	 */
+	xrt_result_t (*predict_frame)(struct xrt_compositor *xc,
+	                              int64_t *out_frame_id,
+	                              uint64_t *out_wake_time_ns,
+	                              uint64_t *out_predicted_gpu_time_ns,
+	                              uint64_t *out_predicted_display_time_ns,
+	                              uint64_t *out_predicted_display_period_ns);
+
+	/*!
+	 * This function and @ref predict_frame function calls are a alternative to
+	 * @ref wait_frame.
+	 *
+	 * The client calls this function to mark that it woke up from waiting
+	 * on a frame.
+	 */
+	xrt_result_t (*mark_frame)(struct xrt_compositor *xc,
+	                           int64_t frame_id,
+	                           enum xrt_compositor_frame_point point,
+	                           uint64_t when_ns);
 
 	/*!
 	 * See xrWaitFrame.
@@ -621,7 +764,10 @@ struct xrt_compositor
 	 * @p layer_commit that layers will be displayed. From the point of view
 	 * of the swapchain the image is used as soon as it's given in a call.
 	 */
-	xrt_result_t (*layer_begin)(struct xrt_compositor *xc, int64_t frame_id, enum xrt_blend_mode env_blend_mode);
+	xrt_result_t (*layer_begin)(struct xrt_compositor *xc,
+	                            int64_t frame_id,
+	                            uint64_t display_time_ns,
+	                            enum xrt_blend_mode env_blend_mode);
 
 	/*!
 	 * Adds a stereo projection layer for submissions.
@@ -774,6 +920,21 @@ xrt_comp_import_swapchain(struct xrt_compositor *xc,
 }
 
 /*!
+ * @copydoc xrt_compositor::import_fence
+ *
+ * Helper for calling through the function pointer.
+ *
+ * @public @memberof xrt_compositor
+ */
+static inline xrt_result_t
+xrt_comp_import_fence(struct xrt_compositor *xc,
+                      xrt_graphics_sync_handle_t handle,
+                      struct xrt_compositor_fence **out_xcf)
+{
+	return xc->import_fence(xc, handle, out_xcf);
+}
+
+/*!
  * @copydoc xrt_compositor::poll_events
  *
  * Helper for calling through the function pointer.
@@ -810,6 +971,46 @@ static inline xrt_result_t
 xrt_comp_end_session(struct xrt_compositor *xc)
 {
 	return xc->end_session(xc);
+}
+
+/*!
+ * @copydoc xrt_compositor::predict_frame
+ *
+ * Helper for calling through the function pointer.
+ *
+ * @public @memberof xrt_compositor
+ */
+static inline xrt_result_t
+xrt_comp_predict_frame(struct xrt_compositor *xc,
+                       int64_t *out_frame_id,
+                       uint64_t *out_wake_time_ns,
+                       uint64_t *out_predicted_gpu_time_ns,
+                       uint64_t *out_predicted_display_time_ns,
+                       uint64_t *out_predicted_display_period_ns)
+{
+	return xc->predict_frame(             //
+	    xc,                               //
+	    out_frame_id,                     //
+	    out_wake_time_ns,                 //
+	    out_predicted_gpu_time_ns,        //
+	    out_predicted_display_time_ns,    //
+	    out_predicted_display_period_ns); //
+}
+
+/*!
+ * @copydoc xrt_compositor::mark_frame
+ *
+ * Helper for calling through the function pointer.
+ *
+ * @public @memberof xrt_compositor
+ */
+static inline xrt_result_t
+xrt_comp_mark_frame(struct xrt_compositor *xc,
+                    int64_t frame_id,
+                    enum xrt_compositor_frame_point point,
+                    uint64_t when_ns)
+{
+	return xc->mark_frame(xc, frame_id, point, when_ns);
 }
 
 /*!
@@ -862,9 +1063,12 @@ xrt_comp_discard_frame(struct xrt_compositor *xc, int64_t frame_id)
  * @public @memberof xrt_compositor
  */
 static inline xrt_result_t
-xrt_comp_layer_begin(struct xrt_compositor *xc, int64_t frame_id, enum xrt_blend_mode env_blend_mode)
+xrt_comp_layer_begin(struct xrt_compositor *xc,
+                     int64_t frame_id,
+                     uint64_t display_time_ns,
+                     enum xrt_blend_mode env_blend_mode)
 {
-	return xc->layer_begin(xc, frame_id, env_blend_mode);
+	return xc->layer_begin(xc, frame_id, display_time_ns, env_blend_mode);
 }
 
 /*!
@@ -1158,6 +1362,7 @@ struct xrt_image_native
 	 * Native buffer handle.
 	 */
 	xrt_graphics_buffer_handle_t handle;
+
 	/*!
 	 * @brief Buffer size in memory.
 	 *
@@ -1166,6 +1371,11 @@ struct xrt_image_native
 	 * into Vulkan.
 	 */
 	size_t size;
+
+	/*!
+	 * Is the image created with a deicated allocation or not.
+	 */
+	bool use_dedicated_allocation;
 };
 
 /*!
@@ -1183,6 +1393,17 @@ struct xrt_swapchain_native
 
 	struct xrt_image_native images[XRT_MAX_SWAPCHAIN_IMAGES];
 };
+
+/*!
+ * @copydoc xrt_swapchain_reference
+ *
+ * @relates xrt_swapchain_native
+ */
+static inline void
+xrt_swapchain_native_reference(struct xrt_swapchain_native **dst, struct xrt_swapchain_native *src)
+{
+	xrt_swapchain_reference((struct xrt_swapchain **)dst, (struct xrt_swapchain *)src);
+}
 
 /*!
  * @interface xrt_compositor_native
@@ -1207,6 +1428,10 @@ struct xrt_compositor_native
  * Helper for calling through the base's function pointer then performing the
  * known-safe downcast.
  *
+ * The pointer pointed to by @p out_xsc has to either be NULL or a valid
+ * @ref xrt_swapchain pointer. If there is a valid @ref xrt_swapchain
+ * pointed by the pointed pointer it will have it reference decremented.
+ *
  * @public @memberof xrt_compositor_native
  */
 static inline xrt_result_t
@@ -1214,11 +1439,17 @@ xrt_comp_native_create_swapchain(struct xrt_compositor_native *xcn,
                                  const struct xrt_swapchain_create_info *info,
                                  struct xrt_swapchain_native **out_xscn)
 {
-	struct xrt_swapchain *xsc = NULL;
+	struct xrt_swapchain *xsc = NULL; // Has to be NULL.
+
 	xrt_result_t ret = xrt_comp_create_swapchain(&xcn->base, info, &xsc);
 	if (ret == XRT_SUCCESS) {
+		// Need to dereference any swapchain already there first.
+		xrt_swapchain_native_reference(out_xscn, NULL);
+
+		// Already referenced.
 		*out_xscn = (struct xrt_swapchain_native *)xsc;
 	}
+
 	return ret;
 }
 
@@ -1287,6 +1518,39 @@ struct xrt_system_compositor_info
 	uint8_t client_vk_deviceUUID[XRT_GPU_UUID_SIZE];
 };
 
+struct xrt_system_compositor;
+
+/*!
+ * Special functions to control multi session/clients.
+ */
+struct xrt_multi_compositor_control
+{
+	/*!
+	 * Sets the state of the compositor, generating any events to the client
+	 * if the state is actually changed. Input focus is enforced/handled by
+	 * a different component but is still signaled by the compositor.
+	 */
+	xrt_result_t (*set_state)(struct xrt_system_compositor *xsc,
+	                          struct xrt_compositor *xc,
+	                          bool visible,
+	                          bool focused);
+
+	/*!
+	 * Set the rendering Z order for rendering, visible has higher priority
+	 * then z_order but is still saved until visible again. This a signed
+	 * 64 bit integer compared to a unsigned 32 bit integer in OpenXR, so
+	 * that non-overlay clients can be handled like overlay ones.
+	 */
+	xrt_result_t (*set_z_order)(struct xrt_system_compositor *xsc, struct xrt_compositor *xc, int64_t z_order);
+
+	/*!
+	 * Tell this client/session if the main application is visible or not.
+	 */
+	xrt_result_t (*set_main_app_visibility)(struct xrt_system_compositor *xsc,
+	                                        struct xrt_compositor *xc,
+	                                        bool visible);
+};
+
 /*!
  * The system compositor is a long lived object, it has the same life time as a
  * XrSystemID.
@@ -1295,6 +1559,11 @@ struct xrt_system_compositor
 {
 	//! Info regarding the system.
 	struct xrt_system_compositor_info info;
+
+	/*!
+	 * Does this system compositor support multi client controls.
+	 */
+	struct xrt_multi_compositor_control *xmcc;
 
 	/*!
 	 * Create a new native compositor.
@@ -1317,6 +1586,58 @@ struct xrt_system_compositor
 	 */
 	void (*destroy)(struct xrt_system_compositor *xsc);
 };
+
+/*!
+ * @copydoc xrt_multi_compositor_control::set_state
+ *
+ * Helper for calling through the function pointer.
+ *
+ * @public @memberof xrt_system_compositor
+ */
+static inline xrt_result_t
+xrt_syscomp_set_state(struct xrt_system_compositor *xsc, struct xrt_compositor *xc, bool visible, bool focused)
+{
+	if (xsc->xmcc == NULL) {
+		return XRT_ERROR_MULTI_SESSION_NOT_IMPLEMENTED;
+	}
+
+	return xsc->xmcc->set_state(xsc, xc, visible, focused);
+}
+
+/*!
+ * @copydoc xrt_multi_compositor_control::set_z_order
+ *
+ * Helper for calling through the function pointer.
+ *
+ * @public @memberof xrt_system_compositor
+ */
+static inline xrt_result_t
+xrt_syscomp_set_z_order(struct xrt_system_compositor *xsc, struct xrt_compositor *xc, int64_t z_order)
+{
+	if (xsc->xmcc == NULL) {
+		return XRT_ERROR_MULTI_SESSION_NOT_IMPLEMENTED;
+	}
+
+	return xsc->xmcc->set_z_order(xsc, xc, z_order);
+}
+
+
+/*!
+ * @copydoc xrt_multi_compositor_control::set_main_app_visibility
+ *
+ * Helper for calling through the function pointer.
+ *
+ * @public @memberof xrt_system_compositor
+ */
+static inline xrt_result_t
+xrt_syscomp_set_main_app_visibility(struct xrt_system_compositor *xsc, struct xrt_compositor *xc, bool visible)
+{
+	if (xsc->xmcc == NULL) {
+		return XRT_ERROR_MULTI_SESSION_NOT_IMPLEMENTED;
+	}
+
+	return xsc->xmcc->set_main_app_visibility(xsc, xc, visible);
+}
 
 /*!
  * @copydoc xrt_system_compositor::create_native_compositor

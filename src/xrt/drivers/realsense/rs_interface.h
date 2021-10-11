@@ -13,7 +13,6 @@
 extern "C" {
 #endif
 
-
 /*!
  * @defgroup drv_rs Intel RealSense driver
  * @ingroup drv
@@ -21,16 +20,20 @@ extern "C" {
  * @brief Driver for the SLAM-capable Intel Realsense devices.
  */
 
+#define RS_HOST_SLAM_TRACKER_STR "Host SLAM Tracker for RealSense"
+
+#define RS_TRACKING_DISABLED -1
+#define RS_TRACKING_UNSPECIFIED 0
+#define RS_TRACKING_DEVICE_SLAM 1
+#define RS_TRACKING_HOST_SLAM 2
+
 /*!
- * Create a RelaseSense 6DOF tracker device.
+ * Create a auto prober for rs devices.
  *
  * @ingroup drv_rs
  */
-struct xrt_device *
-rs_6dof_create(void);
-
-void
-rs_update_offset(struct xrt_pose offset, struct xrt_device *xdev);
+struct xrt_auto_prober *
+rs_create_auto_prober(void);
 
 /*!
  * @dir drivers/realsense

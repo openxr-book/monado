@@ -1,4 +1,4 @@
-# Copyright 2019-2020, Collabora, Ltd.
+# Copyright 2019-2021, Collabora, Ltd.
 # SPDX-License-Identifier: BSL-1.0
 
 ######
@@ -15,7 +15,7 @@ set(SOURCE_FILES
 
 if(NOT WIN32)
 	# No getline on Windows, so until we have a portable impl
-	list(APPEND SOURCE_FILES 
+	list(APPEND SOURCE_FILES
 		cli_cmd_calibrate.c
 		)
 endif()
@@ -23,6 +23,7 @@ endif()
 add_executable(cli
 	${SOURCE_FILES}
 	)
+add_sanitizers(cli)
 
 set_target_properties(cli PROPERTIES
 	OUTPUT_NAME monado-cli

@@ -43,9 +43,23 @@ m_vec2_add(struct xrt_vec2 l, struct xrt_vec2 r)
 }
 
 static inline struct xrt_vec2
+m_vec2_add_scalar(struct xrt_vec2 l, float r)
+{
+	struct xrt_vec2 ret = {l.x + r, l.y + r};
+	return ret;
+}
+
+static inline struct xrt_vec2
 m_vec2_sub(struct xrt_vec2 l, struct xrt_vec2 r)
 {
 	struct xrt_vec2 ret = {l.x - r.x, l.y - r.y};
+	return ret;
+}
+
+static inline struct xrt_vec2
+m_vec2_sub_scalar(struct xrt_vec2 l, float r)
+{
+	struct xrt_vec2 ret = {l.x - r, l.y - r};
 	return ret;
 }
 
@@ -76,12 +90,24 @@ m_vec2_len(struct xrt_vec2 l)
 	return sqrtf(m_vec2_len_sqrd(l));
 }
 
+static inline void
+m_vec2_normalize(struct xrt_vec2 *inout)
+{
+	*inout = m_vec2_div_scalar(*inout, m_vec2_len(*inout));
+}
+
 static inline float
 m_vec2_dot(struct xrt_vec2 l, struct xrt_vec2 r)
 {
 	return l.x * r.x + l.y * r.y;
 }
 
+static inline struct xrt_vec2
+m_vec2_lerp(struct xrt_vec2 from, struct xrt_vec2 to, float amount)
+{
+	// Recommend amount being in [0,1]
+	return m_vec2_add(m_vec2_mul_scalar(from, 1.0f - amount), m_vec2_mul_scalar(to, amount));
+}
 
 #ifdef __cplusplus
 }

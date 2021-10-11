@@ -22,9 +22,15 @@ struct comp_layer_vertex
 	float uv[2];
 };
 
-static const VkClearColorValue background_color = {
-    .float32 = {0.3f, 0.3f, 0.3f, 1.0f},
+static const VkClearColorValue background_color_idle = {
+    .float32 = {0.1f, 0.1f, 0.1f, 1.0f},
 };
+
+static const VkClearColorValue background_color_active = {
+    .float32 = {0.0f, 0.0f, 0.0f, 1.0f},
+};
+
+
 
 static bool
 _init_render_pass(struct vk_bundle *vk,
@@ -308,7 +314,7 @@ _init_graphics_pipeline(struct comp_layer_renderer *self,
 	                    VK_DYNAMIC_STATE_SCISSOR,
 	                },
 	        },
-	    .subpass = VK_NULL_HANDLE,
+	    .subpass = 0,
 	};
 
 	VkResult res;
@@ -571,8 +577,13 @@ _render_pass_begin(struct vk_bundle *vk,
 }
 
 static void
-_render_stereo(struct comp_layer_renderer *self, struct vk_bundle *vk, VkCommandBuffer cmd_buffer)
+_render_stereo(struct comp_layer_renderer *self,
+               struct vk_bundle *vk,
+               VkCommandBuffer cmd_buffer,
+               const VkClearColorValue *color)
 {
+	COMP_TRACE_MARKER();
+
 	VkViewport viewport = {
 	    0.0f, 0.0f, self->extent.width, self->extent.height, 0.0f, 1.0f,
 	};
@@ -584,8 +595,8 @@ _render_stereo(struct comp_layer_renderer *self, struct vk_bundle *vk, VkCommand
 	vk->vkCmdSetScissor(cmd_buffer, 0, 1, &scissor);
 
 	for (uint32_t eye = 0; eye < 2; eye++) {
-		_render_pass_begin(vk, self->render_pass, self->extent, background_color,
-		                   self->framebuffers[eye].handle, cmd_buffer);
+		_render_pass_begin(vk, self->render_pass, self->extent, *color, self->framebuffers[eye].handle,
+		                   cmd_buffer);
 
 		_render_eye(self, eye, cmd_buffer, self->pipeline_layout);
 
@@ -596,14 +607,19 @@ _render_stereo(struct comp_layer_renderer *self, struct vk_bundle *vk, VkCommand
 void
 comp_layer_renderer_draw(struct comp_layer_renderer *self)
 {
+	COMP_TRACE_MARKER();
+
 	struct vk_bundle *vk = self->vk;
 
 	VkCommandBuffer cmd_buffer;
 	if (vk_init_cmd_buffer(vk, &cmd_buffer) != VK_SUCCESS)
 		return;
-
 	os_mutex_lock(&vk->cmd_pool_mutex);
-	_render_stereo(self, vk, cmd_buffer);
+	if (self->num_layers == 0) {
+		_render_stereo(self, vk, cmd_buffer, &background_color_idle);
+	} else {
+		_render_stereo(self, vk, cmd_buffer, &background_color_active);
+	}
 	os_mutex_unlock(&vk->cmd_pool_mutex);
 
 	VkResult res = vk_submit_cmd_buffer(vk, cmd_buffer);
@@ -622,8 +638,15 @@ _destroy_framebuffer(struct comp_layer_renderer *self, uint32_t i)
 }
 
 void
-comp_layer_renderer_destroy(struct comp_layer_renderer *self)
+comp_layer_renderer_destroy(struct comp_layer_renderer **ptr_clr)
 {
+	if (ptr_clr == NULL) {
+		return;
+	}
+	struct comp_layer_renderer *self = *ptr_clr;
+	if (self == NULL) {
+		return;
+	}
 	struct vk_bundle *vk = self->vk;
 
 	if (vk->device == VK_NULL_HANDLE)
@@ -654,6 +677,8 @@ comp_layer_renderer_destroy(struct comp_layer_renderer *self)
 	vk_buffer_destroy(&self->vertex_buffer, vk);
 
 	vk->vkDestroyPipelineCache(vk->device, self->pipeline_cache, NULL);
+	free(self);
+	*ptr_clr = NULL;
 }
 
 void

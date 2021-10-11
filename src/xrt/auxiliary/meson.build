@@ -11,6 +11,15 @@ u_git_tag_c = vcs_tag(
 	replace_string: '@GIT_DESC@',
 )
 
+aux_util_deps = [ xrt_config_have, aux_generated_bindings ]
+if libbsd.found() and not get_option('libbsd').disabled()
+	aux_util_deps += libbsd
+endif
+
+if build_tracing
+	aux_util_deps += percetto
+endif
+
 lib_aux_util = static_library(
 	'aux_util',
 	files(
@@ -31,7 +40,10 @@ lib_aux_util = static_library(
 		'util/u_format.h',
 		'util/u_frame.c',
 		'util/u_frame.h',
+		'util/u_generic_callbacks.hpp',
 		'util/u_git_tag.h',
+		'util/u_hand_tracking.c',
+		'util/u_hand_tracking.h',
 		'util/u_handles.c',
 		'util/u_handles.h',
 		'util/u_hashmap.cpp',
@@ -44,8 +56,6 @@ lib_aux_util = static_library(
 		'util/u_logging.h',
 		'util/u_misc.c',
 		'util/u_misc.h',
-		'util/u_render_timing.c',
-		'util/u_render_timing.h',
 		'util/u_sink.h',
 		'util/u_sink_converter.c',
 		'util/u_sink_deinterleaver.c',
@@ -54,10 +64,20 @@ lib_aux_util = static_library(
 		'util/u_sink_split.c',
 		'util/u_time.cpp',
 		'util/u_time.h',
+		'util/u_timing.h',
+		'util/u_timing_fake.c',
+		'util/u_timing_frame.c',
+		'util/u_timing_render.c',
+		'util/u_template_historybuf.hpp',
+		'util/u_trace_marker.c',
+		'util/u_trace_marker.h',
 		'util/u_var.cpp',
 		'util/u_var.h',
-		'util/u_hand_tracking.c',
-		'util/u_hand_tracking.h',
+		'util/u_config_json.c',
+		'util/u_config_json.h',
+		'util/u_verify.h',
+		'util/u_process.c',
+		'util/u_process.h',
 	) + [
 		u_git_tag_c,
 	],
@@ -66,6 +86,7 @@ lib_aux_util = static_library(
 		cjson_include,
 	],
 	dependencies: [
+		aux_util_deps,
 		xrt_config_have,
 	]
 )
@@ -144,6 +165,8 @@ lib_aux_math = static_library(
 		'math/m_eigen_interop.hpp',
 		'math/m_filter_fifo.c',
 		'math/m_filter_fifo.h',
+		'math/m_filter_one_euro.c',
+		'math/m_filter_one_euro.h',
 		'math/m_hash.cpp',
 		'math/m_imu_3dof.c',
 		'math/m_imu_3dof.h',
@@ -155,6 +178,8 @@ lib_aux_math = static_library(
 		'math/m_predict.c',
 		'math/m_predict.h',
 		'math/m_quatexpmap.cpp',
+		'math/m_relation_history.h',
+		'math/m_relation_history.cpp',
 		'math/m_space.cpp',
 		'math/m_space.h',
 		'math/m_vec2.h',
@@ -189,6 +214,8 @@ if build_tracking
 		'tracking/t_debug_hsv_picker.cpp',
 		'tracking/t_debug_hsv_viewer.cpp',
 		'tracking/t_file.cpp',
+		'tracking/t_frame_cv_mat_wrapper.cpp',
+		'tracking/t_frame_cv_mat_wrapper.hpp',
 		'tracking/t_fusion.hpp',
 		'tracking/t_helper_debug_sink.hpp',
 		'tracking/t_hsv_filter.c',
@@ -199,6 +226,11 @@ if build_tracking
 		'tracking/t_tracker_hand.cpp',
 	]
 	tracking_deps += [opencv]
+
+	if slam.found()
+		tracking_srcs += ['tracking/t_tracker_slam.cpp']
+		tracking_deps += [external_slam]
+	endif
 endif
 
 lib_aux_tracking = static_library(
@@ -215,6 +247,24 @@ lib_aux_tracking = static_library(
 aux_tracking = declare_dependency(
 	include_directories: aux_include,
 	link_with: lib_aux_tracking,
+)
+
+lib_aux_vive = static_library(
+	'aux_vive',
+	files(
+		'vive/vive_config.c',
+		'vive/vive_config.h',
+	),
+	include_directories: [
+		xrt_include,
+		cjson_include,
+	],
+	dependencies: [zlib, aux_tracking],
+)
+
+aux_vive = declare_dependency(
+	include_directories: aux_include,
+	link_with: lib_aux_vive,
 )
 
 lib_aux_vk = static_library(
@@ -237,6 +287,6 @@ aux_vk = declare_dependency(
 )
 
 
-all_aux = [aux_util, aux_os, aux_math, aux_tracking, aux_generated_bindings]
+all_aux = [aux_util, aux_os, aux_math, aux_tracking, aux_generated_bindings, aux_vive]
 
 aux = declare_dependency(dependencies: all_aux)

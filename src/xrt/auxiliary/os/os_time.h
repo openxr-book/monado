@@ -60,13 +60,16 @@ extern "C" {
  * interoperation with platform APIs.
  */
 
-
 /*!
  * @brief Sleep the given number of nanoseconds.
+ *
+ * Note that on some platforms, this may be somewhat less accurate than you might want.
+ * On all platforms, the system scheduler has the final say.
+ *
  * @ingroup aux_os_time
  */
 static inline void
-os_nanosleep(long nsec)
+os_nanosleep(int32_t nsec)
 {
 #if defined(XRT_OS_LINUX)
 	struct timespec spec;
@@ -78,9 +81,82 @@ os_nanosleep(long nsec)
 #endif
 }
 
-#ifdef XRT_HAVE_TIMESPEC
+/*!
+ * @brief A structure for storing state as needed for more precise sleeping, mostly for compositor use.
+ * @ingroup aux_os_time
+ */
+struct os_precise_sleeper
+{
+#if defined(XRT_OS_WINDOWS)
+	HANDLE timer;
+#else
+	int unused_;
+#endif
+};
+
+/*!
+ * @brief Initialize members of @ref os_precise_sleeper.
+ * @public @memberof os_precise_sleeper
+ */
+static inline void
+os_precise_sleeper_init(struct os_precise_sleeper *ops)
+{
+#if defined(XRT_OS_WINDOWS)
+	ops->timer = CreateWaitableTimer(NULL, TRUE, NULL);
+#endif
+}
+
+/*!
+ * @brief De-initialize members of @ref os_precise_sleeper, and free resources, without actually freeing the given
+ * pointer.
+ * @public @memberof os_precise_sleeper
+ */
+static inline void
+os_precise_sleeper_deinit(struct os_precise_sleeper *ops)
+{
+#if defined(XRT_OS_WINDOWS)
+	if (ops->timer) {
+		CloseHandle(ops->timer);
+		ops->timer = NULL;
+	}
+#endif
+}
+
+/*!
+ * @brief Sleep the given number of nanoseconds, trying harder to be precise.
+ *
+ * On some platforms, there is no way to improve sleep precision easily with some OS-specific state, so we just forward
+ * to os_nanosleep().
+ *
+ * Note that on all platforms, the system scheduler has the final say.
+ *
+ * @public @memberof os_precise_sleeper
+ */
+static inline void
+os_precise_sleeper_nanosleep(struct os_precise_sleeper *ops, int32_t nsec)
+{
+#if defined(XRT_OS_WINDOWS)
+	if (ops->timer) {
+		LARGE_INTEGER timeperiod;
+		timeperiod.QuadPart = -(nsec / 100);
+		if (SetWaitableTimer(ops->timer, &timeperiod, 0, NULL, NULL, FALSE)) {
+			// OK we could set up the timer, now let's wait.
+			WaitForSingleObject(ops->timer, INFINITE);
+			return;
+		}
+	}
+#endif
+	// If we fall through from an implementation, or there's no implementation needed for a platform, we just
+	// delegate to the regular os_nanosleep.
+	os_nanosleep(nsec);
+}
+
+#if defined(XRT_HAVE_TIMESPEC)
 /*!
  * @brief Convert a timespec struct to nanoseconds.
+ *
+ * Note that this just does the value combining, no adjustment for epochs is performed.
+ *
  * @ingroup aux_os_time_extra
  */
 static inline uint64_t
@@ -94,6 +170,8 @@ os_timespec_to_ns(const struct timespec *spec)
 
 /*!
  * @brief Convert an nanosecond integer to a timespec struct.
+ *
+ * Note that this just does the value splitting, no adjustment for epochs is performed.
  * @ingroup aux_os_time_extra
  */
 static inline void
@@ -105,7 +183,10 @@ os_ns_to_timespec(uint64_t ns, struct timespec *spec)
 #endif // XRT_HAVE_TIMESPEC
 
 
-#ifdef XRT_HAVE_TIMEVAL
+#if defined(XRT_HAVE_TIMEVAL) && defined(XRT_OS_LINUX)
+
+#define OS_NS_PER_USEC (1000)
+
 /*!
  * @brief Convert a timeval struct to nanoseconds.
  * @ingroup aux_os_time_extra
@@ -115,34 +196,11 @@ os_timeval_to_ns(struct timeval *val)
 {
 	uint64_t ns = 0;
 	ns += (uint64_t)val->tv_sec * U_1_000_000_000;
-#define OS_NS_PER_USEC (1000)
 	ns += (uint64_t)val->tv_usec * OS_NS_PER_USEC;
 	return ns;
 }
 #endif // XRT_HAVE_TIMEVAL
 
-#ifdef XRT_OS_WINDOWS
-#define CLOCK_MONOTONIC 0
-#define CLOCK_REALTIME 1
-
-static int
-clock_gettime(int clk_id, struct timespec *spec)
-{
-	__int64 wintime;
-
-	//! @todo We should be using QueryPerformanceCounter
-	GetSystemTimeAsFileTime((FILETIME *)&wintime);
-	// 1jan1601 to 1jan1970
-	wintime -= 116444736000000000i64;
-	// seconds
-	spec->tv_sec = wintime / 10000000i64;
-	// nano-seconds
-	spec->tv_nsec = wintime % 10000000i64 * 100;
-
-	return 0;
-}
-
-#endif // XRT_OS_WINDOWS
 /*!
  * @brief Return a monotonic clock in nanoseconds.
  * @ingroup aux_os_time
@@ -150,7 +208,7 @@ clock_gettime(int clk_id, struct timespec *spec)
 static inline uint64_t
 os_monotonic_get_ns(void)
 {
-#if defined(XRT_OS_LINUX) || defined(XRT_OS_WINDOWS)
+#if defined(XRT_OS_LINUX)
 	struct timespec ts;
 	int ret = clock_gettime(CLOCK_MONOTONIC, &ts);
 	if (ret != 0) {
@@ -158,6 +216,19 @@ os_monotonic_get_ns(void)
 	}
 
 	return os_timespec_to_ns(&ts);
+#elif defined(XRT_OS_WINDOWS)
+	static int64_t ns_per_qpc_tick = 0;
+	if (ns_per_qpc_tick == 0) {
+		// Fixed at startup, so we can cache this.
+		LARGE_INTEGER freq;
+		QueryPerformanceFrequency(&freq);
+		ns_per_qpc_tick = U_1_000_000_000 / freq.QuadPart;
+	}
+	LARGE_INTEGER qpc;
+	QueryPerformanceCounter(&qpc);
+	return qpc.QuadPart * ns_per_qpc_tick;
+#else
+#error "need port"
 #endif
 }
 

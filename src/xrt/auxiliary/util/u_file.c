@@ -54,10 +54,10 @@ mkpath(const char *path)
 ssize_t
 u_file_get_config_dir(char *out_path, size_t out_path_size)
 {
-	const char *xgd_home = getenv("XDG_CONFIG_HOME");
+	const char *xdg_home = getenv("XDG_CONFIG_HOME");
 	const char *home = getenv("HOME");
-	if (xgd_home != NULL) {
-		return snprintf(out_path, out_path_size, "%s/monado", xgd_home);
+	if (xdg_home != NULL) {
+		return snprintf(out_path, out_path_size, "%s/monado", xdg_home);
 	}
 	if (home != NULL) {
 		return snprintf(out_path, out_path_size, "%s/.config/monado", home);
@@ -104,4 +104,53 @@ u_file_open_file_in_config_dir(const char *filename, const char *mode)
 	return fopen(file_str, mode);
 }
 
+ssize_t
+u_file_get_runtime_dir(char *out_path, size_t out_path_size)
+{
+	const char *xgd_rt = getenv("XDG_RUNTIME_DIR");
+	if (xgd_rt != NULL) {
+		return snprintf(out_path, out_path_size, "%s", xgd_rt);
+	}
+
+	const char *tmp = "/tmp";
+	return snprintf(out_path, out_path_size, "%s", tmp);
+}
+
+ssize_t
+u_file_get_path_in_runtime_dir(const char *filename, char *out_path, size_t out_path_size)
+{
+	char tmp[PATH_MAX];
+	ssize_t i = u_file_get_runtime_dir(tmp, sizeof(tmp));
+	if (i <= 0) {
+		return -1;
+	}
+
+	return snprintf(out_path, out_path_size, "%s/%s", tmp, filename);
+}
+
 #endif
+
+char *
+u_file_read_content(FILE *file)
+{
+	// Go to the end of the file.
+	fseek(file, 0L, SEEK_END);
+	size_t file_size = ftell(file);
+
+	// Return back to the start of the file.
+	fseek(file, 0L, SEEK_SET);
+
+	char *buffer = (char *)calloc(file_size + 1, sizeof(char));
+	if (buffer == NULL) {
+		return NULL;
+	}
+
+	// Do the actual reading.
+	size_t ret = fread(buffer, sizeof(char), file_size, file);
+	if (ret != file_size) {
+		free(buffer);
+		return NULL;
+	}
+
+	return buffer;
+}

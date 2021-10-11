@@ -6,6 +6,7 @@ add_executable(monado-service
 	main.c
 	../openxr/oxr_sdl2_hack.c
 	)
+add_sanitizers(monado-service)
 
 target_link_libraries(monado-service PRIVATE
 	aux_util
@@ -86,6 +87,7 @@ if(XRT_HAVE_SDL2)
 		imgui_impl_sdl
 		${SDL2_LIBRARIES}
 		aux_ogl
+		drv_qwerty_includes
 		)
 	target_include_directories(monado-service PRIVATE
 		${SDL2_INCLUDE_DIRS}

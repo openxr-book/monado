@@ -40,12 +40,21 @@ if(ANDROID)
 		${WRAP_SOURCES})
 	target_include_directories(xrt-external-jni-wrap PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/android-jni-wrap)
 	target_link_libraries(xrt-external-jni-wrap PUBLIC xrt-external-jnipp)
-	set_target_properties(xrt-external-jni-wrap
-		PROPERTIES
-		CXX_STANDARD 17
-		CXX_STANDARD_REQUIRED ON)
 endif()
 
 # OpenXR
 add_library(xrt-external-openxr INTERFACE)
 target_include_directories(xrt-external-openxr INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/openxr_includes)
+
+# External SLAM tracking
+if (SLAM)
+	add_library(xrt-external-slam STATIC slam_tracker/slam_tracker.hpp)
+	set_target_properties(xrt-external-slam PROPERTIES LINKER_LANGUAGE CXX)
+	target_include_directories(xrt-external-slam INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/slam_tracker)
+	target_include_directories(xrt-external-slam INTERFACE ${SLAM_INCLUDE_DIRS})
+	target_link_libraries(xrt-external-slam INTERFACE ${SLAM_LIBRARIES})
+endif()
+
+# STB
+add_library(xrt-external-stb INTERFACE)
+target_include_directories(xrt-external-stb INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/stb)

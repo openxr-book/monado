@@ -6,7 +6,6 @@ set(PROBER_INCLUDES)
 set(PROBER_SOURCE_FILES
 	p_documentation.h
 	p_dump.c
-	p_json.c
 	p_prober.c
 	p_prober.h
 	p_tracking.c
@@ -40,6 +39,7 @@ target_link_libraries(st_prober PUBLIC
 	xrt-interfaces
 	)
 target_link_libraries(st_prober PRIVATE
+	drv_multi
 	aux_util
 	aux_os
 	aux_tracking

@@ -1,10 +1,11 @@
-// Copyright 2020, Collabora, Ltd.
+// Copyright 2020-2021, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Common server side code.
  * @author Pete Black <pblack@collabora.com>
  * @author Jakob Bornecrantz <jakob@collabora.com>
+ * @author Ryan Pavlik <ryan.pavlik@collabora.com>
  * @ingroup ipc_server
  */
 
@@ -12,7 +13,6 @@
 
 #include "xrt/xrt_compiler.h"
 
-#include "util/u_render_timing.h"
 #include "util/u_logging.h"
 
 #include "os/os_threading.h"
@@ -68,14 +68,6 @@ struct ipc_swapchain_data
 	bool active;
 };
 
-
-struct ipc_queued_event
-{
-	bool pending;
-	uint64_t timestamp;
-	union xrt_compositor_event event;
-};
-
 /*!
  * Holds the state for a single client.
  *
@@ -104,17 +96,7 @@ struct ipc_client_state
 	//! Socket fd used for client comms
 	struct ipc_message_channel imc;
 
-	//! State for rendering.
-	struct ipc_layer_slot render_state;
-
-	//! Whether we are currently rendering @ref render_state
-	bool rendering_state;
-
-	//! The frame timing state.
-	struct u_rt_helper urth;
-
 	struct ipc_app_state client_state;
-	struct ipc_queued_event queued_events[IPC_EVENT_QUEUE_SIZE];
 
 	int server_thread_index;
 };
@@ -148,6 +130,136 @@ struct ipc_device
 };
 
 /*!
+ * Platform-specific mainloop object for the IPC server.
+ *
+ * Contents are essentially implementation details, but are listed in full here so they may be included by value in the
+ * main ipc_server struct.
+ *
+ * @see ipc_design
+ *
+ * @ingroup ipc_server
+ */
+struct ipc_server_mainloop
+{
+
+#if defined(XRT_OS_ANDROID) || defined(XRT_OS_LINUX) || defined(XRT_DOXYGEN)
+	//! For waiting on various events in the main thread.
+	int epoll_fd;
+#endif
+
+#if defined(XRT_OS_ANDROID) || defined(XRT_DOXYGEN)
+	/*!
+	 * @name Android Mainloop Members
+	 * @{
+	 */
+
+	//! File descriptor for the read end of our pipe for submitting new clients
+	int pipe_read;
+
+	/*!
+	 * File descriptor for the write end of our pipe for submitting new clients
+	 *
+	 * Must hold client_push_mutex while writing.
+	 */
+	int pipe_write;
+
+	/*!
+	 * Mutex for being able to register oneself as a new client.
+	 *
+	 * Locked only by threads in `ipc_server_mainloop_add_fd()`.
+	 *
+	 * This must be locked first, and kept locked the entire time a client is attempting to register and wait for
+	 * confirmation. It ensures no acknowledgements of acceptance are lost and moves the overhead of ensuring this
+	 * to the client thread.
+	 */
+	pthread_mutex_t client_push_mutex;
+
+
+	/*!
+	 * The last client fd we accepted, to acknowledge client acceptance.
+	 *
+	 * Also used as a sentinel during shutdown.
+	 *
+	 * Must hold accept_mutex while writing.
+	 */
+	int last_accepted_fd;
+
+	/*!
+	 * Condition variable for accepting clients.
+	 *
+	 * Signalled when @ref last_accepted_fd is updated.
+	 *
+	 * Associated with @ref accept_mutex
+	 */
+	pthread_cond_t accept_cond;
+
+	/*!
+	 * Mutex for accepting clients.
+	 *
+	 * Locked by both clients and server: that is, by threads in `ipc_server_mainloop_add_fd()` and in the
+	 * server/compositor thread in an implementation function called from `ipc_server_mainloop_poll()`.
+	 *
+	 * Exists to operate in conjunction with @ref accept_cond - it exists to make sure that the client can be woken
+	 * when the server accepts it.
+	 */
+	pthread_mutex_t accept_mutex;
+
+
+	/*! @} */
+#define XRT_IPC_GOT_IMPL
+#endif
+
+#if (defined(XRT_OS_LINUX) && !defined(XRT_OS_ANDROID)) || defined(XRT_DOXYGEN)
+	/*!
+	 * @name Desktop Linux Mainloop Members
+	 * @{
+	 */
+
+	//! Socket that we accept connections on.
+	int listen_socket;
+
+	//! Were we launched by socket activation, instead of explicitly?
+	bool launched_by_socket;
+
+	//! The socket filename we bound to, if any.
+	char *socket_filename;
+
+	/*! @} */
+
+#define XRT_IPC_GOT_IMPL
+#endif
+
+#ifndef XRT_IPC_GOT_IMPL
+#error "Need port"
+#endif
+};
+
+/*!
+ * De-initialize the mainloop object.
+ * @public @memberof ipc_server_mainloop
+ */
+void
+ipc_server_mainloop_deinit(struct ipc_server_mainloop *ml);
+
+/*!
+ * Initialize the mainloop object.
+ *
+ * @return <0 on error.
+ * @public @memberof ipc_server_mainloop
+ */
+int
+ipc_server_mainloop_init(struct ipc_server_mainloop *ml);
+
+/*!
+ * @brief Poll the mainloop.
+ *
+ * Any errors are signalled by calling ipc_server_handle_failure()
+ * @public @memberof ipc_server_mainloop
+ */
+void
+ipc_server_mainloop_poll(struct ipc_server *vs, struct ipc_server_mainloop *ml);
+
+/*!
  * Main IPC object for the server.
  *
  * @ingroup ipc_server
@@ -156,6 +268,9 @@ struct ipc_server
 {
 	struct xrt_instance *xinst;
 
+	//! Handle for the current process, e.g. pidfile on linux
+	struct u_process *process;
+
 	/* ---- HACK ---- */
 	void *hack;
 	/* ---- HACK ---- */
@@ -163,8 +278,6 @@ struct ipc_server
 
 	//! System compositor.
 	struct xrt_system_compositor *xsysc;
-	//! Native compositor.
-	struct xrt_compositor_native *xcn;
 
 	struct ipc_device idevs[IPC_SERVER_NUM_XDEVS];
 	struct xrt_tracking_origin *xtracks[IPC_SERVER_NUM_XDEVS];
@@ -172,11 +285,7 @@ struct ipc_server
 	struct ipc_shared_memory *ism;
 	xrt_shmem_handle_t ism_handle;
 
-	//! Socket that we accept connections on.
-	int listen_socket;
-
-	//! For waiting on various events in the main thread.
-	int epoll_fd;
+	struct ipc_server_mainloop ml;
 
 	// Is the mainloop supposed to run.
 	volatile bool running;
@@ -184,23 +293,23 @@ struct ipc_server
 	// Should we exit when a client disconnects.
 	bool exit_on_disconnect;
 
-	//! Were we launched by socket activation, instead of explicitly?
-	bool launched_by_socket;
-
-	//! The socket filename we bound to, if any.
-	char *socket_filename;
-
 	enum u_logging_level ll;
 
 	struct ipc_thread threads[IPC_MAX_CLIENTS];
 
 	volatile uint32_t current_slot_index;
 
-	int active_client_index;
-	int last_active_client_index;
-	struct os_mutex global_state_lock;
+	struct
+	{
+		int active_client_index;
+		int last_active_client_index;
+
+		struct os_mutex lock;
+	} global_state;
 };
 
+
+#ifndef XRT_OS_ANDROID
 /*!
  * Main entrypoint to the compositor process.
  *
@@ -208,24 +317,54 @@ struct ipc_server
  */
 int
 ipc_server_main(int argc, char **argv);
+#endif
 
+#ifdef XRT_OS_ANDROID
 /*!
- * Android entry point to the IPC server process.
+ * Main entrypoint to the server process.
+ *
+ * @param ps Pointer to populate with the server struct.
+ * @param startup_complete_callback Function to call upon completing startup and populating *ps, but before entering the
+ * mainloop.
+ * @param data user data to pass to your callback.
  *
  * @ingroup ipc_server
  */
-#ifdef XRT_OS_ANDROID
 int
-ipc_server_main_android(int fd);
+ipc_server_main_android(struct ipc_server **ps, void (*startup_complete_callback)(void *data), void *data);
 #endif
 
 /*!
- * Called by client threads to manage global state
+ * Set the new active client.
  *
  * @ingroup ipc_server
  */
 void
-update_server_state(struct ipc_server *vs);
+ipc_server_set_active_client(struct ipc_server *s, int active_client_index);
+
+/*!
+ * Called by client threads to set a session to active.
+ *
+ * @ingroup ipc_server
+ */
+void
+ipc_server_activate_session(volatile struct ipc_client_state *ics);
+
+/*!
+ * Called by client threads to set a session to deactivate.
+ *
+ * @ingroup ipc_server
+ */
+void
+ipc_server_deactivate_session(volatile struct ipc_client_state *ics);
+
+/*!
+ * Called by client threads to recalculate active client.
+ *
+ * @ingroup ipc_server
+ */
+void
+ipc_server_update_state(struct ipc_server *s);
 
 /*!
  * Thread function for the client side dispatching.
@@ -235,6 +374,42 @@ update_server_state(struct ipc_server *vs);
 void *
 ipc_server_client_thread(void *_cs);
 
+/*!
+ * This destroyes the native compositor for this client and any extra objects
+ * created from it, like all of the swapchains.
+ */
+void
+ipc_server_client_destroy_compositor(volatile struct ipc_client_state *ics);
+
+/*!
+ * @defgroup ipc_server_internals Server Internals
+ * @brief These are only called by the platform-specific mainloop polling code.
+ * @ingroup ipc_server
+ * @{
+ */
+/*!
+ * Start a thread for a client connected at the other end of the file descriptor @p fd.
+ * @memberof ipc_server
+ */
+void
+ipc_server_start_client_listener_thread(struct ipc_server *vs, int fd);
+
+/*!
+ * Perform whatever needs to be done when the mainloop polling encounters a failure.
+ * @memberof ipc_server
+ */
+void
+ipc_server_handle_failure(struct ipc_server *vs);
+
+/*!
+ * Perform whatever needs to be done when the mainloop polling identifies that the server should be shut down.
+ *
+ * Does something like setting a flag or otherwise signalling for shutdown: does not itself explicitly exit.
+ * @memberof ipc_server
+ */
+void
+ipc_server_handle_shutdown_signal(struct ipc_server *vs);
+//! @}
 
 /*
  *

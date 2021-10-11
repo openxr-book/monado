@@ -20,11 +20,12 @@ extern "C" {
 
 
 struct xrt_frame_sink;
+struct u_sink_debug;
 struct m_ff_f64;
 struct m_ff_vec3_f32;
 
 /*!
- * @ingroup aux_util
+ * @addtogroup aux_util
  * @{
  */
 
@@ -57,6 +58,38 @@ struct u_var_timing
 };
 
 /*!
+ * Callback for a button action
+ */
+typedef void (*u_var_button_cb)(void *);
+
+struct u_var_button
+{
+	//! Callback function to execute on button press
+	u_var_button_cb cb;
+
+	//! Pointer that will be passed to the function as its only argument
+	void *ptr;
+
+	//! Button text, use var `name` if zeroed
+	char label[64];
+
+	//! Button dimensions, zero for auto size
+	float width;
+	float height;
+
+	//! Whether this button is disabled
+	bool disabled;
+};
+
+struct u_var_draggable_f32
+{
+	float val;
+	float step;
+	float min;
+	float max;
+};
+
+/*!
  * What kind of variable is this tracking.
  */
 enum u_var_kind
@@ -65,14 +98,17 @@ enum u_var_kind
 	U_VAR_KIND_RGB_U8,
 	U_VAR_KIND_RGB_F32,
 	U_VAR_KIND_U8,
+	U_VAR_KIND_U64,
 	U_VAR_KIND_I32,
 	U_VAR_KIND_F32,
+	U_VAR_KIND_DRAGGABLE_F32,
+	U_VAR_KIND_F64,
 	U_VAR_KIND_F32_ARR,
 	U_VAR_KIND_TIMING,
 	U_VAR_KIND_VEC3_I32,
 	U_VAR_KIND_VEC3_F32,
 	U_VAR_KIND_POSE,
-	U_VAR_KIND_SINK,
+	U_VAR_KIND_SINK_DEBUG,
 	U_VAR_KIND_LOG_LEVEL,
 	U_VAR_KIND_RO_TEXT,
 	U_VAR_KIND_RO_I32,
@@ -87,15 +123,17 @@ enum u_var_kind
 	U_VAR_KIND_RO_FF_F64,
 	U_VAR_KIND_RO_FF_VEC3_F32,
 	U_VAR_KIND_GUI_HEADER,
+	U_VAR_KIND_BUTTON,
 };
 
+#define U_VAR_NAME_STRING_SIZE 256
 /*!
  * Struct that keeps all of the information about the variable, some of the UI
  * state is kept on it.
  */
 struct u_var_info
 {
-	char name[256];
+	char name[U_VAR_NAME_STRING_SIZE];
 	void *ptr;
 
 	enum u_var_kind kind;
@@ -166,14 +204,16 @@ u_var_force_on(void);
 	ADD_FUNC(rgb_u8, struct xrt_colour_rgb_u8, RGB_U8)                                                             \
 	ADD_FUNC(rgb_f32, struct xrt_colour_rgb_f32, RGB_F32)                                                          \
 	ADD_FUNC(u8, uint8_t, U8)                                                                                      \
+	ADD_FUNC(u64, uint64_t, U64)                                                                                   \
 	ADD_FUNC(i32, int32_t, I32)                                                                                    \
 	ADD_FUNC(f32, float, F32)                                                                                      \
+	ADD_FUNC(f64, double, F64)                                                                                     \
 	ADD_FUNC(f32_arr, struct u_var_f32_arr, F32_ARR)                                                               \
 	ADD_FUNC(f32_timing, struct u_var_timing, TIMING)                                                              \
 	ADD_FUNC(vec3_i32, struct xrt_vec3_i32, VEC3_I32)                                                              \
 	ADD_FUNC(vec3_f32, struct xrt_vec3, VEC3_F32)                                                                  \
 	ADD_FUNC(pose, struct xrt_pose, POSE)                                                                          \
-	ADD_FUNC(sink, struct xrt_frame_sink *, SINK)                                                                  \
+	ADD_FUNC(sink_debug, struct u_sink_debug, SINK_DEBUG)                                                          \
 	ADD_FUNC(log_level, enum u_logging_level, LOG_LEVEL)                                                           \
 	ADD_FUNC(ro_text, const char, RO_TEXT)                                                                         \
 	ADD_FUNC(ro_i32, int32_t, RO_I32)                                                                              \
@@ -187,7 +227,9 @@ u_var_force_on(void);
 	ADD_FUNC(ro_quat_f32, struct xrt_quat, RO_QUAT_F32)                                                            \
 	ADD_FUNC(ro_ff_f64, struct m_ff_f64, RO_FF_F64)                                                                \
 	ADD_FUNC(ro_ff_vec3_f32, struct m_ff_vec3_f32, RO_FF_VEC3_F32)                                                 \
-	ADD_FUNC(gui_header, bool, GUI_HEADER)
+	ADD_FUNC(gui_header, bool, GUI_HEADER)                                                                         \
+	ADD_FUNC(button, struct u_var_button, BUTTON)                                                                  \
+	ADD_FUNC(draggable_f32, struct u_var_draggable_f32, DRAGGABLE_F32)
 
 #define ADD_FUNC(SUFFIX, TYPE, ENUM) void u_var_add_##SUFFIX(void *, TYPE *, const char *);
 

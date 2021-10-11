@@ -66,19 +66,20 @@
 
 	"session_end": {},
 
+	"session_destroy": {},
+
 	"compositor_get_info": {
 		"out": [
 			{"name": "info", "type": "struct xrt_compositor_info"}
 		]
 	},
 
-	"compositor_wait_frame": {
+	"compositor_predict_frame": {
 		"out": [
 			{"name": "frame_id", "type": "int64_t"},
-			{"name": "predicted_display_time", "type": "uint64_t"},
 			{"name": "wake_up_time", "type": "uint64_t"},
-			{"name": "predicted_display_period", "type": "uint64_t"},
-			{"name": "min_display_period", "type": "uint64_t"}
+			{"name": "predicted_display_time", "type": "uint64_t"},
+			{"name": "predicted_display_period", "type": "uint64_t"}
 		]
 	},
 
@@ -124,7 +125,8 @@
 		"out": [
 			{"name": "id", "type": "uint32_t"},
 			{"name": "num_images", "type": "uint32_t"},
-			{"name": "size", "type": "uint64_t"}
+			{"name": "size", "type": "uint64_t"},
+			{"name": "use_dedicated_allocation", "type": "bool"}
 		],
 		"out_handles": {"type": "xrt_graphics_buffer_handle_t"}
 	},
@@ -194,14 +196,15 @@
 			{"name": "at_timestamp", "type": "uint64_t"}
 		],
 		"out": [
-			{"name": "value", "type": "struct xrt_hand_joint_set"}
+			{"name": "value", "type": "struct xrt_hand_joint_set"},
+			{"name": "timestamp", "type": "uint64_t"}
 		]
 	},
 
 	"device_get_view_pose": {
 		"in": [
 			{"name": "id", "type": "uint32_t"},
-			{"name": "eye_relation", "type": "struct xrt_vec3"},
+			{"name": "eye_relation", "type": "const struct xrt_vec3"},
 			{"name": "view_index", "type": "uint32_t"}
 		],
 		"out": [

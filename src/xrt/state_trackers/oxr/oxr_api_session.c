@@ -15,6 +15,7 @@
 #include "xrt/xrt_compiler.h"
 
 #include "util/u_debug.h"
+#include "util/u_trace_marker.h"
 
 #include "oxr_objects.h"
 #include "oxr_logger.h"
@@ -28,6 +29,8 @@
 XrResult
 oxr_xrCreateSession(XrInstance instance, const XrSessionCreateInfo *createInfo, XrSession *out_session)
 {
+	OXR_TRACE_MARKER();
+
 	XrResult ret;
 	struct oxr_instance *inst;
 	struct oxr_session *sess, **link;
@@ -59,6 +62,8 @@ oxr_xrCreateSession(XrInstance instance, const XrSessionCreateInfo *createInfo, 
 XrResult
 oxr_xrDestroySession(XrSession session)
 {
+	OXR_TRACE_MARKER();
+
 	struct oxr_session *sess, **link;
 	struct oxr_instance *inst;
 	struct oxr_logger log;
@@ -78,6 +83,8 @@ oxr_xrDestroySession(XrSession session)
 XrResult
 oxr_xrBeginSession(XrSession session, const XrSessionBeginInfo *beginInfo)
 {
+	OXR_TRACE_MARKER();
+
 	struct oxr_session *sess;
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrBeginSession");
@@ -90,6 +97,8 @@ oxr_xrBeginSession(XrSession session, const XrSessionBeginInfo *beginInfo)
 XrResult
 oxr_xrEndSession(XrSession session)
 {
+	OXR_TRACE_MARKER();
+
 	struct oxr_session *sess;
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrEndSession");
@@ -100,6 +109,8 @@ oxr_xrEndSession(XrSession session)
 XrResult
 oxr_xrWaitFrame(XrSession session, const XrFrameWaitInfo *frameWaitInfo, XrFrameState *frameState)
 {
+	OXR_TRACE_MARKER();
+
 	struct oxr_session *sess;
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrWaitFrame");
@@ -113,6 +124,8 @@ oxr_xrWaitFrame(XrSession session, const XrFrameWaitInfo *frameWaitInfo, XrFrame
 XrResult
 oxr_xrBeginFrame(XrSession session, const XrFrameBeginInfo *frameBeginInfo)
 {
+	OXR_TRACE_MARKER();
+
 	struct oxr_session *sess;
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrBeginFrame");
@@ -125,6 +138,8 @@ oxr_xrBeginFrame(XrSession session, const XrFrameBeginInfo *frameBeginInfo)
 XrResult
 oxr_xrEndFrame(XrSession session, const XrFrameEndInfo *frameEndInfo)
 {
+	OXR_TRACE_MARKER();
+
 	struct oxr_session *sess;
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrEndFrame");
@@ -136,6 +151,8 @@ oxr_xrEndFrame(XrSession session, const XrFrameEndInfo *frameEndInfo)
 XrResult
 oxr_xrRequestExitSession(XrSession session)
 {
+	OXR_TRACE_MARKER();
+
 	struct oxr_session *sess;
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrRequestExitSession");
@@ -151,6 +168,8 @@ oxr_xrLocateViews(XrSession session,
                   uint32_t *viewCountOutput,
                   XrView *views)
 {
+	OXR_TRACE_MARKER();
+
 	struct oxr_session *sess;
 	struct oxr_space *spc;
 	struct oxr_logger log;
@@ -165,7 +184,14 @@ oxr_xrLocateViews(XrSession session,
 		OXR_VERIFY_ARG_NOT_NULL(&log, views);
 	}
 
-	return oxr_session_views(&log, sess, viewLocateInfo, viewState, viewCapacityInput, viewCountOutput, views);
+	return oxr_session_locate_views( //
+	    &log,                        //
+	    sess,                        //
+	    viewLocateInfo,              //
+	    viewState,                   //
+	    viewCapacityInput,           //
+	    viewCountOutput,             //
+	    views);                      //
 }
 
 
@@ -184,6 +210,8 @@ oxr_xrGetVisibilityMaskKHR(XrSession session,
                            XrVisibilityMaskTypeKHR visibilityMaskType,
                            XrVisibilityMaskKHR *visibilityMask)
 {
+	OXR_TRACE_MARKER();
+
 	struct oxr_session *sess;
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrGetVisibilityMaskKHR");
@@ -207,6 +235,8 @@ oxr_xrPerfSettingsSetPerformanceLevelEXT(XrSession session,
                                          XrPerfSettingsDomainEXT domain,
                                          XrPerfSettingsLevelEXT level)
 {
+	OXR_TRACE_MARKER();
+
 	struct oxr_session *sess;
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrPerfSettingsSetPerformanceLevelEXT");
@@ -232,6 +262,8 @@ oxr_xrThermalGetTemperatureTrendEXT(XrSession session,
                                     float *tempHeadroom,
                                     float *tempSlope)
 {
+	OXR_TRACE_MARKER();
+
 	struct oxr_session *sess;
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrThermalGetTemperatureTrendEXT");
@@ -239,11 +271,15 @@ oxr_xrThermalGetTemperatureTrendEXT(XrSession session,
 	return oxr_error(&log, XR_ERROR_HANDLE_INVALID, "Not implemented");
 }
 
+#endif
+
 /*
  *
  * XR_EXT_hand_tracking
  *
  */
+
+#ifdef XR_EXT_hand_tracking
 
 static XrResult
 oxr_hand_tracker_destroy_cb(struct oxr_logger *log, struct oxr_handle_base *hb)
@@ -273,11 +309,12 @@ oxr_hand_tracker_create(struct oxr_logger *log,
 	hand_tracker->hand = createInfo->hand;
 	hand_tracker->hand_joint_set = createInfo->handJointSet;
 
-	//! @todo: Implement choice when more than one device has hand tracking
+	//! @todo: move hand tracking device selection to oxr_system.
+	// if no xdev with hand tracking is found, create hand tracker without xdev.
 	for (uint32_t i = 0; i < sess->sys->num_xdevs; i++) {
 		struct xrt_device *xdev = sess->sys->xdevs[i];
 
-		if (!xdev->hand_tracking_supported) {
+		if (!xdev || !xdev->hand_tracking_supported) {
 			continue;
 		}
 
@@ -309,6 +346,8 @@ oxr_xrCreateHandTrackerEXT(XrSession session,
                            const XrHandTrackerCreateInfoEXT *createInfo,
                            XrHandTrackerEXT *handTracker)
 {
+	OXR_TRACE_MARKER();
+
 	struct oxr_hand_tracker *hand_tracker = NULL;
 	struct oxr_session *sess = NULL;
 	struct oxr_logger log;
@@ -341,6 +380,8 @@ oxr_xrCreateHandTrackerEXT(XrSession session,
 XrResult
 oxr_xrDestroyHandTrackerEXT(XrHandTrackerEXT handTracker)
 {
+	OXR_TRACE_MARKER();
+
 	struct oxr_hand_tracker *hand_tracker;
 	struct oxr_logger log;
 	OXR_VERIFY_HAND_TRACKER_AND_INIT_LOG(&log, handTracker, hand_tracker, "xrDestroyHandTrackerEXT");
@@ -353,6 +394,8 @@ oxr_xrLocateHandJointsEXT(XrHandTrackerEXT handTracker,
                           const XrHandJointsLocateInfoEXT *locateInfo,
                           XrHandJointLocationsEXT *locations)
 {
+	OXR_TRACE_MARKER();
+
 	struct oxr_hand_tracker *hand_tracker;
 	struct oxr_space *spc;
 	struct oxr_logger log;

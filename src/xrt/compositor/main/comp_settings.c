@@ -11,9 +11,10 @@
 #include "comp_settings.h"
 
 // clang-format off
-DEBUG_GET_ONCE_LOG_OPTION(log, "XRT_COMPOSITOR_LOG", U_LOGGING_WARN)
+DEBUG_GET_ONCE_LOG_OPTION(log, "XRT_COMPOSITOR_LOG", U_LOGGING_INFO)
 DEBUG_GET_ONCE_BOOL_OPTION(print_modes, "XRT_COMPOSITOR_PRINT_MODES", false)
 DEBUG_GET_ONCE_BOOL_OPTION(force_randr, "XRT_COMPOSITOR_FORCE_RANDR", false)
+DEBUG_GET_ONCE_BOOL_OPTION(force_wayland_direct, "XRT_COMPOSITOR_FORCE_WAYLAND_DIRECT", false)
 DEBUG_GET_ONCE_BOOL_OPTION(force_nvidia, "XRT_COMPOSITOR_FORCE_NVIDIA", false)
 DEBUG_GET_ONCE_OPTION(nvidia_display, "XRT_COMPOSITOR_FORCE_NVIDIA_DISPLAY", NULL)
 DEBUG_GET_ONCE_NUM_OPTION(vk_display, "XRT_COMPOSITOR_FORCE_VK_DISPLAY", -1)
@@ -27,6 +28,7 @@ DEBUG_GET_ONCE_NUM_OPTION(scale_percentage, "XRT_COMPOSITOR_SCALE_PERCENTAGE", 1
 DEBUG_GET_ONCE_BOOL_OPTION(xcb_fullscreen, "XRT_COMPOSITOR_XCB_FULLSCREEN", false)
 DEBUG_GET_ONCE_NUM_OPTION(xcb_display, "XRT_COMPOSITOR_XCB_DISPLAY", -1)
 DEBUG_GET_ONCE_NUM_OPTION(default_framerate, "XRT_COMPOSITOR_DEFAULT_FRAMERATE", 60)
+DEBUG_GET_ONCE_BOOL_OPTION(compute, "XRT_COMPOSITOR_COMPUTE", false)
 // clang-format on
 
 void
@@ -39,8 +41,15 @@ comp_settings_init(struct comp_settings *s, struct xrt_device *xdev)
 		interval_ns = (1000 * 1000 * 1000) / default_framerate;
 	}
 
+	s->use_compute = debug_get_bool_option_compute();
+
+	if (s->use_compute) {
+		s->color_format = VK_FORMAT_B8G8R8A8_UNORM;
+	} else {
+		s->color_format = VK_FORMAT_B8G8R8A8_SRGB;
+	}
+
 	s->display = debug_get_num_option_xcb_display();
-	s->color_format = VK_FORMAT_B8G8R8A8_SRGB;
 	s->color_space = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
 	s->present_mode = VK_PRESENT_MODE_FIFO_KHR;
 	s->window_type = WINDOW_AUTO;
@@ -69,6 +78,11 @@ comp_settings_init(struct comp_settings *s, struct xrt_device *xdev)
 	if (debug_get_bool_option_force_randr()) {
 		s->window_type = WINDOW_DIRECT_RANDR;
 	}
+
+	if (debug_get_bool_option_force_wayland_direct()) {
+		s->window_type = WINDOW_DIRECT_WAYLAND;
+	}
+
 
 	if (debug_get_bool_option_force_xcb()) {
 		s->window_type = WINDOW_XCB;

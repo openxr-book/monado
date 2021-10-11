@@ -60,7 +60,7 @@ struct u_joint_curl_model
 static struct u_joint_curl_model hand_joint_default_set_curl_model_defaults[XRT_HAND_JOINT_COUNT] = {
     // special cases: wrist and palm without bone lengths, offsets are
     // absolute, relative to hand origin (palm)
-    [XRT_HAND_JOINT_PALM] = {.position_offset = {.x = 0, .y = 0, .z = 0},
+    [XRT_HAND_JOINT_PALM] = {.position_offset = XRT_VEC3_ZERO,
                              .axis_angle_offset = {0, 0, 0},
                              .bone_length = 0,
                              .radius = 0.018,
@@ -84,25 +84,25 @@ static struct u_joint_curl_model hand_joint_default_set_curl_model_defaults[XRT_
                                           .radius = 0.015,
                                           .joint_id = XRT_HAND_JOINT_LITTLE_METACARPAL},
 
-    [XRT_HAND_JOINT_LITTLE_PROXIMAL] = {.position_offset = {.x = 0, .y = 0, .z = 0},
+    [XRT_HAND_JOINT_LITTLE_PROXIMAL] = {.position_offset = XRT_VEC3_ZERO,
                                         .axis_angle_offset = {0, DEG_TO_RAD(20), 0},
                                         .bone_length = 0.035,
                                         .radius = 0.01,
                                         .joint_id = XRT_HAND_JOINT_LITTLE_PROXIMAL},
 
-    [XRT_HAND_JOINT_LITTLE_INTERMEDIATE] = {.position_offset = {.x = 0, .y = 0, .z = 0},
+    [XRT_HAND_JOINT_LITTLE_INTERMEDIATE] = {.position_offset = XRT_VEC3_ZERO,
                                             .axis_angle_offset = {0, 0, 0},
                                             .bone_length = 0.028,
                                             .radius = 0.009,
                                             .joint_id = XRT_HAND_JOINT_LITTLE_INTERMEDIATE},
 
-    [XRT_HAND_JOINT_LITTLE_DISTAL] = {.position_offset = {.x = 0, .y = 0, .z = 0},
+    [XRT_HAND_JOINT_LITTLE_DISTAL] = {.position_offset = XRT_VEC3_ZERO,
                                       .axis_angle_offset = {0, 0, 0},
                                       .bone_length = 0.022,
                                       .radius = 0.009,
                                       .joint_id = XRT_HAND_JOINT_LITTLE_DISTAL},
 
-    [XRT_HAND_JOINT_LITTLE_TIP] = {.position_offset = {.x = 0, .y = 0, .z = 0},
+    [XRT_HAND_JOINT_LITTLE_TIP] = {.position_offset = XRT_VEC3_ZERO,
                                    .axis_angle_offset = {0, 0, 0},
                                    .bone_length = 0,
                                    .radius = 0.012,
@@ -115,25 +115,25 @@ static struct u_joint_curl_model hand_joint_default_set_curl_model_defaults[XRT_
                                         .radius = 0.015,
                                         .joint_id = XRT_HAND_JOINT_RING_METACARPAL},
 
-    [XRT_HAND_JOINT_RING_PROXIMAL] = {.position_offset = {.x = 0, .y = 0, .z = 0},
+    [XRT_HAND_JOINT_RING_PROXIMAL] = {.position_offset = XRT_VEC3_ZERO,
                                       .axis_angle_offset = {0, DEG_TO_RAD(10), 0},
                                       .bone_length = 0.040,
                                       .radius = 0.012,
                                       .joint_id = XRT_HAND_JOINT_RING_PROXIMAL},
 
-    [XRT_HAND_JOINT_RING_INTERMEDIATE] = {.position_offset = {.x = 0, .y = 0, .z = 0},
+    [XRT_HAND_JOINT_RING_INTERMEDIATE] = {.position_offset = XRT_VEC3_ZERO,
                                           .axis_angle_offset = {0, 0, 0},
                                           .bone_length = 0.031,
                                           .radius = 0.01,
                                           .joint_id = XRT_HAND_JOINT_RING_INTERMEDIATE},
 
-    [XRT_HAND_JOINT_RING_DISTAL] = {.position_offset = {.x = 0, .y = 0, .z = 0},
+    [XRT_HAND_JOINT_RING_DISTAL] = {.position_offset = XRT_VEC3_ZERO,
                                     .axis_angle_offset = {0, 0, 0},
                                     .bone_length = 0.023,
                                     .radius = 0.01,
                                     .joint_id = XRT_HAND_JOINT_RING_DISTAL},
 
-    [XRT_HAND_JOINT_RING_TIP] = {.position_offset = {.x = 0, .y = 0, .z = 0},
+    [XRT_HAND_JOINT_RING_TIP] = {.position_offset = XRT_VEC3_ZERO,
                                  .axis_angle_offset = {0, 0, 0},
                                  .bone_length = 0,
                                  .radius = 0.013,
@@ -146,25 +146,25 @@ static struct u_joint_curl_model hand_joint_default_set_curl_model_defaults[XRT_
                                           .radius = 0.012,
                                           .joint_id = XRT_HAND_JOINT_MIDDLE_METACARPAL},
 
-    [XRT_HAND_JOINT_MIDDLE_PROXIMAL] = {.position_offset = {.x = 0, .y = 0, .z = 0},
+    [XRT_HAND_JOINT_MIDDLE_PROXIMAL] = {.position_offset = XRT_VEC3_ZERO,
                                         .axis_angle_offset = {0, 0, 0},
                                         .bone_length = 0.042,
                                         .radius = 0.01,
                                         .joint_id = XRT_HAND_JOINT_MIDDLE_PROXIMAL},
 
-    [XRT_HAND_JOINT_MIDDLE_INTERMEDIATE] = {.position_offset = {.x = 0, .y = 0, .z = 0},
+    [XRT_HAND_JOINT_MIDDLE_INTERMEDIATE] = {.position_offset = XRT_VEC3_ZERO,
                                             .axis_angle_offset = {0, 0, 0},
                                             .bone_length = 0.033,
                                             .radius = 0.01,
                                             .joint_id = XRT_HAND_JOINT_MIDDLE_INTERMEDIATE},
 
-    [XRT_HAND_JOINT_MIDDLE_DISTAL] = {.position_offset = {.x = 0, .y = 0, .z = 0},
+    [XRT_HAND_JOINT_MIDDLE_DISTAL] = {.position_offset = XRT_VEC3_ZERO,
                                       .axis_angle_offset = {0, 0, 0},
                                       .bone_length = 0.024,
                                       .radius = 0.01,
                                       .joint_id = XRT_HAND_JOINT_MIDDLE_DISTAL},
 
-    [XRT_HAND_JOINT_MIDDLE_TIP] = {.position_offset = {.x = 0, .y = 0, .z = 0},
+    [XRT_HAND_JOINT_MIDDLE_TIP] = {.position_offset = XRT_VEC3_ZERO,
                                    .axis_angle_offset = {0, 0, 0},
                                    .bone_length = 0,
                                    .radius = 0.01,
@@ -177,25 +177,25 @@ static struct u_joint_curl_model hand_joint_default_set_curl_model_defaults[XRT_
                                          .radius = 0.012,
                                          .joint_id = XRT_HAND_JOINT_INDEX_METACARPAL},
 
-    [XRT_HAND_JOINT_INDEX_PROXIMAL] = {.position_offset = {.x = 0, .y = 0, .z = 0},
+    [XRT_HAND_JOINT_INDEX_PROXIMAL] = {.position_offset = XRT_VEC3_ZERO,
                                        .axis_angle_offset = {0, DEG_TO_RAD(-10), 0},
                                        .bone_length = 0.040,
                                        .radius = 0.011,
                                        .joint_id = XRT_HAND_JOINT_INDEX_PROXIMAL},
 
-    [XRT_HAND_JOINT_INDEX_INTERMEDIATE] = {.position_offset = {.x = 0, .y = 0, .z = 0},
+    [XRT_HAND_JOINT_INDEX_INTERMEDIATE] = {.position_offset = XRT_VEC3_ZERO,
                                            .axis_angle_offset = {0, 0, 0},
                                            .bone_length = 0.031,
                                            .radius = 0.01,
                                            .joint_id = XRT_HAND_JOINT_INDEX_INTERMEDIATE},
 
-    [XRT_HAND_JOINT_INDEX_DISTAL] = {.position_offset = {.x = 0, .y = 0, .z = 0},
+    [XRT_HAND_JOINT_INDEX_DISTAL] = {.position_offset = XRT_VEC3_ZERO,
                                      .axis_angle_offset = {0, 0, 0},
                                      .bone_length = 0.023,
                                      .radius = 0.01,
                                      .joint_id = XRT_HAND_JOINT_INDEX_DISTAL},
 
-    [XRT_HAND_JOINT_INDEX_TIP] = {.position_offset = {.x = 0, .y = 0, .z = 0},
+    [XRT_HAND_JOINT_INDEX_TIP] = {.position_offset = XRT_VEC3_ZERO,
                                   .axis_angle_offset = {0, 0, 0},
                                   .bone_length = 0,
                                   .radius = 0.01,
@@ -208,20 +208,20 @@ static struct u_joint_curl_model hand_joint_default_set_curl_model_defaults[XRT_
                                          .radius = 0.0175,
                                          .joint_id = XRT_HAND_JOINT_THUMB_METACARPAL},
 
-    [XRT_HAND_JOINT_THUMB_PROXIMAL] = {.position_offset = {.x = 0, .y = 0, .z = 0},
+    [XRT_HAND_JOINT_THUMB_PROXIMAL] = {.position_offset = XRT_VEC3_ZERO,
                                        .axis_angle_offset = {0, DEG_TO_RAD(-12), 0},
                                        .bone_length = 0.038,
                                        .radius = 0.017,
                                        .joint_id = XRT_HAND_JOINT_THUMB_PROXIMAL},
     // no intermediate
 
-    [XRT_HAND_JOINT_THUMB_DISTAL] = {.position_offset = {.x = 0, .y = 0, .z = 0},
+    [XRT_HAND_JOINT_THUMB_DISTAL] = {.position_offset = XRT_VEC3_ZERO,
                                      .axis_angle_offset = {0, 0, 0},
                                      .bone_length = 0.028,
                                      .radius = 0.017,
                                      .joint_id = XRT_HAND_JOINT_THUMB_DISTAL},
 
-    [XRT_HAND_JOINT_THUMB_TIP] = {.position_offset = {.x = 0, .y = 0, .z = 0},
+    [XRT_HAND_JOINT_THUMB_TIP] = {.position_offset = XRT_VEC3_ZERO,
                                   .axis_angle_offset = {0, 0, 0},
                                   .bone_length = 0,
                                   .radius = 0.016,
@@ -288,8 +288,8 @@ scale_model_param(struct u_joint_curl_model *param, float scale)
 }
 
 void
-u_hand_joint_compute_next_by_curl(struct u_hand_tracking *set,
-                                  struct u_joint_space_relation *prev,
+u_hand_joint_compute_next_by_curl(const struct u_hand_tracking *set,
+                                  const struct u_joint_space_relation *prev,
                                   enum xrt_hand hand,
                                   uint64_t at_timestamp_ns,
                                   struct u_joint_space_relation *out_joint,
@@ -302,9 +302,6 @@ u_hand_joint_compute_next_by_curl(struct u_hand_tracking *set,
 
 	scale_model_param(&prev_defaults, set->scale);
 	scale_model_param(&defaults, set->scale);
-
-	struct xrt_vec3 x_axis = {1, 0, 0};
-	struct xrt_vec3 y_axis = {0, 1, 0};
 
 	// prev joint pose is transformed to next joint pose by adding the bone
 	// vector to the joint, and adding rotation based on finger curl
@@ -325,7 +322,8 @@ u_hand_joint_compute_next_by_curl(struct u_hand_tracking *set,
 
 	//! @todo more axis rotations & make sure order is right
 	//! @todo handle velocities
-	struct xrt_pose offset_pose;
+	const struct xrt_vec3 y_axis = XRT_VEC3_UNIT_Y;
+	struct xrt_pose offset_pose = XRT_POSE_IDENTITY;
 	if (hand == XRT_HAND_LEFT) {
 		quat_from_angle_vector_clockwise(defaults.axis_angle_offset[1], &y_axis, &offset_pose.orientation);
 		offset_pose.position = defaults.position_offset;
@@ -366,6 +364,7 @@ u_hand_joint_compute_next_by_curl(struct u_hand_tracking *set,
 
 	float curl_angle = curl_value * full_curl_angle;
 
+	const struct xrt_vec3 x_axis = XRT_VEC3_UNIT_X;
 	struct xrt_quat curl_rotation;
 	math_quat_from_angle_vector(-curl_angle, &x_axis, &curl_rotation);
 	math_quat_rotate(&pose.orientation, &curl_rotation, &pose.orientation);
@@ -385,7 +384,7 @@ u_hand_joint_compute_next_by_curl(struct u_hand_tracking *set,
 		math_quat_finite_difference(&old_relation.pose.orientation, &out_joint->relation.pose.orientation,
 		                            time_diff_s, &out_joint->relation.angular_velocity);
 	} else {
-		out_joint->relation.angular_velocity = (struct xrt_vec3){0, 0, 0};
+		out_joint->relation.angular_velocity = (struct xrt_vec3)XRT_VEC3_ZERO;
 	}
 
 	out_joint->relation.relation_flags = POSE_VALID_FLAGS | VELOCIY_VALID_FLAGS;
@@ -403,7 +402,7 @@ u_hand_joints_update_curl(struct u_hand_tracking *set,
 	float curl_index = curl_values->index;
 	float curl_thumb = curl_values->thumb;
 
-	const struct xrt_quat identity_quat = {0, 0, 0, 1};
+	const struct xrt_quat identity_quat = XRT_QUAT_IDENTITY;
 
 	//! @todo: full relations with velocities
 
@@ -411,15 +410,15 @@ u_hand_joints_update_curl(struct u_hand_tracking *set,
 	set->joints.wrist.relation.pose = (struct xrt_pose){
 	    .position = hand_joint_default_set_curl_model_defaults[XRT_HAND_JOINT_WRIST].position_offset,
 	    .orientation = identity_quat};
-	set->joints.wrist.relation.linear_velocity = (struct xrt_vec3){0, 0, 0};
-	set->joints.wrist.relation.angular_velocity = (struct xrt_vec3){0, 0, 0};
+	set->joints.wrist.relation.linear_velocity = (struct xrt_vec3)XRT_VEC3_ZERO;
+	set->joints.wrist.relation.angular_velocity = (struct xrt_vec3)XRT_VEC3_ZERO;
 	set->joints.wrist.relation.relation_flags = POSE_VALID_FLAGS | VELOCIY_VALID_FLAGS;
 
 	set->joints.palm.relation.pose = (struct xrt_pose){
 	    .position = hand_joint_default_set_curl_model_defaults[XRT_HAND_JOINT_PALM].position_offset,
 	    .orientation = identity_quat};
-	set->joints.palm.relation.linear_velocity = (struct xrt_vec3){0, 0, 0};
-	set->joints.palm.relation.angular_velocity = (struct xrt_vec3){0, 0, 0};
+	set->joints.palm.relation.linear_velocity = (struct xrt_vec3)XRT_VEC3_ZERO;
+	set->joints.palm.relation.angular_velocity = (struct xrt_vec3)XRT_VEC3_ZERO;
 	set->joints.palm.relation.relation_flags = POSE_VALID_FLAGS | VELOCIY_VALID_FLAGS;
 
 	struct u_joint_space_relation *prev = &set->joints.wrist;
@@ -650,8 +649,8 @@ get_joint_data(struct u_hand_tracking *set, enum xrt_hand_joint joint_id)
 void
 u_hand_joints_set_out_data(struct u_hand_tracking *set,
                            enum xrt_hand hand,
-                           struct xrt_space_relation *hand_relation,
-                           struct xrt_pose *hand_offset,
+                           const struct xrt_space_relation *hand_relation,
+                           const struct xrt_pose *hand_offset,
                            struct xrt_hand_joint_set *out_value)
 {
 
@@ -667,13 +666,19 @@ u_hand_joints_set_out_data(struct u_hand_tracking *set,
 		m_space_graph_add_relation(&graph, &data->relation);
 		m_space_graph_add_pose(&graph, hand_offset);
 		m_space_graph_resolve(&graph, &l[i].relation);
+
+		// joint relations can not be "more valid" than the hand relation
+		// after space graph to make sure flags are not "upgraded"
+		l[i].relation.relation_flags &= hand_relation->relation_flags;
 	}
 
 	out_value->hand_pose = *hand_relation;
 }
 
 void
-u_hand_joints_offset_valve_index_controller(enum xrt_hand hand, struct xrt_vec3 *static_offset, struct xrt_pose *offset)
+u_hand_joints_offset_valve_index_controller(enum xrt_hand hand,
+                                            const struct xrt_vec3 *static_offset,
+                                            struct xrt_pose *offset)
 {
 	/* Controller space origin is at the very tip of the controller,
 	 * handle pointing forward at -z.
@@ -686,9 +691,9 @@ u_hand_joints_offset_valve_index_controller(enum xrt_hand hand, struct xrt_vec3 
 	 *
 	 * Now the hand points "through the strap" like at normal use.
 	 */
-	struct xrt_vec3 x = {1, 0, 0};
-	struct xrt_vec3 y = {0, 1, 0};
-	struct xrt_vec3 z = {0, 0, -1};
+	const struct xrt_vec3 x = XRT_VEC3_UNIT_X;
+	const struct xrt_vec3 y = XRT_VEC3_UNIT_Y;
+	const struct xrt_vec3 negative_z = {0, 0, -1};
 
 	float hand_on_handle_x_rotation = DEG_TO_RAD(-72);
 	float hand_on_handle_y_rotation = 0;
@@ -700,13 +705,13 @@ u_hand_joints_offset_valve_index_controller(enum xrt_hand hand, struct xrt_vec3 
 	}
 
 
-	struct xrt_quat hand_rotation_y = {0, 0, 0, 1};
+	struct xrt_quat hand_rotation_y = XRT_QUAT_IDENTITY;
 	math_quat_from_angle_vector(hand_on_handle_y_rotation, &y, &hand_rotation_y);
 
-	struct xrt_quat hand_rotation_z = {0, 0, 0, 1};
-	math_quat_from_angle_vector(hand_on_handle_z_rotation, &z, &hand_rotation_z);
+	struct xrt_quat hand_rotation_z = XRT_QUAT_IDENTITY;
+	math_quat_from_angle_vector(hand_on_handle_z_rotation, &negative_z, &hand_rotation_z);
 
-	struct xrt_quat hand_rotation_x = {0, 0, 0, 1};
+	struct xrt_quat hand_rotation_x = XRT_QUAT_IDENTITY;
 	math_quat_from_angle_vector(hand_on_handle_x_rotation, &x, &hand_rotation_x);
 
 	struct xrt_quat hand_rotation;

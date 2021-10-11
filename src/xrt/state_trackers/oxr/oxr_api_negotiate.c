@@ -220,9 +220,11 @@ handle_non_null(struct oxr_instance *inst, struct oxr_logger *log, const char *n
 	ENTRY_IF_EXT(xrThermalGetTemperatureTrendEXT, EXT_thermal_query);
 #endif // OXR_HAVE_EXT_thermal_query
 
+#ifdef OXR_HAVE_EXT_hand_tracking
 	ENTRY_IF_EXT(xrCreateHandTrackerEXT, EXT_hand_tracking);
 	ENTRY_IF_EXT(xrDestroyHandTrackerEXT, EXT_hand_tracking);
 	ENTRY_IF_EXT(xrLocateHandJointsEXT, EXT_hand_tracking);
+#endif
 
 #if 0
 #ifdef OXR_HAVE_EXT_debug_utils
@@ -275,6 +277,10 @@ handle_null(struct oxr_logger *log, const char *name, PFN_xrVoidFunction *out_fu
 	ENTRY(xrCreateInstance);
 	ENTRY(xrEnumerateInstanceExtensionProperties);
 	ENTRY(xrEnumerateApiLayerProperties);
+
+#ifdef OXR_HAVE_KHR_loader_init
+	ENTRY(xrInitializeLoaderKHR);
+#endif // OXR_HAVE_KHR_loader_init
 
 	/*
 	 * This is fine to log, since there should not be other

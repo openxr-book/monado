@@ -20,6 +20,7 @@
 #include <opencv2/opencv.hpp>
 #include <sys/stat.h>
 
+namespace xrt::auxiliary::tracking {
 
 /*!
  * @brief Essential calibration data wrapped for C++.
@@ -41,7 +42,7 @@ struct CameraCalibrationWrapper
 	    : base(calib), image_size_pixels(calib.image_size_pixels),
 	      image_size_pixels_cv(calib.image_size_pixels.w, calib.image_size_pixels.h),
 	      intrinsics_mat(3, 3, &calib.intrinsics[0][0]),
-	      distortion_mat(XRT_DISTORTION_MAX_DIM, 1, &calib.distortion[0]),
+	      distortion_mat(base.distortion_num, 1, &calib.distortion[0]),
 	      distortion_fisheye_mat(4, 1, &calib.distortion_fisheye[0]), use_fisheye(calib.use_fisheye)
 	{
 		assert(isDataStorageValid());
@@ -54,7 +55,7 @@ struct CameraCalibrationWrapper
 		return intrinsics_mat.size() == cv::Size(3, 3) &&
 		       (double *)intrinsics_mat.data == &(base.intrinsics[0][0]) &&
 
-		       distortion_mat.size() == cv::Size(1, XRT_DISTORTION_MAX_DIM) &&
+		       distortion_mat.size() == cv::Size(1, base.distortion_num) &&
 		       (double *)distortion_mat.data == &(base.distortion[0]) &&
 
 		       distortion_fisheye_mat.size() == cv::Size(1, 4) &&
@@ -80,10 +81,10 @@ struct StereoCameraCalibrationWrapper
 
 
 	static t_stereo_camera_calibration *
-	allocData()
+	allocData(uint32_t distortion_num)
 	{
 		t_stereo_camera_calibration *data_ptr = NULL;
-		t_stereo_camera_calibration_alloc(&data_ptr);
+		t_stereo_camera_calibration_alloc(&data_ptr, distortion_num);
 		return data_ptr;
 	}
 
@@ -101,7 +102,8 @@ struct StereoCameraCalibrationWrapper
 		assert(isDataStorageValid());
 	}
 
-	StereoCameraCalibrationWrapper() : StereoCameraCalibrationWrapper(allocData())
+	StereoCameraCalibrationWrapper(uint32_t distortion_num)
+	    : StereoCameraCalibrationWrapper(allocData(distortion_num))
 	{
 
 		// The function allocData returns with a ref count of one,
@@ -290,3 +292,5 @@ private:
 	cv::Mat_<float> cacheX_;
 	cv::Mat_<float> cacheY_;
 };
+
+} // namespace xrt::auxiliary::tracking

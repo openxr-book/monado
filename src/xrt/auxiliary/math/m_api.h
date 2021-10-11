@@ -1,9 +1,10 @@
-// Copyright 2019, Collabora, Ltd.
+// Copyright 2019-2021, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  C interface to math library.
  * @author Jakob Bornecrantz <jakob@collabora.com>
+ * @author Moses Turner <mosesturner@protonmail.com>
  *
  * @see xrt_vec3
  * @see xrt_quat
@@ -147,7 +148,7 @@ math_vec3_normalize(struct xrt_vec3 *in);
  * Create a rotation from a angle in radians and a vector.
  *
  * @relates xrt_quat
- * @relates xrt_vec3
+ * @see xrt_vec3
  * @ingroup aux_math
  */
 void
@@ -157,7 +158,7 @@ math_quat_from_angle_vector(float angle_rads, const struct xrt_vec3 *vector, str
  * Create a rotation from a 3x3 rotation matrix.
  *
  * @relates xrt_quat
- * @relates xrt_matrix_3x3
+ * @see xrt_matrix_3x3
  * @ingroup aux_math
  */
 void
@@ -168,7 +169,7 @@ math_quat_from_matrix_3x3(const struct xrt_matrix_3x3 *mat, struct xrt_quat *res
  * matrix by crossing z and x to get the y axis.
  *
  * @relates xrt_quat
- * @relates xrt_vec3
+ * @see xrt_vec3
  * @ingroup aux_math
  */
 void
@@ -226,7 +227,7 @@ math_quat_ensure_normalized(struct xrt_quat *inout);
  * Rotate a vector.
  *
  * @relates xrt_quat
- * @relatesalso xrt_vec3
+ * @see xrt_vec3
  * @ingroup aux_math
  */
 void
@@ -250,7 +251,7 @@ math_quat_rotate(const struct xrt_quat *left, const struct xrt_quat *right, stru
  * vector should be in radians per unit of time.
  *
  * @relates xrt_quat
- * @relatesalso xrt_vec3
+ * @see xrt_vec3
  * @ingroup aux_math
  */
 void
@@ -269,7 +270,7 @@ math_quat_integrate_velocity(const struct xrt_quat *quat,
  * radians per unit of time.
  *
  * @relates xrt_quat
- * @relatesalso xrt_vec3
+ * @see xrt_vec3
  * @ingroup aux_math
  */
 void
@@ -282,12 +283,21 @@ math_quat_finite_difference(const struct xrt_quat *quat0,
  * Used to rotate a derivative like a angular velocity.
  *
  * @relates xrt_quat
- * @relatesalso xrt_vec3
+ * @see xrt_vec3
  * @ingroup aux_math
  */
 void
 math_quat_rotate_derivative(const struct xrt_quat *rot, const struct xrt_vec3 *deriv, struct xrt_vec3 *result);
 
+
+/*!
+ * Slerp (spherical linear interpolation) between two quaternions
+ *
+ * @relates xrt_quat
+ * @ingroup aux_math
+ */
+void
+math_quat_slerp(const struct xrt_quat *left, const struct xrt_quat *right, float t, struct xrt_quat *result);
 
 /*
  *
@@ -310,6 +320,26 @@ void
 math_matrix_3x3_transform_vec3(const struct xrt_matrix_3x3 *left,
                                const struct xrt_vec3 *right,
                                struct xrt_vec3 *result);
+
+/*!
+ * Multiply Matrix3x3.
+ *
+ * @relates xrt_matrix_3x3
+ * @ingroup aux_math
+ */
+void
+math_matrix_3x3_multiply(const struct xrt_matrix_3x3 *left,
+                         const struct xrt_matrix_3x3 *right,
+                         struct xrt_matrix_3x3 *result);
+
+/*!
+ * Invert Matrix3x3
+ *
+ * @relates xrt_matrix_3x3
+ * @ingroup aux_math
+ */
+void
+math_matrix_3x3_inverse(const struct xrt_matrix_3x3 *in, struct xrt_matrix_3x3 *result);
 
 /*!
  * Initialize Matrix4x4 with identity.
@@ -367,6 +397,16 @@ math_matrix_4x4_inverse_view_projection(const struct xrt_matrix_4x4 *view,
  *
  */
 
+
+/*!
+ * Somewhat laboriously make an xrt_pose identity.
+ *
+ * @relates xrt_pose
+ * @ingroup aux_math
+ */
+void
+math_pose_identity(struct xrt_pose *pose);
+
 /*!
  * Check if this pose can be used in transformation operations.
  *
@@ -404,12 +444,34 @@ math_pose_transform(const struct xrt_pose *transform, const struct xrt_pose *pos
  * The input point and output may be the same pointer.
  *
  * @relates xrt_pose
- * @relates xrt_vec3
+ * @see xrt_vec3
  * @ingroup aux_math
  */
 void
 math_pose_transform_point(const struct xrt_pose *transform, const struct xrt_vec3 *point, struct xrt_vec3 *out_point);
 
+
+/*
+ *
+ * Inline functions.
+ *
+ */
+
+/*!
+ * Map a number from one range to another range.
+ * Exactly the same as Arduino's map().
+ */
+static inline double
+math_map_ranges(double value, double from_low, double from_high, double to_low, double to_high)
+{
+	return (value - from_low) * (to_high - to_low) / (from_high - from_low) + to_low;
+}
+
+static inline double
+math_lerp(double from, double to, double amount)
+{
+	return (from * (1.0 - amount)) + (to * (amount));
+}
 
 /*
  *

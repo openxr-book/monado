@@ -1,9 +1,11 @@
-// Copyright 2019-2020, Collabora, Ltd.
+// Copyright 2019-2021, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Misc helpers for device drivers.
  * @author Jakob Bornecrantz <jakob@collabora.com>
+ * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Moses Turner <moses@collabora.com>
  * @ingroup aux_util
  */
 
@@ -32,6 +34,22 @@ enum u_device_alloc_flags
 	// clang-format on
 };
 
+/*!
+ *
+ * Info to describe 2D extents of a device's screen
+ *
+ */
+struct u_extents_2d
+{
+	uint32_t w_pixels; // Width of entire screen in pixels
+	uint32_t h_pixels; // Height of entire screen
+};
+
+/*!
+ *
+ * Info to describe a very simple headset with diffractive lens optics.
+ *
+ */
 struct u_device_simple_info
 {
 	struct
@@ -59,6 +77,17 @@ struct u_device_simple_info
  */
 bool
 u_device_setup_split_side_by_side(struct xrt_device *xdev, const struct u_device_simple_info *info);
+
+/*!
+ * Just setup the device's display's 2D extents.
+ * Good for headsets without traditional VR optics.
+ *
+ * @return true on success.
+ * @ingroup aux_util
+ */
+bool
+u_extents_2d_split_side_by_side(struct xrt_device *xdev, const struct u_extents_2d *extents);
+
 
 /*!
  * Dump the device config to stderr.
@@ -103,7 +132,7 @@ void
 u_device_assign_xdev_roles(struct xrt_device **xdevs, size_t num_xdevs, int *head, int *left, int *right);
 
 /*!
- * Helper function to assign head, left hand and right hand roles.
+ * Helper function for setting up tracking origins. Applies 3dof offsets for devices with XRT_TRACKING_TYPE_NONE.
  *
  * @ingroup aux_util
  */
@@ -112,6 +141,22 @@ u_device_setup_tracking_origins(struct xrt_device *head,
                                 struct xrt_device *left,
                                 struct xrt_device *right,
                                 struct xrt_vec3 *global_tracking_origin_offset);
+
+/*!
+ * Helper function for `get_view_pose` in an HMD driver.
+ *
+ * Takes in a translation from the left to right eye, and returns a center to left or right eye transform that assumes
+ * the eye relation is symmetrical around the tracked point ("center eye"). Knowing IPD is a subset of this: If you know
+ * IPD better than the overall Monado system, copy @p eye_relation and put your known IPD in @p real_eye_relation->x
+ *
+ * If you have rotation, apply it after calling this function.
+ *
+ * @param eye_relation 3D translation from left eye to right eye.
+ * @param view_index 0 for left, 1 for right.
+ * @param out_pose The output pose to populate. Will receive translation, with an identity rotation.
+ */
+void
+u_device_get_view_pose(const struct xrt_vec3 *eye_relation, uint32_t view_index, struct xrt_pose *out_pose);
 
 #ifdef __cplusplus
 }

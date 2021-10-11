@@ -1,9 +1,10 @@
-// Copyright 2019-2020, Collabora, Ltd.
+// Copyright 2019-2021, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Common defines and enums for XRT.
  * @author Jakob Bornecrantz <jakob@collabora.com>
+ * @author Moses Turner <mosesturner@protonmail.com>
  * @ingroup xrt_iface
  */
 
@@ -32,18 +33,19 @@ struct xrt_reference
 };
 
 /*!
- * Which blend mode does the device support, used as both a bitfield and value.
+ * Blend mode that the device supports, exact mirror of XrEnvironmentBlendMode
  *
  * @ingroup xrt_iface
  */
 enum xrt_blend_mode
 {
-	// clang-format off
-	XRT_BLEND_MODE_OPAQUE      = 1 << 0,
-	XRT_BLEND_MODE_ADDITIVE    = 1 << 1,
-	XRT_BLEND_MODE_ALPHA_BLEND = 1 << 2,
-	// clang-format on
+	XRT_BLEND_MODE_OPAQUE = 1,
+	XRT_BLEND_MODE_ADDITIVE = 2,
+	XRT_BLEND_MODE_ALPHA_BLEND = 3,
+	XRT_BLEND_MODE_MAX_ENUM,
 };
+
+#define XRT_MAX_DEVICE_BLEND_MODES 3
 
 /*!
  * Which distortion model does the device expose,
@@ -110,6 +112,17 @@ struct xrt_quat
 };
 
 /*!
+ * Identity value for @ref xrt_quat
+ *
+ * @ingroup xrt_iface math
+ * @relates xrt_quat
+ */
+#define XRT_QUAT_IDENTITY                                                                                              \
+	{                                                                                                              \
+		0.f, 0.f, 0.f, 1.f                                                                                     \
+	}
+
+/*!
  * A 1 element vector with single floats.
  *
  * @ingroup xrt_iface math
@@ -151,6 +164,59 @@ struct xrt_vec3
 	float y;
 	float z;
 };
+
+/*!
+ * A 3 element vector with single doubles.
+ *
+ * @ingroup xrt_iface math
+ */
+struct xrt_vec3_f64
+{
+	double x;
+	double y;
+	double z;
+};
+
+/*!
+ * All-zero value for @ref xrt_vec3
+ *
+ * @ingroup xrt_iface math
+ * @relates xrt_vec3
+ */
+#define XRT_VEC3_ZERO                                                                                                  \
+	{                                                                                                              \
+		0.f, 0.f, 0.f                                                                                          \
+	}
+/*!
+ * Value for @ref xrt_vec3 with 1 in the @p x coordinate.
+ *
+ * @ingroup xrt_iface math
+ * @relates xrt_vec3
+ */
+#define XRT_VEC3_UNIT_X                                                                                                \
+	{                                                                                                              \
+		1.f, 0.f, 0.f                                                                                          \
+	}
+/*!
+ * Value for @ref xrt_vec3 with 1 in the @p y coordinate.
+ *
+ * @ingroup xrt_iface math
+ * @relates xrt_vec3
+ */
+#define XRT_VEC3_UNIT_Y                                                                                                \
+	{                                                                                                              \
+		0.f, 1.f, 0.f                                                                                          \
+	}
+/*!
+ * Value for @ref xrt_vec3 with 1 in the @p z coordinate.
+ *
+ * @ingroup xrt_iface math
+ * @relates xrt_vec3
+ */
+#define XRT_VEC3_UNIT_Z                                                                                                \
+	{                                                                                                              \
+		0.f, 0.f, 1.f                                                                                          \
+	}
 
 /*!
  * A 3 element vector with 32 bit integers.
@@ -258,6 +324,16 @@ struct xrt_rect
 };
 
 /*!
+ * Normalized image rectangle, coordinates and size in 0 .. 1 range.
+ *
+ * @ingroup xrt_iface math
+ */
+struct xrt_normalized_rect
+{
+	float x, y, w, h;
+};
+
+/*!
  * A pose composed of a position and orientation.
  *
  * @see xrt_qaut
@@ -269,6 +345,16 @@ struct xrt_pose
 	struct xrt_quat orientation;
 	struct xrt_vec3 position;
 };
+/*!
+ * Identity value for @ref xrt_pose
+ *
+ * @ingroup xrt_iface math
+ * @relates xrt_pose
+ */
+#define XRT_POSE_IDENTITY                                                                                              \
+	{                                                                                                              \
+		XRT_QUAT_IDENTITY, XRT_VEC3_ZERO                                                                       \
+	}
 
 /*!
  * Describes a projection matrix fov.
@@ -314,6 +400,16 @@ struct xrt_matrix_3x3
 struct xrt_matrix_4x4
 {
 	float v[16];
+};
+
+/*!
+ * A tightly packed 4x4 matrix of double.
+ *
+ * @ingroup xrt_iface math
+ */
+struct xrt_matrix_4x4_f64
+{
+	double v[16];
 };
 
 /*!
@@ -373,6 +469,20 @@ struct xrt_space_relation
 };
 
 /*!
+ * A zero/identity value for @ref xrt_space_relation
+ *
+ * @note Despite this initializing all members (to zero or identity), this sets the xrt_space_relation::relation_flags
+ * to XRT_SPACE_RELATION_BITMASK_NONE - so this is safe to assign before an error return, etc.
+ *
+ * @ingroup xrt_iface math
+ * @relates xrt_space_relation
+ */
+#define XRT_SPACE_RELATION_ZERO                                                                                        \
+	{                                                                                                              \
+		XRT_SPACE_RELATION_BITMASK_NONE, XRT_POSE_IDENTITY, XRT_VEC3_ZERO, XRT_VEC3_ZERO                       \
+	}
+
+/*!
  * The maximum number of steps that can be in a space graph chain.
  *
  * @see xrt_space_graph::steps
@@ -428,6 +538,8 @@ enum xrt_device_name
 	XRT_DEVICE_HAND_INTERACTION,
 
 	XRT_DEVICE_HAND_TRACKER,
+
+	XRT_DEVICE_REALSENSE,
 };
 
 /*!
@@ -508,6 +620,7 @@ enum xrt_input_name
 	XRT_INPUT_GENERIC_HEAD_DETECT                = XRT_INPUT_NAME(0x0001, BOOLEAN),
 	XRT_INPUT_GENERIC_HAND_TRACKING_LEFT         = XRT_INPUT_NAME(0x0002, HAND_TRACKING),
 	XRT_INPUT_GENERIC_HAND_TRACKING_RIGHT        = XRT_INPUT_NAME(0x0004, HAND_TRACKING),
+	XRT_INPUT_GENERIC_TRACKER_POSE               = XRT_INPUT_NAME(0x0005, POSE),
 
 	XRT_INPUT_SIMPLE_SELECT_CLICK                = XRT_INPUT_NAME(0x0010, BOOLEAN),
 	XRT_INPUT_SIMPLE_MENU_CLICK                  = XRT_INPUT_NAME(0x0011, BOOLEAN),
@@ -751,6 +864,7 @@ struct xrt_hand_joint_set
 
 	// in driver global space, without tracking_origin offset
 	struct xrt_space_relation hand_pose;
+	bool is_active;
 };
 
 /*!
@@ -795,7 +909,7 @@ enum xrt_output_name
 	XRT_OUTPUT_NAME_WMR_HAPTIC                  = XRT_OUTPUT_NAME(0x0050, VIBRATION),
 
 	XRT_OUTPUT_NAME_XBOX_HAPTIC_LEFT            = XRT_OUTPUT_NAME(0x0060, VIBRATION),
-	XRT_OUTPUT_NAME_XBOX_HAPTIC_RIGHTT          = XRT_OUTPUT_NAME(0x0061, VIBRATION),
+	XRT_OUTPUT_NAME_XBOX_HAPTIC_RIGHT           = XRT_OUTPUT_NAME(0x0061, VIBRATION),
 	XRT_OUTPUT_NAME_XBOX_HAPTIC_LEFT_TRIGGER    = XRT_OUTPUT_NAME(0x0062, VIBRATION),
 	XRT_OUTPUT_NAME_XBOX_HAPTIC_RIGHT_TRIGGER   = XRT_OUTPUT_NAME(0x0063, VIBRATION),
 

@@ -48,7 +48,7 @@ if libuvc.found()
 	have_conf.set('XRT_HAVE_LIBUVC', true)
 endif
 
-if opencv.found()
+if opencv.found() and build_tracking
 	have_conf.set('XRT_HAVE_OPENCV', true)
 endif
 
@@ -68,16 +68,16 @@ if has_v4l2_header and 'v4l2' in drivers
 	have_conf.set('XRT_HAVE_V4L2', true)
 endif
 
-if 'vf' in drivers
-	have_conf.set('XRT_HAVE_VF', true)
-endif
-
 if true
-	have_conf.set('XRT_HAVE_VULKAN', true)	
+	have_conf.set('XRT_HAVE_VULKAN', true)
 endif
 
 if dbus.found() and not get_option('dbus').disabled()
 	have_conf.set('XRT_HAVE_DBUS', true)
+endif
+
+if systemd.found() and not get_option('systemd').disabled()
+	have_conf.set('XRT_HAVE_SYSTEMD', true)
 endif
 
 if get_option('layer_depth')
@@ -100,6 +100,27 @@ if get_option('layer_equirect2')
 	have_conf.set('XRT_FEATURE_OPENXR_LAYER_EQUIRECT2', true)
 endif
 
+if libbsd.found() and not get_option('libbsd').disabled()
+	have_conf.set('XRT_HAVE_LIBBSD', true)
+endif
+
+if slam.found() and build_tracking
+	have_conf.set('XRT_HAVE_SLAM', true)
+	have_conf.set('XRT_HAVE_KIMERA_SLAM', slam.name() == 'kimera_vio')
+endif
+
+if build_wayland
+	have_conf.set('XRT_HAVE_WAYLAND', true)
+endif
+
+if build_wayland_direct
+	have_conf.set('XRT_HAVE_WAYLAND_DIRECT', true)
+endif
+
+if build_tracing
+	have_conf.set('XRT_HAVE_PERCETTO', true)
+endif
+
 xrt_config_have_h = configure_file(
 	output: 'xrt_config_have.h',
 	configuration: have_conf,
@@ -118,6 +139,10 @@ xrt_config_have = declare_dependency(
 build_conf = configuration_data()
 if get_option('service')
 	build_conf.set('XRT_FEATURE_SERVICE', true)
+endif
+
+if get_option('tracing')
+	build_conf.set('XRT_FEATURE_TRACING', true)
 endif
 
 if get_option('color_log')

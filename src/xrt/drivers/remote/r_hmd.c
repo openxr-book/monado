@@ -77,7 +77,8 @@ static void
 r_hmd_get_hand_tracking(struct xrt_device *xdev,
                         enum xrt_input_name name,
                         uint64_t at_timestamp_ns,
-                        struct xrt_hand_joint_set *out_value)
+                        struct xrt_hand_joint_set *out_value,
+                        uint64_t *out_timestamp_ns)
 {
 	struct r_hmd *rh = r_hmd(xdev);
 	(void)rh;
@@ -85,29 +86,12 @@ r_hmd_get_hand_tracking(struct xrt_device *xdev,
 
 static void
 r_hmd_get_view_pose(struct xrt_device *xdev,
-                    struct xrt_vec3 *eye_relation,
+                    const struct xrt_vec3 *eye_relation,
                     uint32_t view_index,
                     struct xrt_pose *out_pose)
 {
-	struct xrt_pose pose = {{0.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 0.0f}};
-	bool adjust = view_index == 0;
-
-	pose.position.x = eye_relation->x / 2.0f;
-	pose.position.y = eye_relation->y / 2.0f;
-	pose.position.z = eye_relation->z / 2.0f;
-
-	// Adjust for left/right while also making sure there aren't any -0.f.
-	if (pose.position.x > 0.0f && adjust) {
-		pose.position.x = -pose.position.x;
-	}
-	if (pose.position.y > 0.0f && adjust) {
-		pose.position.y = -pose.position.y;
-	}
-	if (pose.position.z > 0.0f && adjust) {
-		pose.position.z = -pose.position.z;
-	}
-
-	*out_pose = pose;
+	(void)xdev;
+	u_device_get_view_pose(eye_relation, view_index, out_pose);
 }
 
 static void
@@ -148,6 +132,7 @@ r_hmd_create(struct r_hub *r)
 
 	// Print name.
 	snprintf(rh->base.str, sizeof(rh->base.str), "Remote HMD");
+	snprintf(rh->base.serial, sizeof(rh->base.serial), "Remote HMD");
 
 	// Setup info.
 	struct u_device_simple_info info;

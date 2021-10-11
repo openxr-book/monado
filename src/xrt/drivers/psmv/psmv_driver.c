@@ -37,7 +37,7 @@
 
 
 /*!
- * @ingroup drv_psmv
+ * @addtogroup drv_psmv
  * @{
  */
 
@@ -1034,6 +1034,17 @@ psmv_found(struct xrt_prober *xp,
 	psmv->log_level = debug_get_log_option_psmv_log();
 	psmv->pid = devices[index]->product_id;
 	psmv->hid = hid;
+
+	struct xrt_prober_device *dev = devices[index];
+	int str_serial_ret = xrt_prober_get_string_descriptor(xp, dev, XRT_PROBER_STRING_SERIAL_NUMBER,
+	                                                      (unsigned char *)psmv->base.serial, XRT_DEVICE_NAME_LEN);
+
+	static int controller_num = 0;
+	if (str_serial_ret <= 0) {
+		snprintf(psmv->base.serial, XRT_DEVICE_NAME_LEN, "PS Move Controller %d", controller_num++);
+		PSMV_ERROR(psmv, "Could not get bluetooth serial, fallback: %s", psmv->base.serial);
+	}
+
 	snprintf(psmv->base.str, XRT_DEVICE_NAME_LEN, "%s", "PS Move Controller");
 
 	m_imu_pre_filter_init(&psmv->calibration.prefilter, 1.f, 1.f);

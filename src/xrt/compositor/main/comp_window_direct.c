@@ -49,7 +49,7 @@ choose_best_vk_mode_auto(struct comp_target *ct, VkDisplayModePropertiesKHR *mod
 	}
 	VkDisplayModeParametersKHR best = mode_properties[best_index].parameters;
 	COMP_DEBUG(ct->c, "Auto choosing Vk direct mode %d: %dx%d@%.2f", best_index, best.visibleRegion.width,
-	           best.visibleRegion.width, (float)best.refreshRate / 1000.);
+	           best.visibleRegion.width, (float)best.refreshRate / 1000.f);
 	return best_index;
 }
 
@@ -61,7 +61,7 @@ print_modes(struct comp_target *ct, VkDisplayModePropertiesKHR *mode_properties,
 		VkDisplayModePropertiesKHR props = mode_properties[i];
 		uint16_t width = props.parameters.visibleRegion.width;
 		uint16_t height = props.parameters.visibleRegion.height;
-		float refresh = (float)props.parameters.refreshRate / 1000.;
+		float refresh = (float)props.parameters.refreshRate / 1000.f;
 
 		COMP_PRINT_MODE(ct->c, "| %2d | %dx%d@%.2f", i, width, height, refresh);
 	}
@@ -205,6 +205,8 @@ comp_window_direct_create_surface(struct comp_target_swapchain *cts,
 	return result;
 }
 
+#ifdef VK_USE_PLATFORM_XLIB_XRANDR_EXT
+
 int
 comp_window_direct_connect(struct comp_target_swapchain *cts, Display **dpy)
 {
@@ -258,3 +260,5 @@ comp_window_direct_init_swapchain(
 
 	return true;
 }
+
+#endif

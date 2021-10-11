@@ -9,6 +9,7 @@ project(
 	meson_version: '>=0.49.0',
 	default_options: [
 		'c_std=c11',
+		'cpp_std=c++17',
 		'warning_level=3',
 	],
 )
@@ -36,6 +37,7 @@ add_project_arguments(cpp.get_supported_arguments([
 #
 
 build_tracking = false
+build_tracing = false
 
 v4l2_required = false
 hidapi_required = false
@@ -71,20 +73,43 @@ vulkan   = dependency('vulkan', required: true)
 zlib     = dependency('zlib', required: false)
 survive  = dependency('survive', required: false)
 dbus     = dependency('dbus-1', required: get_option('dbus'))
+systemd  = dependency('libsystemd', required: get_option('systemd'))
+libbsd   = dependency('libbsd', required: get_option('libbsd'))
 gst      = dependency('gstreamer-1.0', required: false)
 gst_app  = dependency('gstreamer-app-1.0', required: false)
 gst_video= dependency('gstreamer-video-1.0', required: false)
+depthai  = dependency('depthai', method: 'cmake', modules : ['depthai::core', 'depthai::opencv', 'XLink'], required: false)
+onnxruntime = dependency('libonnxruntime', required: false)
+percetto = dependency('percetto', required: false)
 
 gst_found = gst.found() and gst_app.found() and gst_video.found()
 
-opencv = dependency('opencv4', required: false)
+leap = cc.find_library('Leap', dirs : ['/usr/local/lib'], required: false)
+inc_leap = include_directories('/usr/local/include')
+
+opencv = dependency('opencv', required: get_option('tracking'))
 if not opencv.found()
-	opencv = dependency('opencv', required: get_option('tracking'))
+	opencv = dependency('opencv4', required: get_option('tracking'))
 endif
+
+# Find an external SLAM implementation
+external_slam_systems = ['kimera_vio']
+foreach slam_system : external_slam_systems
+	slam = dependency(slam_system, required: false)
+	if slam.found()
+		break
+	endif
+endforeach
 
 if get_option('tracking').enabled() or get_option('tracking').auto()
 	build_tracking = opencv.found()
 endif
+
+if get_option('tracing')
+	build_tracing = percetto.found()
+endif
+
+
 
 # TODO: make these behave well when not present
 x11       = dependency('x11', required: get_option('xlib'))
@@ -95,6 +120,7 @@ xcb_randr = dependency('xcb-randr', required: get_option('xcb'))
 wayland         = dependency('wayland-client', required: get_option('wayland'))
 wayland_protos  = dependency('wayland-protocols', required: get_option('wayland'))
 wayland_scanner = dependency('wayland-scanner', required: get_option('wayland'))
+drm             = dependency('libdrm', required: get_option('wayland'))
 
 if wayland_scanner.found()
 	wayland_scanner = find_program(
@@ -135,8 +161,10 @@ build_xcb_xrandr_direct = build_xcb and build_xlib and xcb_randr.found() and x11
 build_vk_khr_display = true
 
 build_wayland = false
+build_wayland_direct = false
 if get_option('wayland').enabled() or get_option('wayland').auto()
         build_wayland = wayland.found() and wayland_protos.found() and wayland_scanner.found()
+        build_wayland_direct = build_wayland and drm.found() and wayland_protos.version().version_compare('>=1.22')
 endif
 
 # For now required on Linux
@@ -156,7 +184,7 @@ if 'v4l2' in drivers
 endif
 
 if 'auto' in drivers
-	drivers += ['dummy', 'hdk', 'hydra', 'ns', 'psmv', 'remote']
+	drivers += ['dummy', 'hdk', 'hydra', 'ns', 'psmv', 'remote', 'wmr']
 endif
 
 openhmd = dependency('openhmd', required: openhmd_required)
@@ -170,7 +198,7 @@ if openhmd.found() and ('auto' in drivers or 'ohmd' in drivers)
 	endif
 endif
 
-if has_v4l2_header and ('auto' in drivers or 'handtracking' in drivers)
+if opencv.found() and onnxruntime.found() and has_v4l2_header and ('auto' in drivers or 'handtracking' in drivers)
 	if 'handtracking' not in drivers
 		drivers += ['handtracking']
 	endif
@@ -206,18 +234,38 @@ if gst_found and ('auto' in drivers or 'vf' in drivers)
 	endif
 endif
 
+if depthai.found() and ('auto' in drivers or 'depthai' in drivers)
+	if 'depthai' not in drivers
+		drivers += ['depthai']
+	endif
+endif
+
+if leap.found() and ('auto' in drivers or 'ulv2' in drivers)
+       if 'ulv2' not in drivers
+               drivers += ['ulv2']
+       endif
+endif
+
 if survive.found() and ('auto' in drivers and 'survive' not in drivers)
 	drivers += ['survive']
 endif
 
 if not get_option('dbus').disabled() and dbus.found()
-	if 'daydream' not in drivers
+	if 'auto' in drivers and 'daydream' not in drivers
 		drivers += ['daydream']
 	endif
 
-	if 'arduino' not in drivers
+	if 'auto' in drivers and 'arduino' not in drivers
 		drivers += ['arduino']
 	endif
+endif
+
+if sdl2.found() and ('auto' in drivers and 'qwerty' not in drivers)
+	drivers += ['qwerty']
+endif
+
+if opencv.found() and ('auto' in drivers and 'euroc' not in drivers)
+	drivers += ['euroc']
 endif
 
 if drivers.length() == 0 or drivers == ['auto']
@@ -257,19 +305,85 @@ message('Configuration done!')
 message('    drivers:  ' + ', '.join(drivers))
 
 if build_docs
-	message('    docs:     yes')
+	message('          docs: yes')
 else
-	message('    docs:     no')
+	message('          docs: no')
 endif
 
 if build_tracking
-	message('    tracking: yes')
+	message('      tracking: yes')
 else
-	message('    tracking: no')
+	message('      tracking: no')
+endif
+
+if build_tracing
+	message('       tracing: yes')
+else
+	message('       tracing: no')
 endif
 
 if get_option('steamvr_plugin')
 	message('steamvr plugin: yes')
 else
 	message('steamvr plugin: no')
+endif
+
+if build_opengl
+	message('        opengl: yes')
+else
+	message('        opengl: no')
+endif
+
+if build_opengles
+	message('      opengles: yes')
+else
+	message('      opengles: no')
+endif
+
+if build_egl
+	message('           egl: yes')
+else
+	message('           egl: no')
+endif
+
+if build_xlib
+	message('          xlib: yes')
+else
+	message('          xlib: no')
+endif
+
+if build_xcb
+	message('           xcb: yes')
+else
+	message('           xcb: no')
+endif
+
+if build_wayland
+	message('       wayland: yes')
+else
+	message('       wayland: no')
+endif
+
+if build_wayland_direct
+	message('wayland_direct: yes')
+else
+	message('wayland_direct: no')
+endif
+
+if not get_option('systemd').disabled() and systemd.found()
+	message('       systemd: yes')
+else
+	message('       systemd: no')
+endif
+
+if not get_option('dbus').disabled() and dbus.found()
+	message('          dbus: yes')
+else
+	message('          dbus: no')
+endif
+
+if not get_option('libbsd').disabled() and libbsd.found()
+	message('        libbsd: yes')
+else
+	message('        libbsd: no')
 endif

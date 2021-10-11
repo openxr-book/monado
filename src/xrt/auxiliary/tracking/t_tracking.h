@@ -1,4 +1,4 @@
-// Copyright 2019-2020, Collabora, Ltd.
+// Copyright 2019-2021, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -21,44 +21,8 @@
 extern "C" {
 #endif
 
-
 /*!
- * @defgroup aux_tracking Tracking
- * @ingroup aux
- * @brief Trackers, filters and associated helper code.
- *
- *
- * ### Coordinate system
- *
- * Right now there is no specific convention on where a tracking systems
- * coordinate system is centered, and is something we probably need to figure
- * out. Right now the stereo based tracking system used by the PSVR and PSMV
- * tracking system is centered on the camera that OpenCV decided is origin.
- *
- * To go a bit further on the PSVR/PSMV case. Think about a idealized start up
- * case, the user is wearing the HMD headset and holding two PSMV controllers.
- * The HMD's coordinate system axis are perfectly parallel with the user
- * coordinate with the user's coordinate system. Where -Z is forward. The user
- * holds the controllers with the ball pointing up and the buttons on the back
- * pointing forward. Which if you read the documentation of @ref psmv_device
- * will that the axis of the PSMV are also perfectly aligned with the users
- * coordinate system. So everything "attached" to the user have it's coordinate
- * system parallel to the user's.
- *
- * The camera on the other hand is looking directly at the user, it's Z-axis and
- * X-axis is flipped in relation to the user's. So to compare what is sees to
- * what the user sees, everything is rotated 180° around the Y-axis.
- */
-
-/*!
- * @dir auxiliary/tracking
- * @ingroup aux
- *
- * @brief Trackers, filters and associated helper code.
- */
-
-/*!
- * @ingroup aux_tracking
+ * @addtogroup aux_tracking
  * @{
  */
 
@@ -69,9 +33,11 @@ extern "C" {
  *
  */
 
+struct xrt_slam_sinks;
 struct xrt_tracked_psmv;
 struct xrt_tracked_psvr;
 struct xrt_tracked_hand;
+struct xrt_tracked_slam;
 
 
 /*
@@ -81,7 +47,7 @@ struct xrt_tracked_hand;
  */
 
 //! Maximum size of rectilinear distortion coefficient array
-#define XRT_DISTORTION_MAX_DIM (5)
+#define XRT_DISTORTION_MAX_DIM (14)
 
 /*!
  * @brief Essential calibration data for a single camera, or single lens/sensor
@@ -95,8 +61,10 @@ struct t_camera_calibration
 	//! Camera intrinsics matrix
 	double intrinsics[3][3];
 
-	//! Rectilinear distortion coefficients: k1, k2, p1, p2[, k3[, k4, k5,
-	//! k6[, s1, s2, s3, s4]]
+	//! Number of distortion parameters (non-fisheye).
+	size_t distortion_num;
+
+	//! Rectilinear distortion coefficients: k1, k2, p1, p2[, k3[, k4, k5, k6[, s1, s2, s3, s4[, Tx, Ty]]]]
 	double distortion[XRT_DISTORTION_MAX_DIM];
 
 	//! Fisheye camera distortion coefficients
@@ -131,10 +99,12 @@ struct t_stereo_camera_calibration
 /*!
  * Allocates a new stereo calibration data, unreferences the old @p calib.
  *
+ * Also initializes view[s]::distortion_num, only 5 and 14 is accepted.
+ *
  * @public @memberof t_stereo_camera_calibration
  */
 void
-t_stereo_camera_calibration_alloc(struct t_stereo_camera_calibration **calib);
+t_stereo_camera_calibration_alloc(struct t_stereo_camera_calibration **calib, uint32_t distortion_num);
 
 /*!
  * Only to be called by @p t_stereo_camera_calibration_reference.
@@ -198,7 +168,7 @@ t_stereo_camera_calibration_save_v1(FILE *calib_file, struct t_stereo_camera_cal
 
 struct t_convert_table
 {
-	uint8_t v[256][256][256][3];
+	uint8_t v[256][256][256][3]; // nolint(readability-magic-numbers)
 };
 
 void
@@ -296,7 +266,7 @@ t_hsv_filter_sample(struct t_hsv_filter_optimized_table *t, uint32_t y, uint32_t
  * Construct an HSV filter sink.
  * @public @memberof t_hsv_filter
  *
- * @relates xrt_frame_context
+ * @see xrt_frame_context
  */
 int
 t_hsv_filter_create(struct xrt_frame_context *xfctx,
@@ -357,6 +327,18 @@ t_hand_create(struct xrt_frame_context *xfctx,
 int
 t_hand_start(struct xrt_tracked_hand *xth);
 
+/*!
+ * @public @memberof xrt_tracked_slam
+ */
+int
+t_slam_create(struct xrt_frame_context *xfctx, struct xrt_tracked_slam **out_xts, struct xrt_slam_sinks **out_sink);
+
+/*!
+ * @public @memberof xrt_tracked_slam
+ */
+int
+t_slam_start(struct xrt_tracked_slam *xts);
+
 /*
  *
  * Camera calibration
@@ -369,6 +351,8 @@ t_hand_start(struct xrt_tracked_hand *xth);
 enum t_board_pattern
 {
 	T_BOARD_CHECKERS,
+	//! Sector based checker board, using `cv::findChessboardCornersSB`.
+	T_BOARD_SB_CHECKERS,
 	T_BOARD_CIRCLES,
 	T_BOARD_ASYMMETRIC_CIRCLES,
 };
@@ -407,6 +391,16 @@ struct t_calibration_params
 		bool subpixel_enable;
 		int subpixel_size;
 	} checkers;
+
+	struct
+	{
+		int cols;
+		int rows;
+		float size_meters;
+
+		bool marker;
+		bool normalize_image;
+	} sb_checkers;
 
 	struct
 	{
@@ -464,6 +458,13 @@ t_calibration_params_default(struct t_calibration_params *p)
 	p->checkers.subpixel_enable = true;
 	p->checkers.subpixel_size = 5;
 
+	// Sector based checker board.
+	p->sb_checkers.cols = 14;
+	p->sb_checkers.rows = 9;
+	p->sb_checkers.size_meters = 0.01206f;
+	p->sb_checkers.marker = false;
+	p->sb_checkers.normalize_image = false;
+
 	// Symmetrical circles.
 	p->circles.cols = 9;
 	p->circles.rows = 7;
@@ -500,7 +501,7 @@ t_calibration_params_default(struct t_calibration_params *p)
  * @param gui Frame sink
  * @param out_sink Output: created frame sink.
  *
- * @relates xrt_frame_context
+ * @see xrt_frame_context
  */
 int
 t_calibration_stereo_create(struct xrt_frame_context *xfctx,
@@ -517,7 +518,7 @@ t_calibration_stereo_create(struct xrt_frame_context *xfctx,
  */
 
 /*!
- * @relates xrt_frame_context
+ * @see xrt_frame_context
  */
 int
 t_convert_yuv_or_yuyv_create(struct xrt_frame_sink *next, struct xrt_frame_sink **out_sink);
@@ -525,7 +526,7 @@ t_convert_yuv_or_yuyv_create(struct xrt_frame_sink *next, struct xrt_frame_sink 
 
 
 /*!
- * @relates xrt_frame_context
+ * @see xrt_frame_context
  */
 int
 t_debug_hsv_picker_create(struct xrt_frame_context *xfctx,
@@ -533,7 +534,7 @@ t_debug_hsv_picker_create(struct xrt_frame_context *xfctx,
                           struct xrt_frame_sink **out_sink);
 
 /*!
- * @relates xrt_frame_context
+ * @see xrt_frame_context
  */
 int
 t_debug_hsv_viewer_create(struct xrt_frame_context *xfctx,
@@ -541,7 +542,7 @@ t_debug_hsv_viewer_create(struct xrt_frame_context *xfctx,
                           struct xrt_frame_sink **out_sink);
 
 /*!
- * @relates xrt_frame_context
+ * @see xrt_frame_context
  */
 int
 t_debug_hsv_filter_create(struct xrt_frame_context *xfctx,

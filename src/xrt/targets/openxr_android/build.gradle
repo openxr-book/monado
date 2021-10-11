@@ -17,14 +17,14 @@ plugins {
 
 androidGitVersion {
     tagPattern(/^v[0-9]+.*/)
-    codeFormat = 'MNNPPPBBB'
+    codeFormat = 'MMNNPPBBB'
     format = '%tag%%-count%%-gcommit%%-dirty%'
 }
 
 def parseOpenXRVersion(def fn) {
     def matches = file(fn).readLines().find {
         it.contains('XR_CURRENT_API_VERSION')
-    } =~ ~/XR_MAKE_VERSION\(([^\)]+)\)/
+    } =~ ~/XR_MAKE_VERSION\(([^)]+)\)/
     def components = matches[0][1].split(',').each { it.replace(' ', '').trim() }
     String.join('.', components)
 }
@@ -35,7 +35,7 @@ project.ext.renameLicense = { String name ->
     return result
 }
 
-project.ext.filterLicense = {String line ->
+project.ext.filterLicense = { String line ->
     if (line.trim().isEmpty()) {
         return '<br /><br />'
     } else {
@@ -69,7 +69,7 @@ task copyDownloadedLicenses(type: Copy) {
 }
 android {
     compileSdkVersion project.sharedTargetSdk
-    buildToolsVersion '30.0.2'
+    buildToolsVersion '30.0.3'
 
     ndkVersion "${ndk_version}"
 
@@ -173,8 +173,8 @@ dependencies {
     // Dependencies related only to AboutLibraries
     implementation "com.mikepenz:aboutlibraries-core:${latestAboutLibsRelease}"
     implementation "com.mikepenz:aboutlibraries:${latestAboutLibsRelease}"
-    implementation "androidx.cardview:cardview:1.*.*"
-    implementation "androidx.recyclerview:recyclerview:1.1.*"
+    implementation 'androidx.cardview:cardview:1.0.0'
+    implementation 'androidx.recyclerview:recyclerview:1.2.0'
 
 
     // for Hilt dependency injection

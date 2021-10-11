@@ -3,7 +3,7 @@
 
 option('drivers',
 	type: 'array',
-	choices: ['auto', 'dummy', 'hdk', 'hydra', 'ns', 'ohmd', 'psmv', 'psvr', 'rs', 'v4l2', 'vf', 'vive', 'survive', 'daydream', 'arduino', 'remote', 'handtracking'],
+	choices: ['auto', 'dummy', 'hdk', 'hydra', 'ns', 'ohmd', 'psmv', 'psvr', 'rs', 'v4l2', 'vf', 'depthai', 'vive', 'wmr', 'survive', 'daydream', 'arduino', 'remote', 'handtracking', 'qwerty', 'ulv2', 'euroc'],
 	value: ['auto'],
 	description: 'Set of drivers to build')
 
@@ -35,7 +35,7 @@ option('gui',
 option('tracking',
 	type: 'feature',
 	value: 'auto',
-	description: 'Enable tracking support')
+	description: 'Enable camera tracking support (disabling this will disable OpenCV support)')
 
 option('install-active-runtime',
 	type: 'boolean',
@@ -77,10 +77,26 @@ option('dbus',
 	value: 'auto',
 	description: 'Enable support for dbus.')
 
+option('libbsd',
+	type: 'feature',
+	value: 'auto',
+	description: 'Enable support for libbsd.')
+
+option('systemd',
+	type: 'feature',
+	value: 'auto',
+	description: 'Enable systemd support (for socket activation of service)')
+
 option('service',
 	type: 'boolean',
 	value: true,
 	description: 'Enable separate service module for OpenXR runtime'
+)
+
+option('tracing',
+	type: 'boolean',
+	value: false,
+	description: 'Enable Perfetto/Percetto tracing'
 )
 
 option('layer_depth',

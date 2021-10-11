@@ -30,6 +30,10 @@
 #include <assert.h>
 #include <pthread.h>
 
+using namespace xrt::auxiliary::tracking;
+
+//! Namespace for PS Move tracking implementation
+namespace xrt::auxiliary::tracking::psmv {
 
 /*!
  * Single camera.
@@ -106,7 +110,7 @@ struct TrackerPSMV
 
 	cv::Ptr<cv::SimpleBlobDetector> sbd;
 
-	std::unique_ptr<xrt_fusion::PSMVFusionInterface> filter;
+	std::unique_ptr<PSMVFusionInterface> filter;
 
 	xrt_vec3 tracked_object_position;
 };
@@ -204,14 +208,25 @@ make_lowest_score_finder(FunctionType scoreFunctor)
 static cv::Point3f
 world_point_from_blobs(cv::Point2f left, cv::Point2f right, const cv::Matx44d &disparity_to_depth)
 {
-	float disp = right.x - left.x;
+	float disp = left.x - right.x;
 	cv::Vec4d xydw(left.x, left.y, disp, 1.0f);
+
 	// Transform
 	cv::Vec4d h_world = disparity_to_depth * xydw;
 
-	// Divide by scale to get 3D vector from homogeneous coordinate.  we
-	// also invert x here
-	cv::Point3f world_point(-h_world[0] / h_world[3], h_world[1] / h_world[3], h_world[2] / h_world[3]);
+	// Divide by scale to get 3D vector from homogeneous coordinate.
+	cv::Point3f world_point(      //
+	    h_world[0] / h_world[3],  //
+	    h_world[1] / h_world[3],  //
+	    h_world[2] / h_world[3]); //
+
+	/*
+	 * OpenCV camera space is right handed, -Y up, +Z forwards but
+	 * Monados camera space is right handed, +Y up, -Z forwards so we need
+	 * to invert y and z.
+	 */
+	world_point.y = -world_point.y;
+	world_point.z = -world_point.z;
 
 	return world_point;
 }
@@ -431,6 +446,9 @@ break_apart(TrackerPSMV &t)
 	os_thread_helper_stop(&t.oth);
 }
 
+} // namespace xrt::auxiliary::tracking::psmv
+
+using xrt::auxiliary::tracking::psmv::TrackerPSMV;
 
 /*
  *
@@ -534,7 +552,7 @@ t_psmv_create(struct xrt_frame_context *xfctx,
 	t.fusion.rot.y = 0.0f;
 	t.fusion.rot.z = 0.0f;
 	t.fusion.rot.w = 1.0f;
-	t.filter = xrt_fusion::PSMVFusionInterface::create();
+	t.filter = PSMVFusionInterface::create();
 
 	ret = os_thread_helper_init(&t.oth);
 	if (ret != 0) {
@@ -593,7 +611,7 @@ t_psmv_create(struct xrt_frame_context *xfctx,
 	// Everything is safe, now setup the variable tracking.
 	u_var_add_root(&t, "PSMV Tracker", true);
 	u_var_add_vec3_f32(&t, &t.tracked_object_position, "last.ball.pos");
-	u_var_add_sink(&t, &t.debug.sink, "Debug");
+	u_var_add_sink_debug(&t, &t.debug.usd, "Debug");
 
 	*out_sink = &t.sink;
 	*out_xtmv = &t.base;

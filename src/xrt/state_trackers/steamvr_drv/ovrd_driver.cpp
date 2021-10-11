@@ -42,6 +42,8 @@ DEBUG_GET_ONCE_BOOL_OPTION(emulate_index_controller, "STEAMVR_EMULATE_INDEX_CONT
 
 DEBUG_GET_ONCE_NUM_OPTION(scale_percentage, "XRT_COMPOSITOR_SCALE_PERCENTAGE", 140)
 
+#define MODELNUM_LEN (XRT_DEVICE_NAME_LEN + 9) // "[Monado] "
+
 //#define DUMP_POSE
 //#define DUMP_POSE_CONTROLLERS
 
@@ -148,16 +150,8 @@ public:
 		m_unObjectId = vr::k_unTrackedDeviceIndexInvalid;
 		m_pose = {};
 
-		// append xrt_hand because SteamVR serial must be unique
-		std::stringstream ss;
-		ss << "[Monado] " << xdev->str << " " << hand;
-		std::string name = ss.str();
-
-		strncpy(m_sSerialNumber, name.c_str(), XRT_DEVICE_NAME_LEN);
-		strncpy(m_sModelNumber, name.c_str(), XRT_DEVICE_NAME_LEN);
-
-		strncpy(m_sSerialNumber, name.c_str(), XRT_DEVICE_NAME_LEN);
-		strncpy(m_sModelNumber, name.c_str(), XRT_DEVICE_NAME_LEN);
+		snprintf(m_sModelNumber, MODELNUM_LEN, "[Monado] %s", xdev->str);
+		strncpy(m_sSerialNumber, xdev->serial, XRT_DEVICE_NAME_LEN);
 
 		switch (this->m_xdev->name) {
 		case XRT_DEVICE_INDEX_CONTROLLER:
@@ -170,6 +164,14 @@ public:
 				m_render_model =
 				    "{indexcontroller}valve_controller_knu_1_0_"
 				    "right";
+			}
+			break;
+		case XRT_DEVICE_TOUCH_CONTROLLER:
+			if (hand == XRT_HAND_LEFT) {
+				m_render_model = "oculus_cv1_controller_left";
+			}
+			if (hand == XRT_HAND_RIGHT) {
+				m_render_model = "oculus_cv1_controller_right";
 			}
 			break;
 		case XRT_DEVICE_VIVE_WAND: m_render_model = "vr_controller_vive_1_5"; break;
@@ -344,6 +346,7 @@ public:
 		case XRT_DEVICE_XBOX_CONTROLLER: break;   // TODO
 		case XRT_DEVICE_VIVE_TRACKER_GEN1: break; // TODO
 		case XRT_DEVICE_VIVE_TRACKER_GEN2: break; // TODO
+		case XRT_DEVICE_REALSENSE: break;
 
 		case XRT_DEVICE_HAND_INTERACTION: break;  // there is no hardware
 		case XRT_DEVICE_GO_CONTROLLER: break;     // hardware has no haptics
@@ -486,6 +489,11 @@ public:
 
 			struct profile_template *p = get_profile_template(m_xdev->name);
 
+			if (p == NULL) {
+				ovrd_log("Monado device has unknown profile: %d\n", m_xdev->name);
+				return vr::VRInitError_Unknown;
+			}
+
 			m_input_profile = std::string("{monado}/input/") + std::string(p->steamvr_input_profile_path);
 			m_controller_type = p->steamvr_controller_type;
 		}
@@ -571,6 +579,8 @@ public:
 			grip_name = XRT_INPUT_DAYDREAM_POSE;
 		} else if (m_xdev->name == XRT_DEVICE_HYDRA) {
 			grip_name = XRT_INPUT_HYDRA_POSE;
+		} else if (m_xdev->name == XRT_DEVICE_TOUCH_CONTROLLER) {
+			grip_name = XRT_INPUT_TOUCH_GRIP_POSE;
 		} else {
 			ovrd_log("Unhandled device name %u\n", m_xdev->name);
 			grip_name = XRT_INPUT_GENERIC_HEAD_POSE; // ???
@@ -703,7 +713,7 @@ public:
 
 private:
 	char m_sSerialNumber[XRT_DEVICE_NAME_LEN];
-	char m_sModelNumber[XRT_DEVICE_NAME_LEN];
+	char m_sModelNumber[MODELNUM_LEN];
 
 	const char *m_controller_type = NULL;
 
@@ -1226,7 +1236,7 @@ CServerDriver_Monado::HandleHapticEvent(vr::VREvent_t *event)
 	union xrt_output_value out;
 	out.vibration.amplitude = amp;
 	if (duration > 0.00001) {
-		out.vibration.duration = duration * 1000. * 1000. * 1000.;
+		out.vibration.duration = (time_duration_ns)(duration * 1000.f * 1000.f * 1000.f);
 	} else {
 		out.vibration.duration = XRT_MIN_HAPTIC_DURATION;
 	}

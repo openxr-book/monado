@@ -16,6 +16,9 @@
 #include <unistd.h>
 #include <errno.h>
 #include <sys/mman.h>
+#include <limits.h>
+
+#include "util/u_file.h"
 
 #define P(...) fprintf(stdout, __VA_ARGS__)
 #define PE(...) fprintf(stderr, __VA_ARGS__)
@@ -127,7 +130,7 @@ toggle_io(struct ipc_connection *ipc_c, int client_id)
 
 	r = ipc_call_system_toggle_io_device(ipc_c, client_id);
 	if (r != XRT_SUCCESS) {
-		PE("Failed to set focused client to %d.\n", client_id);
+		PE("Failed to toggle io for client %d.\n", client_id);
 		return 1;
 	}
 
@@ -168,7 +171,10 @@ main(int argc, char *argv[])
 			if (optopt == 's') {
 				PE("Option -s requires an id to set.\n");
 			} else if (isprint(optopt)) {
-				PE("Option `-%c' unknown.\n", optopt);
+				PE("Option `-%c' unknown. Usage:\n", optopt);
+				PE("    -f <id>: Set focused client\n");
+				PE("    -p <id>: Set primary client\n");
+				PE("    -i <id>: Toggle whether client receives input\n");
 			} else {
 				PE("Option `\\x%x' unknown.\n", optopt);
 			}
@@ -212,9 +218,17 @@ do_connect(struct ipc_connection *ipc_c)
 		return -1;
 	}
 
+	char sock_file[PATH_MAX];
+
+	int rt_size = u_file_get_path_in_runtime_dir(IPC_MSG_SOCK_FILE, sock_file, PATH_MAX);
+	if (rt_size == -1) {
+		PE("Could not get socket file name");
+		return -1;
+	}
+
 	struct sockaddr_un addr = {0};
 	addr.sun_family = AF_UNIX;
-	strcpy(addr.sun_path, IPC_MSG_SOCK_FILE);
+	strcpy(addr.sun_path, sock_file);
 
 	ret = connect(ipc_c->imc.socket_fd,     // socket
 	              (struct sockaddr *)&addr, // address

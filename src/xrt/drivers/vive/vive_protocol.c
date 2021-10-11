@@ -10,17 +10,19 @@
  */
 
 #include "math/m_mathinclude.h"
-
-#include <stdio.h>
-#include <zlib.h>
 #include "math/m_api.h"
-
-#include "vive_protocol.h"
 
 #include "util/u_debug.h"
 #include "util/u_misc.h"
 #include "util/u_json.h"
 #include "util/u_logging.h"
+#include "util/u_trace_marker.h"
+
+#include "vive_protocol.h"
+
+#include <stdio.h>
+#include <zlib.h>
+
 
 const struct vive_headset_power_report power_on_report = {
     .id = VIVE_HEADSET_POWER_REPORT_ID,
@@ -64,13 +66,16 @@ const struct vive_headset_power_report power_off_report = {
 char *
 vive_read_config(struct os_hid_device *hid_dev)
 {
+	XRT_TRACE_MARKER();
+
 	struct vive_config_start_report start_report = {
 	    .id = VIVE_CONFIG_START_REPORT_ID,
 	};
 
 	int ret = os_hid_get_feature_timeout(hid_dev, &start_report, sizeof(start_report), 100);
 	if (ret < 0) {
-		U_LOG_E("Could not get config start report.");
+		// e.g. watchman receiver has no connected device (controller powered off)
+		U_LOG_I("Could not get config start report for device, connected device may be powered off (%d).", ret);
 		return NULL;
 	}
 
@@ -151,7 +156,7 @@ vive_get_imu_range_report(struct os_hid_device *hid_dev, double *gyro_range, dou
 
 	ret = os_hid_get_feature_timeout(hid_dev, &report, sizeof(report), 100);
 	if (ret < 0) {
-		U_LOG_E("Could not get range report!");
+		U_LOG_I("Could not get range report, connected device may be powered off (%d)!", ret);
 		return ret;
 	}
 

@@ -5,6 +5,7 @@
  * @brief  Base implementations for math library.
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Moses Turner <mosesturner@protonmail.com>
  * @ingroup aux_math
  */
 
@@ -16,6 +17,7 @@
 
 #include <assert.h>
 
+using namespace xrt::auxiliary::math;
 
 /*
  *
@@ -38,6 +40,21 @@ copy(const struct xrt_quat *q)
 	return copy(*q);
 }
 
+XRT_MAYBE_UNUSED static inline Eigen::Quaterniond
+copyd(const struct xrt_quat &q)
+{
+	// Eigen constructor order is different from XRT, OpenHMD and OpenXR!
+	//  Eigen: `float w, x, y, z`.
+	// OpenXR: `float x, y, z, w`.
+	return Eigen::Quaterniond(q.w, q.x, q.y, q.z);
+}
+
+XRT_MAYBE_UNUSED static inline Eigen::Quaterniond
+copyd(const struct xrt_quat *q)
+{
+	return copyd(*q);
+}
+
 static inline Eigen::Vector3f
 copy(const struct xrt_vec3 &v)
 {
@@ -48,6 +65,30 @@ static inline Eigen::Vector3f
 copy(const struct xrt_vec3 *v)
 {
 	return copy(*v);
+}
+
+XRT_MAYBE_UNUSED static inline Eigen::Vector3d
+copyd(const struct xrt_vec3 &v)
+{
+	return Eigen::Vector3d(v.x, v.y, v.z);
+}
+
+XRT_MAYBE_UNUSED static inline Eigen::Vector3d
+copyd(const struct xrt_vec3 *v)
+{
+	return copyd(*v);
+}
+
+static inline Eigen::Matrix3f
+copy(const struct xrt_matrix_3x3 *m)
+{
+	Eigen::Matrix3f res;
+	// clang-format off
+	res << m->v[0], m->v[3], m->v[6],
+	       m->v[1], m->v[4], m->v[7],
+	       m->v[2], m->v[5], m->v[8];
+	// clang-format on
+	return res;
 }
 
 static inline Eigen::Matrix4f
@@ -62,6 +103,7 @@ copy(const struct xrt_matrix_4x4 *m)
 	// clang-format on
 	return res;
 }
+
 
 /*
  *
@@ -200,7 +242,7 @@ math_quat_validate(const struct xrt_quat *quat)
 extern "C" bool
 math_quat_validate_within_1_percent(const struct xrt_quat *quat)
 {
-	return quat_validate(0.01, quat);
+	return quat_validate(0.01f, quat);
 }
 
 extern "C" void
@@ -285,6 +327,18 @@ math_quat_rotate_derivative(const struct xrt_quat *quat, const struct xrt_vec3 *
 	*result = ret;
 }
 
+extern "C" void
+math_quat_slerp(const struct xrt_quat *left, const struct xrt_quat *right, float t, struct xrt_quat *result)
+{
+	assert(left != NULL);
+	assert(right != NULL);
+	assert(result != NULL);
+
+	auto l = copy(left);
+	auto r = copy(right);
+
+	map_quat(*result) = l.slerp(t, r);
+}
 
 /*
  *
@@ -314,6 +368,30 @@ math_matrix_3x3_transform_vec3(const struct xrt_matrix_3x3 *left, const struct x
 	map_vec3(*result) = m * copy(right);
 }
 
+extern "C" void
+math_matrix_3x3_multiply(const struct xrt_matrix_3x3 *left,
+                         const struct xrt_matrix_3x3 *right,
+                         struct xrt_matrix_3x3 *result)
+{
+	result->v[0] = left->v[0] * right->v[0] + left->v[1] * right->v[3] + left->v[2] * right->v[6];
+	result->v[1] = left->v[0] * right->v[1] + left->v[1] * right->v[4] + left->v[2] * right->v[7];
+	result->v[2] = left->v[0] * right->v[2] + left->v[1] * right->v[5] + left->v[2] * right->v[8];
+
+	result->v[3] = left->v[3] * right->v[0] + left->v[4] * right->v[3] + left->v[5] * right->v[6];
+	result->v[4] = left->v[3] * right->v[1] + left->v[4] * right->v[4] + left->v[5] * right->v[7];
+	result->v[5] = left->v[3] * right->v[2] + left->v[4] * right->v[5] + left->v[5] * right->v[8];
+
+	result->v[6] = left->v[6] * right->v[0] + left->v[7] * right->v[3] + left->v[8] * right->v[6];
+	result->v[7] = left->v[6] * right->v[1] + left->v[7] * right->v[4] + left->v[8] * right->v[7];
+	result->v[8] = left->v[6] * right->v[2] + left->v[7] * right->v[5] + left->v[8] * right->v[8];
+}
+
+extern "C" void
+math_matrix_3x3_inverse(const struct xrt_matrix_3x3 *in, struct xrt_matrix_3x3 *result)
+{
+	Eigen::Matrix3f m = copy(in);
+	map_matrix_3x3(*result) = m.inverse();
+}
 
 void
 math_matrix_4x4_identity(struct xrt_matrix_4x4 *result)
@@ -367,6 +445,70 @@ math_matrix_4x4_inverse_view_projection(const struct xrt_matrix_4x4 *view,
 	map_matrix_4x4(*result) = vp.inverse();
 }
 
+
+/*
+ *
+ * Exported Matrix 4x4 functions.
+ *
+ */
+
+extern "C" void
+m_mat4_f64_identity(struct xrt_matrix_4x4_f64 *result)
+{
+	map_matrix_4x4_f64(*result) = Eigen::Matrix4d::Identity();
+}
+
+extern "C" void
+m_mat4_f64_invert(const struct xrt_matrix_4x4_f64 *matrix, struct xrt_matrix_4x4_f64 *result)
+{
+	Eigen::Matrix4d m = map_matrix_4x4_f64(*matrix);
+	map_matrix_4x4_f64(*result) = m.inverse();
+}
+
+extern "C" void
+m_mat4_f64_multiply(const struct xrt_matrix_4x4_f64 *left,
+                    const struct xrt_matrix_4x4_f64 *right,
+                    struct xrt_matrix_4x4_f64 *result)
+{
+	Eigen::Matrix4d l = map_matrix_4x4_f64(*left);
+	Eigen::Matrix4d r = map_matrix_4x4_f64(*right);
+
+	map_matrix_4x4_f64(*result) = l * r;
+}
+
+extern "C" void
+m_mat4_f64_orientation(const struct xrt_quat *quat, struct xrt_matrix_4x4_f64 *result)
+{
+	map_matrix_4x4_f64(*result) = Eigen::Affine3d(copyd(*quat)).matrix();
+}
+
+extern "C" void
+m_mat4_f64_model(const struct xrt_pose *pose, const struct xrt_vec3 *size, struct xrt_matrix_4x4_f64 *result)
+{
+	Eigen::Vector3d position = copyd(pose->position);
+	Eigen::Quaterniond orientation = copyd(pose->orientation);
+
+	auto scale = Eigen::Scaling(copyd(size));
+
+	Eigen::Translation3d translation(position);
+	Eigen::Affine3d transformation = translation * orientation * scale;
+
+	map_matrix_4x4_f64(*result) = transformation.matrix();
+}
+
+extern "C" void
+m_mat4_f64_view(const struct xrt_pose *pose, struct xrt_matrix_4x4_f64 *result)
+{
+	Eigen::Vector3d position = copyd(pose->position);
+	Eigen::Quaterniond orientation = copyd(pose->orientation);
+
+	Eigen::Translation3d translation(position);
+	Eigen::Affine3d transformation = translation * orientation;
+
+	map_matrix_4x4_f64(*result) = transformation.matrix().inverse();
+}
+
+
 /*
  *
  * Exported pose functions.
@@ -399,6 +541,18 @@ math_pose_invert(const struct xrt_pose *pose, struct xrt_pose *outPose)
 
 	position(*outPose) = newPosition;
 	orientation(*outPose) = newOrientation;
+}
+
+extern "C" void
+math_pose_identity(struct xrt_pose *pose)
+{
+	pose->position.x = 0.0;
+	pose->position.y = 0.0;
+	pose->position.z = 0.0;
+	pose->orientation.x = 0.0;
+	pose->orientation.y = 0.0;
+	pose->orientation.z = 0.0;
+	pose->orientation.w = 1.0;
 }
 
 /*!

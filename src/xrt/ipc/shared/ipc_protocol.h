@@ -20,7 +20,7 @@
 #include "xrt/xrt_tracking.h"
 
 
-#define IPC_MSG_SOCK_FILE "/tmp/monado_comp_ipc"
+#define IPC_MSG_SOCK_FILE "monado_comp_ipc"
 #define IPC_MAX_SWAPCHAIN_HANDLES 8
 #define IPC_CRED_SIZE 1    // auth not implemented
 #define IPC_BUF_SIZE 512   // must be >= largest message length in bytes
@@ -37,6 +37,8 @@
 #define IPC_SHARED_MAX_OUTPUTS 128
 #define IPC_SHARED_MAX_BINDINGS 64
 
+// example: v21.0.0-560-g586d33b5
+#define IPC_VERSION_NAME_LEN 64
 
 /*
  *
@@ -151,6 +153,7 @@ struct ipc_layer_entry
  */
 struct ipc_layer_slot
 {
+	uint64_t display_time_ns;
 	enum xrt_blend_mode env_blend_mode;
 	uint32_t num_layers;
 	struct ipc_layer_entry layers[IPC_MAX_LAYERS];
@@ -173,6 +176,11 @@ struct ipc_layer_slot
  */
 struct ipc_shared_memory
 {
+	/*!
+	 * The git revision of the service, used by clients to detect version mismatches.
+	 */
+	char u_git_tag[IPC_VERSION_NAME_LEN];
+
 	/*!
 	 * Number of elements in @ref itracks that are populated/valid.
 	 */
@@ -224,6 +232,8 @@ struct ipc_shared_memory
 			 */
 			struct xrt_fov fov;
 		} views[2];
+		enum xrt_blend_mode blend_modes[XRT_MAX_DEVICE_BLEND_MODES];
+		size_t num_blend_modes;
 	} hmd;
 
 	struct xrt_input inputs[IPC_SHARED_MAX_INPUTS];

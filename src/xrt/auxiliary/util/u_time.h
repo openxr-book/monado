@@ -24,13 +24,30 @@
 extern "C" {
 #endif
 
+//! Helper define to make code more readable.
+#define U_1_000_000_000 (1000000000)
+
 /*!
  * The number of nanoseconds in a second.
  *
  * @see timepoint_ns
  * @ingroup time_ns_to_s
  */
-#define U_1_000_000_000 (1000000000)
+#define U_TIME_1S_IN_NS U_1_000_000_000
+
+/*!
+ * The number of nanoseconds in a milliseconds.
+ *
+ * @see timepoint_ns
+ */
+#define U_TIME_1MS_IN_NS (U_TIME_1S_IN_NS / 1000)
+
+/*!
+ * The number of nanoseconds in half a milliseconds.
+ *
+ * @see timepoint_ns
+ */
+#define U_TIME_HALF_MS_IN_NS (U_TIME_1MS_IN_NS / 2)
 
 /*!
  * Integer timestamp type.
@@ -53,15 +70,15 @@ typedef int64_t timepoint_ns;
 typedef int64_t time_duration_ns;
 
 /*!
- * Convert nanoseconds duration to float seconds.
+ * Convert nanoseconds duration to double seconds.
  *
  * @see timepoint_ns
  * @ingroup aux_util
  */
-static inline float
+static inline double
 time_ns_to_s(time_duration_ns ns)
 {
-	return (float)(ns) / (float)U_1_000_000_000;
+	return (double)(ns) / (double)U_TIME_1S_IN_NS;
 }
 
 /*!
@@ -73,7 +90,92 @@ time_ns_to_s(time_duration_ns ns)
 static inline time_duration_ns
 time_s_to_ns(double duration)
 {
-	return (time_duration_ns)(duration * (double)U_1_000_000_000);
+	return (time_duration_ns)(duration * (double)U_TIME_1S_IN_NS);
+}
+
+/*!
+ * Convert nanoseconds to double float milliseconds, useful for printing.
+ *
+ * @see timepoint_ns
+ * @ingroup aux_util
+ */
+static inline double
+time_ns_to_ms_f(time_duration_ns ns)
+{
+	return (double)(ns) / (double)U_TIME_1MS_IN_NS;
+}
+
+/*!
+ * Checks if two timepoints are with a certain range of each other.
+ *
+ * @see timepoint_ns
+ * @ingroup aux_util
+ */
+static inline bool
+time_is_within_range_of_each_other(timepoint_ns a, timepoint_ns b, uint64_t range)
+{
+	int64_t t = (int64_t)a - (int64_t)b;
+	return (-(int64_t)range < t) && (t < (int64_t)range);
+}
+
+/*!
+ * Checks if two timepoints are with half a millisecond of each other.
+ *
+ * @see timepoint_ns
+ * @ingroup aux_util
+ */
+static inline bool
+time_is_within_half_ms(timepoint_ns a, timepoint_ns b)
+{
+	return time_is_within_range_of_each_other(a, b, U_TIME_HALF_MS_IN_NS);
+}
+
+/*!
+ * Fuzzy comparisons.
+ *
+ * @see timepoint_ns
+ * @ingroup aux_util
+ */
+static inline bool
+time_is_less_then_or_within_range(timepoint_ns a, timepoint_ns b, uint64_t range)
+{
+	return a < b || time_is_within_range_of_each_other(a, b, range);
+}
+
+/*!
+ * Fuzzy comparisons.
+ *
+ * @see timepoint_ns
+ * @ingroup aux_util
+ */
+static inline bool
+time_is_less_then_or_within_half_ms(timepoint_ns a, timepoint_ns b)
+{
+	return time_is_less_then_or_within_range(a, b, U_TIME_HALF_MS_IN_NS);
+}
+
+/*!
+ * Fuzzy comparisons.
+ *
+ * @see timepoint_ns
+ * @ingroup aux_util
+ */
+static inline bool
+time_is_greater_then_or_within_range(timepoint_ns a, timepoint_ns b, uint64_t range)
+{
+	return a > b || time_is_within_range_of_each_other(a, b, range);
+}
+
+/*!
+ * Fuzzy comparisons.
+ *
+ * @see timepoint_ns
+ * @ingroup aux_util
+ */
+static inline bool
+time_is_greater_then_or_within_half_ms(timepoint_ns a, timepoint_ns b)
+{
+	return time_is_greater_then_or_within_range(a, b, U_TIME_HALF_MS_IN_NS);
 }
 
 /*!

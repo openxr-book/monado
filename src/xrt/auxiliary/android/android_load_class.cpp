@@ -12,13 +12,14 @@
 #include "util/u_logging.h"
 
 #include "wrap/android.content.h"
-#include "wrap/dalvik.system.h"
 
 #include "jni.h"
 
 using wrap::android::content::Context;
 using wrap::android::content::pm::ApplicationInfo;
 using wrap::android::content::pm::PackageManager;
+
+namespace xrt::auxiliary::android {
 
 ApplicationInfo
 getAppInfo(std::string const &packageName, jobject application_context)
@@ -79,6 +80,8 @@ loadClassFromPackage(ApplicationInfo applicationInfo, jobject application_contex
 		return wrap::java::lang::Class();
 	}
 }
+} // namespace xrt::auxiliary::android
+
 
 void *
 android_load_class_from_package(struct _JavaVM *vm,
@@ -86,6 +89,7 @@ android_load_class_from_package(struct _JavaVM *vm,
                                 void *application_context,
                                 const char *classname)
 {
+	using namespace xrt::auxiliary::android;
 	jni::init(vm);
 	Context context((jobject)application_context);
 	auto info = getAppInfo(pkgname, (jobject)application_context);
