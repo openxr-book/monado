@@ -3,6 +3,21 @@
 
 drv_include = include_directories('.')
 
+lib_drv_depthai = static_library(
+	'drv_depthai',
+	files(
+		'depthai/depthai_driver.cpp',
+	),
+	include_directories: [xrt_include],
+	dependencies: [aux, opencv, depthai],
+	build_by_default: 'depthai' in drivers,
+)
+
+drv_depthai = declare_dependency(
+	include_directories: drv_include,
+	link_with: lib_drv_depthai
+)
+
 lib_drv_dummy = static_library(
 	'drv_dummy',
 	files(
@@ -42,9 +57,9 @@ lib_drv_hydra = static_library(
 lib_drv_ns = static_library(
 	'drv_ns',
 	files(
-		'north_star/distortion/utility_northstar.h',
-		'north_star/distortion/deformation_northstar.h',
-		'north_star/distortion/deformation_northstar.cpp',
+		'north_star/distortion_3d/utility_northstar.h',
+		'north_star/distortion_3d/deformation_northstar.h',
+		'north_star/distortion_3d/deformation_northstar.cpp',
 		'north_star/ns_hmd.h',
 		'north_star/ns_hmd.c',
 		'north_star/ns_interface.h',
@@ -58,16 +73,31 @@ lib_drv_ns = static_library(
 	build_by_default: 'ns' in drivers,
 )
 
+lib_drv_ulv2 = static_library(
+       'drv_ulv2',
+       files(
+               'ultraleap_v2/ulv2_driver.cpp',
+               'ultraleap_v2/ulv2_interface.h',
+       ),
+       include_directories: [xrt_include, inc_leap],
+       dependencies: [aux, leap],
+       build_by_default: 'ulv2' in drivers,
+)
+
 lib_drv_ht = static_library(
 	'drv_ht',
 	files(
-		'ht/ht_driver.c',
-		'ht/ht_driver.h',
+		'ht/ht_driver.cpp',
+		'ht/ht_driver.hpp',
 		'ht/ht_interface.h',
-		'ht/ht_prober.c',
+		'ht/ht_models.hpp',
+		'ht/ht_hand_math.hpp',
+		'ht/ht_image_math.hpp',
+		'ht/ht_nms.hpp',
+		'ht/templates/NaivePermutationSort.hpp',
 	),
-	include_directories: xrt_include,
-	dependencies: [aux],
+	include_directories: [xrt_include, cjson_include],
+	dependencies: [aux, opencv, onnxruntime, eigen3],
 	build_by_default: 'handtracking' in drivers,
 )
 
@@ -112,10 +142,13 @@ lib_drv_psvr = static_library(
 lib_drv_rs = static_library(
 	'drv_rs',
 	files(
-		'realsense/rs_6dof.c',
+		'realsense/rs_ddev.c',
+		'realsense/rs_hdev.c',
 		'realsense/rs_interface.h',
+		'realsense/rs_driver.h',
+		'realsense/rs_prober.c',
 	),
-	include_directories: xrt_include,
+	include_directories: [xrt_include,cjson_include],
 	dependencies: [aux, rs],
 	build_by_default: 'rs' in drivers,
 )
@@ -144,6 +177,11 @@ lib_drv_vf = static_library(
 	build_by_default: 'vf' in drivers,
 )
 
+drv_vf = declare_dependency(
+	include_directories: drv_include,
+	link_with: lib_drv_vf,
+)
+
 lib_drv_v4l2 = static_library(
 	'drv_v4l2',
 	files(
@@ -165,16 +203,15 @@ lib_drv_vive = static_library(
 		'vive/vive_prober.c',
 		'vive/vive_controller.c',
 		'vive/vive_controller.h',
-		'vive/vive_config.c',
-		'vive/vive_config.h',
 		'vive/vive_lighthouse.c',
 		'vive/vive_lighthouse.h',
 	),
 	include_directories: [
 		xrt_include,
+		aux_include,
 		cjson_include,
 	],
-	dependencies: [aux, zlib],
+	dependencies: [aux, zlib, aux_vive],
 	build_by_default: 'vive' in drivers,
 )
 
@@ -182,15 +219,16 @@ lib_drv_survive = static_library(
 	'drv_survive',
 	files(
 		'survive/survive_driver.c',
+		'survive/survive_driver.h',
 		'survive/survive_interface.h',
-		'survive/survive_wrap.c',
-		'survive/survive_wrap.h'
+		'survive/survive_prober.c',
 	),
 	include_directories: [
 		xrt_include,
+		aux_include,
 		cjson_include,
 	],
-	dependencies: [aux, zlib, survive],
+	dependencies: [aux, zlib, survive, aux_vive],
 	build_by_default: 'survive' in drivers,
 )
 
@@ -221,4 +259,66 @@ lib_drv_arduino = static_library(
 	],
 	dependencies: [dbus, aux],
 	build_by_default: 'arduino' in drivers,
+)
+
+lib_drv_multi = static_library(
+	'drv_multi',
+	files(
+		'multi_wrapper/multi.c',
+		'multi_wrapper/multi.h'
+	),
+	include_directories: [
+		xrt_include,
+	],
+	dependencies: [aux],
+	build_by_default: true,
+)
+
+lib_drv_qwerty = static_library(
+	'drv_qwerty',
+	files(
+		'qwerty/qwerty_device.c',
+		'qwerty/qwerty_device.h',
+		'qwerty/qwerty_interface.h',
+		'qwerty/qwerty_prober.c',
+		'qwerty/qwerty_sdl.c',
+	),
+	include_directories: xrt_include,
+	dependencies: [aux, sdl2],
+	build_by_default: 'qwerty' in drivers,
+)
+
+drv_qwerty_include = include_directories('qwerty')
+
+lib_drv_wmr = static_library(
+	'drv_wmr',
+	files(
+		'wmr/wmr_common.h',
+		'wmr/wmr_config.c',
+		'wmr/wmr_hmd.c',
+		'wmr/wmr_hmd.h',
+		'wmr/wmr_interface.h',
+		'wmr/wmr_prober.c',
+		'wmr/wmr_protocol.c',
+		'wmr/wmr_protocol.h',
+	),
+	include_directories: [
+		xrt_include,
+		cjson_include,
+	],
+	dependencies: [aux],
+	build_by_default: 'wmr' in drivers,
+)
+
+lib_drv_euroc = static_library(
+	'drv_euroc',
+	files(
+		'euroc/euroc_player.cpp',
+		'euroc/euroc_driver.h',
+		'euroc/euroc_device.c',
+		'euroc/euroc_interface.h',
+	),
+	include_directories: [xrt_include],
+	dependencies: [aux, opencv],
+	build_by_default: 'euroc' in drivers,
 )

@@ -14,6 +14,7 @@
 #include "util/u_debug.h"
 #include "util/u_frame.h"
 #include "util/u_format.h"
+#include "util/u_logging.h"
 
 #include "tracking/t_tracking.h"
 #include "tracking/t_calibration_opencv.hpp"
@@ -22,12 +23,19 @@
 #include <sys/stat.h>
 #include <utility>
 
+#if CV_MAJOR_VERSION >= 4
+#define SB_CHEESBOARD_CORNERS_SUPPORTED
+#if CV_MINOR_VERSION >= 3 || CV_MAJOR_VERSION > 4
+#define SB_CHEESBOARD_CORNERS_MARKER_SUPPORTED
+#endif
+#endif
+
 
 DEBUG_GET_ONCE_BOOL_OPTION(hsv_filter, "T_DEBUG_HSV_FILTER", false)
 DEBUG_GET_ONCE_BOOL_OPTION(hsv_picker, "T_DEBUG_HSV_PICKER", false)
 DEBUG_GET_ONCE_BOOL_OPTION(hsv_viewer, "T_DEBUG_HSV_VIEWER", false)
 
-
+namespace xrt::auxiliary::tracking {
 /*
  *
  * Structs
@@ -99,6 +107,8 @@ public:
 		cv::Size dims = {8, 6};
 		enum t_board_pattern pattern = T_BOARD_CHECKERS;
 		float spacing_meters = 0.05;
+		bool marker;          //!< Center board marker for sb_checkers.
+		bool normalize_image; //!< For SB checkers.
 	} board;
 
 	struct
@@ -325,6 +335,45 @@ do_view_chess(class Calibration &c, struct ViewState &view, cv::Mat &gray, cv::M
 	return found;
 }
 
+#ifdef SB_CHEESBOARD_CORNERS_SUPPORTED
+static bool
+do_view_sb_checkers(class Calibration &c, struct ViewState &view, cv::Mat &gray, cv::Mat &rgb)
+{
+	/*
+	 * Fisheye requires measurement and model to be double, other functions
+	 * requires them to be floats (like cornerSubPix). So we give in
+	 * current_f32 here and convert below.
+	 */
+
+	int flags = 0;
+	if (c.board.normalize_image) {
+		flags += cv::CALIB_CB_NORMALIZE_IMAGE;
+	}
+
+#ifdef SB_CHEESBOARD_CORNERS_MARKER_SUPPORTED
+	if (c.board.marker) {
+		// Only available in OpenCV 4.3 and above.
+		flags += cv::CALIB_CB_MARKER;
+	}
+#endif
+
+	bool found = cv::findChessboardCornersSB(gray,             // Image
+	                                         c.board.dims,     // patternSize
+	                                         view.current_f32, // corners
+	                                         flags);           // flags
+
+	// Do the conversion here.
+	view.current_f64.clear(); // Doesn't effect capacity.
+	for (const cv::Point2f &p : view.current_f32) {
+		view.current_f64.emplace_back(double(p.x), double(p.y));
+	}
+
+	do_view_coverage(c, view, gray, rgb, found);
+
+	return found;
+}
+#endif
+
 static bool
 do_view_circles(class Calibration &c, struct ViewState &view, cv::Mat &gray, cv::Mat &rgb)
 {
@@ -364,6 +413,11 @@ do_view(class Calibration &c, struct ViewState &view, cv::Mat &gray, cv::Mat &rg
 	case T_BOARD_CHECKERS: //
 		found = do_view_chess(c, view, gray, rgb);
 		break;
+#ifdef SB_CHEESBOARD_CORNERS_SUPPORTED
+	case T_BOARD_SB_CHECKERS: //
+		found = do_view_sb_checkers(c, view, gray, rgb);
+		break;
+#endif
 	case T_BOARD_CIRCLES: //
 		found = do_view_circles(c, view, gray, rgb);
 		break;
@@ -405,6 +459,7 @@ build_board_position(class Calibration &c)
 
 	switch (c.board.pattern) {
 	case T_BOARD_CHECKERS:
+	case T_BOARD_SB_CHECKERS:
 	case T_BOARD_CIRCLES:
 		// Nothing to do.
 		break;
@@ -416,6 +471,7 @@ build_board_position(class Calibration &c)
 
 	switch (c.board.pattern) {
 	case T_BOARD_CHECKERS:
+	case T_BOARD_SB_CHECKERS:
 	case T_BOARD_CIRCLES:
 		c.board.model_f32.reserve(rows_num * cols_num);
 		c.board.model_f64.reserve(rows_num * cols_num);
@@ -519,7 +575,7 @@ process_stereo_samples(class Calibration &c, int cols, int rows)
 	cv::Size image_size(cols, rows);
 	cv::Size new_image_size(cols, rows);
 
-	StereoCameraCalibrationWrapper wrapped = {};
+	StereoCameraCalibrationWrapper wrapped = {5}; // We only use five distortion parameters.
 	wrapped.view[0].image_size_pixels.w = image_size.width;
 	wrapped.view[0].image_size_pixels.h = image_size.height;
 	wrapped.view[1].image_size_pixels = wrapped.view[0].image_size_pixels;
@@ -1085,6 +1141,21 @@ process_frame_uyvy(class Calibration &c, struct xrt_frame *xf)
 }
 
 XRT_NO_INLINE static void
+process_frame_rgb(class Calibration &c, struct xrt_frame *xf)
+{
+
+	int w = (int)xf->width;
+	int h = (int)xf->height;
+
+	cv::Mat rgb_data(h, w, CV_8UC3, xf->data, xf->stride);
+	ensure_buffers_are_allocated(c, rgb_data.rows, rgb_data.cols);
+	c.gui.frame->source_sequence = xf->source_sequence;
+
+	cv::cvtColor(rgb_data, c.gray, cv::COLOR_RGB2GRAY);
+	rgb_data.copyTo(c.gui.rgb);
+}
+
+XRT_NO_INLINE static void
 process_load_image(class Calibration &c, struct xrt_frame *xf)
 {
 	char buf[512];
@@ -1162,6 +1233,7 @@ t_calibration_frame(struct xrt_frame_sink *xsink, struct xrt_frame *xf)
 	case XRT_FORMAT_YUYV422: process_frame_yuyv(c, xf); break;
 	case XRT_FORMAT_UYVY422: process_frame_uyvy(c, xf); break;
 	case XRT_FORMAT_L8: process_frame_l8(c, xf); break;
+	case XRT_FORMAT_R8G8B8: process_frame_rgb(c, xf); break;
 	default:
 		P("ERROR: Bad format '%s'", u_format_str(xf->format));
 		make_gui_str(c);
@@ -1201,6 +1273,19 @@ t_calibration_stereo_create(struct xrt_frame_context *xfctx,
                             struct xrt_frame_sink *gui,
                             struct xrt_frame_sink **out_sink)
 {
+#ifndef SB_CHEESBOARD_CORNERS_SUPPORTED
+	if (params->pattern == T_BOARD_SB_CHECKERS) {
+		U_LOG_E("OpenCV %u.%u doesn't support SB chessboard!", CV_MAJOR_VERSION, CV_MINOR_VERSION);
+		return -1;
+	}
+#endif
+#ifndef SB_CHEESBOARD_CORNERS_MARKER_SUPPORTED
+	if (params->pattern == T_BOARD_SB_CHECKERS && params->sb_checkers.marker) {
+		U_LOG_W("OpenCV %u.%u doesn't support SB chessboard marker option!", CV_MAJOR_VERSION,
+		        CV_MINOR_VERSION);
+	}
+#endif
+
 	auto &c = *(new Calibration());
 
 	// Basic setup.
@@ -1221,6 +1306,15 @@ t_calibration_stereo_create(struct xrt_frame_context *xfctx,
 		c.board.spacing_meters = params->checkers.size_meters;
 		c.subpixel_enable = params->checkers.subpixel_enable;
 		c.subpixel_size = params->checkers.subpixel_size;
+		break;
+	case T_BOARD_SB_CHECKERS:
+		c.board.dims = {
+		    params->sb_checkers.cols,
+		    params->sb_checkers.rows,
+		};
+		c.board.spacing_meters = params->sb_checkers.size_meters;
+		c.board.marker = params->sb_checkers.marker;
+		c.board.normalize_image = params->sb_checkers.normalize_image;
 		break;
 	case T_BOARD_CIRCLES:
 		c.board.dims = {
@@ -1266,8 +1360,8 @@ t_calibration_stereo_create(struct xrt_frame_context *xfctx,
 		ret = t_debug_hsv_viewer_create(xfctx, *out_sink, out_sink);
 	}
 
-	// Ensure we only get yuv, yuyv, uyvy or l8 frames.
-	u_sink_create_to_yuv_yuyv_uyvy_or_l8(xfctx, *out_sink, out_sink);
+	// Ensure we only get rgb, yuv, yuyv, uyvy or l8 frames.
+	u_sink_create_to_rgb_yuv_yuyv_uyvy_or_l8(xfctx, *out_sink, out_sink);
 
 
 	// Build the board model.
@@ -1291,6 +1385,8 @@ t_calibration_stereo_create(struct xrt_frame_context *xfctx,
 		push_model(c);
 	}
 #endif
+
+
 	return ret;
 }
 
@@ -1416,3 +1512,5 @@ NormalizedCoordsCache::getNormalizedVector(cv::Point2f origCoords) const
 	auto z = -std::sqrt(1.f - pt.dot(pt));
 	return {pt[0], pt[1], z};
 }
+
+} // namespace xrt::auxiliary::tracking

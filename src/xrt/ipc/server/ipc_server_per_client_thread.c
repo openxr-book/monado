@@ -1,4 +1,4 @@
-// Copyright 2020, Collabora, Ltd.
+// Copyright 2020-2021, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -69,9 +69,6 @@ client_loop(volatile struct ipc_client_state *ics)
 {
 	IPC_INFO(ics->server, "Client connected");
 
-	// Make sure it's ready for the client.
-	u_rt_helper_client_clear((struct u_rt_helper *)&ics->urth);
-
 	// Claim the client fd.
 	int epoll_fd = setup_epoll(ics);
 	if (epoll_fd < 0) {
@@ -123,64 +120,54 @@ client_loop(volatile struct ipc_client_state *ics)
 	epoll_fd = -1;
 
 	// Multiple threads might be looking at these fields.
-	os_mutex_lock(&ics->server->global_state_lock);
+	os_mutex_lock(&ics->server->global_state.lock);
 
 	ipc_message_channel_close((struct ipc_message_channel *)&ics->imc);
-
-	// Reset the urth for the next client.
-	u_rt_helper_client_clear((struct u_rt_helper *)&ics->urth);
-
-	ics->num_swapchains = 0;
 
 	ics->server->threads[ics->server_thread_index].state = IPC_THREAD_STOPPING;
 	ics->server_thread_index = -1;
 	memset((void *)&ics->client_state, 0, sizeof(struct ipc_app_state));
 
-	// Make sure to reset the renderstate fully.
-	ics->rendering_state = false;
-	ics->render_state.num_layers = 0;
-	for (uint32_t i = 0; i < ARRAY_SIZE(ics->render_state.layers); ++i) {
-		volatile struct ipc_layer_entry *rl = &ics->render_state.layers[i];
+	os_mutex_unlock(&ics->server->global_state.lock);
 
-		rl->swapchain_ids[0] = 0;
-		rl->swapchain_ids[1] = 0;
-		rl->data.flip_y = false;
-		/*!
-		 * @todo this is redundant, we're setting both elements of a
-		 * union. Why? Can we just zero the whole render_state?
-		 */
-		rl->data.stereo.l.sub.image_index = 0;
-		rl->data.stereo.r.sub.image_index = 0;
-		rl->data.quad.sub.image_index = 0;
-		rl->data.cube.sub.image_index = 0;
-		rl->data.cylinder.sub.image_index = 0;
-		rl->data.equirect1.sub.image_index = 0;
-		rl->data.equirect2.sub.image_index = 0;
-
-		//! @todo set rects or array index?
-	}
-
-	// Destroy all swapchains now.
-	for (uint32_t j = 0; j < IPC_MAX_CLIENT_SWAPCHAINS; j++) {
-		xrt_swapchain_destroy((struct xrt_swapchain **)&ics->xscs[j]);
-		ics->swapchain_data[j].active = false;
-		IPC_TRACE(ics->server, "Destroyed swapchain %d.", j);
-	}
-
-	os_mutex_unlock(&ics->server->global_state_lock);
+	ipc_server_client_destroy_compositor(ics);
 
 	// Should we stop the server when a client disconnects?
 	if (ics->server->exit_on_disconnect) {
 		ics->server->running = false;
 	}
+
+	ipc_server_deactivate_session(ics);
 }
 
 
 /*
  *
- * Entry point.
+ * 'Exported' functions.
  *
  */
+
+void
+ipc_server_client_destroy_compositor(volatile struct ipc_client_state *ics)
+{
+	// Multiple threads might be looking at these fields.
+	os_mutex_lock(&ics->server->global_state.lock);
+
+	ics->num_swapchains = 0;
+
+	// Destroy all swapchains now.
+	for (uint32_t j = 0; j < IPC_MAX_CLIENT_SWAPCHAINS; j++) {
+		// Drop our reference, does NULL checking. Cast away volatile.
+		xrt_swapchain_reference((struct xrt_swapchain **)&ics->xscs[j], NULL);
+		ics->swapchain_data[j].active = false;
+		IPC_TRACE(ics->server, "Destroyed swapchain %d.", j);
+	}
+
+	os_mutex_unlock(&ics->server->global_state.lock);
+
+	// Cast away volatile.
+	xrt_comp_destroy((struct xrt_compositor **)&ics->xc);
+}
 
 void *
 ipc_server_client_thread(void *_ics)
@@ -188,8 +175,6 @@ ipc_server_client_thread(void *_ics)
 	volatile struct ipc_client_state *ics = _ics;
 
 	client_loop(ics);
-
-	update_server_state(ics->server);
 
 	return NULL;
 }

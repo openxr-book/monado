@@ -1,4 +1,4 @@
-# Copyright 2019-2020, Collabora, Ltd.
+# Copyright 2019-2021, Collabora, Ltd.
 # SPDX-License-Identifier: BSL-1.0
 
 gui_sources = [
@@ -10,8 +10,13 @@ gui_sources = [
 	'gui_scene_calibrate.c',
 	'gui_scene_debug.c',
 	'gui_scene_main_menu.c',
+	'gui_scene_record.c',
 	'gui_scene_remote.c',
 	'gui_scene_video.c',
+	'gui_scene_tracking_overrides.c',
+	'gui_stb.c',
+	'gui_window_record.c',
+	'gui_window_record.h',
 	'../../../external/imgui/imgui/cimgui.cpp',
 	'../../../external/imgui/imgui/cimgui.h',
 	'../../../external/imgui/imgui/cimplot.cpp',
@@ -27,6 +32,7 @@ gui_sources = [
 	'../../../external/imgui/imgui/imgui_widgets.cpp',
 	'../../../external/imgui/imgui/implot.cpp',
 	'../../../external/imgui/imgui/implot.h',
+	'../../../external/imgui/imgui/implot_demo.cpp',
 	'../../../external/imgui/imgui/implot_internal.h',
 	'../../../external/imgui/imgui/implot_items.cpp',
 	'../../../external/imgui/imgui/imstb_rectpack.h',
@@ -38,6 +44,14 @@ gui_sources = [
 
 gui_deps = [aux, xrt_config_have]
 
+if 'vf' in drivers
+	gui_deps += [drv_vf]
+endif
+
+if 'depthai' in drivers
+	gui_deps += [drv_depthai]
+endif
+
 lib_st_gui = static_library(
 	'st_gui',
 	files(gui_sources),
@@ -47,6 +61,7 @@ lib_st_gui = static_library(
 		glad_include,
 		cjson_include,
 		imgui_include,
+		stb_include,
 	],
 	dependencies: gui_deps,
 )

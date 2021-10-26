@@ -1,4 +1,4 @@
-// Copyright 2019, Collabora, Ltd.
+// Copyright 2019-2021, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -33,12 +33,16 @@ struct xrt_tracking_factory;
 struct os_hid_device;
 
 /*!
- * The maximum number of devices that a single "found" function called by the
- * prober can create per-call.
+ * The maximum number of devices that a single
+ * @ref xrt_prober_entry::found or
+ * @ref xrt_auto_prober::lelo_dallas_autoprobe
+ * function called by the prober can create per-call.
  *
  * @ingroup xrt_iface
  */
 #define XRT_MAX_DEVICES_PER_PROBE 16
+
+#define MAX_AUTO_PROBERS 16
 
 /*!
  * Entry for a single device.
@@ -58,6 +62,7 @@ struct xrt_prober_entry
 	             struct xrt_device **out_xdevs);
 
 	const char *name;
+	const char *driver_name;
 };
 
 /*!
@@ -163,7 +168,15 @@ struct xrt_prober
 	 * xrt_prober_probe()
 	 */
 	int (*probe)(struct xrt_prober *xp);
+
+	/*!
+	 * Dump a listing of all devices found on the system to platform
+	 * dependent output (stdout).
+	 *
+	 * @note Code consuming this interface should use xrt_prober_dump()
+	 */
 	int (*dump)(struct xrt_prober *xp);
+
 	/*!
 	 * Iterate through drivers (by ID and auto-probers) checking to see if
 	 * they can handle any connected devices from the last xrt_prober::probe
@@ -191,21 +204,49 @@ struct xrt_prober
 	 * and xrt_prober_select().
 	 */
 	int (*select)(struct xrt_prober *xp, struct xrt_device **xdevs, size_t num_xdevs);
+
 	int (*open_hid_interface)(struct xrt_prober *xp,
 	                          struct xrt_prober_device *xpdev,
 	                          int interface,
 	                          struct os_hid_device **out_hid_dev);
+
+	/*!
+	 * Opens the selected video device and returns a @ref xrt_fs, does not
+	 * start it.
+	 */
 	int (*open_video_device)(struct xrt_prober *xp,
 	                         struct xrt_prober_device *xpdev,
 	                         struct xrt_frame_context *xfctx,
 	                         struct xrt_fs **out_xfs);
+
 	int (*list_video_devices)(struct xrt_prober *xp, xrt_prober_list_video_cb cb, void *ptr);
+
+	int (*get_entries)(struct xrt_prober *xp,
+	                   size_t *out_num_entries,
+	                   struct xrt_prober_entry ***out_entries,
+	                   struct xrt_auto_prober ***out_auto_probers);
+
+	/*!
+	 * Returns a string property on the device of the given type
+	 * @p which_string in @p out_buffer.
+	 *
+	 * @param[in] xp             Prober.
+	 * @param[in] xpdev          Device to get string property from.
+	 * @param[in] which_string   Which string property to query.
+	 * @param[in,out] out_buffer Target buffer.
+	 * @param[in] max_length     Max length of the target buffer.
+	 *
+	 * @return The length of the string, or negative on error.
+	 *
+	 */
 	int (*get_string_descriptor)(struct xrt_prober *xp,
 	                             struct xrt_prober_device *xpdev,
 	                             enum xrt_prober_string which_string,
-	                             unsigned char *buffer,
-	                             int length);
+	                             unsigned char *out_buffer,
+	                             size_t max_length);
+
 	bool (*can_open)(struct xrt_prober *xp, struct xrt_prober_device *xpdev);
+
 	/*!
 	 * Destroy the prober and set the pointer to null.
 	 *
@@ -217,6 +258,8 @@ struct xrt_prober
 };
 
 /*!
+ * @copydoc xrt_prober::probe
+ *
  * Helper function for @ref xrt_prober::probe.
  *
  * @public @memberof xrt_prober
@@ -228,6 +271,8 @@ xrt_prober_probe(struct xrt_prober *xp)
 }
 
 /*!
+ * @copydoc xrt_prober::dump
+ *
  * Helper function for @ref xrt_prober::dump.
  *
  * @public @memberof xrt_prober
@@ -239,6 +284,8 @@ xrt_prober_dump(struct xrt_prober *xp)
 }
 
 /*!
+ * @copydoc xrt_prober::select
+ *
  * Helper function for @ref xrt_prober::select.
  *
  * @public @memberof xrt_prober
@@ -250,6 +297,8 @@ xrt_prober_select(struct xrt_prober *xp, struct xrt_device **xdevs, size_t num_x
 }
 
 /*!
+ * @copydoc xrt_prober::open_hid_interface
+ *
  * Helper function for @ref xrt_prober::open_hid_interface.
  *
  * @public @memberof xrt_prober
@@ -264,6 +313,8 @@ xrt_prober_open_hid_interface(struct xrt_prober *xp,
 }
 
 /*!
+ * @copydoc xrt_prober::get_string_descriptor
+ *
  * Helper function for @ref xrt_prober::get_string_descriptor.
  *
  * @public @memberof xrt_prober
@@ -272,13 +323,15 @@ static inline int
 xrt_prober_get_string_descriptor(struct xrt_prober *xp,
                                  struct xrt_prober_device *xpdev,
                                  enum xrt_prober_string which_string,
-                                 unsigned char *buffer,
-                                 int length)
+                                 unsigned char *out_buffer,
+                                 size_t max_length)
 {
-	return xp->get_string_descriptor(xp, xpdev, which_string, buffer, length);
+	return xp->get_string_descriptor(xp, xpdev, which_string, out_buffer, max_length);
 }
 
 /*!
+ * @copydoc xrt_prober::can_open
+ *
  * Helper function for @ref xrt_prober::can_open.
  *
  * @public @memberof xrt_prober
@@ -291,6 +344,8 @@ xrt_prober_can_open(struct xrt_prober *xp, struct xrt_prober_device *xpdev)
 
 
 /*!
+ * @copydoc xrt_prober::open_video_device
+ *
  * Helper function for @ref xrt_prober::xrt_prober_open_video_device.
  *
  * @public @memberof xrt_prober
@@ -305,6 +360,8 @@ xrt_prober_open_video_device(struct xrt_prober *xp,
 }
 
 /*!
+ * @copydoc xrt_prober::list_video_devices
+ *
  * Helper function for @ref xrt_prober::list_video_devices.
  *
  * @public @memberof xrt_prober
@@ -316,7 +373,26 @@ xrt_prober_list_video_devices(struct xrt_prober *xp, xrt_prober_list_video_cb cb
 }
 
 /*!
- * Helper function for @ref xrt_prober::destroy.
+ * @copydoc xrt_prober::get_entries
+ *
+ * Helper function for @ref xrt_prober::get_entries.
+ *
+ * @public @memberof xrt_prober
+ */
+static inline int
+xrt_prober_get_entries(struct xrt_prober *xp,
+                       size_t *out_num_entries,
+                       struct xrt_prober_entry ***out_entries,
+                       struct xrt_auto_prober ***out_auto_probers)
+{
+	return xp->get_entries(xp, out_num_entries, out_entries, out_auto_probers);
+}
+
+/*!
+ * @copydoc xrt_prober::destroy
+ *
+ * Helper for calling through the function pointer: does a null check and sets
+ * xp_ptr to null if freed.
  *
  * @public @memberof xrt_prober
  */
@@ -329,6 +405,7 @@ xrt_prober_destroy(struct xrt_prober **xp_ptr)
 	}
 
 	xp->destroy(xp_ptr);
+	*xp_ptr = NULL;
 }
 
 /*!
@@ -385,13 +462,19 @@ struct xrt_auto_prober
 	 * devices.
 	 * @param[in] xp Prober: provided for access to the tracking factory,
 	 * among other reasons.
+	 * @param[out] out_xdevs Array of @ref XRT_MAX_DEVICES_PER_PROBE @c NULL
+	 * @ref xrt_device pointers. First elements will be populated with new
+	 * devices.
 	 *
-	 * @return New device implementing the xrt_device interface, or NULL.
+	 * @return The amount of devices written into @p out_xdevs, 0 if none.
+	 *
+	 * @note Leeloo Dallas is a reference to The Fifth Element.
 	 */
-	struct xrt_device *(*lelo_dallas_autoprobe)(struct xrt_auto_prober *xap,
-	                                            cJSON *attached_data,
-	                                            bool no_hmds,
-	                                            struct xrt_prober *xp);
+	int (*lelo_dallas_autoprobe)(struct xrt_auto_prober *xap,
+	                             cJSON *attached_data,
+	                             bool no_hmds,
+	                             struct xrt_prober *xp,
+	                             struct xrt_device **out_xdevs);
 	/*!
 	 * Destroy this auto-prober.
 	 *

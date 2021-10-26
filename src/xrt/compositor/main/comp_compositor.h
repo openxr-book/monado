@@ -139,6 +139,10 @@ enum comp_state
 
 struct comp_shaders
 {
+	VkShaderModule clear_comp;
+	VkShaderModule distortion_comp;
+	VkShaderModule distortion_timewarp_comp;
+
 	VkShaderModule mesh_vert;
 	VkShaderModule mesh_frag;
 
@@ -153,6 +157,17 @@ struct comp_shaders
 };
 
 /*!
+ * Tracking frame state.
+ */
+struct comp_frame
+{
+	int64_t id;
+	uint64_t predicted_display_time_ns;
+	uint64_t desired_present_time_ns;
+	uint64_t present_slop_ns;
+};
+
+/*!
  * Main compositor struct tying everything in the compositor together.
  *
  * @ingroup comp_main
@@ -161,8 +176,6 @@ struct comp_shaders
 struct comp_compositor
 {
 	struct xrt_compositor_native base;
-
-	struct xrt_system_compositor system;
 
 	//! Renderer helper.
 	struct comp_renderer *r;
@@ -188,6 +201,8 @@ struct comp_compositor
 	//! State for generating the correct set of events.
 	enum comp_state state;
 
+	struct os_precise_sleeper sleeper;
+
 	//! Triple buffered layer stacks.
 	struct comp_layer_slot slots[3];
 
@@ -200,9 +215,6 @@ struct comp_compositor
 		int64_t last_begin;
 		int64_t last_end;
 	} app_profiling;
-
-	//! The time our compositor needs to do rendering
-	int64_t frame_overhead_ns;
 
 	struct
 	{
@@ -221,16 +233,11 @@ struct comp_compositor
 		struct u_var_timing *debug_var;
 	} compositor_frame_times;
 
-	/*!
-	 * @brief Estimated rendering time per frame of the application.
-	 *
-	 * Set by the begin_frame/end_frame code.
-	 *
-	 * @todo make this atomic.
-	 */
-	int64_t expected_app_duration_ns;
-	//! The last time we provided in the results of wait_frame
-	int64_t last_next_display_time;
+	struct
+	{
+		struct comp_frame waited;
+		struct comp_frame rendering;
+	} frame;
 
 	struct
 	{
@@ -239,10 +246,13 @@ struct comp_compositor
 	} threading;
 
 
-	struct comp_resources nr;
+	struct
+	{
+		//! Temporarily disable ATW
+		bool atw_off;
+	} debug;
 
-	//! To insure only one compositor is created.
-	bool compositor_created;
+	struct comp_resources nr;
 };
 
 
@@ -322,13 +332,21 @@ void
 comp_swapchain_really_destroy(struct comp_swapchain *sc);
 
 /*!
+ * For importing fences, defined in comp_sync.c .
+ */
+xrt_result_t
+comp_compositor_import_fence(struct xrt_compositor *xc,
+                             xrt_graphics_sync_handle_t handle,
+                             struct xrt_compositor_fence **out_xcf);
+
+/*!
  * Loads all of the shaders that the compositor uses.
  */
 bool
 comp_shaders_load(struct vk_bundle *vk, struct comp_shaders *s);
 
 /*!
- * Loads all of the shaders that the compositor uses.
+ * Unload and cleanup shaders.
  */
 void
 comp_shaders_close(struct vk_bundle *vk, struct comp_shaders *s);

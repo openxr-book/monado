@@ -18,6 +18,7 @@
 #include "util/u_debug.h"
 
 #include "ns_interface.h"
+#include "ns_hmd.h"
 
 
 DEBUG_GET_ONCE_OPTION(ns_config_path, "NS_CONFIG_PATH", NULL)
@@ -48,26 +49,32 @@ ns_prober_destroy(struct xrt_auto_prober *p)
 }
 
 //! @public @memberof ns_prober
-static struct xrt_device *
-ns_prober_autoprobe(struct xrt_auto_prober *xap, cJSON *attached_data, bool no_hmds, struct xrt_prober *xp)
+static int
+ns_prober_autoprobe(struct xrt_auto_prober *xap,
+                    cJSON *attached_data,
+                    bool no_hmds,
+                    struct xrt_prober *xp,
+                    struct xrt_device **out_xdevs)
 {
 	struct ns_prober *nsp = ns_prober(xap);
 
 	if (no_hmds) {
-		return NULL;
+		return 0;
 	}
 
 	if (nsp->config_path == NULL) {
-		return NULL;
+		return 0;
 	}
 
-	return ns_hmd_create(nsp->config_path);
+	out_xdevs[0] = ns_hmd_create(nsp->config_path);
+	return 1;
 }
 
 struct xrt_auto_prober *
 ns_create_auto_prober()
 {
 	struct ns_prober *nsp = U_TYPED_CALLOC(struct ns_prober);
+	nsp->base.name = "northstar";
 	nsp->base.destroy = ns_prober_destroy;
 	nsp->base.lelo_dallas_autoprobe = ns_prober_autoprobe;
 	nsp->config_path = debug_get_option_ns_config_path();

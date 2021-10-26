@@ -32,6 +32,28 @@
 
 
 /*
+ * XR_KHR_loader_init
+ */
+#if defined(XR_KHR_loader_init) && defined(XR_USE_PLATFORM_ANDROID)
+#define OXR_HAVE_KHR_loader_init
+#define OXR_EXTENSION_SUPPORT_KHR_loader_init(_) _(KHR_loader_init, KHR_LOADER_INIT)
+#else
+#define OXR_EXTENSION_SUPPORT_KHR_loader_init(_)
+#endif
+
+
+/*
+ * XR_KHR_loader_init_android
+ */
+#if defined(XR_KHR_loader_init_android) && defined(OXR_HAVE_KHR_loader_init) && defined(XR_USE_PLATFORM_ANDROID)
+#define OXR_HAVE_KHR_loader_init_android
+#define OXR_EXTENSION_SUPPORT_KHR_loader_init_android(_) _(KHR_loader_init_android, KHR_LOADER_INIT_ANDROID)
+#else
+#define OXR_EXTENSION_SUPPORT_KHR_loader_init_android(_)
+#endif
+
+
+/*
  * XR_KHR_convert_timespec_time
  */
 #if defined(XR_KHR_convert_timespec_time) && defined(XR_USE_TIMESPEC)
@@ -179,6 +201,18 @@
 
 
 /*
+ * XR_KHR_swapchain_usage_input_attachment_bit
+ */
+#if defined(XR_KHR_swapchain_usage_input_attachment_bit)
+#define OXR_HAVE_KHR_swapchain_usage_input_attachment_bit
+#define OXR_EXTENSION_SUPPORT_KHR_swapchain_usage_input_attachment_bit(_)                                              \
+	_(KHR_swapchain_usage_input_attachment_bit, KHR_SWAPCHAIN_USAGE_INPUT_ATTACHMENT_BIT)
+#else
+#define OXR_EXTENSION_SUPPORT_KHR_swapchain_usage_input_attachment_bit(_)
+#endif
+
+
+/*
  * XR_EXTX_overlay
  */
 #if defined(XR_EXTX_overlay)
@@ -247,6 +281,8 @@
 // clang-format off
 #define OXR_EXTENSION_SUPPORT_GENERATE(_) \
     OXR_EXTENSION_SUPPORT_KHR_android_create_instance(_) \
+    OXR_EXTENSION_SUPPORT_KHR_loader_init(_) \
+    OXR_EXTENSION_SUPPORT_KHR_loader_init_android(_) \
     OXR_EXTENSION_SUPPORT_KHR_convert_timespec_time(_) \
     OXR_EXTENSION_SUPPORT_KHR_opengl_enable(_) \
     OXR_EXTENSION_SUPPORT_KHR_opengl_es_enable(_) \
@@ -260,6 +296,7 @@
     OXR_EXTENSION_SUPPORT_EXT_debug_utils(_) \
     OXR_EXTENSION_SUPPORT_MND_headless(_) \
     OXR_EXTENSION_SUPPORT_MND_swapchain_usage_input_attachment_bit(_) \
+    OXR_EXTENSION_SUPPORT_KHR_swapchain_usage_input_attachment_bit(_) \
     OXR_EXTENSION_SUPPORT_EXTX_overlay(_) \
     OXR_EXTENSION_SUPPORT_MNDX_egl_enable(_) \
     OXR_EXTENSION_SUPPORT_MNDX_ball_on_a_stick_controller(_) \

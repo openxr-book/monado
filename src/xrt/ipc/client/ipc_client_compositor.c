@@ -13,6 +13,7 @@
 #include "xrt/xrt_defines.h"
 
 #include "util/u_misc.h"
+#include "util/u_trace_marker.h"
 
 #include "os/os_time.h"
 
@@ -64,8 +65,6 @@ struct ipc_client_compositor
 		uint32_t slot_id;
 
 		uint32_t num_layers;
-
-		enum xrt_blend_mode env_blend_mode;
 	} layers;
 
 	//! Has the native compositor been created, only supports one for now.
@@ -117,8 +116,8 @@ compositor_disconnect(struct ipc_connection *ipc_c)
 
 #define IPC_CALL_CHK(call)                                                                                             \
 	xrt_result_t res = (call);                                                                                     \
-	if (res == XRT_ERROR_IPC_FAILURE) {                                                                            \
-		IPC_ERROR(icc->ipc_c, "Call error '%s'!", __func__);                                                   \
+	if (res != XRT_SUCCESS) {                                                                                      \
+		IPC_ERROR(icc->ipc_c, "Call error '%i'!", res);                                                        \
 	}
 
 static xrt_result_t
@@ -208,12 +207,14 @@ swapchain_server_create(struct ipc_client_compositor *icc,
 	uint32_t handle;
 	uint32_t num_images;
 	uint64_t size;
+	bool use_dedicated_allocation;
 
 	r = ipc_call_swapchain_create(icc->ipc_c,                 // connection
 	                              info,                       // in
 	                              &handle,                    // out
 	                              &num_images,                // out
 	                              &size,                      // out
+	                              &use_dedicated_allocation,  // out
 	                              remote_handles,             // handles
 	                              IPC_MAX_SWAPCHAIN_HANDLES); // handles
 	if (r != XRT_SUCCESS) {
@@ -226,12 +227,14 @@ swapchain_server_create(struct ipc_client_compositor *icc,
 	ics->base.base.acquire_image = ipc_compositor_swapchain_acquire_image;
 	ics->base.base.release_image = ipc_compositor_swapchain_release_image;
 	ics->base.base.destroy = ipc_compositor_swapchain_destroy;
+	ics->base.base.reference.count = 1;
 	ics->icc = icc;
 	ics->id = handle;
 
 	for (uint32_t i = 0; i < num_images; i++) {
 		ics->base.images[i].handle = remote_handles[i];
 		ics->base.images[i].size = size;
+		ics->base.images[i].use_dedicated_allocation = use_dedicated_allocation;
 	}
 
 	*out_xsc = &ics->base.base;
@@ -273,6 +276,7 @@ swapchain_server_import(struct ipc_client_compositor *icc,
 	ics->base.base.acquire_image = ipc_compositor_swapchain_acquire_image;
 	ics->base.base.release_image = ipc_compositor_swapchain_release_image;
 	ics->base.base.destroy = ipc_compositor_swapchain_destroy;
+	ics->base.base.reference.count = 1;
 	ics->icc = icc;
 	ics->id = id;
 
@@ -373,6 +377,8 @@ ipc_compositor_begin_session(struct xrt_compositor *xc, enum xrt_view_type view_
 static xrt_result_t
 ipc_compositor_end_session(struct xrt_compositor *xc)
 {
+	IPC_TRACE_MARKER();
+
 	struct ipc_client_compositor *icc = ipc_client_compositor(xc);
 
 	IPC_TRACE(icc->ipc_c, "Compositor end session.");
@@ -388,17 +394,16 @@ ipc_compositor_wait_frame(struct xrt_compositor *xc,
                           uint64_t *out_predicted_display_time,
                           uint64_t *out_predicted_display_period)
 {
+	IPC_TRACE_MARKER();
 	struct ipc_client_compositor *icc = ipc_client_compositor(xc);
 
 	uint64_t wake_up_time_ns = 0;
-	uint64_t min_display_period_ns = 0;
 
-	IPC_CALL_CHK(ipc_call_compositor_wait_frame(icc->ipc_c,                   // Connection
-	                                            out_frame_id,                 // Frame id
-	                                            out_predicted_display_time,   // Display time
-	                                            &wake_up_time_ns,             // When we should wake up
-	                                            out_predicted_display_period, // Current period
-	                                            &min_display_period_ns));     // Minimum display period
+	IPC_CALL_CHK(ipc_call_compositor_predict_frame(icc->ipc_c,                     // Connection
+	                                               out_frame_id,                   // Frame id
+	                                               &wake_up_time_ns,               // When we should wake up
+	                                               out_predicted_display_time,     // Display time
+	                                               out_predicted_display_period)); // Current period
 
 	uint64_t now_ns = os_monotonic_get_ns();
 
@@ -452,11 +457,18 @@ ipc_compositor_begin_frame(struct xrt_compositor *xc, int64_t frame_id)
 }
 
 static xrt_result_t
-ipc_compositor_layer_begin(struct xrt_compositor *xc, int64_t frame_id, enum xrt_blend_mode env_blend_mode)
+ipc_compositor_layer_begin(struct xrt_compositor *xc,
+                           int64_t frame_id,
+                           uint64_t display_time_ns,
+                           enum xrt_blend_mode env_blend_mode)
 {
 	struct ipc_client_compositor *icc = ipc_client_compositor(xc);
 
-	icc->layers.env_blend_mode = env_blend_mode;
+	struct ipc_shared_memory *ism = icc->ipc_c->ism;
+	struct ipc_layer_slot *slot = &ism->slots[icc->layers.slot_id];
+
+	slot->display_time_ns = display_time_ns;
+	slot->env_blend_mode = env_blend_mode;
 
 	return XRT_SUCCESS;
 }
@@ -653,7 +665,37 @@ ipc_compositor_destroy(struct xrt_compositor *xc)
 
 	assert(icc->compositor_created);
 
+	IPC_CALL_CHK(ipc_call_session_destroy(icc->ipc_c));
+
 	icc->compositor_created = false;
+}
+
+static void
+ipc_compositor_init(struct ipc_client_compositor *icc, struct xrt_compositor_native **out_xcn)
+{
+	icc->base.base.create_swapchain = ipc_compositor_swapchain_create;
+	icc->base.base.import_swapchain = ipc_compositor_swapchain_import;
+	icc->base.base.begin_session = ipc_compositor_begin_session;
+	icc->base.base.end_session = ipc_compositor_end_session;
+	icc->base.base.wait_frame = ipc_compositor_wait_frame;
+	icc->base.base.begin_frame = ipc_compositor_begin_frame;
+	icc->base.base.discard_frame = ipc_compositor_discard_frame;
+	icc->base.base.layer_begin = ipc_compositor_layer_begin;
+	icc->base.base.layer_stereo_projection = ipc_compositor_layer_stereo_projection;
+	icc->base.base.layer_stereo_projection_depth = ipc_compositor_layer_stereo_projection_depth;
+	icc->base.base.layer_quad = ipc_compositor_layer_quad;
+	icc->base.base.layer_cube = ipc_compositor_layer_cube;
+	icc->base.base.layer_cylinder = ipc_compositor_layer_cylinder;
+	icc->base.base.layer_equirect1 = ipc_compositor_layer_equirect1;
+	icc->base.base.layer_equirect2 = ipc_compositor_layer_equirect2;
+	icc->base.base.layer_commit = ipc_compositor_layer_commit;
+	icc->base.base.destroy = ipc_compositor_destroy;
+	icc->base.base.poll_events = ipc_compositor_poll_events;
+
+	// Fetch info from the compositor, among it the format format list.
+	get_info(&(icc->base.base), &icc->base.base.info);
+
+	*out_xcn = &icc->base;
 }
 
 
@@ -782,10 +824,17 @@ ipc_syscomp_create_native_compositor(struct xrt_system_compositor *xsc,
 		return XRT_ERROR_MULTI_SESSION_NOT_IMPLEMENTED;
 	}
 
-	icc->compositor_created = true;
-	*out_xcn = &icc->base;
-
+	// Needs to be done before init.
 	IPC_CALL_CHK(ipc_call_session_create(icc->ipc_c, xsi));
+
+	if (res != XRT_SUCCESS) {
+		return res;
+	}
+
+	// Needs to be done after session create call.
+	ipc_compositor_init(icc, out_xcn);
+
+	icc->compositor_created = true;
 
 	return XRT_SUCCESS;
 }
@@ -819,24 +868,6 @@ ipc_client_create_system_compositor(struct ipc_connection *ipc_c,
 {
 	struct ipc_client_compositor *c = U_TYPED_CALLOC(struct ipc_client_compositor);
 
-	c->base.base.create_swapchain = ipc_compositor_swapchain_create;
-	c->base.base.import_swapchain = ipc_compositor_swapchain_import;
-	c->base.base.begin_session = ipc_compositor_begin_session;
-	c->base.base.end_session = ipc_compositor_end_session;
-	c->base.base.wait_frame = ipc_compositor_wait_frame;
-	c->base.base.begin_frame = ipc_compositor_begin_frame;
-	c->base.base.discard_frame = ipc_compositor_discard_frame;
-	c->base.base.layer_begin = ipc_compositor_layer_begin;
-	c->base.base.layer_stereo_projection = ipc_compositor_layer_stereo_projection;
-	c->base.base.layer_stereo_projection_depth = ipc_compositor_layer_stereo_projection_depth;
-	c->base.base.layer_quad = ipc_compositor_layer_quad;
-	c->base.base.layer_cube = ipc_compositor_layer_cube;
-	c->base.base.layer_cylinder = ipc_compositor_layer_cylinder;
-	c->base.base.layer_equirect1 = ipc_compositor_layer_equirect1;
-	c->base.base.layer_equirect2 = ipc_compositor_layer_equirect2;
-	c->base.base.layer_commit = ipc_compositor_layer_commit;
-	c->base.base.destroy = ipc_compositor_destroy;
-	c->base.base.poll_events = ipc_compositor_poll_events;
 	c->system.create_native_compositor = ipc_syscomp_create_native_compositor;
 	c->system.destroy = ipc_syscomp_destroy;
 	c->ipc_c = ipc_c;
@@ -852,9 +883,6 @@ ipc_client_create_system_compositor(struct ipc_connection *ipc_c,
 		c->xina = &c->loopback_xina;
 	}
 #endif
-
-	// Fetch info from the compositor, among it the format format list.
-	get_info(&(c->base.base), &c->base.base.info);
 
 	// Fetch info from the system compositor.
 	get_system_info(c, &c->system.info);

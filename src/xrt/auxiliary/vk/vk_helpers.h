@@ -49,6 +49,10 @@ struct vk_bundle
 	struct os_mutex queue_mutex;
 
 	bool has_GOOGLE_display_timing;
+	bool has_EXT_global_priority;
+	bool has_VK_EXT_robustness2;
+
+	bool is_tegra;
 
 	VkDebugReportCallbackEXT debug_report_cb;
 
@@ -71,6 +75,9 @@ struct vk_bundle
 	PFN_vkEnumeratePhysicalDevices vkEnumeratePhysicalDevices;
 	PFN_vkDestroySurfaceKHR vkDestroySurfaceKHR;
 	PFN_vkEnumerateDeviceExtensionProperties vkEnumerateDeviceExtensionProperties;
+#ifdef VK_USE_PLATFORM_DISPLAY_KHR
+	PFN_vkCreateDisplayPlaneSurfaceKHR vkCreateDisplayPlaneSurfaceKHR;
+#endif
 
 #ifdef VK_USE_PLATFORM_XCB_KHR
 	PFN_vkCreateXcbSurfaceKHR vkCreateXcbSurfaceKHR;
@@ -78,19 +85,14 @@ struct vk_bundle
 
 #ifdef VK_USE_PLATFORM_WAYLAND_KHR
 	PFN_vkCreateWaylandSurfaceKHR vkCreateWaylandSurfaceKHR;
+#ifdef VK_EXT_acquire_drm_display
+	PFN_vkAcquireDrmDisplayEXT vkAcquireDrmDisplayEXT;
+	PFN_vkGetDrmDisplayEXT vkGetDrmDisplayEXT;
+#endif
 #endif
 
 #ifdef VK_USE_PLATFORM_XLIB_XRANDR_EXT
-	PFN_vkCreateDisplayPlaneSurfaceKHR vkCreateDisplayPlaneSurfaceKHR;
-	PFN_vkGetDisplayPlaneCapabilitiesKHR vkGetDisplayPlaneCapabilitiesKHR;
-
-	// This doesn't strictly require VK_USE_PLATFORM_XLIB_XRANDR_EXT,
-	// but it's only used in the NVIDIA X direct mode path that does require it.
-	PFN_vkGetPhysicalDeviceDisplayPropertiesKHR vkGetPhysicalDeviceDisplayPropertiesKHR;
-	PFN_vkGetPhysicalDeviceDisplayPlanePropertiesKHR vkGetPhysicalDeviceDisplayPlanePropertiesKHR;
-	PFN_vkGetDisplayModePropertiesKHR vkGetDisplayModePropertiesKHR;
 	PFN_vkAcquireXlibDisplayEXT vkAcquireXlibDisplayEXT;
-	PFN_vkReleaseDisplayEXT vkReleaseDisplayEXT;
 	PFN_vkGetRandROutputDisplayEXT vkGetRandROutputDisplayEXT;
 #endif
 
@@ -107,6 +109,7 @@ struct vk_bundle
 	PFN_vkGetPhysicalDeviceQueueFamilyProperties vkGetPhysicalDeviceQueueFamilyProperties;
 	PFN_vkGetPhysicalDeviceProperties vkGetPhysicalDeviceProperties;
 	PFN_vkGetPhysicalDeviceProperties2 vkGetPhysicalDeviceProperties2;
+	PFN_vkGetPhysicalDeviceFeatures2 vkGetPhysicalDeviceFeatures2;
 
 	PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR vkGetPhysicalDeviceSurfaceCapabilitiesKHR;
 	PFN_vkGetPhysicalDeviceSurfaceFormatsKHR vkGetPhysicalDeviceSurfaceFormatsKHR;
@@ -115,6 +118,15 @@ struct vk_bundle
 
 	PFN_vkGetPhysicalDeviceFormatProperties vkGetPhysicalDeviceFormatProperties;
 
+	PFN_vkGetPhysicalDeviceImageFormatProperties2 vkGetPhysicalDeviceImageFormatProperties2;
+
+#ifdef VK_USE_PLATFORM_DISPLAY_KHR
+	PFN_vkGetDisplayModePropertiesKHR vkGetDisplayModePropertiesKHR;
+	PFN_vkGetPhysicalDeviceDisplayPropertiesKHR vkGetPhysicalDeviceDisplayPropertiesKHR;
+	PFN_vkGetPhysicalDeviceDisplayPlanePropertiesKHR vkGetPhysicalDeviceDisplayPlanePropertiesKHR;
+	PFN_vkGetDisplayPlaneCapabilitiesKHR vkGetDisplayPlaneCapabilitiesKHR;
+	PFN_vkReleaseDisplayEXT vkReleaseDisplayEXT;
+#endif
 
 	// Device functions.
 	PFN_vkGetDeviceProcAddr vkGetDeviceProcAddr;
@@ -144,6 +156,7 @@ struct vk_bundle
 
 	PFN_vkCreateImage vkCreateImage;
 	PFN_vkGetImageMemoryRequirements vkGetImageMemoryRequirements;
+	PFN_vkGetImageMemoryRequirements2 vkGetImageMemoryRequirements2;
 	PFN_vkBindImageMemory vkBindImageMemory;
 	PFN_vkDestroyImage vkDestroyImage;
 	PFN_vkCreateImageView vkCreateImageView;
@@ -171,6 +184,9 @@ struct vk_bundle
 	PFN_vkCmdBindIndexBuffer vkCmdBindIndexBuffer;
 	PFN_vkCmdDraw vkCmdDraw;
 	PFN_vkCmdDrawIndexed vkCmdDrawIndexed;
+	PFN_vkCmdDispatch vkCmdDispatch;
+	PFN_vkCmdCopyBufferToImage vkCmdCopyBufferToImage;
+	PFN_vkCmdCopyImageToBuffer vkCmdCopyImageToBuffer;
 	PFN_vkEndCommandBuffer vkEndCommandBuffer;
 	PFN_vkFreeCommandBuffers vkFreeCommandBuffers;
 
@@ -180,10 +196,12 @@ struct vk_bundle
 	PFN_vkDestroyFramebuffer vkDestroyFramebuffer;
 	PFN_vkCreatePipelineCache vkCreatePipelineCache;
 	PFN_vkDestroyPipelineCache vkDestroyPipelineCache;
+	PFN_vkResetDescriptorPool vkResetDescriptorPool;
 	PFN_vkCreateDescriptorPool vkCreateDescriptorPool;
 	PFN_vkDestroyDescriptorPool vkDestroyDescriptorPool;
 	PFN_vkAllocateDescriptorSets vkAllocateDescriptorSets;
 	PFN_vkFreeDescriptorSets vkFreeDescriptorSets;
+	PFN_vkCreateComputePipelines vkCreateComputePipelines;
 	PFN_vkCreateGraphicsPipelines vkCreateGraphicsPipelines;
 	PFN_vkDestroyPipeline vkDestroyPipeline;
 	PFN_vkCreatePipelineLayout vkCreatePipelineLayout;
@@ -201,6 +219,7 @@ struct vk_bundle
 
 	PFN_vkCreateFence vkCreateFence;
 	PFN_vkWaitForFences vkWaitForFences;
+	PFN_vkGetFenceStatus vkGetFenceStatus;
 	PFN_vkDestroyFence vkDestroyFence;
 	PFN_vkResetFences vkResetFences;
 
@@ -212,10 +231,16 @@ struct vk_bundle
 
 #ifdef VK_USE_PLATFORM_WIN32_KHR
 	PFN_vkImportSemaphoreWin32HandleKHR vkImportSemaphoreWin32HandleKHR;
+	PFN_vkImportFenceWin32HandleKHR vkImportFenceWin32HandleKHR;
 #else
 	PFN_vkImportSemaphoreFdKHR vkImportSemaphoreFdKHR;
 	PFN_vkGetSemaphoreFdKHR vkGetSemaphoreFdKHR;
+
+	PFN_vkImportFenceFdKHR vkImportFenceFdKHR;
+	PFN_vkGetFenceFdKHR vkGetFenceFdKHR;
 #endif
+
+	PFN_vkGetPastPresentationTimingGOOGLE vkGetPastPresentationTimingGOOGLE;
 	// clang-format on
 };
 
@@ -262,18 +287,59 @@ vk_color_space_string(VkColorSpaceKHR code);
 #define VK_WARN(d, ...) U_LOG_IFL_W(d->ll, __VA_ARGS__)
 #define VK_ERROR(d, ...) U_LOG_IFL_E(d->ll, __VA_ARGS__)
 
+/*!
+ * @brief Check a Vulkan VkResult, writing an error to the log and returning true if not VK_SUCCESS
+ *
+ * @param fun a string literal with the name of the Vulkan function, for logging purposes.
+ * @param res a VkResult from that function.
+ * @param file a string literal with the source code filename, such as from __FILE__
+ * @param line a source code line number, such as from __LINE__
+ *
+ * @see vk_check_error, vk_check_error_with_free which wrap this for easier usage.
+ *
+ * @ingroup aux_vk
+ */
 bool
 vk_has_error(VkResult res, const char *fun, const char *file, int line);
 
+/*!
+ * @def vk_check_error
+ * @brief Perform checking of a Vulkan result, returning in case it is not VK_SUCCESS.
+ *
+ * @param fun A string literal with the name of the Vulkan function, for logging purposes.
+ * @param res a VkResult from that function.
+ * @param ret value to return, if any, upon error
+ *
+ * @see vk_has_error which is wrapped by this macro
+ *
+ * @ingroup aux_vk
+ */
 #define vk_check_error(fun, res, ret)                                                                                  \
-	if (vk_has_error(res, fun, __FILE__, __LINE__))                                                                \
-	return ret
+	do {                                                                                                           \
+		if (vk_has_error(res, fun, __FILE__, __LINE__))                                                        \
+			return ret;                                                                                    \
+	} while (0)
 
+/*!
+ * @def vk_check_error_with_free
+ * @brief Perform checking of a Vulkan result, freeing an allocation and returning in case it is not VK_SUCCESS.
+ *
+ * @param fun A string literal with the name of the Vulkan function, for logging purposes.
+ * @param res a VkResult from that function.
+ * @param ret value to return, if any, upon error
+ * @param to_free expression to pass to `free()` upon error
+ *
+ * @see vk_has_error which is wrapped by this macro
+ *
+ * @ingroup aux_vk
+ */
 #define vk_check_error_with_free(fun, res, ret, to_free)                                                               \
-	if (vk_has_error(res, fun, __FILE__, __LINE__)) {                                                              \
-		free(to_free);                                                                                         \
-		return ret;                                                                                            \
-	}
+	do {                                                                                                           \
+		if (vk_has_error(res, fun, __FILE__, __LINE__)) {                                                      \
+			free(to_free);                                                                                 \
+			return ret;                                                                                    \
+		}                                                                                                      \
+	} while (0)
 
 /*!
  * @ingroup aux_vk
@@ -288,10 +354,38 @@ VkResult
 vk_get_instance_functions(struct vk_bundle *vk);
 
 /*!
+ * @brief Initialize mutexes in the @ref vk_bundle.
+ *
+ * Not required for all uses, but a precondition for some.
+ *
+ * @ingroup aux_vk
+ */
+VkResult
+vk_init_mutex(struct vk_bundle *vk);
+
+/*!
+ * @brief De-initialize mutexes in the @ref vk_bundle.
+ * @ingroup aux_vk
+ */
+VkResult
+vk_deinit_mutex(struct vk_bundle *vk);
+
+/*!
  * @ingroup aux_vk
  */
 VkResult
 vk_init_cmd_pool(struct vk_bundle *vk);
+
+/*!
+ * Used to enable device features as a argument @ref vk_create_device.
+ *
+ * @ingroup aux_vk
+ */
+struct vk_device_features
+{
+	bool shader_storage_image_write_without_format;
+	bool null_descriptor;
+};
 
 /*!
  * @ingroup aux_vk
@@ -299,10 +393,13 @@ vk_init_cmd_pool(struct vk_bundle *vk);
 VkResult
 vk_create_device(struct vk_bundle *vk,
                  int forced_index,
+                 bool only_compute,
+                 VkQueueGlobalPriorityEXT global_priorty,
                  const char *const *required_device_extensions,
                  size_t num_required_device_extensions,
                  const char *const *optional_device_extensions,
-                 size_t num_optional_device_extension);
+                 size_t num_optional_device_extension,
+                 const struct vk_device_features *optional_device_features);
 
 /*!
  * Initialize a bundle with objects given to us by client code,
@@ -366,6 +463,24 @@ vk_alloc_and_bind_image_memory(struct vk_bundle *vk,
                                VkDeviceSize *out_size);
 
 /*!
+ *
+ * @brief Creates a Vulkan device memory and image from a native graphics buffer handle.
+ *
+ * In case of error, ownership is never transferred and the caller should close the handle themselves.
+ *
+ * In case of success, the underlying Vulkan functionality's ownership semantics apply: ownership of the @p image_native
+ * handle may have transferred, a reference may have been added, or the Vulkan objects may rely on the caller to keep
+ * the native handle alive until the Vulkan objects are destroyed. Which option applies depends on the particular native
+ * handle type used.
+ *
+ * See the corresponding specification texts:
+ *
+ * - Windows:
+ *   https://www.khronos.org/registry/vulkan/specs/1.2-extensions/html/vkspec.html#VkImportMemoryWin32HandleInfoKHR
+ * - Linux: https://www.khronos.org/registry/vulkan/specs/1.2-extensions/html/vkspec.html#VkImportMemoryFdInfoKHR
+ * - Android:
+ *   https://www.khronos.org/registry/vulkan/specs/1.2-extensions/html/vkspec.html#VkImportAndroidHardwareBufferInfoANDROID
+ *
  * @ingroup aux_vk
  */
 VkResult
@@ -376,6 +491,33 @@ vk_create_image_from_native(struct vk_bundle *vk,
                             VkDeviceMemory *out_mem);
 
 /*!
+ * @brief Creates a Vulkan fence from a native graphics sync handle.
+ *
+ * In case of error, ownership is never transferred and the caller should close the handle themselves.
+ *
+ * In case of success, the underlying Vulkan functionality's ownership semantics apply: ownership of the @p native
+ * handle may have transferred, a reference may have been added, or the Vulkan object may rely on the caller to keep the
+ * native handle alive until the Vulkan object is destroyed. Which option applies depends on the particular native
+ * handle type used.
+ *
+ * See the corresponding Vulkan specification text:
+ * https://www.khronos.org/registry/vulkan/specs/1.2-extensions/html/vkspec.html#synchronization-fences-importing
+ *
+ * @ingroup aux_vk
+ */
+VkResult
+vk_create_fence_sync_from_native(struct vk_bundle *vk, xrt_graphics_sync_handle_t native, VkFence *out_fence);
+
+/*!
+ * @brief Creates a Vulkan semaphore from a native graphics sync handle.
+ *
+ * In case of error, ownership is never transferred and the caller should close the handle themselves.
+ *
+ * In case of success, the underlying Vulkan functionality's ownership semantics apply: ownership of the @p native
+ * handle may have transferred, a reference may have been added, or the Vulkan object may rely on the caller to keep the
+ * native handle alive until the Vulkan object is destroyed. Which option applies depends on the particular native
+ * handle type used.
+ *
  * @ingroup aux_vk
  */
 VkResult
@@ -420,12 +562,14 @@ vk_create_view_swizzle(struct vk_bundle *vk,
                        VkImageView *out_view);
 
 /*!
+ * @pre Requires successful call to vk_init_mutex
  * @ingroup aux_vk
  */
 VkResult
 vk_init_cmd_buffer(struct vk_bundle *vk, VkCommandBuffer *out_cmd_buffer);
 
 /*!
+ * @pre Requires successful call to vk_init_mutex
  * @ingroup aux_vk
  */
 VkResult
@@ -439,6 +583,7 @@ vk_set_image_layout(struct vk_bundle *vk,
                     VkImageSubresourceRange subresource_range);
 
 /*!
+ * @pre Requires successful call to vk_init_mutex
  * @ingroup aux_vk
  */
 VkResult
@@ -487,6 +632,10 @@ vk_buffer_destroy(struct vk_buffer *self, struct vk_bundle *vk);
 bool
 vk_update_buffer(struct vk_bundle *vk, float *buffer, size_t buffer_size, VkDeviceMemory memory);
 
+/*!
+ * @pre Requires successful call to vk_init_mutex
+ * @ingroup aux_vk
+ */
 VkResult
 vk_locked_submit(struct vk_bundle *vk, VkQueue queue, uint32_t count, const VkSubmitInfo *infos, VkFence fence);
 

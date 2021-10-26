@@ -21,8 +21,10 @@
 #include "util/u_var.h"
 #include "util/u_logging.h"
 
+#include "math/m_mathinclude.h"
 #include "math/m_api.h"
 #include "math/m_permutation.h"
+#include "math/m_imu_3dof.h"
 
 #include "os/os_threading.h"
 
@@ -106,6 +108,11 @@ DEBUG_GET_ONCE_LOG_OPTION(psvr_log, "PSVR_TRACKING_LOG", U_LOGGING_WARN)
 
 //#define PSVR_DUMP_FOR_OFFLINE_ANALYSIS
 //#define PSVR_DUMP_IMU_FOR_OFFLINE_ANALYSIS
+
+using namespace xrt::auxiliary::tracking;
+
+//! Namespace for PSVR tracking implementation
+namespace xrt::auxiliary::tracking::psvr {
 
 typedef enum blob_type
 {
@@ -229,7 +236,7 @@ public:
 	struct
 	{
 		struct xrt_vec3 pos = {};
-		struct xrt_quat rot = {};
+		struct m_imu_3dof imu_3dof;
 	} fusion;
 
 	struct
@@ -1280,7 +1287,7 @@ sample_line(cv::Mat &src, cv::Point2i start, cv::Point2i end, int *inside_length
 
 	while (1) {
 		// sample our pixel and see if it is in the interior
-		if (curr_x > 0 && curr_y > 0) {
+		if (curr_x > 0 && curr_y > 0 && curr_x < src.cols && curr_y < src.rows) {
 			// cv is row, column
 			uint8_t *val = src.ptr(curr_y, curr_x);
 
@@ -1676,7 +1683,9 @@ process(TrackerPSVR &t, struct xrt_frame *xf)
 	// leds.
 	if (t.merged_points.size() >= PSVR_OPTICAL_SOLVE_THRESH) {
 		Eigen::Quaternionf correction =
-		    rot * Eigen::Quaternionf(t.fusion.rot.w, t.fusion.rot.x, t.fusion.rot.y, t.fusion.rot.z).inverse();
+		    rot * Eigen::Quaternionf(t.fusion.imu_3dof.rot.w, t.fusion.imu_3dof.rot.x, t.fusion.imu_3dof.rot.y,
+		                             t.fusion.imu_3dof.rot.z)
+		              .inverse();
 
 		float correction_magnitude = t.target_optical_rotation_correction.angularDistance(correction);
 
@@ -1855,10 +1864,14 @@ get_pose(TrackerPSVR &t, timepoint_ns when_ns, struct xrt_space_relation *out_re
 
 	//! @todo assuming that orientation is actually
 	//! currently tracked.
-	out_relation->relation_flags = (enum xrt_space_relation_flags)(
-	    XRT_SPACE_RELATION_POSITION_VALID_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT |
-	    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
+	out_relation->relation_flags = (enum xrt_space_relation_flags)(XRT_SPACE_RELATION_POSITION_VALID_BIT |
+	                                                               XRT_SPACE_RELATION_POSITION_TRACKED_BIT |
+	                                                               XRT_SPACE_RELATION_ORIENTATION_VALID_BIT);
 
+	if (t.done_correction) {
+		out_relation->relation_flags = (enum xrt_space_relation_flags)(
+		    out_relation->relation_flags | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
+	}
 	os_thread_helper_unlock(&t.oth);
 }
 
@@ -1873,18 +1886,16 @@ imu_data(TrackerPSVR &t, timepoint_ns timestamp_ns, struct xrt_tracking_sample *
 		return;
 	}
 	if (t.last_imu != 0) {
-		time_duration_ns delta_ns = timestamp_ns - t.last_imu;
-		float dt = time_ns_to_s(delta_ns);
-		// Super simple fusion.
-		math_quat_integrate_velocity(&t.fusion.rot, &sample->gyro_rad_secs, dt, &t.fusion.rot);
+		// Update 3DOF fusion
+		m_imu_3dof_update(&t.fusion.imu_3dof, timestamp_ns, &sample->accel_m_s2, &sample->gyro_rad_secs);
 	}
 
 	// apply our optical correction to imu rotation
 	// data
 
 	Eigen::Quaternionf corrected_rot_q =
-	    t.optical_rotation_correction *
-	    Eigen::Quaternionf(t.fusion.rot.w, t.fusion.rot.x, t.fusion.rot.y, t.fusion.rot.z);
+	    t.optical_rotation_correction * Eigen::Quaternionf(t.fusion.imu_3dof.rot.w, t.fusion.imu_3dof.rot.x,
+	                                                       t.fusion.imu_3dof.rot.y, t.fusion.imu_3dof.rot.z);
 
 	Eigen::Matrix4f corrected_rot = Eigen::Matrix4f::Identity();
 	corrected_rot.block(0, 0, 3, 3) = corrected_rot_q.toRotationMatrix();
@@ -1939,6 +1950,9 @@ break_apart(TrackerPSVR &t)
 	os_thread_helper_stop(&t.oth);
 }
 
+} // namespace xrt::auxiliary::tracking::psvr
+
+using xrt::auxiliary::tracking::psvr::TrackerPSVR;
 
 /*
  *
@@ -1989,6 +2003,8 @@ t_psvr_node_destroy(struct xrt_frame_node *node)
 
 	os_thread_helper_destroy(&t_ptr->oth);
 
+	m_imu_3dof_close(&t_ptr->fusion.imu_3dof);
+
 	delete t_ptr;
 }
 
@@ -2033,6 +2049,8 @@ t_psvr_create(struct xrt_frame_context *xfctx,
 
 	PSVR_INFO("%s", __func__);
 	int ret;
+
+	using xrt::auxiliary::tracking::psvr::init_filter;
 
 	for (uint32_t i = 0; i < PSVR_NUM_LEDS; i++) {
 		init_filter(t.track_filters[i], PSVR_BLOB_PROCESS_NOISE, PSVR_BLOB_MEASUREMENT_NOISE, 1.0f);
@@ -2095,7 +2113,6 @@ t_psvr_create(struct xrt_frame_context *xfctx,
 	t.sink.push_frame = t_psvr_sink_push_frame;
 	t.node.break_apart = t_psvr_node_break_apart;
 	t.node.destroy = t_psvr_node_destroy;
-	t.fusion.rot.w = 1.0f;
 
 	ret = os_thread_helper_init(&t.oth);
 	if (ret != 0) {
@@ -2107,17 +2124,19 @@ t_psvr_create(struct xrt_frame_context *xfctx,
 	t.fusion.pos.y = 0.0f;
 	t.fusion.pos.z = 0.0f;
 
-	t.fusion.rot.x = 0.0f;
-	t.fusion.rot.y = 0.0f;
-	t.fusion.rot.z = 0.0f;
-	t.fusion.rot.w = 1.0f;
+	m_imu_3dof_init(&t.fusion.imu_3dof, M_IMU_3DOF_USE_GRAVITY_DUR_20MS);
+
+	t.fusion.imu_3dof.rot.x = 0.0f;
+	t.fusion.imu_3dof.rot.y = 0.0f;
+	t.fusion.imu_3dof.rot.z = 0.0f;
+	t.fusion.imu_3dof.rot.w = 1.0f;
 
 	xrt_frame_context_add(xfctx, &t.node);
 
 	// Everything is safe, now setup the variable tracking.
 	u_var_add_root(&t, "PSVR Tracker", true);
 	u_var_add_log_level(&t, &t.ll, "Log level");
-	u_var_add_sink(&t, &t.debug.sink, "Debug");
+	u_var_add_sink_debug(&t, &t.debug.usd, "Debug");
 
 	*out_sink = &t.sink;
 	*out_xtvr = &t.base;

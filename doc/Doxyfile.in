@@ -1,4 +1,4 @@
-# Copyright 2018-2020, Collabora, Ltd. and the Monado contributors
+# Copyright 2018-2021, Collabora, Ltd. and the Monado contributors
 # SPDX-License-Identifier: BSL-1.0
 
 QUIET                  = YES
@@ -17,6 +17,8 @@ RECURSIVE              = YES
 EXCLUDE                = @SRCDIR@/src/external \
                          @SRCDIR@/doc/changes \
                          @BUILDDIR@
+EXCLUDE_PATTERNS       = */build/*
+
 STRIP_FROM_PATH        = @SRCDIR@/src/xrt \
                          @SRCDIR@/src/xrt/include \
                          @SRCDIR@/doc
@@ -63,6 +65,7 @@ ALWAYS_DETAILED_SEC    = YES
 WARN_IF_UNDOCUMENTED   = @DOXYGEN_WARN_UNDOCUMENTED@
 EXTRACT_ALL            = @DOXYGEN_EXTRACT_ALL@
 HIDE_UNDOC_RELATIONS   = NO
+EXTRACT_STATIC         = @DOXYGEN_EXTRACT_ALL@
 
 MACRO_EXPANSION        = YES
 

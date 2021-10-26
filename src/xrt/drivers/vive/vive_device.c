@@ -1,5 +1,5 @@
 // Copyright 2016-2019, Philipp Zabel
-// Copyright 2019, Collabora, Ltd.
+// Copyright 2019-2021, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -17,8 +17,10 @@
 #include "util/u_debug.h"
 #include "util/u_var.h"
 #include "util/u_time.h"
+#include "util/u_trace_marker.h"
 
 #include "math/m_api.h"
+#include "math/m_predict.h"
 
 #include "os/os_hid.h"
 #include "os/os_time.h"
@@ -26,7 +28,6 @@
 #include "vive.h"
 #include "vive_device.h"
 #include "vive_protocol.h"
-#include "vive_config.h"
 
 
 #define VIVE_CLOCK_FREQ 48e6 // 48 MHz
@@ -45,6 +46,8 @@ vive_device(struct xrt_device *xdev)
 static void
 vive_device_destroy(struct xrt_device *xdev)
 {
+	XRT_TRACE_MARKER();
+
 	struct vive_device *d = vive_device(xdev);
 	if (d->mainboard_dev)
 		vive_mainboard_power_off(d);
@@ -53,6 +56,8 @@ vive_device_destroy(struct xrt_device *xdev)
 	os_thread_helper_destroy(&d->sensors_thread);
 	os_thread_helper_destroy(&d->watchman_thread);
 	os_thread_helper_destroy(&d->mainboard_thread);
+
+	// Now that the thread is not running we can destroy the lock.
 
 	m_imu_3dof_close(&d->fusion);
 
@@ -71,21 +76,21 @@ vive_device_destroy(struct xrt_device *xdev)
 		d->watchman_dev = NULL;
 	}
 
-	if (d->lh.sensors != NULL) {
-		free(d->lh.sensors);
-		d->lh.sensors = NULL;
-		d->lh.num_sensors = 0;
-	}
+	vive_config_teardown(&d->config);
+
+	m_relation_history_destroy(&d->relation_hist);
 
 	// Remove the variable tracking.
 	u_var_remove_root(d);
 
-	free(d);
+	u_device_free(&d->base);
 }
 
 static void
 vive_device_update_inputs(struct xrt_device *xdev)
 {
+	XRT_TRACE_MARKER();
+
 	struct vive_device *d = vive_device(xdev);
 	VIVE_TRACE(d, "ENTER!");
 }
@@ -96,6 +101,8 @@ vive_device_get_tracked_pose(struct xrt_device *xdev,
                              uint64_t at_timestamp_ns,
                              struct xrt_space_relation *out_relation)
 {
+	XRT_TRACE_MARKER();
+
 	struct vive_device *d = vive_device(xdev);
 
 	if (name != XRT_INPUT_GENERIC_HEAD_POSE) {
@@ -109,51 +116,25 @@ vive_device_get_tracked_pose(struct xrt_device *xdev,
 	//! @todo Use this properly.
 	(void)at_timestamp_ns;
 
-	os_thread_helper_lock(&d->sensors_thread);
-
-	// Don't do anything if we have stopped.
-	if (!os_thread_helper_is_running_locked(&d->sensors_thread)) {
-		os_thread_helper_unlock(&d->sensors_thread);
-		return;
-	}
-
-	out_relation->pose.orientation = d->rot_filtered;
-
-	//! @todo assuming that orientation is actually currently tracked.
-	out_relation->relation_flags = (enum xrt_space_relation_flags)(
-	    XRT_SPACE_RELATION_POSITION_VALID_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT |
-	    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
-
-	os_thread_helper_unlock(&d->sensors_thread);
+	m_relation_history_get(d->relation_hist, out_relation, at_timestamp_ns);
 }
 
 static void
 vive_device_get_view_pose(struct xrt_device *xdev,
-                          struct xrt_vec3 *eye_relation,
+                          const struct xrt_vec3 *eye_relation,
                           uint32_t view_index,
                           struct xrt_pose *out_pose)
 {
+	XRT_TRACE_MARKER();
+
+	// Only supports two views.
+	assert(view_index < 2);
+
+	u_device_get_view_pose(eye_relation, view_index, out_pose);
+
+	// This is for the Index' canted displays, on the Vive [Pro] they are identity.
 	struct vive_device *d = vive_device(xdev);
-	struct xrt_pose pose = {{0.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 0.0f}};
-	bool adjust = view_index == 0;
-
-	pose.orientation = d->display.rot[view_index];
-	pose.position.x = eye_relation->x / 2.0f;
-	pose.position.y = eye_relation->y / 2.0f;
-	pose.position.z = eye_relation->z / 2.0f;
-
-	// Adjust for left/right while also making sure there aren't any -0.f.
-	if (pose.position.x > 0.0f && adjust) {
-		pose.position.x = -pose.position.x;
-	}
-	if (pose.position.y > 0.0f && adjust) {
-		pose.position.y = -pose.position.y;
-	}
-	if (pose.position.z > 0.0f && adjust) {
-		pose.position.z = -pose.position.z;
-	}
-
-	*out_pose = pose;
+	out_pose->orientation = d->config.display.rot[view_index];
 }
 
 static int
@@ -178,11 +159,11 @@ vive_mainboard_get_device_info(struct vive_device *d)
 
 	edid_vid = __be16_to_cpu(report.edid_vid);
 
-	d->firmware.display_firmware_version = __le32_to_cpu(report.display_firmware_version);
+	d->config.firmware.display_firmware_version = __le32_to_cpu(report.display_firmware_version);
 
 	VIVE_INFO(d, "EDID Manufacturer ID: %c%c%c, Product code: 0x%04x", '@' + (edid_vid >> 10),
 	          '@' + ((edid_vid >> 5) & 0x1f), '@' + (edid_vid & 0x1f), __le16_to_cpu(report.edid_pid));
-	VIVE_INFO(d, "Display firmware version: %u", d->firmware.display_firmware_version);
+	VIVE_INFO(d, "Display firmware version: %u", d->config.firmware.display_firmware_version);
 
 	return 0;
 }
@@ -237,7 +218,7 @@ vive_mainboard_decode_message(struct vive_device *d, struct vive_mainboard_statu
 	if (d->board.button != report->button) {
 		d->board.button = report->button;
 		VIVE_TRACE(d, "Button %d.", report->button);
-		d->rot_filtered = (struct xrt_quat){0, 0, 0, 1};
+		d->rot_filtered = (struct xrt_quat)XRT_QUAT_IDENTITY;
 	}
 }
 
@@ -279,9 +260,12 @@ cald_dt_ns(uint32_t dt_raw)
 static void
 update_imu(struct vive_device *d, const void *buffer)
 {
+	XRT_TRACE_MARKER();
+
 	const struct vive_imu_report *report = buffer;
 	const struct vive_imu_sample *sample = report->sample;
 	uint8_t last_seq = d->imu.sequence;
+	d->imu.ts_received_ns = os_monotonic_get_ns();
 	int i, j;
 
 	/*
@@ -316,11 +300,11 @@ update_imu(struct vive_device *d, const void *buffer)
 		    (int16_t)__le16_to_cpu(sample->acc[2]),
 		};
 
-		scale = (float)d->imu.acc_range / 32768.0f;
+		scale = (float)d->config.imu.acc_range / 32768.0f;
 		struct xrt_vec3 acceleration = {
-		    scale * d->imu.acc_scale.x * acc[0] - d->imu.acc_bias.x,
-		    scale * d->imu.acc_scale.y * acc[1] - d->imu.acc_bias.y,
-		    scale * d->imu.acc_scale.z * acc[2] - d->imu.acc_bias.z,
+		    scale * d->config.imu.acc_scale.x * acc[0] - d->config.imu.acc_bias.x,
+		    scale * d->config.imu.acc_scale.y * acc[1] - d->config.imu.acc_bias.y,
+		    scale * d->config.imu.acc_scale.z * acc[2] - d->config.imu.acc_bias.z,
 		};
 
 		int16_t gyro[3] = {
@@ -329,18 +313,18 @@ update_imu(struct vive_device *d, const void *buffer)
 		    (int16_t)__le16_to_cpu(sample->gyro[2]),
 		};
 
-		scale = (float)d->imu.gyro_range / 32768.0f;
+		scale = (float)d->config.imu.gyro_range / 32768.0f;
 		struct xrt_vec3 angular_velocity = {
-		    scale * d->imu.gyro_scale.x * gyro[0] - d->imu.gyro_bias.x,
-		    scale * d->imu.gyro_scale.y * gyro[1] - d->imu.gyro_bias.y,
-		    scale * d->imu.gyro_scale.z * gyro[2] - d->imu.gyro_bias.z,
+		    scale * d->config.imu.gyro_scale.x * gyro[0] - d->config.imu.gyro_bias.x,
+		    scale * d->config.imu.gyro_scale.y * gyro[1] - d->config.imu.gyro_bias.y,
+		    scale * d->config.imu.gyro_scale.z * gyro[2] - d->config.imu.gyro_bias.z,
 		};
 
 		VIVE_TRACE(d, "ACC  %f %f %f", acceleration.x, acceleration.y, acceleration.z);
 
 		VIVE_TRACE(d, "GYRO %f %f %f", angular_velocity.x, angular_velocity.y, angular_velocity.z);
 
-		switch (d->variant) {
+		switch (d->config.variant) {
 		case VIVE_VARIANT_VIVE:
 			// flip all except x axis
 			acceleration.x = +acceleration.x;
@@ -379,13 +363,25 @@ update_imu(struct vive_device *d, const void *buffer)
 		}
 
 		d->imu.time_ns += dt_ns;
-		d->last.acc = acceleration;
-		d->last.gyro = angular_velocity;
 		d->imu.sequence = seq;
 
 		m_imu_3dof_update(&d->fusion, d->imu.time_ns, &acceleration, &angular_velocity);
 
 		d->rot_filtered = d->fusion.rot;
+
+		struct xrt_space_relation rel = {0};
+		rel.relation_flags =
+		    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT;
+		rel.pose.orientation = d->rot_filtered;
+
+		// Use d->imu.ts_received_ns instead of d->imu.time_ns.
+		// d->imu.time_ns is offset by an arbitrary value (I think so we get more floating-point precision in
+		// the 3dof fusion) - so it's not what we want in the global "time-space".
+
+		// In contrast, d->imu.ts_received_ns is just "when we got the IMU timestamp" in the normal
+		// os_monotonic_get_ns() "time-space". Which is what we want. So we use it.
+
+		m_relation_history_push(d->relation_hist, &rel, d->imu.ts_received_ns);
 	}
 }
 
@@ -483,6 +479,8 @@ _print_v1_pulse(struct vive_device *d, uint8_t sensor_id, uint32_t timestamp, ui
 static void
 _decode_pulse_report(struct vive_device *d, const void *buffer)
 {
+	XRT_TRACE_MARKER();
+
 	const struct vive_headset_lighthouse_pulse_report *report = buffer;
 	unsigned int i;
 
@@ -505,8 +503,18 @@ _decode_pulse_report(struct vive_device *d, const void *buffer)
 			continue;
 		}
 
+		if (sensor_id == 0xfd) {
+			/* TODO: handle camera sync timestamp */
+			continue;
+		}
+
+		if (sensor_id == 0xfb) {
+			/* TODO: Only turns on when the camera is running but not every frame. */
+			continue;
+		}
+
 		if (sensor_id > 31) {
-			VIVE_ERROR(d, "Unexpected sensor id: %04x\n", sensor_id);
+			VIVE_ERROR(d, "Unexpected sensor id: %04x", sensor_id);
 			return;
 		}
 
@@ -564,7 +572,9 @@ vive_sensors_read_one_msg(struct vive_device *d,
 	if (buffer[0] == report_id) {
 		if (!_is_report_size_valid(d, ret, report_size, report_id))
 			return false;
+
 		process_cb(d, buffer);
+
 	} else {
 		VIVE_ERROR(d, "Unexpected sensor report type %s (0x%x).", _sensors_get_report_string(buffer[0]),
 		           buffer[0]);
@@ -599,6 +609,8 @@ _print_v2_pulse(
 static bool
 _print_pulse_report_v2(struct vive_device *d, const void *buffer)
 {
+	XRT_TRACE_MARKER();
+
 	const struct vive_headset_lighthouse_v2_pulse_report *report = buffer;
 
 	for (uint32_t i = 0; i < 4; i++) {
@@ -717,41 +729,13 @@ vive_sensors_run_thread(void *ptr)
 	return NULL;
 }
 
-void
-vive_init_defaults(struct vive_device *d)
-{
-	d->display.eye_target_width_in_pixels = 1080;
-	d->display.eye_target_height_in_pixels = 1200;
-
-	d->display.rot[0].w = 1.0f;
-	d->display.rot[1].w = 1.0f;
-
-	d->imu.gyro_range = 8.726646f;
-	d->imu.acc_range = 39.226600f;
-
-	d->imu.acc_scale.x = 1.0f;
-	d->imu.acc_scale.y = 1.0f;
-	d->imu.acc_scale.z = 1.0f;
-
-	d->imu.gyro_scale.x = 1.0f;
-	d->imu.gyro_scale.y = 1.0f;
-	d->imu.gyro_scale.z = 1.0f;
-
-	d->rot_filtered.w = 1.0f;
-
-	for (int view = 0; view < 2; view++) {
-		d->distortion[view].aspect_x_over_y = 0.89999997615814209f;
-		d->distortion[view].grow_for_undistort = 0.5f;
-		d->distortion[view].undistort_r2_cutoff = 1.0f;
-	}
-}
-
-
 static bool
 compute_distortion(struct xrt_device *xdev, int view, float u, float v, struct xrt_uv_triplet *result)
 {
+	XRT_TRACE_MARKER();
+
 	struct vive_device *d = vive_device(xdev);
-	return u_compute_distortion_vive(&d->distortion[view], u, v, result);
+	return u_compute_distortion_vive(&d->config.distortion[view], u, v, result);
 }
 
 struct vive_device *
@@ -760,11 +744,18 @@ vive_device_create(struct os_hid_device *mainboard_dev,
                    struct os_hid_device *watchman_dev,
                    enum VIVE_VARIANT variant)
 {
+	XRT_TRACE_MARKER();
+
 	enum u_device_alloc_flags flags =
 	    (enum u_device_alloc_flags)(U_DEVICE_ALLOC_HMD | U_DEVICE_ALLOC_TRACKING_NONE);
 	struct vive_device *d = U_DEVICE_ALLOCATE(struct vive_device, flags, 1, 0);
 
-	d->base.hmd->blend_mode = XRT_BLEND_MODE_OPAQUE;
+	m_relation_history_create(&d->relation_hist);
+
+	size_t idx = 0;
+	d->base.hmd->blend_modes[idx++] = XRT_BLEND_MODE_OPAQUE;
+	d->base.hmd->num_blend_modes = idx;
+
 	d->base.update_inputs = vive_device_update_inputs;
 	d->base.get_tracked_pose = vive_device_get_tracked_pose;
 	d->base.get_view_pose = vive_device_get_view_pose;
@@ -775,28 +766,18 @@ vive_device_create(struct os_hid_device *mainboard_dev,
 	d->sensors_dev = sensors_dev;
 	d->ll = debug_get_log_option_vive_log();
 	d->watchman_dev = watchman_dev;
-	d->variant = variant;
 
 	d->base.hmd->distortion.models = XRT_DISTORTION_MODEL_COMPUTE;
 	d->base.hmd->distortion.preferred = XRT_DISTORTION_MODEL_COMPUTE;
 	d->base.compute_distortion = compute_distortion;
 
-	vive_init_defaults(d);
-
-	switch (variant) {
-	case VIVE_VARIANT_VIVE: snprintf(d->base.str, XRT_DEVICE_NAME_LEN, "HTC Vive"); break;
-	case VIVE_VARIANT_PRO: snprintf(d->base.str, XRT_DEVICE_NAME_LEN, "HTC Vive Pro"); break;
-	case VIVE_VARIANT_INDEX: snprintf(d->base.str, XRT_DEVICE_NAME_LEN, "Valve Index"); break;
-	default: snprintf(d->base.str, XRT_DEVICE_NAME_LEN, "Unknown Vive device");
-	}
-
 	if (d->mainboard_dev) {
 		vive_mainboard_power_on(d);
 		vive_mainboard_get_device_info(d);
 	}
-	vive_read_firmware(d->sensors_dev, &d->firmware.firmware_version, &d->firmware.hardware_revision,
-	                   &d->firmware.hardware_version_micro, &d->firmware.hardware_version_minor,
-	                   &d->firmware.hardware_version_major);
+	vive_read_firmware(d->sensors_dev, &d->config.firmware.firmware_version, &d->config.firmware.hardware_revision,
+	                   &d->config.firmware.hardware_version_micro, &d->config.firmware.hardware_version_minor,
+	                   &d->config.firmware.hardware_version_major);
 
 	/*
 	VIVE_INFO(d, "Firmware version %u %s@%s FPGA %u.%u",
@@ -804,18 +785,21 @@ vive_device_create(struct os_hid_device *mainboard_dev,
 	          report.fpga_version_major, report.fpga_version_minor);
 	*/
 
-	VIVE_INFO(d, "Firmware version %u", d->firmware.firmware_version);
-	VIVE_INFO(d, "Hardware revision: %d rev %d.%d.%d", d->firmware.hardware_revision,
-	          d->firmware.hardware_version_major, d->firmware.hardware_version_minor,
-	          d->firmware.hardware_version_micro);
+	VIVE_INFO(d, "Firmware version %u", d->config.firmware.firmware_version);
+	VIVE_INFO(d, "Hardware revision: %d rev %d.%d.%d", d->config.firmware.hardware_revision,
+	          d->config.firmware.hardware_version_major, d->config.firmware.hardware_version_minor,
+	          d->config.firmware.hardware_version_micro);
 
-	vive_get_imu_range_report(d->sensors_dev, &d->imu.gyro_range, &d->imu.acc_range);
-	VIVE_INFO(d, "Vive gyroscope range     %f", d->imu.gyro_range);
-	VIVE_INFO(d, "Vive accelerometer range %f", d->imu.acc_range);
+	vive_get_imu_range_report(d->sensors_dev, &d->config.imu.gyro_range, &d->config.imu.acc_range);
+	VIVE_INFO(d, "Vive gyroscope range     %f", d->config.imu.gyro_range);
+	VIVE_INFO(d, "Vive accelerometer range %f", d->config.imu.acc_range);
 
 	char *config = vive_read_config(d->sensors_dev);
+
+	d->config.ll = d->ll;
+	// usb connected HMD variant is known because of USB id, config parsing relies on it.
 	if (config != NULL) {
-		vive_config_parse(d, config);
+		vive_config_parse(&d->config, config, d->ll);
 		free(config);
 	}
 
@@ -825,14 +809,14 @@ vive_device_create(struct os_hid_device *mainboard_dev,
 	double lens_horizontal_separation = 0.057863;
 	double eye_to_screen_distance = 0.023226876441867737;
 
-	uint32_t w_pixels = d->display.eye_target_width_in_pixels;
-	uint32_t h_pixels = d->display.eye_target_height_in_pixels;
+	uint32_t w_pixels = d->config.display.eye_target_width_in_pixels;
+	uint32_t h_pixels = d->config.display.eye_target_height_in_pixels;
 
 	// Main display.
 	d->base.hmd->screens[0].w_pixels = (int)w_pixels * 2;
 	d->base.hmd->screens[0].h_pixels = (int)h_pixels;
 
-	if (d->variant == VIVE_VARIANT_INDEX) {
+	if (d->config.variant == VIVE_VARIANT_INDEX) {
 		lens_horizontal_separation = 0.06;
 		h_meters = 0.07;
 		// eye relief knob adjusts this around [0.0255(near)-0.275(far)]
@@ -881,14 +865,13 @@ vive_device_create(struct os_hid_device *mainboard_dev,
 	m_imu_3dof_init(&d->fusion, M_IMU_3DOF_USE_GRAVITY_DUR_20MS);
 
 	u_var_add_root(d, "Vive Device", true);
+	u_var_add_gui_header(d, &d->gui.fusion, "3DoF Fusion");
+	m_imu_3dof_add_vars(&d->fusion, d, "");
 	u_var_add_gui_header(d, &d->gui.calibration, "Calibration");
-	u_var_add_vec3_f32(d, &d->imu.acc_scale, "acc_scale");
-	u_var_add_vec3_f32(d, &d->imu.acc_bias, "acc_bias");
-	u_var_add_vec3_f32(d, &d->imu.gyro_scale, "gyro_scale");
-	u_var_add_vec3_f32(d, &d->imu.gyro_bias, "gyro_bias");
-	u_var_add_gui_header(d, &d->gui.last, "Last data");
-	u_var_add_vec3_f32(d, &d->last.acc, "acc");
-	u_var_add_vec3_f32(d, &d->last.gyro, "gyro");
+	u_var_add_vec3_f32(d, &d->config.imu.acc_scale, "acc_scale");
+	u_var_add_vec3_f32(d, &d->config.imu.acc_bias, "acc_bias");
+	u_var_add_vec3_f32(d, &d->config.imu.gyro_scale, "gyro_scale");
+	u_var_add_vec3_f32(d, &d->config.imu.gyro_bias, "gyro_bias");
 
 	int ret;
 
@@ -914,6 +897,14 @@ vive_device_create(struct os_hid_device *mainboard_dev,
 	d->base.orientation_tracking_supported = true;
 	d->base.position_tracking_supported = false;
 	d->base.device_type = XRT_DEVICE_TYPE_HMD;
+
+	switch (d->config.variant) {
+	case VIVE_VARIANT_VIVE: snprintf(d->base.str, XRT_DEVICE_NAME_LEN, "HTC Vive (vive)"); break;
+	case VIVE_VARIANT_PRO: snprintf(d->base.str, XRT_DEVICE_NAME_LEN, "HTC Vive Pro (vive)"); break;
+	case VIVE_VARIANT_INDEX: snprintf(d->base.str, XRT_DEVICE_NAME_LEN, "Valve Index (vive)"); break;
+	case VIVE_UNKNOWN: snprintf(d->base.str, XRT_DEVICE_NAME_LEN, "Unknown HMD (vive)"); break;
+	}
+	snprintf(d->base.serial, XRT_DEVICE_NAME_LEN, "%s", d->config.firmware.device_serial_number);
 
 	ret = os_thread_helper_start(&d->sensors_thread, vive_sensors_run_thread, d);
 	if (ret != 0) {

@@ -132,13 +132,12 @@ illixr_hmd_get_tracked_pose(struct xrt_device *xdev,
 
 static void
 illixr_hmd_get_view_pose(struct xrt_device *xdev,
-                         struct xrt_vec3 *eye_relation,
+                         const struct xrt_vec3 *eye_relation,
                          uint32_t view_index,
                          struct xrt_pose *out_pose)
 {
-	struct xrt_pose pose = illixr_read_pose();
-
-	*out_pose = pose;
+	(void)xdev;
+	u_device_get_view_pose(eye_relation, view_index, out_pose);
 }
 
 std::vector<std::string>
@@ -177,7 +176,11 @@ illixr_hmd_create(const char *path_in, const char *comp_in)
 	dh->base.destroy = illixr_hmd_destroy;
 	dh->base.name = XRT_DEVICE_GENERIC_HMD;
 	dh->base.device_type = XRT_DEVICE_TYPE_HMD;
-	dh->base.hmd->blend_mode = XRT_BLEND_MODE_OPAQUE;
+
+	size_t idx = 0;
+	dh->base.hmd->blend_modes[idx++] = XRT_BLEND_MODE_OPAQUE;
+	dh->base.hmd->num_blend_modes = idx;
+
 	dh->pose.orientation.w = 1.0f; // All other values set to zero.
 	dh->print_spew = debug_get_bool_option_illixr_spew();
 	dh->print_debug = debug_get_bool_option_illixr_debug();
@@ -186,6 +189,7 @@ illixr_hmd_create(const char *path_in, const char *comp_in)
 
 	// Print name.
 	snprintf(dh->base.str, XRT_DEVICE_NAME_LEN, "ILLIXR");
+	snprintf(dh->base.serial, XRT_DEVICE_NAME_LEN, "ILLIXR");
 
 	// Setup input.
 	dh->base.inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;

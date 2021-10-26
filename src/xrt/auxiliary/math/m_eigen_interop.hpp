@@ -1,4 +1,4 @@
-// Copyright 2019, Collabora, Ltd.
+// Copyright 2019-2021, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -18,6 +18,7 @@
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 
+namespace xrt::auxiliary::math {
 
 /*!
  * @brief Wrap an internal quaternion struct in an Eigen type, const overload.
@@ -71,6 +72,19 @@ map_vec3(struct xrt_vec3 &v)
 }
 
 /*!
+ * @brief Wrap an internal 3x3 matrix struct in an Eigen type, non-const
+ * overload.
+ *
+ * Permits zero-overhead manipulation of `xrt_matrix_3x3&` by Eigen routines as
+ * if it were a `Eigen::Matrix3f&`.
+ */
+static inline Eigen::Map<Eigen::Matrix3f>
+map_matrix_3x3(struct xrt_matrix_3x3 &m)
+{
+	return Eigen::Map<Eigen::Matrix3f>(m.v);
+}
+
+/*!
  * @brief Wrap an internal 4x4 matrix struct in an Eigen type, non-const
  * overload.
  *
@@ -82,6 +96,30 @@ map_matrix_4x4(struct xrt_matrix_4x4 &m)
 {
 	return Eigen::Map<Eigen::Matrix4f>(m.v);
 }
+
+/*!
+ * @brief Wrap an internal 4x4 matrix f64 struct in an Eigen type, const overload.
+ *
+ * Permits zero-overhead manipulation of `const xrt_matrix_4x4_f64&` by Eigen routines as if it were a
+ * `const Eigen::Matrix4d&`.
+ */
+static inline Eigen::Map<const Eigen::Matrix4d>
+map_matrix_4x4_f64(const struct xrt_matrix_4x4_f64 &m)
+{
+	return Eigen::Map<const Eigen::Matrix4d>(m.v);
+}
+
+/*!
+ * @brief Wrap an internal 4x4 matrix struct in an Eigen type, non-const overload.
+ *
+ * Permits zero-overhead manipulation of `xrt_matrix_4x4_f64&` by Eigen routines as if it were a `Eigen::Matrix4d&`.
+ */
+static inline Eigen::Map<Eigen::Matrix4d>
+map_matrix_4x4_f64(struct xrt_matrix_4x4_f64 &m)
+{
+	return Eigen::Map<Eigen::Matrix4d>(m.v);
+}
+
 
 /*
  *
@@ -124,3 +162,5 @@ position(struct xrt_pose &pose)
 {
 	return map_vec3(pose.position);
 }
+
+} // namespace xrt::auxiliary::math

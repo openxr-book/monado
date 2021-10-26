@@ -68,6 +68,10 @@ best with the following vcpkg packages installed:
 
 * pthreads eigen3 libusb hidapi zlib doxygen
 
+If you have a recent [vcpkg](https://vcpkg.io) installed and use the appropriate
+CMake toolchain file, the vcpkg manifest in the Monado repository will instruct
+vcpkg to locally install the dependencies automatically.
+
 Tested distributions that are fully compatible,
 on Intel (Vulkan only) and AMD graphics (Vulkan and OpenGL):
 
@@ -241,8 +245,11 @@ scripts/format-project.sh
 
 You can optionally put something like `CLANG_FORMAT=clang-format-7` before that command
 if your clang-format binary isn't named `clang-format`.
-Note that you'll typically prefer to use something like `git clang-format`
+**Note that you'll typically prefer** to use something like `git clang-format`
 to just re-format your changes, in case version differences in tools result in overall format changes.
+The CI "style" job currently runs on Debian Buster, so it has clang-format-7.
+We will probably update that job to Bullseye or Ubuntu 20.10, which will allow
+using clang-format-11 by default, soon.
 
 [OpenHMD]: http://openhmd.net
 [drm-lease]: https://haagch.frickel.club/#!drmlease%2Emd

@@ -26,10 +26,6 @@
 #include "ohmd/oh_interface.h"
 #endif
 
-#ifdef XRT_BUILD_DRIVER_HANDTRACKING
-#include "ht/ht_interface.h"
-#endif
-
 #ifdef XRT_BUILD_DRIVER_NS
 #include "north_star/ns_interface.h"
 #endif
@@ -66,6 +62,28 @@
 #include "illixr/illixr_interface.h"
 #endif
 
+#ifdef XRT_BUILD_DRIVER_RS
+#include "realsense/rs_interface.h"
+#endif
+
+#ifdef XRT_BUILD_DRIVER_ULV2
+#include "ultraleap_v2/ulv2_interface.h"
+#endif
+
+#ifdef XRT_BUILD_DRIVER_QWERTY
+#include "qwerty/qwerty_interface.h"
+#endif
+
+#ifdef XRT_BUILD_DRIVER_WMR
+#include "wmr/wmr_interface.h"
+#include "wmr/wmr_common.h"
+#endif
+
+#ifdef XRT_BUILD_DRIVER_EUROC
+#include "euroc/euroc_interface.h"
+#endif
+
+
 /*!
  * Each entry should be a vendor ID (VID), product ID (PID), a "found" function,
  * and a string literal name.
@@ -85,33 +103,35 @@
  */
 struct xrt_prober_entry target_entry_list[] = {
 #ifdef XRT_BUILD_DRIVER_PSMV
-    {PSMV_VID, PSMV_PID_ZCM1, psmv_found, "PS Move Controller (ZCM1)"},
-    {PSMV_VID, PSMV_PID_ZCM2, psmv_found, "PS Move Controller (ZCM2)"},
+    {PSMV_VID, PSMV_PID_ZCM1, psmv_found, "PS Move Controller (ZCM1)", "psmv"},
+    {PSMV_VID, PSMV_PID_ZCM2, psmv_found, "PS Move Controller (ZCM2)", "psmv"},
 #endif // XRT_BUILD_DRIVER_PSMV
 
 #ifdef XRT_BUILD_DRIVER_HYDRA
-    {HYDRA_VID, HYDRA_PID, hydra_found, "Razer Hydra"},
+    {HYDRA_VID, HYDRA_PID, hydra_found, "Razer Hydra", "hydra"},
 #endif // XRT_BUILD_DRIVER_HYDRA
 
 #ifdef XRT_BUILD_DRIVER_HDK
-    {HDK_VID, HDK_PID, hdk_found, "OSVR HDK"},
+    {HDK_VID, HDK_PID, hdk_found, "OSVR HDK", "osvr"},
 #endif // XRT_BUILD_DRIVER_HDK
 
-#ifdef XRT_BUILD_DRIVER_SURVIVE
-    {HTC_VID, VIVE_PID, survive_found, "HTC Vive"},
-    {HTC_VID, VIVE_PRO_MAINBOARD_PID, survive_found, "HTC Vive Pro"},
-    {VALVE_VID, VIVE_PRO_LHR_PID, survive_found, "Valve Index"},
-#endif
-
 #ifdef XRT_BUILD_DRIVER_VIVE
-    {HTC_VID, VIVE_PID, vive_found, "HTC Vive"},
-    {HTC_VID, VIVE_PRO_MAINBOARD_PID, vive_found, "HTC Vive Pro"},
-    {VALVE_VID, VIVE_PRO_LHR_PID, vive_found, "Valve Index"},
-    {VALVE_VID, VIVE_WATCHMAN_DONGLE, vive_controller_found, "HTC Vive Watchman Wireless Device"},
-    {VALVE_VID, VIVE_WATCHMAN_DONGLE_GEN2, vive_controller_found, "Valve Watchman Wireless Device"},
+    {HTC_VID, VIVE_PID, vive_found, "HTC Vive", "vive"},
+    {HTC_VID, VIVE_PRO_MAINBOARD_PID, vive_found, "HTC Vive Pro", "vive"},
+    {VALVE_VID, VIVE_PRO_LHR_PID, vive_found, "Valve Index", "vive"},
+    {VALVE_VID, VIVE_WATCHMAN_DONGLE, vive_controller_found, "HTC Vive Watchman Wireless Device", "vive"},
+    {VALVE_VID, VIVE_WATCHMAN_DONGLE_GEN2, vive_controller_found, "Valve Watchman Wireless Device", "vive"},
 #endif
 
-    {0x0000, 0x0000, NULL, NULL}, // Terminate
+#ifdef XRT_BUILD_DRIVER_ULV2
+    {ULV2_VID, ULV2_PID, ulv2_found, "Leap Motion Controller", "ulv2"},
+#endif
+
+#ifdef XRT_BUILD_DRIVER_WMR
+    {MICROSOFT_VID, HOLOLENS_SENSORS_PID, wmr_found, "Microsoft HoloLens Sensors", "wmr"},
+#endif // XRT_BUILD_DRIVER_WMR
+
+    {0x0000, 0x0000, NULL, NULL, NULL}, // Terminate
 };
 
 struct xrt_prober_entry *target_entry_lists[] = {
@@ -134,13 +154,13 @@ xrt_auto_prober_creator target_auto_list[] = {
     daydream_create_auto_prober,
 #endif
 
+#ifdef XRT_BUILD_DRIVER_SURVIVE
+    survive_create_auto_prober,
+#endif
+
 #ifdef XRT_BUILD_DRIVER_OHMD
     // OpenHMD almost as the end as we want to override it with native drivers.
     oh_create_auto_prober,
-#endif
-
-#ifdef XRT_BUILD_DRIVER_HANDTRACKING
-    ht_create_auto_prober,
 #endif
 
 #ifdef XRT_BUILD_DRIVER_NS
@@ -156,10 +176,23 @@ xrt_auto_prober_creator target_auto_list[] = {
     illixr_create_auto_prober,
 #endif
 
+#ifdef XRT_BUILD_DRIVER_RS
+    rs_create_auto_prober,
+#endif
+
+#ifdef XRT_BUILD_DRIVER_EUROC
+    euroc_create_auto_prober,
+#endif
+
+#ifdef XRT_BUILD_DRIVER_QWERTY
+    qwerty_create_auto_prober,
+#endif
+
 #ifdef XRT_BUILD_DRIVER_DUMMY
     // Dummy headset driver last.
     dummy_create_auto_prober,
 #endif
+
     NULL, // Terminate
 };
 

@@ -44,6 +44,7 @@ enum window_type
 	WINDOW_AUTO,
 	WINDOW_XCB,
 	WINDOW_WAYLAND,
+	WINDOW_DIRECT_WAYLAND,
 	WINDOW_DIRECT_RANDR,
 	WINDOW_DIRECT_NVIDIA,
 	WINDOW_ANDROID,
@@ -60,6 +61,8 @@ enum window_type
 struct comp_settings
 {
 	int display;
+
+	bool use_compute;
 
 	VkFormat color_format;
 	VkColorSpaceKHR color_space;
@@ -86,7 +89,7 @@ struct comp_settings
 		bool wireframe;
 	} debug;
 
-	//! Procentage to scale the viewport by.
+	//! Percentage to scale the viewport by.
 	double viewport_scale;
 
 	//! Not used with direct mode.

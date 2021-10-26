@@ -14,43 +14,15 @@
 #include "os/os_threading.h"
 #include "util/u_logging.h"
 #include "util/u_distortion_mesh.h"
+#include "math/m_relation_history.h"
+
+#include "vive/vive_config.h"
 
 #include "vive_lighthouse.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-
-/*!
- * A lighthouse consisting of sensors.
- *
- * All sensors are placed in IMU space.
- */
-struct lh_model
-{
-	struct lh_sensor *sensors;
-	size_t num_sensors;
-};
-
-/*!
- * A single lighthouse senosor point and normal, in IMU space.
- */
-struct lh_sensor
-{
-	struct xrt_vec3 pos;
-	uint32_t _pad0;
-	struct xrt_vec3 normal;
-	uint32_t _pad1;
-};
-
-enum VIVE_VARIANT
-{
-	VIVE_UNKNOWN = 0,
-	VIVE_VARIANT_VIVE,
-	VIVE_VARIANT_PRO,
-	VIVE_VARIANT_INDEX
-};
 
 /*!
  * @implements xrt_device
@@ -64,52 +36,19 @@ struct vive_device
 
 	struct lighthouse_watchman watchman;
 
-	enum VIVE_VARIANT variant;
-
 	struct os_thread_helper sensors_thread;
 	struct os_thread_helper watchman_thread;
 	struct os_thread_helper mainboard_thread;
-
-	struct lh_model lh;
 
 	struct
 	{
 		uint64_t time_ns;
 		uint8_t sequence;
 		uint32_t last_sample_time_raw;
-		double acc_range;
-		double gyro_range;
-		struct xrt_vec3 acc_bias;
-		struct xrt_vec3 acc_scale;
-		struct xrt_vec3 gyro_bias;
-		struct xrt_vec3 gyro_scale;
-
-		//! IMU position in tracking space.
-		struct xrt_pose trackref;
+		timepoint_ns ts_received_ns;
 	} imu;
 
 	struct m_imu_3dof fusion;
-
-	struct
-	{
-		struct xrt_vec3 acc;
-		struct xrt_vec3 gyro;
-	} last;
-
-	struct
-	{
-		double lens_separation;
-		double persistence;
-		int eye_target_height_in_pixels;
-		int eye_target_width_in_pixels;
-
-		struct xrt_quat rot[2];
-
-		//! Head position in tracking space.
-		struct xrt_pose trackref;
-		//! Head position in IMU space.
-		struct xrt_pose imuref;
-	} display;
 
 	struct
 	{
@@ -119,20 +58,8 @@ struct vive_device
 		uint8_t button;
 	} board;
 
-	struct
-	{
-		uint32_t display_firmware_version;
-		uint32_t firmware_version;
-		uint8_t hardware_revision;
-		uint8_t hardware_version_micro;
-		uint8_t hardware_version_minor;
-		uint8_t hardware_version_major;
-		char mb_serial_number[32];
-		char model_number[32];
-		char device_serial_number[32];
-	} firmware;
-
 	struct xrt_quat rot_filtered;
+	struct m_relation_history *relation_hist;
 
 	enum u_logging_level ll;
 	bool disconnect_notified;
@@ -140,10 +67,10 @@ struct vive_device
 	struct
 	{
 		bool calibration;
-		bool last;
+		bool fusion;
 	} gui;
 
-	struct u_vive_values distortion[2];
+	struct vive_config config;
 };
 
 struct vive_device *

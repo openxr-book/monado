@@ -8,6 +8,7 @@
 
 #include "xrt/xrt_instance.h"
 #include "xrt/xrt_config_have.h"
+#include "xrt/xrt_config_drivers.h"
 
 #include "util/u_var.h"
 #include "util/u_misc.h"
@@ -27,7 +28,7 @@ oxr_sdl2_hack_create(void **out_hack)
 }
 
 void
-oxr_sdl2_hack_start(void *hack, struct xrt_instance *xinst)
+oxr_sdl2_hack_start(void *hack, struct xrt_instance *xinst, struct xrt_device **xdevs)
 {}
 
 void
@@ -41,9 +42,16 @@ oxr_sdl2_hack_stop(void **hack)
 #include "gui/gui_common.h"
 #include "gui/gui_imgui.h"
 
+#ifdef XRT_BUILD_DRIVER_QWERTY
+#include "qwerty_interface.h"
+#endif
+
 #include <SDL2/SDL.h>
 
 DEBUG_GET_ONCE_BOOL_OPTION(gui, "OXR_DEBUG_GUI", false)
+#ifdef XRT_BUILD_DRIVER_QWERTY
+DEBUG_GET_ONCE_BOOL_OPTION(qwerty_enable, "QWERTY_ENABLE", false)
+#endif
 
 
 /*!
@@ -64,7 +72,8 @@ struct sdl2_program
 
 struct gui_imgui
 {
-	bool show_demo_window;
+	bool show_imgui_demo;
+	bool show_implot_demo;
 	struct xrt_colour_rgb_f32 clear;
 };
 
@@ -140,6 +149,16 @@ sdl2_loop(struct sdl2_program *p)
 	// Setup Dear ImGui style
 	igStyleColorsDark(NULL);
 
+	// Setup the plot context.
+	ImPlotContext *plot_ctx = ImPlot_CreateContext();
+	ImPlot_SetCurrentContext(plot_ctx);
+
+
+#ifdef XRT_BUILD_DRIVER_QWERTY
+	// Setup qwerty driver usage
+	bool qwerty_enabled = debug_get_bool_option_qwerty_enable();
+#endif
+
 	// Main loop
 	struct gui_imgui gui = {0};
 	gui.clear.r = 0.45f;
@@ -147,7 +166,8 @@ sdl2_loop(struct sdl2_program *p)
 	gui.clear.b = 0.60f;
 	u_var_add_root(&gui, "GUI Control", false);
 	u_var_add_rgb_f32(&gui, &gui.clear, "Clear Colour");
-	u_var_add_bool(&gui, &gui.show_demo_window, "Demo Window");
+	u_var_add_bool(&gui, &gui.show_imgui_demo, "Imgui Demo Window");
+	u_var_add_bool(&gui, &gui.show_implot_demo, "Implot Demo Window");
 	u_var_add_bool(&gui, &p->base.stopped, "Exit");
 
 	while (!p->base.stopped) {
@@ -155,6 +175,13 @@ sdl2_loop(struct sdl2_program *p)
 
 		while (SDL_PollEvent(&event)) {
 			igImGui_ImplSDL2_ProcessEvent(&event);
+
+#ifdef XRT_BUILD_DRIVER_QWERTY
+			// Caution here, qwerty driver is being accessed by the main thread as well
+			if (qwerty_enabled) {
+				qwerty_process_event(p->base.xdevs, NUM_XDEVS, event);
+			}
+#endif
 
 			if (event.type == SDL_QUIT) {
 				p->base.stopped = true;
@@ -177,8 +204,13 @@ sdl2_loop(struct sdl2_program *p)
 		gui_scene_manager_render(&p->base);
 
 		// Handle this here.
-		if (gui.show_demo_window) {
-			igShowDemoWindow(&gui.show_demo_window);
+		if (gui.show_imgui_demo) {
+			igShowDemoWindow(&gui.show_imgui_demo);
+		}
+
+		// Handle this here.
+		if (gui.show_implot_demo) {
+			ImPlot_ShowDemoWindow(&gui.show_implot_demo);
 		}
 
 		// Build the DrawData (EndFrame).
@@ -198,6 +230,7 @@ sdl2_loop(struct sdl2_program *p)
 
 	// Cleanup
 	u_var_remove_root(&gui);
+	ImPlot_DestroyContext(plot_ctx);
 	igImGui_ImplOpenGL3_Shutdown();
 	igImGui_ImplSDL2_Shutdown();
 	igDestroyContext(NULL);
@@ -262,7 +295,7 @@ oxr_sdl2_hack_create(void **out_hack)
 }
 
 void
-oxr_sdl2_hack_start(void *hack, struct xrt_instance *xinst)
+oxr_sdl2_hack_start(void *hack, struct xrt_instance *xinst, struct xrt_device **xdevs)
 {
 	struct sdl2_program *p = (struct sdl2_program *)hack;
 	if (p == NULL) {
@@ -270,6 +303,10 @@ oxr_sdl2_hack_start(void *hack, struct xrt_instance *xinst)
 	}
 
 	xrt_instance_get_prober(xinst, &p->base.xp);
+
+	for (size_t i = 0; i < NUM_XDEVS; i++) {
+		p->base.xdevs[i] = xdevs[i];
+	}
 
 	if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
 		U_LOG_E("Failed to init SDL2!");

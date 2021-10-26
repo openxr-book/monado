@@ -16,10 +16,12 @@
 #include "util/u_misc.h"
 #include "util/u_var.h"
 #include "util/u_debug.h"
+#include "util/u_git_tag.h"
 
 #include "shared/ipc_protocol.h"
 #include "client/ipc_client.h"
 #include "ipc_client_generated.h"
+#include "util/u_file.h"
 
 #include <stdio.h>
 #include <sys/socket.h>
@@ -28,9 +30,10 @@
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <sys/un.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
-
+#include <limits.h>
 
 #ifdef XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER
 #include "android/android_ahardwarebuffer_allocator.h"
@@ -42,6 +45,7 @@
 #endif // XRT_OS_ANDROID
 
 DEBUG_GET_ONCE_LOG_OPTION(ipc_log, "IPC_LOG", U_LOGGING_WARN)
+DEBUG_GET_ONCE_BOOL_OPTION(ipc_ignore_version, "IPC_IGNORE_VERSION", false)
 
 /*
  *
@@ -91,6 +95,13 @@ ipc_connect(struct ipc_connection *ipc_c)
 		IPC_ERROR(ipc_c, "Service Connect error!");
 		return false;
 	}
+	// The ownership belongs to the Java object. Dup because the fd will be
+	// closed when client destroy.
+	socket = dup(socket);
+	if (socket < 0) {
+		IPC_ERROR(ipc_c, "Failed to dup fd with error %d!", errno);
+		return false;
+	}
 
 	ipc_c->imc.socket_fd = socket;
 	ipc_c->imc.ll = ipc_c->ll;
@@ -118,13 +129,21 @@ ipc_connect(struct ipc_connection *ipc_c)
 
 	int socket = ret;
 
+	char sock_file[PATH_MAX];
+
+	int size = u_file_get_path_in_runtime_dir(IPC_MSG_SOCK_FILE, sock_file, PATH_MAX);
+	if (size == -1) {
+		IPC_ERROR(ipc_c, "Could not get socket file name");
+		return -1;
+	}
+
 	memset(&addr, 0, sizeof(addr));
 	addr.sun_family = AF_UNIX;
-	strcpy(addr.sun_path, IPC_MSG_SOCK_FILE);
+	strcpy(addr.sun_path, sock_file);
 
 	ret = connect(socket, (struct sockaddr *)&addr, sizeof(addr));
 	if (ret < 0) {
-		IPC_ERROR(ipc_c, "Socket Connect error!");
+		IPC_ERROR(ipc_c, "Failed to connec to socket %s: %s!", sock_file, strerror(errno));
 		close(socket);
 		return false;
 	}
@@ -286,6 +305,16 @@ ipc_instance_create(struct xrt_instance_info *i_info, struct xrt_instance **out_
 		IPC_ERROR((&ii->ipc_c), "Failed to mmap shm!");
 		free(ii);
 		return -1;
+	}
+
+	if (strncmp(u_git_tag, ii->ipc_c.ism->u_git_tag, IPC_VERSION_NAME_LEN) != 0) {
+		IPC_ERROR((&ii->ipc_c), "Monado client library version %s does not match service version %s", u_git_tag,
+		          ii->ipc_c.ism->u_git_tag);
+		if (!debug_get_bool_option_ipc_ignore_version()) {
+			IPC_ERROR((&ii->ipc_c), "Set IPC_IGNORE_VERSION=1 to ignore this version conflict");
+			free(ii);
+			return -1;
+		}
 	}
 
 	uint32_t count = 0;

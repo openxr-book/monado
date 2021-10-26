@@ -4,8 +4,8 @@
 """Generate code from a JSON file describing interaction profiles and
 bindings."""
 
-import json
 import argparse
+import json
 
 
 def handle_subpath(pathgroup_cls, feature_list, subaction_path, sub_path_itm):
@@ -31,7 +31,8 @@ class Feature:
         feature_list = []
         for subaction_path in subaction_paths:
             for sub_path_itm in paths.items():
-                handle_subpath(feature_cls, feature_list, subaction_path, sub_path_itm)
+                handle_subpath(feature_cls, feature_list,
+                               subaction_path, sub_path_itm)
         return feature_list
 
     def __init__(self, subaction_path, sub_path_itm, feature_str):
@@ -41,10 +42,10 @@ class Feature:
         self.subaction_path = subaction_path
         self.feature_str = feature_str
 
-    """A group of paths that derive from the same input.
-    For example .../thumbstick, .../thumbstick/x, .../thumbstick/y
-    """
     def to_monado_paths(self):
+        """A group of paths that derive from the same input.
+        For example .../thumbstick, .../thumbstick/x, .../thumbstick/y
+        """
         paths = []
 
         basepath = self.subaction_path + self.sub_path_name
@@ -60,7 +61,7 @@ class Feature:
         return paths
 
     def is_input(self):
-        # only haptics is output so far, everythine else is input
+        # only haptics is output so far, everything else is input
         return self.feature_str != "haptic"
 
     def is_output(self):
@@ -68,7 +69,8 @@ class Feature:
 
 
 class Profile:
-    """An interctive bindings profile."""
+    """An interactive bindings profile."""
+
     def __init__(self, name, data):
         """Construct an profile."""
         self.name = name
@@ -83,7 +85,7 @@ class Profile:
         for feature in self.features:
             for path in feature.to_monado_paths():
                 length = len(path)
-                if (length in self.by_length):
+                if length in self.by_length:
                     self.by_length[length].append(path)
                 else:
                     self.by_length[length] = [path]
@@ -152,7 +154,8 @@ def generate_bindings_c(file, p):
             f.write("{\n\t\t\treturn false;\n\t\t}\n")
         f.write("\tdefault:\n\t\treturn false;\n\t}\n}\n")
 
-    f.write(f'\n\nstruct profile_template profile_templates[{len(p.profiles)}] = {{ // array of profile_template\n')
+    f.write(
+        f'\n\nstruct profile_template profile_templates[{len(p.profiles)}] = {{ // array of profile_template\n')
     for profile in p.profiles:
         hw_name = str(profile.name.split("/")[-1])
         vendor_name = str(profile.name.split("/")[-2])
@@ -167,7 +170,8 @@ def generate_bindings_c(file, p):
         f.write(f'\t\t.steamvr_input_profile_path = "{fname}",\n')
         f.write(f'\t\t.steamvr_controller_type = "{controller_type}",\n')
         f.write(f'\t\t.num_bindings = {num_bindings},\n')
-        f.write(f'\t\t.bindings = (struct binding_template[]){{ // array of binding_template\n')
+        f.write(
+            f'\t\t.bindings = (struct binding_template[]){{ // array of binding_template\n')
 
         feature: Feature
         for idx, feature in enumerate(profile.features):
@@ -180,7 +184,8 @@ def generate_bindings_c(file, p):
             f.write(f'\t\t\t{{ // binding_template {idx}\n')
             f.write(f'\t\t\t\t.subaction_path = "{feature.subaction_path}",\n')
             f.write(f'\t\t\t\t.steamvr_path = "{steamvr_path}",\n')
-            f.write(f'\t\t\t\t.localized_name = "{sp_obj["localized_name"]}",\n')
+            f.write(
+                f'\t\t\t\t.localized_name = "{sp_obj["localized_name"]}",\n')
 
             f.write('\t\t\t\t.paths = { // array of paths\n')
             for path in feature.to_monado_paths():
@@ -215,6 +220,42 @@ def generate_bindings_c(file, p):
 
     f.write('}; // /array of profile_template\n\n')
 
+    inputs = set()
+    for profile in p.profiles:
+        feature: Feature
+        for idx, feature in enumerate(profile.features):
+            sp_obj = feature.sub_path_obj
+            if feature_str not in sp_obj["monado_bindings"]:
+                continue
+            monado_binding = sp_obj["monado_bindings"][feature_str]
+            inputs.add(monado_binding)
+
+    # special cased bindings that are never directly used in the input profiles
+    inputs.add("XRT_INPUT_GENERIC_HEAD_POSE")
+    inputs.add("XRT_INPUT_GENERIC_HEAD_DETECT")
+    inputs.add("XRT_INPUT_GENERIC_HAND_TRACKING_LEFT")
+    inputs.add("XRT_INPUT_GENERIC_HAND_TRACKING_RIGHT")
+    inputs.add("XRT_INPUT_GENERIC_TRACKER_POSE")
+
+    f.write('const char *\n')
+    f.write('xrt_input_name_string(enum xrt_input_name input)\n')
+    f.write('{\n')
+    f.write('\tswitch(input)\n')
+    f.write('\t{\n')
+    for input in inputs:
+        f.write(f'\tcase {input}: return "{input}";\n')
+    f.write(f'\tdefault: return "UNKNOWN";\n')
+    f.write('\t}\n')
+    f.write('}\n')
+
+    f.write('enum xrt_input_name\n')
+    f.write('xrt_input_name_enum(const char *input)\n')
+    f.write('{\n')
+    for input in inputs:
+        f.write(f'\tif(strcmp("{input}", input) == 0) return {input};\n')
+    f.write(f'\treturn XRT_INPUT_GENERIC_TRACKER_POSE;\n')
+    f.write('}\n')
+
     f.write("\n// clang-format on\n")
 
     f.close()
@@ -240,13 +281,14 @@ def generate_bindings_h(file, p):
                 "_subpath(const char *str, size_t length);\n")
 
     f.write(f'''
+#define PATHS_PER_BINDING_TEMPLATE 8
 
 struct binding_template
 {{
 \tconst char *subaction_path;
 \tconst char *steamvr_path;
 \tconst char *localized_name;
-\tconst char *paths[8];
+\tconst char *paths[PATHS_PER_BINDING_TEMPLATE];
 \tenum xrt_input_name input;
 \tenum xrt_output_name output;
 }};
@@ -263,8 +305,15 @@ struct profile_template
 }};
 
 #define NUM_PROFILE_TEMPLATES {len(p.profiles)}
-extern struct profile_template profile_templates[{len(p.profiles)}];
+extern struct profile_template profile_templates[NUM_PROFILE_TEMPLATES];
+
 ''')
+
+    f.write('const char *\n')
+    f.write('xrt_input_name_string(enum xrt_input_name input);\n\n')
+
+    f.write('enum xrt_input_name\n')
+    f.write('xrt_input_name_enum(const char *input);\n\n')
 
     f.write("\n// clang-format on\n")
     f.close()

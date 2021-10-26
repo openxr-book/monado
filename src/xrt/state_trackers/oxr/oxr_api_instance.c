@@ -10,6 +10,7 @@
 #include "xrt/xrt_compiler.h"
 
 #include "util/u_debug.h"
+#include "util/u_trace_marker.h"
 
 #include "oxr_objects.h"
 #include "oxr_logger.h"
@@ -19,6 +20,11 @@
 
 #include "oxr_api_funcs.h"
 #include "oxr_api_verify.h"
+
+
+#ifdef XRT_OS_ANDROID
+#include "android/android_globals.h"
+#endif
 
 #include "openxr/openxr.h"
 #include "openxr/openxr_reflection.h"
@@ -39,12 +45,50 @@ oxr_xrEnumerateInstanceExtensionProperties(const char *layerName,
                                            uint32_t *propertyCountOutput,
                                            XrExtensionProperties *properties)
 {
+	OXR_TRACE_MARKER();
+
 	struct oxr_logger log;
 	oxr_log_init(&log, "xrEnumerateInstanceExtensionProperties");
 
 	OXR_TWO_CALL_HELPER(&log, propertyCapacityInput, propertyCountOutput, properties,
 	                    ARRAY_SIZE(extension_properties), extension_properties, XR_SUCCESS);
 }
+
+#ifdef OXR_HAVE_KHR_loader_init
+XrResult
+oxr_xrInitializeLoaderKHR(const XrLoaderInitInfoBaseHeaderKHR *loaderInitInfo)
+{
+	struct oxr_logger log;
+	oxr_log_init(&log, "oxr_xrInitializeLoaderKHR");
+
+
+	oxr_log(&log, "Loader forwarded call to xrInitializeLoaderKHR.");
+#ifdef XRT_OS_ANDROID
+	const XrLoaderInitInfoAndroidKHR *initInfoAndroid =
+	    OXR_GET_INPUT_FROM_CHAIN(loaderInitInfo, XR_TYPE_LOADER_INIT_INFO_ANDROID_KHR, XrLoaderInitInfoAndroidKHR);
+	if (initInfoAndroid == NULL) {
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
+		                 "(loaderInitInfo) "
+		                 "Did not find XrLoaderInitInfoAndroidKHR");
+	}
+	if (initInfoAndroid->applicationVM == NULL) {
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
+		                 "(initInfoAndroid->applicationVM) "
+		                 "applicationVM must be populated");
+	}
+	if (initInfoAndroid->applicationContext == NULL) {
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
+		                 "(initInfoAndroid->applicationContext) "
+		                 "applicationContext must be populated");
+	}
+	//! @todo check that applicationContext is in fact an Activity.
+	android_globals_store_vm_and_context(initInfoAndroid->applicationVM, initInfoAndroid->applicationContext);
+
+#endif // XRT_OS_ANDROID
+	return XR_SUCCESS;
+}
+#endif // OXR_HAVE_KHR_loader_init
+
 
 #ifdef XRT_OS_ANDROID
 static XrResult
@@ -61,9 +105,8 @@ oxr_check_android_extensions(struct oxr_logger *log, const XrInstanceCreateInfo 
 	if (!foundAndroidExtension) {
 		return oxr_error(log, XR_ERROR_INITIALIZATION_FAILED,
 		                 "(createInfo->enabledExtensionNames) "
-		                 "Mandatory platform-specific "
-		                 "extension"
-		                 " " XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME " not specified");
+		                 "Mandatory platform-specific extension " XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME
+		                 " not specified");
 	}
 
 	{
@@ -94,6 +137,8 @@ oxr_check_android_extensions(struct oxr_logger *log, const XrInstanceCreateInfo 
 XrResult
 oxr_xrCreateInstance(const XrInstanceCreateInfo *createInfo, XrInstance *out_instance)
 {
+	OXR_TRACE_MARKER();
+
 	XrResult ret;
 	struct oxr_logger log;
 	oxr_log_init(&log, "xrCreateInstance");
@@ -160,6 +205,8 @@ oxr_xrCreateInstance(const XrInstanceCreateInfo *createInfo, XrInstance *out_ins
 XrResult
 oxr_xrDestroyInstance(XrInstance instance)
 {
+	OXR_TRACE_MARKER();
+
 	struct oxr_instance *inst;
 	struct oxr_logger log;
 	OXR_VERIFY_INSTANCE_AND_INIT_LOG(&log, instance, inst, "xrDestroyInstance");
@@ -170,6 +217,8 @@ oxr_xrDestroyInstance(XrInstance instance)
 XrResult
 oxr_xrGetInstanceProperties(XrInstance instance, XrInstanceProperties *instanceProperties)
 {
+	OXR_TRACE_MARKER();
+
 	struct oxr_instance *inst;
 	struct oxr_logger log;
 	OXR_VERIFY_INSTANCE_AND_INIT_LOG(&log, instance, inst, "xrGetInstanceProperties");
@@ -180,6 +229,8 @@ oxr_xrGetInstanceProperties(XrInstance instance, XrInstanceProperties *instanceP
 XrResult
 oxr_xrPollEvent(XrInstance instance, XrEventDataBuffer *eventData)
 {
+	OXR_TRACE_MARKER();
+
 	struct oxr_instance *inst;
 	struct oxr_logger log;
 	OXR_VERIFY_INSTANCE_AND_INIT_LOG(&log, instance, inst, "xrPollEvent");
@@ -191,6 +242,8 @@ oxr_xrPollEvent(XrInstance instance, XrEventDataBuffer *eventData)
 XrResult
 oxr_xrResultToString(XrInstance instance, XrResult value, char buffer[XR_MAX_RESULT_STRING_SIZE])
 {
+	OXR_TRACE_MARKER();
+
 	struct oxr_instance *inst;
 	struct oxr_logger log;
 	OXR_VERIFY_INSTANCE_AND_INIT_LOG(&log, instance, inst, "xrResultToString");
@@ -211,6 +264,8 @@ oxr_xrResultToString(XrInstance instance, XrResult value, char buffer[XR_MAX_RES
 XrResult
 oxr_xrStructureTypeToString(XrInstance instance, XrStructureType value, char buffer[XR_MAX_STRUCTURE_NAME_SIZE])
 {
+	OXR_TRACE_MARKER();
+
 	struct oxr_instance *inst;
 	struct oxr_logger log;
 	OXR_VERIFY_INSTANCE_AND_INIT_LOG(&log, instance, inst, "xrStructureTypeToString");
@@ -229,6 +284,8 @@ oxr_xrStructureTypeToString(XrInstance instance, XrStructureType value, char buf
 XrResult
 oxr_xrStringToPath(XrInstance instance, const char *pathString, XrPath *out_path)
 {
+	OXR_TRACE_MARKER();
+
 	struct oxr_instance *inst;
 	struct oxr_logger log;
 	XrResult ret;
@@ -254,6 +311,8 @@ XrResult
 oxr_xrPathToString(
     XrInstance instance, XrPath path, uint32_t bufferCapacityInput, uint32_t *bufferCountOutput, char *buffer)
 {
+	OXR_TRACE_MARKER();
+
 	struct oxr_instance *inst;
 	struct oxr_logger log;
 	const char *str;
@@ -283,6 +342,8 @@ oxr_xrPathToString(
 XrResult
 oxr_xrConvertTimespecTimeToTimeKHR(XrInstance instance, const struct timespec *timespecTime, XrTime *time)
 {
+	OXR_TRACE_MARKER();
+
 	//! @todo do we need to check and see if this extension was
 	//! enabled first?
 	struct oxr_instance *inst;
@@ -297,6 +358,8 @@ oxr_xrConvertTimespecTimeToTimeKHR(XrInstance instance, const struct timespec *t
 XrResult
 oxr_xrConvertTimeToTimespecTimeKHR(XrInstance instance, XrTime time, struct timespec *timespecTime)
 {
+	OXR_TRACE_MARKER();
+
 	struct oxr_instance *inst;
 	struct oxr_logger log;
 	OXR_VERIFY_INSTANCE_AND_INIT_LOG(&log, instance, inst, "xrConvertTimeToTimespecTimeKHR");

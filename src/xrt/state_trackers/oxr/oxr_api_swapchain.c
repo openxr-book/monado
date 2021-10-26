@@ -10,6 +10,7 @@
 #include "xrt/xrt_compiler.h"
 
 #include "util/u_debug.h"
+#include "util/u_trace_marker.h"
 
 #include "oxr_objects.h"
 #include "oxr_logger.h"
@@ -30,6 +31,8 @@ oxr_xrEnumerateSwapchainFormats(XrSession session,
                                 uint32_t *formatCountOutput,
                                 int64_t *formats)
 {
+	OXR_TRACE_MARKER();
+
 	struct oxr_session *sess;
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrEnumerateSwapchainFormats");
@@ -40,6 +43,8 @@ oxr_xrEnumerateSwapchainFormats(XrSession session,
 XrResult
 oxr_xrCreateSwapchain(XrSession session, const XrSwapchainCreateInfo *createInfo, XrSwapchain *out_swapchain)
 {
+	OXR_TRACE_MARKER();
+
 	XrResult ret;
 	struct oxr_session *sess;
 	struct oxr_swapchain *sc;
@@ -67,13 +72,15 @@ oxr_xrCreateSwapchain(XrSession session, const XrSwapchainCreateInfo *createInfo
 	flags |= XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT;
 	flags |= XR_SWAPCHAIN_USAGE_SAMPLED_BIT;
 	flags |= XR_SWAPCHAIN_USAGE_MUTABLE_FORMAT_BIT;
-	if (inst->extensions.MND_swapchain_usage_input_attachment_bit) {
-		flags |= XR_SWAPCHAIN_USAGE_INPUT_ATTACHMENT_BIT_MND;
+	if (inst->extensions.MND_swapchain_usage_input_attachment_bit ||
+	    inst->extensions.KHR_swapchain_usage_input_attachment_bit) {
+		// aliased to XR_SWAPCHAIN_USAGE_INPUT_ATTACHMENT_BIT_MND
+		flags |= XR_SWAPCHAIN_USAGE_INPUT_ATTACHMENT_BIT_KHR;
 	}
 
 	if ((createInfo->usageFlags & ~flags) != 0) {
 		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
-		                 "(createInfo->usageFlags == 0x08%" PRIx64 ") contains invalid flags",
+		                 "(createInfo->usageFlags == 0x%04" PRIx64 ") contains invalid flags",
 		                 createInfo->usageFlags);
 	}
 	bool format_supported = false;
@@ -87,7 +94,7 @@ oxr_xrCreateSwapchain(XrSession session, const XrSwapchainCreateInfo *createInfo
 
 	if (!format_supported) {
 		return oxr_error(&log, XR_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED,
-		                 "(createInfo->format == 0x08%" PRIx64 ") is not supported", createInfo->format);
+		                 "(createInfo->format == 0x%04" PRIx64 ") is not supported", createInfo->format);
 	}
 
 	ret = sess->create_swapchain(&log, sess, createInfo, &sc);
@@ -103,6 +110,8 @@ oxr_xrCreateSwapchain(XrSession session, const XrSwapchainCreateInfo *createInfo
 XrResult
 oxr_xrDestroySwapchain(XrSwapchain swapchain)
 {
+	OXR_TRACE_MARKER();
+
 	struct oxr_swapchain *sc;
 	struct oxr_logger log;
 	OXR_VERIFY_SWAPCHAIN_AND_INIT_LOG(&log, swapchain, sc, "xrDestroySwapchain");
@@ -116,6 +125,8 @@ oxr_xrEnumerateSwapchainImages(XrSwapchain swapchain,
                                uint32_t *imageCountOutput,
                                XrSwapchainImageBaseHeader *images)
 {
+	OXR_TRACE_MARKER();
+
 	struct oxr_swapchain *sc;
 	struct oxr_logger log;
 	OXR_VERIFY_SWAPCHAIN_AND_INIT_LOG(&log, swapchain, sc, "xrEnumerateSwapchainImages");
@@ -137,6 +148,8 @@ oxr_xrEnumerateSwapchainImages(XrSwapchain swapchain,
 XrResult
 oxr_xrAcquireSwapchainImage(XrSwapchain swapchain, const XrSwapchainImageAcquireInfo *acquireInfo, uint32_t *index)
 {
+	OXR_TRACE_MARKER();
+
 	struct oxr_swapchain *sc;
 	struct oxr_logger log;
 	OXR_VERIFY_SWAPCHAIN_AND_INIT_LOG(&log, swapchain, sc, "xrAcquireSwapchainImage");
@@ -149,6 +162,8 @@ oxr_xrAcquireSwapchainImage(XrSwapchain swapchain, const XrSwapchainImageAcquire
 XrResult
 oxr_xrWaitSwapchainImage(XrSwapchain swapchain, const XrSwapchainImageWaitInfo *waitInfo)
 {
+	OXR_TRACE_MARKER();
+
 	struct oxr_swapchain *sc;
 	struct oxr_logger log;
 	OXR_VERIFY_SWAPCHAIN_AND_INIT_LOG(&log, swapchain, sc, "xrWaitSwapchainImage");
@@ -160,6 +175,8 @@ oxr_xrWaitSwapchainImage(XrSwapchain swapchain, const XrSwapchainImageWaitInfo *
 XrResult
 oxr_xrReleaseSwapchainImage(XrSwapchain swapchain, const XrSwapchainImageReleaseInfo *releaseInfo)
 {
+	OXR_TRACE_MARKER();
+
 	struct oxr_swapchain *sc;
 	struct oxr_logger log;
 	OXR_VERIFY_SWAPCHAIN_AND_INIT_LOG(&log, swapchain, sc, "xrReleaseSwapchainImage");

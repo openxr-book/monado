@@ -42,6 +42,8 @@ if(XRT_HAVE_SDL2)
 		st_gui
 		imgui_impl_sdl
 		${SDL2_LIBRARIES}
+		drv_qwerty
+		drv_qwerty_includes
 		)
 	target_include_directories(${RUNTIME_TARGET} PRIVATE
 		${SDL2_INCLUDE_DIRS}
@@ -97,8 +99,27 @@ set(runtime_path $<TARGET_FILE:${RUNTIME_TARGET}>)
 
 # Need this step because file(GENERATE) only evaluates generator expressions, and not what configure_file does.
 configure_file(${MANIFEST_INPUT} ${CMAKE_CURRENT_BINARY_DIR}/intermediate_manifest.json)
+
+if(CMAKE_VERSION VERSION_LESS 3.9)
+	# best guess
+	if(CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+		set(IS_MULTI_CONFIG FALSE)
+	else()
+		set(IS_MULTI_CONFIG TRUE)
+	endif()
+else()
+	# 3.9+ have a global property with the truth
+	get_property(IS_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+endif()
+
+if(IS_MULTI_CONFIG)
+	set(DEV_MANIFEST_OUTPUT "${CMAKE_BINARY_DIR}/$<CONFIG>/${RUNTIME_TARGET}-dev.json")
+else()
+	set(DEV_MANIFEST_OUTPUT "${CMAKE_BINARY_DIR}/${RUNTIME_TARGET}-dev.json")
+endif()
+
 file(GENERATE
-	OUTPUT "${CMAKE_BINARY_DIR}/${RUNTIME_TARGET}-dev.json"
+	OUTPUT "${DEV_MANIFEST_OUTPUT}"
 	INPUT ${CMAKE_CURRENT_BINARY_DIR}/intermediate_manifest.json)
 
 ###

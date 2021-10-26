@@ -17,8 +17,9 @@
 #include "os/os_threading.h"
 #include "math/m_imu_3dof.h"
 #include "util/u_logging.h"
-
 #include "util/u_hand_tracking.h"
+#include "vive/vive_config.h"
+
 
 #ifdef __cplusplus
 extern "C" {
@@ -36,16 +37,6 @@ enum watchman_gen
 	WATCHMAN_GEN_UNKNOWN
 };
 
-enum controller_variant
-{
-	CONTROLLER_VIVE_WAND,
-	CONTROLLER_INDEX_LEFT,
-	CONTROLLER_INDEX_RIGHT,
-	CONTROLLER_TRACKER_GEN1,
-	CONTROLLER_TRACKER_GEN2,
-	CONTROLLER_UNKNOWN
-};
-
 /*!
  * A Vive Controller device, representing just a single controller.
  *
@@ -58,20 +49,13 @@ struct vive_controller_device
 
 	struct os_hid_device *controller_hid;
 	struct os_thread_helper controller_thread;
+	struct os_mutex lock;
 
 	struct
 	{
 		uint64_t time_ns;
 		uint32_t last_sample_time_raw;
-		double acc_range;
-		double gyro_range;
-		struct xrt_vec3 acc_bias;
-		struct xrt_vec3 acc_scale;
-		struct xrt_vec3 gyro_bias;
-		struct xrt_vec3 gyro_scale;
-
-		//! IMU position in tracking space.
-		struct xrt_pose trackref;
+		timepoint_ns ts_received_ns;
 	} imu;
 
 	struct m_imu_3dof fusion;
@@ -113,22 +97,11 @@ struct vive_controller_device
 		uint8_t battery;
 	} state;
 
-	struct
-	{
-		uint32_t firmware_version;
-		uint8_t hardware_revision;
-		uint8_t hardware_version_micro;
-		uint8_t hardware_version_minor;
-		uint8_t hardware_version_major;
-		char mb_serial_number[32];
-		char model_number[32];
-		char device_serial_number[32];
-	} firmware;
-
 	enum watchman_gen watchman_gen;
-	enum controller_variant variant;
 
 	struct u_hand_tracking hand_tracking;
+
+	struct vive_controller_config config;
 };
 
 struct vive_controller_device *

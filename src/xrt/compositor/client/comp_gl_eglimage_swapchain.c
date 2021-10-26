@@ -1,4 +1,4 @@
-// Copyright 2019-2020, Collabora, Ltd.
+// Copyright 2019-2021, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -27,6 +27,7 @@
 #include "ogl/ogl_helpers.h"
 
 #include "client/comp_gl_client.h"
+#include "client/comp_egl_client.h"
 #include "client/comp_gl_eglimage_swapchain.h"
 
 #include <inttypes.h>
@@ -84,8 +85,8 @@ client_gl_eglimage_swapchain_destroy(struct xrt_swapchain *xsc)
 	client_gl_eglimage_swapchain_teardown_storage(sc);
 	sc->base.base.base.num_images = 0;
 
-	// Destroy the native swapchain as well.
-	xrt_swapchain_destroy((struct xrt_swapchain **)&sc->base.xscn);
+	// Drop our reference, does NULL checking.
+	xrt_swapchain_native_reference(&sc->base.xscn, NULL);
 
 	free(sc);
 }
@@ -164,6 +165,7 @@ client_gl_eglimage_swapchain_create(struct xrt_compositor *xc,
                                     struct xrt_swapchain_native *xscn,
                                     struct client_gl_swapchain **out_sc)
 {
+	struct client_egl_compositor *ceglc = client_egl_compositor(xc);
 	ll = debug_get_log_option_egl_swapchain_log();
 
 	if (xscn == NULL) {
@@ -193,14 +195,13 @@ client_gl_eglimage_swapchain_create(struct xrt_compositor *xc,
 	struct xrt_swapchain *native_xsc = &xscn->base;
 
 	struct client_gl_eglimage_swapchain *sc = U_TYPED_CALLOC(struct client_gl_eglimage_swapchain);
-	struct xrt_swapchain_gl *xscgl = &sc->base.base;
-	struct xrt_swapchain *client_xsc = &xscgl->base;
-	client_xsc->destroy = client_gl_eglimage_swapchain_destroy;
-	// Fetch the number of images from the native swapchain.
-	client_xsc->num_images = native_xsc->num_images;
+	sc->base.base.base.destroy = client_gl_eglimage_swapchain_destroy;
+	sc->base.base.base.reference.count = 1;
+	sc->base.base.base.num_images = native_xsc->num_images; // Fetch the number of images from the native swapchain.
 	sc->base.xscn = xscn;
+	sc->display = ceglc->dpy;
 
-	sc->display = eglGetCurrentDisplay();
+	struct xrt_swapchain_gl *xscgl = &sc->base.base;
 
 	glGenTextures(native_xsc->num_images, xscgl->images);
 

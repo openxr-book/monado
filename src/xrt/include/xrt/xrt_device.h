@@ -4,6 +4,7 @@
  * @file
  * @brief  Header defining an xrt HMD device.
  * @author Jakob Bornecrantz <jakob@collabora.com>
+ * @author Moses Turner <mosesturner@protonmail.com>
  * @ingroup xrt_iface
  */
 
@@ -106,9 +107,10 @@ struct xrt_hmd_parts
 	struct xrt_view views[2];
 
 	/*!
-	 * Supported blend modes, a bitfield.
+	 * Array of supported blend modes.
 	 */
-	enum xrt_blend_mode blend_mode;
+	enum xrt_blend_mode blend_modes[XRT_MAX_DEVICE_BLEND_MODES];
+	size_t num_blend_modes;
 
 	/*!
 	 * Distortion information.
@@ -125,20 +127,20 @@ struct xrt_hmd_parts
 			//! Data.
 			float *vertices;
 			//! Number of vertices.
-			size_t num_vertices;
+			uint32_t num_vertices;
 			//! Stride of vertices
-			size_t stride;
+			uint32_t stride;
 			//! 1 or 3 for (chromatic aberration).
-			size_t num_uv_channels;
+			uint32_t num_uv_channels;
 
 			//! Indices, for triangle strip.
 			int *indices;
 			//! Number of indices for the triangle strip.
-			size_t num_indices[2];
+			uint32_t num_indices[2];
 			//! Offsets for the indices.
-			size_t offset_indices[2];
+			uint32_t offset_indices[2];
 			//! Total number of indices.
-			size_t total_num_indices;
+			uint32_t total_num_indices;
 		} mesh;
 	} distortion;
 };
@@ -226,6 +228,9 @@ struct xrt_device
 	//! A string describing the device.
 	char str[XRT_DEVICE_NAME_LEN];
 
+	//! A unique identifier. Persistent across configurations, if possible.
+	char serial[XRT_DEVICE_NAME_LEN];
+
 	//! Null if this device does not interface with the users head.
 	struct xrt_hmd_parts *hmd;
 
@@ -284,8 +289,8 @@ struct xrt_device
 
 	/*!
 	 * Get relationship of hand joints to the tracking origin space as
-	 * the base space. It is the responsibility of the device driver to do
-	 * any prediction, there are helper functions available for this.
+	 * the base space. It is the responsibility of the device driver to either do prediction or return joints from a
+	 * previous time and write that time out to out_timestamp_ns.
 	 *
 	 * The timestamps are system monotonic timestamps, such as returned by
 	 * os_monotonic_get_ns().
@@ -300,12 +305,16 @@ struct xrt_device
 	 *                            wants the pose to be from.
 	 * @param[out] out_relation The relation read from the device.
 	 *
+	 * @param[out] out_timestamp_ns
+	 *
 	 * @see xrt_input_name
 	 */
+
 	void (*get_hand_tracking)(struct xrt_device *xdev,
 	                          enum xrt_input_name name,
-	                          uint64_t at_timestamp_ns,
-	                          struct xrt_hand_joint_set *out_value);
+	                          uint64_t desired_timestamp_ns,
+	                          struct xrt_hand_joint_set *out_value,
+	                          uint64_t *out_timestamp_ns);
 	/*!
 	 * Set a output value.
 	 *
@@ -336,7 +345,7 @@ struct xrt_device
 	 *                         orientation unless you have canted screens.
 	 */
 	void (*get_view_pose)(struct xrt_device *xdev,
-	                      struct xrt_vec3 *eye_relation,
+	                      const struct xrt_vec3 *eye_relation,
 	                      uint32_t view_index,
 	                      struct xrt_pose *out_pose);
 
@@ -382,9 +391,10 @@ static inline void
 xrt_device_get_hand_tracking(struct xrt_device *xdev,
                              enum xrt_input_name name,
                              uint64_t requested_timestamp_ns,
-                             struct xrt_hand_joint_set *out_value)
+                             struct xrt_hand_joint_set *out_value,
+                             uint64_t *out_timestamp_ns)
 {
-	xdev->get_hand_tracking(xdev, name, requested_timestamp_ns, out_value);
+	xdev->get_hand_tracking(xdev, name, requested_timestamp_ns, out_value, out_timestamp_ns);
 }
 
 /*!
@@ -405,11 +415,22 @@ xrt_device_set_output(struct xrt_device *xdev, enum xrt_output_name name, union 
  */
 static inline void
 xrt_device_get_view_pose(struct xrt_device *xdev,
-                         struct xrt_vec3 *eye_relation,
+                         const struct xrt_vec3 *eye_relation,
                          uint32_t view_index,
                          struct xrt_pose *out_pose)
 {
 	xdev->get_view_pose(xdev, eye_relation, view_index, out_pose);
+}
+
+/*!
+ * Helper function for @ref xrt_device::compute_distortion.
+ *
+ * @public @memberof xrt_device
+ */
+static inline void
+xrt_device_compute_distortion(struct xrt_device *xdev, int view, float u, float v, struct xrt_uv_triplet *result)
+{
+	xdev->compute_distortion(xdev, view, u, v, result);
 }
 
 /*!

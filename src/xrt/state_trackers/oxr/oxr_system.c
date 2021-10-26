@@ -15,6 +15,7 @@
 
 #include "xrt/xrt_device.h"
 #include "util/u_debug.h"
+#include "util/u_verify.h"
 
 #include "oxr_objects.h"
 #include "oxr_logger.h"
@@ -86,6 +87,8 @@ oxr_system_get_by_id(struct oxr_logger *log, struct oxr_instance *inst, XrSystem
 	return XR_SUCCESS;
 }
 
+
+
 XrResult
 oxr_system_fill_in(struct oxr_logger *log, struct oxr_instance *inst, XrSystemId systemId, struct oxr_system *sys)
 {
@@ -96,8 +99,10 @@ oxr_system_fill_in(struct oxr_logger *log, struct oxr_instance *inst, XrSystemId
 	sys->form_factor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
 	sys->view_config_type = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
 
+#ifdef XR_USE_GRAPHICS_API_VULKAN
 	sys->vulkan_enable2_instance = VK_NULL_HANDLE;
-	sys->vulkan_enable2_physical_device = VK_NULL_HANDLE;
+	sys->suggested_vulkan_physical_device = VK_NULL_HANDLE;
+#endif
 
 	// Headless.
 	if (sys->xsysc == NULL) {
@@ -151,20 +156,16 @@ oxr_system_fill_in(struct oxr_logger *log, struct oxr_instance *inst, XrSystemId
 
 	struct xrt_device *head = GET_XDEV_BY_ROLE(sys, head);
 
-	uint32_t i = 0;
-	if (head->hmd->blend_mode & XRT_BLEND_MODE_OPAQUE) {
-		sys->blend_modes[i++] = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
-	}
-	if (head->hmd->blend_mode & XRT_BLEND_MODE_ADDITIVE) {
-		sys->blend_modes[i++] = XR_ENVIRONMENT_BLEND_MODE_ADDITIVE;
-	}
-	if (head->hmd->blend_mode & XRT_BLEND_MODE_ALPHA_BLEND) {
-		sys->blend_modes[i++] = XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND;
-	}
-	sys->num_blend_modes = i;
+	assert(head->hmd->num_blend_modes <= XRT_MAX_DEVICE_BLEND_MODES);
+	assert(head->hmd->num_blend_modes != 0);
 
-	assert(i < ARRAY_SIZE(sys->blend_modes));
+	for (size_t i = 0; i < head->hmd->num_blend_modes; i++) {
+		assert(u_verify_blend_mode_valid(head->hmd->blend_modes[i]));
+		sys->blend_modes[i] = (XrEnvironmentBlendMode)head->hmd->blend_modes[i];
+	}
+	sys->num_blend_modes = (uint32_t)head->hmd->num_blend_modes;
 
+	assert(sys->num_blend_modes <= ARRAY_SIZE(sys->blend_modes));
 
 	return XR_SUCCESS;
 }
@@ -193,21 +194,27 @@ oxr_system_get_properties(struct oxr_logger *log, struct oxr_system *sys, XrSyst
 	snprintf(properties->systemName, XR_MAX_SYSTEM_NAME_SIZE, "Monado: %.*s", 247, xdev->str);
 
 	// Get from compositor.
-	struct xrt_system_compositor_info *info = &sys->xsysc->info;
+	struct xrt_system_compositor_info *info = sys->xsysc ? &sys->xsysc->info : NULL;
 
-	properties->graphicsProperties.maxLayerCount = info->max_layers;
+	if (info) {
+		properties->graphicsProperties.maxLayerCount = info->max_layers;
+	} else {
+		// probably using the headless extension, but the extension does not modify the 16 layer minimum.
+		properties->graphicsProperties.maxLayerCount = 16;
+	}
 	properties->graphicsProperties.maxSwapchainImageWidth = 1024 * 16;
 	properties->graphicsProperties.maxSwapchainImageHeight = 1024 * 16;
 	properties->trackingProperties.orientationTracking = xdev->orientation_tracking_supported;
 	properties->trackingProperties.positionTracking = xdev->position_tracking_supported;
 
-	XrSystemHandTrackingPropertiesEXT *hand_tracking_props = OXR_GET_OUTPUT_FROM_CHAIN(
-	    properties, XR_TYPE_SYSTEM_HAND_TRACKING_PROPERTIES_EXT, XrSystemHandTrackingPropertiesEXT);
+	XrSystemHandTrackingPropertiesEXT *hand_tracking_props = NULL;
+	// We should only be looking for extension structs if the extension has been enabled.
+	if (sys->inst->extensions.EXT_hand_tracking) {
+		hand_tracking_props = OXR_GET_OUTPUT_FROM_CHAIN(properties, XR_TYPE_SYSTEM_HAND_TRACKING_PROPERTIES_EXT,
+		                                                XrSystemHandTrackingPropertiesEXT);
+	}
 
 	if (hand_tracking_props) {
-		if (!sys->inst->extensions.EXT_hand_tracking) {
-			return oxr_error(log, XR_ERROR_VALIDATION_FAILURE, "XR_EXT_hand_tracking is not enabled.");
-		}
 		hand_tracking_props->supportsHandTracking = oxr_system_get_hand_tracking_support(log, sys->inst);
 	}
 

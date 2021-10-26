@@ -1,4 +1,4 @@
-// Copyright 2019-2020, Collabora, Ltd.
+// Copyright 2019-2021, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -15,6 +15,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
+
+#define MS_TO_NS(ms) (ms * 1000L * 1000L)
 
 /*!
  * Down-cast helper.
@@ -49,21 +51,29 @@ client_vk_swapchain_destroy(struct xrt_swapchain *xsc)
 {
 	struct client_vk_swapchain *sc = client_vk_swapchain(xsc);
 	struct client_vk_compositor *c = sc->c;
+	struct vk_bundle *vk = &c->vk;
 
 	for (uint32_t i = 0; i < sc->base.base.num_images; i++) {
+
+		VkResult ret = vk->vkWaitForFences(vk->device, 1, &sc->acquire_release_fence[i], true, MS_TO_NS(500));
+		if (vk_has_error(ret, "vkWaitForFences", __FILE__, __LINE__)) {
+			// don't really care, we are going to destroy anyway, just make sure it's not used anymore
+			vk->vkDeviceWaitIdle(vk->device);
+		}
+
 		if (sc->base.images[i] != VK_NULL_HANDLE) {
-			c->vk.vkDestroyImage(c->vk.device, sc->base.images[i], NULL);
+			vk->vkDestroyImage(vk->device, sc->base.images[i], NULL);
 			sc->base.images[i] = VK_NULL_HANDLE;
 		}
 
 		if (sc->mems[i] != VK_NULL_HANDLE) {
-			c->vk.vkFreeMemory(c->vk.device, sc->mems[i], NULL);
+			vk->vkFreeMemory(vk->device, sc->mems[i], NULL);
 			sc->mems[i] = VK_NULL_HANDLE;
 		}
 	}
 
-	// Destroy the native swapchain as well.
-	xrt_swapchain_destroy((struct xrt_swapchain **)&sc->xscn);
+	// Drop our reference, does NULL checking.
+	xrt_swapchain_native_reference(&sc->xscn, NULL);
 
 	free(sc);
 }
@@ -80,6 +90,14 @@ client_vk_swapchain_acquire_image(struct xrt_swapchain *xsc, uint32_t *out_index
 		return xret;
 	}
 
+	VkResult ret;
+
+	ret = vk->vkWaitForFences(vk->device, 1, &sc->acquire_release_fence[*out_index], true, MS_TO_NS(500));
+	vk_check_error("vkWaitForFences", ret, XRT_ERROR_VULKAN);
+
+	ret = vk->vkResetFences(vk->device, 1, &sc->acquire_release_fence[*out_index]);
+	vk_check_error("vkResetFences", ret, XRT_ERROR_VULKAN);
+
 	// Acquire ownership and complete layout transition
 	VkSubmitInfo submitInfo = {
 	    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
@@ -87,11 +105,12 @@ client_vk_swapchain_acquire_image(struct xrt_swapchain *xsc, uint32_t *out_index
 	    .pCommandBuffers = &sc->acquire[*out_index],
 	};
 
-	VkResult ret = vk_locked_submit(vk, vk->queue, 1, &submitInfo, VK_NULL_HANDLE);
+	ret = vk_locked_submit(vk, vk->queue, 1, &submitInfo, sc->acquire_release_fence[*out_index]);
 	if (ret != VK_SUCCESS) {
 		VK_ERROR(vk, "Could not submit to queue: %d", ret);
 		return XRT_ERROR_FAILED_TO_SUBMIT_VULKAN_COMMANDS;
 	}
+
 	return XRT_SUCCESS;
 }
 
@@ -110,6 +129,14 @@ client_vk_swapchain_release_image(struct xrt_swapchain *xsc, uint32_t index)
 	struct client_vk_swapchain *sc = client_vk_swapchain(xsc);
 	struct vk_bundle *vk = &sc->c->vk;
 
+	VkResult ret;
+
+	ret = vk->vkWaitForFences(vk->device, 1, &sc->acquire_release_fence[index], true, MS_TO_NS(500));
+	vk_check_error("vkWaitForFences", ret, XRT_ERROR_VULKAN);
+
+	vk->vkResetFences(vk->device, 1, &sc->acquire_release_fence[index]);
+	vk_check_error("vkResetFences", ret, XRT_ERROR_VULKAN);
+
 	// Release ownership and begin layout transition
 	VkSubmitInfo submitInfo = {
 	    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
@@ -117,7 +144,7 @@ client_vk_swapchain_release_image(struct xrt_swapchain *xsc, uint32_t index)
 	    .pCommandBuffers = &sc->release[index],
 	};
 
-	VkResult ret = vk_locked_submit(vk, vk->queue, 1, &submitInfo, VK_NULL_HANDLE);
+	ret = vk_locked_submit(vk, vk->queue, 1, &submitInfo, sc->acquire_release_fence[index]);
 	if (ret != VK_SUCCESS) {
 		VK_ERROR(vk, "Could not submit to queue: %d", ret);
 		return XRT_ERROR_FAILED_TO_SUBMIT_VULKAN_COMMANDS;
@@ -147,17 +174,19 @@ static void
 client_vk_compositor_destroy(struct xrt_compositor *xc)
 {
 	struct client_vk_compositor *c = client_vk_compositor(xc);
+	struct vk_bundle *vk = &c->vk;
 
-	if (c->vk.cmd_pool != VK_NULL_HANDLE) {
+	if (vk->cmd_pool != VK_NULL_HANDLE) {
 		// Make sure that any of the command buffers from this command
 		// pool are n used here, this pleases the validation layer.
-		os_mutex_lock(&c->vk.queue_mutex);
-		c->vk.vkDeviceWaitIdle(c->vk.device);
-		os_mutex_unlock(&c->vk.queue_mutex);
+		os_mutex_lock(&vk->queue_mutex);
+		vk->vkDeviceWaitIdle(vk->device);
+		os_mutex_unlock(&vk->queue_mutex);
 
-		c->vk.vkDestroyCommandPool(c->vk.device, c->vk.cmd_pool, NULL);
-		c->vk.cmd_pool = VK_NULL_HANDLE;
+		vk->vkDestroyCommandPool(vk->device, vk->cmd_pool, NULL);
+		vk->cmd_pool = VK_NULL_HANDLE;
 	}
+	vk_deinit_mutex(vk);
 
 	free(c);
 }
@@ -211,11 +240,14 @@ client_vk_compositor_discard_frame(struct xrt_compositor *xc, int64_t frame_id)
 }
 
 static xrt_result_t
-client_vk_compositor_layer_begin(struct xrt_compositor *xc, int64_t frame_id, enum xrt_blend_mode env_blend_mode)
+client_vk_compositor_layer_begin(struct xrt_compositor *xc,
+                                 int64_t frame_id,
+                                 uint64_t display_time_ns,
+                                 enum xrt_blend_mode env_blend_mode)
 {
 	struct client_vk_compositor *c = client_vk_compositor(xc);
 
-	return xrt_comp_layer_begin(&c->xcn->base, frame_id, env_blend_mode);
+	return xrt_comp_layer_begin(&c->xcn->base, frame_id, display_time_ns, env_blend_mode);
 }
 
 static xrt_result_t
@@ -356,11 +388,12 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
                            struct xrt_swapchain **out_xsc)
 {
 	struct client_vk_compositor *c = client_vk_compositor(xc);
+	struct vk_bundle *vk = &c->vk;
 	VkCommandBuffer cmd_buffer;
 	VkResult ret;
 	xrt_result_t xret;
 
-	struct xrt_swapchain_native *xscn = NULL;
+	struct xrt_swapchain_native *xscn = NULL; // Has to be NULL.
 	xret = xrt_comp_native_create_swapchain(c->xcn, info, &xscn);
 
 	if (xret != XRT_SUCCESS) {
@@ -370,7 +403,7 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 
 	struct xrt_swapchain *xsc = &xscn->base;
 
-	ret = vk_init_cmd_buffer(&c->vk, &cmd_buffer);
+	ret = vk_init_cmd_buffer(vk, &cmd_buffer);
 	if (ret != VK_SUCCESS) {
 		return XRT_ERROR_VULKAN;
 	}
@@ -388,13 +421,13 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 	sc->base.base.acquire_image = client_vk_swapchain_acquire_image;
 	sc->base.base.wait_image = client_vk_swapchain_wait_image;
 	sc->base.base.release_image = client_vk_swapchain_release_image;
-	// Fetch the number of images from the native swapchain.
-	sc->base.base.num_images = xsc->num_images;
+	sc->base.base.reference.count = 1;
+	sc->base.base.num_images = xsc->num_images; // Fetch the number of images from the native swapchain.
 	sc->c = c;
 	sc->xscn = xscn;
 
 	for (uint32_t i = 0; i < xsc->num_images; i++) {
-		ret = vk_create_image_from_native(&c->vk, info, &xscn->images[i], &sc->base.images[i], &sc->mems[i]);
+		ret = vk_create_image_from_native(vk, info, &xscn->images[i], &sc->base.images[i], &sc->mems[i]);
 
 
 		if (ret != VK_SUCCESS) {
@@ -406,11 +439,11 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 		 * not be a bug in the validation layer. That may or may not be
 		 * fixed in the future version of the validation layer.
 		 */
-		vk_set_image_layout(&c->vk, cmd_buffer, sc->base.images[i], 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+		vk_set_image_layout(vk, cmd_buffer, sc->base.images[i], 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
 		                    VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, subresource_range);
 	}
 
-	ret = vk_submit_cmd_buffer(&c->vk, cmd_buffer);
+	ret = vk_submit_cmd_buffer(vk, cmd_buffer);
 	if (ret != VK_SUCCESS) {
 		return XRT_ERROR_FAILED_TO_SUBMIT_VULKAN_COMMANDS;
 	}
@@ -418,11 +451,11 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 	// Prerecord command buffers for swapchain image ownership/layout
 	// transitions
 	for (uint32_t i = 0; i < xsc->num_images; i++) {
-		ret = vk_init_cmd_buffer(&c->vk, &sc->acquire[i]);
+		ret = vk_init_cmd_buffer(vk, &sc->acquire[i]);
 		if (ret != VK_SUCCESS) {
 			return XRT_ERROR_VULKAN;
 		}
-		ret = vk_init_cmd_buffer(&c->vk, &sc->release[i]);
+		ret = vk_init_cmd_buffer(vk, &sc->release[i]);
 		if (ret != VK_SUCCESS) {
 			return XRT_ERROR_VULKAN;
 		}
@@ -469,28 +502,34 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 		    .dstAccessMask = 0,
 		    .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 		    .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-		    .srcQueueFamilyIndex = c->vk.queue_family_index,
+		    .srcQueueFamilyIndex = vk->queue_family_index,
 		    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_EXTERNAL,
 		    .image = sc->base.images[i],
 		    .subresourceRange = subresource_range,
 		};
 
 		//! @todo less conservative pipeline stage masks based on usage
-		c->vk.vkCmdPipelineBarrier(sc->acquire[i], VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-		                           VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, NULL, 0, NULL, 1, &acquire);
-		c->vk.vkCmdPipelineBarrier(sc->release[i], VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-		                           VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, NULL, 0, NULL, 1, &release);
+		vk->vkCmdPipelineBarrier(sc->acquire[i], VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+		                         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, NULL, 0, NULL, 1, &acquire);
+		vk->vkCmdPipelineBarrier(sc->release[i], VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+		                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, NULL, 0, NULL, 1, &release);
 
-		ret = c->vk.vkEndCommandBuffer(sc->acquire[i]);
+		ret = vk->vkEndCommandBuffer(sc->acquire[i]);
 		if (ret != VK_SUCCESS) {
-			VK_ERROR((&c->vk), "vkEndCommandBuffer: %s", vk_result_string(ret));
+			VK_ERROR(vk, "vkEndCommandBuffer: %s", vk_result_string(ret));
 			return XRT_ERROR_VULKAN;
 		}
-		ret = c->vk.vkEndCommandBuffer(sc->release[i]);
+		ret = vk->vkEndCommandBuffer(sc->release[i]);
 		if (ret != VK_SUCCESS) {
-			VK_ERROR((&c->vk), "vkEndCommandBuffer: %s", vk_result_string(ret));
+			VK_ERROR(vk, "vkEndCommandBuffer: %s", vk_result_string(ret));
 			return XRT_ERROR_VULKAN;
 		}
+
+		VkFenceCreateInfo fence_create_info = {
+		    .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+		    .flags = VK_FENCE_CREATE_SIGNALED_BIT,
+		};
+		vk->vkCreateFence(vk->device, &fence_create_info, NULL, &sc->acquire_release_fence[i]);
 	}
 
 	*out_xsc = &sc->base.base;
@@ -541,6 +580,10 @@ client_vk_compositor_create(struct xrt_compositor_native *xcn,
 		goto err_free;
 	}
 
+	ret = vk_init_mutex(&c->vk);
+	if (ret != VK_SUCCESS) {
+		goto err_free;
+	}
 	return c;
 
 err_free:

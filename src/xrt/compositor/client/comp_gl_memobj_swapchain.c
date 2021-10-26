@@ -1,4 +1,4 @@
-// Copyright 2019-2020, Collabora, Ltd.
+// Copyright 2019-2021, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -55,11 +55,12 @@ client_gl_memobj_swapchain_destroy(struct xrt_swapchain *xsc)
 		sc->base.base.base.num_images = 0;
 	}
 
-	// Destroy the native swapchain as well.
-	xrt_swapchain_destroy((struct xrt_swapchain **)&sc->base.xscn);
+	// Drop our reference, does NULL checking.
+	xrt_swapchain_reference((struct xrt_swapchain **)&sc->base.xscn, NULL);
 
 	free(sc);
 }
+
 struct xrt_swapchain *
 client_gl_memobj_swapchain_create(struct xrt_compositor *xc,
                                   const struct xrt_swapchain_create_info *info,
@@ -80,22 +81,21 @@ client_gl_memobj_swapchain_create(struct xrt_compositor *xc,
 	struct xrt_swapchain *native_xsc = &xscn->base;
 
 	struct client_gl_memobj_swapchain *sc = U_TYPED_CALLOC(struct client_gl_memobj_swapchain);
-	struct xrt_swapchain_gl *xscgl = &sc->base.base;
-	struct xrt_swapchain *client_xsc = &xscgl->base;
-	client_xsc->destroy = client_gl_memobj_swapchain_destroy;
-	// Fetch the number of images from the native swapchain.
-	client_xsc->num_images = native_xsc->num_images;
+	sc->base.base.base.destroy = client_gl_memobj_swapchain_destroy;
+	sc->base.base.base.reference.count = 1;
+	sc->base.base.base.num_images = native_xsc->num_images; // Fetch the number of images from the native swapchain.
 	sc->base.xscn = xscn;
 	sc->base.tex_target = tex_target;
 
+	struct xrt_swapchain_gl *xscgl = &sc->base.base;
+
 	glGenTextures(native_xsc->num_images, xscgl->images);
-	for (uint32_t i = 0; i < native_xsc->num_images; i++) {
-		glBindTexture(tex_target, xscgl->images[i]);
-	}
 
 	glCreateMemoryObjectsEXT(native_xsc->num_images, &sc->memory[0]);
 	for (uint32_t i = 0; i < native_xsc->num_images; i++) {
-		GLint dedicated = GL_TRUE;
+		glBindTexture(tex_target, xscgl->images[i]);
+
+		GLint dedicated = xscn->images[i].use_dedicated_allocation ? GL_TRUE : GL_FALSE;
 		glMemoryObjectParameterivEXT(sc->memory[i], GL_DEDICATED_MEMORY_OBJECT_EXT, &dedicated);
 		glImportMemoryFdEXT(sc->memory[i], xscn->images[i].size, GL_HANDLE_TYPE_OPAQUE_FD_EXT,
 		                    xscn->images[i].handle);
@@ -113,7 +113,7 @@ client_gl_memobj_swapchain_create(struct xrt_compositor *xc,
 	}
 
 	*out_cglsc = &sc->base;
-	return client_xsc;
+	return &sc->base.base.base;
 #else
 
 	// silence unused function warning

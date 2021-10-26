@@ -20,11 +20,16 @@
 #include "util/u_var.h"
 #include "util/u_misc.h"
 #include "util/u_sink.h"
+#include "util/u_config_json.h"
 #include "p_prober.h"
 
 #include <stdio.h>
 #include <string.h>
 
+#ifdef XRT_BUILD_DRIVER_EUROC
+#include "util/u_debug.h"
+DEBUG_GET_ONCE_OPTION(euroc_path, "EUROC_PATH", NULL)
+#endif
 
 /*
  *
@@ -77,6 +82,12 @@ struct p_factory
 
 	//! Pre-created psvr trackers.
 	struct xrt_tracked_psvr *xtvr;
+
+	//! Have we handed out the slam tracker.
+	bool started_xts;
+
+	//! Pre-create SLAM tracker.
+	struct xrt_tracked_slam *xts;
 #endif
 
 	// Frameserver.
@@ -134,10 +145,8 @@ p_factory_ensure_frameserver(struct p_factory *fact)
 	// We have no tried the settings.
 	fact->tried_settings = true;
 
-	if (!p_json_get_tracking_settings(fact->p, &fact->settings)) {
-		U_LOG_E(
-		    "Could not setup PSVR and/or PSMV tracking, "
-		    "see above.");
+	if (!u_config_json_get_tracking_settings(&fact->p->json, &fact->settings)) {
+		U_LOG_I("PSVR and/or PSMV tracking is not set up, see above.");
 		return;
 	}
 
@@ -325,6 +334,44 @@ p_factory_create_tracked_hand(struct xrt_tracking_factory *xfact,
 #endif
 }
 
+static int
+p_factory_create_tracked_slam(struct xrt_tracking_factory *xfact,
+                              struct xrt_device *xdev,
+                              struct xrt_tracked_slam **out_xts)
+{
+#ifdef XRT_HAVE_SLAM
+	struct p_factory *fact = p_factory(xfact);
+
+	struct xrt_tracked_slam *xts = NULL;
+
+#ifdef XRT_BUILD_DRIVER_EUROC
+	if (debug_get_option_euroc_path() != NULL) {
+		// The euroc slam tracker was already created on p_tracking_init because the
+		// euroc player is not a device so it needs to be started from somewhere
+		goto end;
+	}
+#endif
+
+end:
+
+	if (!fact->started_xts) {
+		xts = fact->xts;
+	}
+
+	if (xts == NULL) {
+		return -1;
+	}
+
+	fact->started_xts = true;
+	t_slam_start(xts);
+	*out_xts = xts;
+
+	return 0;
+#else
+	return -1;
+#endif
+}
+
 /*
  *
  * "Exported" prober functions.
@@ -340,6 +387,7 @@ p_tracking_init(struct prober *p)
 	fact->base.create_tracked_psmv = p_factory_create_tracked_psmv;
 	fact->base.create_tracked_psvr = p_factory_create_tracked_psvr;
 	fact->base.create_tracked_hand = p_factory_create_tracked_hand;
+	fact->base.create_tracked_slam = p_factory_create_tracked_slam;
 	fact->origin.type = XRT_TRACKING_TYPE_RGB;
 	fact->origin.offset.orientation.y = 1.0f;
 	fact->origin.offset.position.z = -2.0f;
@@ -353,6 +401,27 @@ p_tracking_init(struct prober *p)
 
 	// Finally set us as the tracking factory.
 	p->base.tracking = &fact->base;
+
+#ifdef XRT_BUILD_DRIVER_EUROC
+	if (debug_get_option_euroc_path() != NULL) {
+		struct xrt_slam_sinks empty_sinks = {0};
+		struct xrt_slam_sinks *sinks = &empty_sinks;
+
+		// fact->xfs *will* be an euroc frame server after open, because of prober open_video_device
+		xrt_prober_open_video_device(&fact->p->base, NULL, &fact->xfctx, &fact->xfs);
+
+#ifdef XRT_HAVE_SLAM
+		int ret = t_slam_create(&fact->xfctx, &fact->xts, &sinks);
+		if (ret != 0) {
+			U_LOG_W("Unable to initialize SLAM tracking, the Euroc driver will not be tracked");
+		}
+#else
+		U_LOG_W("SLAM tracking support is disabled, the Euroc driver will not be tracked");
+#endif
+
+		xrt_fs_slam_stream_start(fact->xfs, sinks);
+	}
+#endif
 
 	return 0;
 }

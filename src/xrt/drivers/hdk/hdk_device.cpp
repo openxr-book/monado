@@ -99,6 +99,9 @@ hdk_device_destroy(struct xrt_device *xdev)
 
 	os_thread_helper_destroy(&hd->imu_thread);
 
+	// Now that the thread is not running we can destroy the lock.
+	os_mutex_destroy(&hd->lock);
+
 	if (hd->dev != NULL) {
 		os_hid_destroy(hd->dev);
 		hd->dev = NULL;
@@ -204,9 +207,12 @@ hdk_device_update(struct hdk_device *hd)
 	math_quat_rotate(&ang_vel_quat, &rot_90_about_x, &ang_vel_quat);
 	math_quat_rotate(&negative_90_about_x, &ang_vel_quat, &ang_vel_quat);
 
+	os_mutex_lock(&hd->lock);
 	hd->ang_vel_quat = ang_vel_quat;
 
 	hd->quat_valid = true;
+	os_mutex_unlock(&hd->lock);
+
 	return 1;
 }
 
@@ -228,13 +234,13 @@ hdk_device_get_tracked_pose(struct xrt_device *xdev,
 	// Adjusting for latency - 14ms, found empirically.
 	now -= 14000000;
 
+	os_mutex_lock(&hd->lock);
 	if (!hd->quat_valid) {
 		out_relation->relation_flags = XRT_SPACE_RELATION_BITMASK_NONE;
 		HDK_TRACE(hd, "GET_TRACKED_POSE: No pose");
+		os_mutex_unlock(&hd->lock);
 		return;
 	}
-
-	os_thread_helper_lock(&hd->imu_thread);
 
 	out_relation->pose.orientation = hd->quat;
 
@@ -242,11 +248,11 @@ hdk_device_get_tracked_pose(struct xrt_device *xdev,
 	out_relation->angular_velocity.y = hd->ang_vel_quat.y;
 	out_relation->angular_velocity.z = hd->ang_vel_quat.z;
 
+	os_mutex_unlock(&hd->lock);
+
 	out_relation->relation_flags = xrt_space_relation_flags(XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
 	                                                        XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT |
 	                                                        XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
-
-	os_thread_helper_unlock(&hd->imu_thread);
 
 	HDK_TRACE(hd, "GET_TRACKED_POSE (%f, %f, %f, %f) ANG_VEL (%f, %f, %f)", hd->quat.x, hd->quat.y, hd->quat.z,
 	          hd->quat.w, hd->ang_vel_quat.x, hd->ang_vel_quat.y, hd->ang_vel_quat.z);
@@ -254,29 +260,12 @@ hdk_device_get_tracked_pose(struct xrt_device *xdev,
 
 static void
 hdk_device_get_view_pose(struct xrt_device *xdev,
-                         struct xrt_vec3 *eye_relation,
+                         const struct xrt_vec3 *eye_relation,
                          uint32_t view_index,
                          struct xrt_pose *out_pose)
 {
-	struct xrt_pose pose = {{0.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 0.0f}};
-	bool adjust = view_index == 0;
-
-	pose.position.x = eye_relation->x / 2.0f;
-	pose.position.y = eye_relation->y / 2.0f;
-	pose.position.z = eye_relation->z / 2.0f;
-
-	// Adjust for left/right while also making sure there aren't any -0.f.
-	if (pose.position.x > 0.0f && adjust) {
-		pose.position.x = -pose.position.x;
-	}
-	if (pose.position.y > 0.0f && adjust) {
-		pose.position.y = -pose.position.y;
-	}
-	if (pose.position.z > 0.0f && adjust) {
-		pose.position.z = -pose.position.z;
-	}
-
-	*out_pose = pose;
+	(void)xdev;
+	u_device_get_view_pose(eye_relation, view_index, out_pose);
 }
 
 static void *
@@ -315,7 +304,10 @@ hdk_device_create(struct os_hid_device *dev, enum HDK_VARIANT variant)
 	    (enum u_device_alloc_flags)(U_DEVICE_ALLOC_HMD | U_DEVICE_ALLOC_TRACKING_NONE);
 	struct hdk_device *hd = U_DEVICE_ALLOCATE(struct hdk_device, flags, 1, 0);
 
-	hd->base.hmd->blend_mode = XRT_BLEND_MODE_OPAQUE;
+	size_t idx = 0;
+	hd->base.hmd->blend_modes[idx++] = XRT_BLEND_MODE_OPAQUE;
+	hd->base.hmd->num_blend_modes = idx;
+
 	hd->base.update_inputs = hdk_device_update_inputs;
 	hd->base.get_tracked_pose = hdk_device_get_tracked_pose;
 	hd->base.get_view_pose = hdk_device_get_view_pose;
@@ -326,6 +318,7 @@ hdk_device_create(struct os_hid_device *dev, enum HDK_VARIANT variant)
 	hd->ll = debug_get_log_option_hdk_log();
 
 	snprintf(hd->base.str, XRT_DEVICE_NAME_LEN, "OSVR HDK-family Device");
+	snprintf(hd->base.serial, XRT_DEVICE_NAME_LEN, "OSVR HDK-family Device");
 
 	if (variant == HDK_UNKNOWN) {
 		HDK_ERROR(hd, "Don't know which HDK variant this is.");
@@ -486,7 +479,15 @@ hdk_device_create(struct os_hid_device *dev, enum HDK_VARIANT variant)
 	// }
 
 	if (hd->dev) {
-		int ret = os_thread_helper_start(&hd->imu_thread, hdk_device_run_thread, hd);
+		// Mutex before thread.
+		int ret = os_mutex_init(&hd->lock);
+		if (ret != 0) {
+			HDK_ERROR(hd, "Failed to init mutex!");
+			hdk_device_destroy(&hd->base);
+			return NULL;
+		}
+
+		ret = os_thread_helper_start(&hd->imu_thread, hdk_device_run_thread, hd);
 		if (ret != 0) {
 			HDK_ERROR(hd, "Failed to start mainboard thread!");
 			hdk_device_destroy((struct xrt_device *)hd);

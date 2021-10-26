@@ -13,6 +13,7 @@
 #include "util/u_sink.h"
 #include "util/u_file.h"
 #include "util/u_json.h"
+#include "util/u_config_json.h"
 
 #ifdef XRT_HAVE_OPENCV
 #include "tracking/t_tracking.h"
@@ -102,31 +103,10 @@ save_calibration(struct calibration_scene *cs)
 	 * Camera config file.
 	 *
 	 */
-
-	cJSON *root = cJSON_CreateObject();
-	cJSON *t = cJSON_AddObjectToObject(root, "tracking");
-	cJSON_AddNumberToObject(t, "version", 0);
-	cJSON_AddStringToObject(t, "camera_name", cs->settings->camera_name);
-	cJSON_AddNumberToObject(t, "camera_mode", cs->settings->camera_mode);
-	switch (cs->settings->camera_type) {
-	case XRT_SETTINGS_CAMERA_TYPE_REGULAR_MONO: cJSON_AddStringToObject(t, "camera_type", "regular_mono"); break;
-	case XRT_SETTINGS_CAMERA_TYPE_REGULAR_SBS: cJSON_AddStringToObject(t, "camera_type", "regular_sbs"); break;
-	case XRT_SETTINGS_CAMERA_TYPE_PS4: cJSON_AddStringToObject(t, "camera_type", "ps4"); break;
-	case XRT_SETTINGS_CAMERA_TYPE_LEAP_MOTION: cJSON_AddStringToObject(t, "camera_type", "leap_motion"); break;
-	}
-	cJSON_AddStringToObject(t, "calibration_path", cs->settings->calibration_path);
-
-	char *str = cJSON_Print(root);
-	U_LOG_D("%s", str);
-	cJSON_Delete(root);
-
-	FILE *config_file = u_file_open_file_in_config_dir("config_v0.json", "w");
-	fprintf(config_file, "%s\n", str);
-	fflush(config_file);
-	fclose(config_file);
-	config_file = NULL;
-	free(str);
-
+	struct u_config_json json;
+	u_config_json_open_or_create_main_file(&json);
+	u_config_json_save_calibration(&json, cs->settings);
+	u_config_json_close(&json);
 
 	/*
 	 *
@@ -293,7 +273,7 @@ scene_render_select(struct gui_scene *scene, struct gui_program *p)
 	igInputInt("Collect in groups of #", &cs->params.num_collect_restart, 1, 5, 0);
 
 	igSeparator();
-	igComboStr("Board type", (int *)&cs->params.pattern, "Checkers\0Circles\0Asymetric Circles\0\0", 3);
+	igComboStr("Board type", (int *)&cs->params.pattern, "Checkers\0Corners SB\0Circles\0Asymetric Circles\0\0", 3);
 	switch (cs->params.pattern) {
 	case T_BOARD_CHECKERS:
 		igInputInt("Checkerboard Rows", &cs->params.checkers.rows, 1, 5, 0);
@@ -301,6 +281,13 @@ scene_render_select(struct gui_scene *scene, struct gui_program *p)
 		igInputFloat("Checker Size (m)", &cs->params.checkers.size_meters, 0.0005, 0.001, NULL, 0);
 		igCheckbox("Subpixel", &cs->params.checkers.subpixel_enable);
 		igInputInt("Subpixel Search Size", &cs->params.checkers.subpixel_size, 1, 5, 0);
+		break;
+	case T_BOARD_SB_CHECKERS:
+		igInputInt("Internal Corner Rows", &cs->params.sb_checkers.rows, 1, 5, 0);
+		igInputInt("Internal Corner Columns", &cs->params.sb_checkers.cols, 1, 5, 0);
+		igInputFloat("Corner Spacing (m)", &cs->params.sb_checkers.size_meters, 0.0005, 0.001, NULL, 0);
+		igCheckbox("Marker", &cs->params.sb_checkers.marker);
+		igCheckbox("Normalize image", &cs->params.sb_checkers.normalize_image);
 		break;
 	case T_BOARD_CIRCLES:
 		igInputInt("Circle Rows", &cs->params.circles.rows, 1, 5, 0);

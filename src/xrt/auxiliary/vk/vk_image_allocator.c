@@ -155,8 +155,12 @@ create_image(struct vk_bundle *vk, const struct xrt_swapchain_create_info *info,
 		.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO_KHR,
 #if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER)
 		.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID,
-#else
+#elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_WIN32_HANDLE)
+		.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT_KHR,
+#elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
 		.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT_KHR,
+#else
+#error "need port"
 #endif
 	};
 
@@ -200,6 +204,38 @@ create_image(struct vk_bundle *vk, const struct xrt_swapchain_create_info *info,
 		return ret;
 	}
 
+	VkImageMemoryRequirementsInfo2 memory_requirements_info = {
+	    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2,
+	    .image = image,
+	};
+
+	VkMemoryDedicatedRequirements memory_dedicated_requirements = {
+	    .sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS,
+	};
+	VkMemoryRequirements2 memory_requirements = {
+	    .sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2,
+	    .pNext = &memory_dedicated_requirements,
+	};
+	vk->vkGetImageMemoryRequirements2(vk->device, &memory_requirements_info, &memory_requirements);
+
+	/* on tegra we must not use dedicated allocation when it is only preferred to avoid black textures and driver
+	 * errors when blitting from opengl interop textures.
+	 *
+	 * on desktop nvidia and everywhere else we must use dedicated allocation when it is preferred to avoid fences
+	 * timing out and driver errors "Graphics Exception on GPC 0: 3D-C MEMLAYOUT Violation."
+	 */
+	VkBool32 use_dedicated_allocation;
+	if (vk->is_tegra) {
+		use_dedicated_allocation = memory_dedicated_requirements.requiresDedicatedAllocation != VK_FALSE;
+	} else {
+		use_dedicated_allocation = (memory_dedicated_requirements.requiresDedicatedAllocation != VK_FALSE) ||
+		                           (memory_dedicated_requirements.prefersDedicatedAllocation != VK_FALSE);
+	}
+
+	U_LOG_D("create_image: Use dedicated allocation: %d (preferred: %d, required: %d)", use_dedicated_allocation,
+	        memory_dedicated_requirements.prefersDedicatedAllocation,
+	        memory_dedicated_requirements.requiresDedicatedAllocation);
+
 	/*
 	 * Create and bind the memory.
 	 */
@@ -214,7 +250,7 @@ create_image(struct vk_bundle *vk, const struct xrt_swapchain_create_info *info,
 
 	VkExportMemoryAllocateInfo export_alloc_info = {
 	    .sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO_KHR,
-	    .pNext = &dedicated_memory_info,
+	    .pNext = use_dedicated_allocation ? &dedicated_memory_info : NULL,
 	    .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT_KHR,
 	};
 
@@ -222,7 +258,7 @@ create_image(struct vk_bundle *vk, const struct xrt_swapchain_create_info *info,
 
 	VkExportMemoryAllocateInfo export_alloc_info = {
 	    .sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO_KHR,
-	    .pNext = &dedicated_memory_info,
+	    .pNext = use_dedicated_allocation ? &dedicated_memory_info : NULL,
 	    .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID,
 	};
 
@@ -230,8 +266,8 @@ create_image(struct vk_bundle *vk, const struct xrt_swapchain_create_info *info,
 
 	VkExportMemoryAllocateInfo export_alloc_info = {
 	    .sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO_KHR,
-	    .pNext = &dedicated_memory_info,
-	    .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT,
+	    .pNext = use_dedicated_allocation ? &dedicated_memory_info : NULL,
+	    .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT_KHR,
 	};
 
 #else
@@ -248,6 +284,7 @@ create_image(struct vk_bundle *vk, const struct xrt_swapchain_create_info *info,
 	out_image->handle = image;
 	out_image->memory = device_memory;
 	out_image->size = size;
+	out_image->use_dedicated_allocation = use_dedicated_allocation;
 
 	return ret;
 }

@@ -1,4 +1,4 @@
-# Copyright 2019-2020, Collabora, Ltd.
+# Copyright 2019-2021, Collabora, Ltd.
 # SPDX-License-Identifier: BSL-1.0
 
 subdir('shaders')
@@ -22,13 +22,19 @@ compositor_srcs = [
 	'main/comp_settings.h',
 	'main/comp_shaders.c',
 	'main/comp_swapchain.c',
+	'main/comp_sync.c',
 	'main/comp_target.h',
 	'main/comp_target_swapchain.c',
 	'main/comp_target_swapchain.h',
 	'main/comp_window.h',
 	'main/comp_layer_renderer.c',
 	'main/comp_layer.c',
+	'multi/comp_multi_compositor.c',
+	'multi/comp_multi_interface.h',
+	'multi/comp_multi_private.h',
+	'multi/comp_multi_system.c',
 	'render/comp_buffer.c',
+	'render/comp_compute.c',
 	'render/comp_render.h',
 	'render/comp_rendering.c',
 	'render/comp_resources.c',
@@ -36,20 +42,23 @@ compositor_srcs = [
 
 compile_args = []
 
-if build_vk_khr_display
-	compositor_srcs += ['main/comp_window_vk_display.c']
-endif
-
 if build_xcb
 	compositor_srcs += ['main/comp_window_xcb.c']
 	compositor_deps += [xcb]
 endif
 
+if build_vk_khr_display
+	compositor_srcs += ['main/comp_window_vk_display.c']
+endif
+
 if build_xcb_xrandr_direct
-	compositor_srcs += ['main/comp_window_direct.c',
-	                    'main/comp_window_direct_randr.c',
+	compositor_srcs += ['main/comp_window_direct_randr.c',
 	                    'main/comp_window_direct_nvidia.c']
 	compositor_deps += [xcb_randr, x11_xcb]
+endif
+
+if build_vk_khr_display or build_xcb_xrandr_direct
+	compositor_srcs += ['main/comp_window_direct.c']
 endif
 
 if build_opengl or build_opengles
@@ -93,7 +102,8 @@ endif
 
 if build_egl
 	compositor_srcs += [
-		'client/comp_egl_glue.c',
+		'client/comp_egl_client.c',
+		'client/comp_egl_client.h',
 	]
 	compositor_deps += [egl]
 endif
@@ -104,20 +114,27 @@ if build_wayland
 	wl_protocol_dir = wayland_protos.get_pkgconfig_variable('pkgdatadir')
 
 	protocols = [
-		[wl_protocol_dir, 'stable/xdg-shell/xdg-shell.xml'],
+		wl_protocol_dir / 'stable/xdg-shell/xdg-shell.xml',
 	]
 
-	foreach p : protocols
-		xml = join_paths(p)
+	if build_wayland_direct
+		protocols += wl_protocol_dir / 'staging/drm-lease/drm-lease-v1.xml'
+		compositor_srcs += 'main/comp_window_direct_wayland.c'
+		compositor_deps += drm
+	endif
+
+	compositor_srcs += 'main/comp_window_wayland.c'
+
+	foreach path : protocols
 		wl_protos_src += custom_target(
-			xml.underscorify() + '_c',
-			input: xml,
+			path.underscorify() + '_c',
+			input: path,
 			output: '@BASENAME@-protocol.c',
 			command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'],
 		)
 		wl_protos_headers += custom_target(
-			xml.underscorify() + '_client_h',
-			input: xml,
+			path.underscorify() + '_client_h',
+			input: path,
 			output: '@BASENAME@-client-protocol.h',
 			command: [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@'],
 		)
@@ -134,8 +151,8 @@ if build_wayland
 		sources: wl_protos_headers,
 	)
 
-	compositor_srcs += ['main/comp_window_wayland.c']
 	compositor_deps += [wayland, wl_protos]
+
 endif
 
 lib_comp = static_library(

@@ -1,4 +1,4 @@
-// Copyright 2019, Collabora, Ltd.
+// Copyright 2019-2021, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -11,10 +11,12 @@
 #include "os/os_time.h"
 
 #include "util/u_var.h"
+#include "util/u_sink.h"
 #include "util/u_misc.h"
 #include "util/u_debug.h"
 #include "util/u_format.h"
 #include "util/u_logging.h"
+#include "util/u_trace_marker.h"
 
 #include "v4l2_interface.h"
 
@@ -68,7 +70,7 @@
 DEBUG_GET_ONCE_LOG_OPTION(v4l2_log, "V4L2_LOG", U_LOGGING_WARN)
 DEBUG_GET_ONCE_NUM_OPTION(v4l2_exposure_absolute, "V4L2_EXPOSURE_ABSOLUTE", 10)
 
-#define NUM_V4L2_BUFFERS 5
+#define NUM_V4L2_BUFFERS 32
 
 
 /*
@@ -123,6 +125,8 @@ struct v4l2_fs
 
 	struct xrt_frame_node node;
 
+	struct u_sink_debug usd;
+
 	int fd;
 
 	struct
@@ -141,6 +145,7 @@ struct v4l2_fs
 	} quirks;
 
 	struct v4l2_frame frames[NUM_V4L2_BUFFERS];
+	uint32_t used_frames;
 
 	struct
 	{
@@ -167,7 +172,7 @@ struct v4l2_fs
  * Streaming thread entrypoint
  */
 static void *
-v4l2_fs_stream_run(void *ptr);
+v4l2_fs_mainloop(void *ptr);
 
 /*!
  * Cast to derived type.
@@ -206,6 +211,8 @@ v4l2_free_frame(struct xrt_frame *xf)
 {
 	struct v4l2_frame *vf = (struct v4l2_frame *)xf;
 	struct v4l2_fs *vid = (struct v4l2_fs *)xf->owner;
+
+	vid->used_frames--;
 
 	if (!vid->is_running) {
 		return;
@@ -658,7 +665,7 @@ v4l2_fs_stream_start(struct xrt_fs *xfs,
 	vid->sink = xs;
 	vid->is_running = true;
 	vid->capture_type = capture_type;
-	if (pthread_create(&vid->stream_thread, NULL, v4l2_fs_stream_run, xfs)) {
+	if (pthread_create(&vid->stream_thread, NULL, v4l2_fs_mainloop, xfs)) {
 		vid->is_running = false;
 		V4L2_ERROR(vid, "error: Could not create thread");
 		return false;
@@ -701,6 +708,7 @@ v4l2_fs_destroy(struct v4l2_fs *vid)
 
 	// Stop the variable tracking.
 	u_var_remove_root(vid);
+	u_sink_debug_destroy(&vid->usd);
 
 	if (vid->descriptors != NULL) {
 		free(vid->descriptors);
@@ -781,14 +789,14 @@ v4l2_fs_create(struct xrt_frame_context *xfctx,
 	xrt_frame_context_add(xfctx, &vid->node);
 
 	// Start the variable tracking after we know what device we have.
-	// clang-format off
+	u_sink_debug_init(&vid->usd);
 	u_var_add_root(vid, "V4L2 Frameserver", true);
 	u_var_add_ro_text(vid, vid->base.name, "Card");
 	u_var_add_ro_u32(vid, &vid->ll, "Log Level");
 	for (size_t i = 0; i < vid->num_states; i++) {
 		u_var_add_i32(vid, &vid->states[i].want[0].value, vid->states[i].name);
 	}
-	// clang-format on
+	u_var_add_sink_debug(vid, &vid->usd, "Output");
 
 	v4l2_list_modes(vid);
 
@@ -796,8 +804,10 @@ v4l2_fs_create(struct xrt_frame_context *xfctx,
 }
 
 void *
-v4l2_fs_stream_run(void *ptr)
+v4l2_fs_mainloop(void *ptr)
 {
+	SINK_TRACE_MARKER();
+
 	struct xrt_fs *xfs = (struct xrt_fs *)ptr;
 	struct v4l2_fs *vid = v4l2_fs(xfs);
 
@@ -891,6 +901,10 @@ v4l2_fs_stream_run(void *ptr)
 	v_buf.memory = v_bufrequest.memory;
 
 	while (vid->is_running) {
+		if (vid->used_frames == NUM_V4L2_BUFFERS) {
+			V4L2_ERROR(vid, "No frames left");
+		}
+
 		if (ioctl(vid->fd, VIDIOC_DQBUF, &v_buf) < 0) {
 			V4L2_ERROR(vid, "error: Dequeue failed!");
 			vid->is_running = false;
@@ -899,7 +913,10 @@ v4l2_fs_stream_run(void *ptr)
 
 		v4l2_update_controls(vid);
 
-		V4L2_TRACE(vid, "Got frame #%u, index %i", v_buf.sequence, v_buf.index);
+		SINK_TRACE_IDENT(v4l2_fs_frame);
+
+		V4L2_TRACE(vid, "Got frame #%u, index %i. Used frames are %i", v_buf.sequence, v_buf.index,
+		           vid->used_frames);
 
 		struct v4l2_frame *vf = &vid->frames[v_buf.index];
 		struct xrt_frame *xf = NULL;
@@ -924,6 +941,11 @@ v4l2_fs_stream_run(void *ptr)
 		}
 
 		vid->sink->push_frame(vid->sink, xf);
+
+		// Checks if active.
+		u_sink_debug_push_frame(&vid->usd, xf);
+
+		vid->used_frames++;
 
 		// The frame is requeued as soon as the refcount reaches zero,
 		// this can be done safely from another thread.

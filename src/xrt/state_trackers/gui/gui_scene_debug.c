@@ -30,10 +30,18 @@
 
 #include "gui_common.h"
 #include "gui_imgui.h"
+#include "gui_window_record.h"
 
 #include "imgui_monado/cimgui_monado.h"
 
 #include <float.h>
+
+struct debug_record
+{
+	void *ptr;
+
+	struct gui_record_window rw;
+};
 
 /*!
  * A GUI scene showing the variable tracking provided by @ref util/u_var.h
@@ -43,6 +51,15 @@ struct debug_scene
 {
 	struct gui_scene base;
 	struct xrt_frame_context *xfctx;
+
+	struct debug_record recs[32];
+	uint32_t num_recrs;
+};
+
+struct priv_tuple
+{
+	struct gui_program *p;
+	struct debug_scene *ds;
 };
 
 
@@ -97,6 +114,7 @@ handle_draggable_quat(const char *name, struct xrt_quat *q)
 struct draw_state
 {
 	struct gui_program *p;
+	struct debug_scene *ds;
 	bool hidden;
 };
 
@@ -130,14 +148,16 @@ on_ff_vec3_var(struct u_var_info *info, struct gui_program *p)
 
 
 	struct xrt_vec3 value = {0};
+
 	uint64_t timestamp;
 
 	m_ff_vec3_f32_get(ff, 0, &value, &timestamp);
+	float value_arr[3] = {value.x, value.y, value.z};
 
 	snprintf(tmp, sizeof(tmp), "%s.toggle", name);
 	igToggleButton(tmp, &info->gui.graphed);
 	igSameLine(0, 0);
-	igInputFloat3(name, &value.x, "%+f", ImGuiInputTextFlags_ReadOnly);
+	igInputFloat3(name, value_arr, "%+f", ImGuiInputTextFlags_ReadOnly);
 
 	if (!info->gui.graphed) {
 		return;
@@ -170,16 +190,12 @@ on_ff_vec3_var(struct u_var_info *info, struct gui_program *p)
 }
 
 static void
-on_sink_var(const char *name, void *ptr, struct gui_program *p)
+on_sink_debug_var(const char *name, void *ptr, struct gui_program *p, struct debug_scene *ds)
 {
-	for (size_t i = 0; i < ARRAY_SIZE(p->texs); i++) {
-		struct gui_ogl_texture *tex = p->texs[i];
+	for (size_t i = 0; i < ARRAY_SIZE(ds->recs); i++) {
+		struct debug_record *dr = &ds->recs[i];
 
-		if (tex == NULL) {
-			continue;
-		}
-
-		if ((ptrdiff_t)tex->ptr != (ptrdiff_t)ptr) {
+		if ((ptrdiff_t)dr->ptr != (ptrdiff_t)ptr) {
 			continue;
 		}
 
@@ -187,22 +203,38 @@ on_sink_var(const char *name, void *ptr, struct gui_program *p)
 			continue;
 		}
 
-		gui_ogl_sink_update(tex);
-
-		igText("Sequence %u", (uint32_t)tex->seq);
-		char temp[512];
-		snprintf(temp, 512, "Half (%s)", tex->name);
-		igCheckbox(temp, &tex->half);
-		int w = tex->w / (tex->half ? 2 : 1);
-		int h = tex->h / (tex->half ? 2 : 1);
-
-		ImVec2 size = {(float)w, (float)h};
-		ImVec2 uv0 = {0, 0};
-		ImVec2 uv1 = {1, 1};
-		ImVec4 white = {1, 1, 1, 1};
-		ImTextureID id = (ImTextureID)(intptr_t)tex->id;
-		igImage(id, size, uv0, uv1, white, white);
+		gui_window_record_render(&dr->rw, p);
 	}
+}
+
+static void
+on_button_var(const char *name, void *ptr)
+{
+	struct u_var_button *btn = (struct u_var_button *)ptr;
+	ImVec2 dims = {btn->width, btn->height};
+	const char *label = strlen(btn->label) == 0 ? name : btn->label;
+	bool disabled = btn->disabled;
+
+	if (disabled) {
+		igPushStyleVarFloat(ImGuiStyleVar_Alpha, 0.6f);
+		igPushItemFlag(ImGuiItemFlags_Disabled, true);
+	}
+
+	if (igButton(label, dims)) {
+		btn->cb(btn->ptr);
+	}
+
+	if (disabled) {
+		igPopItemFlag();
+		igPopStyleVar(1);
+	}
+}
+
+static void
+on_draggable_f32_var(const char *name, void *ptr)
+{
+	struct u_var_draggable_f32 *d = (struct u_var_draggable_f32 *)ptr;
+	igDragFloat(name, &d->val, d->step, d->min, d->max, "%+f", ImGuiSliderFlags_None);
 }
 
 static void
@@ -259,9 +291,11 @@ on_elem(struct u_var_info *info, void *priv)
 		break;
 	}
 	case U_VAR_KIND_U8: igDragScalar(name, ImGuiDataType_U8, ptr, drag_speed, NULL, NULL, NULL, power); break;
+	case U_VAR_KIND_U64: igDragScalar(name, ImGuiDataType_U64, ptr, drag_speed, NULL, NULL, NULL, power); break;
 	case U_VAR_KIND_I32: igInputInt(name, (int *)ptr, 1, 10, i_flags); break;
 	case U_VAR_KIND_VEC3_I32: igInputInt3(name, (int *)ptr, i_flags); break;
 	case U_VAR_KIND_F32: igInputFloat(name, (float *)ptr, 1, 10, "%+f", i_flags); break;
+	case U_VAR_KIND_F64: igInputDouble(name, (double *)ptr, 0.1, 1, "%+f", i_flags); break;
 	case U_VAR_KIND_F32_ARR: {
 		struct u_var_f32_arr *f32_arr = ptr;
 		int index = *f32_arr->index_ptr;
@@ -330,7 +364,9 @@ on_elem(struct u_var_info *info, void *priv)
 		state->hidden = !igCollapsingHeaderBoolPtr(name, NULL, 0);
 		break;
 	}
-	case U_VAR_KIND_SINK: on_sink_var(name, ptr, state->p); break;
+	case U_VAR_KIND_SINK_DEBUG: on_sink_debug_var(name, ptr, state->p, state->ds); break;
+	case U_VAR_KIND_DRAGGABLE_F32: on_draggable_f32_var(name, ptr); break;
+	case U_VAR_KIND_BUTTON: on_button_var(name, ptr); break;
 	default: igLabelText(name, "Unknown tag '%i'", kind); break;
 	}
 }
@@ -342,29 +378,6 @@ on_root_exit(const char *name, void *priv)
 	state->hidden = false;
 
 	igEnd();
-}
-
-static void
-scene_render(struct gui_scene *scene, struct gui_program *p)
-{
-	struct debug_scene *ds = (struct debug_scene *)scene;
-	(void)ds;
-	struct draw_state state = {p, false};
-
-	u_var_visit(on_root_enter, on_root_exit, on_elem, &state);
-}
-
-static void
-scene_destroy(struct gui_scene *scene, struct gui_program *p)
-{
-	struct debug_scene *ds = (struct debug_scene *)scene;
-
-	if (ds->xfctx != NULL) {
-		xrt_frame_context_destroy_nodes(ds->xfctx);
-		ds->xfctx = NULL;
-	}
-
-	free(ds);
 }
 
 
@@ -379,14 +392,13 @@ on_root_enter_sink(const char *name, void *priv)
 {}
 
 static void
-on_elem_sink(struct u_var_info *info, void *priv)
+on_elem_sink_debug_add(struct u_var_info *info, void *priv)
 {
-	const char *name = info->name;
 	void *ptr = info->ptr;
 	enum u_var_kind kind = info->kind;
-	struct gui_program *p = (struct gui_program *)priv;
+	struct gui_program *p = ((struct priv_tuple *)priv)->p;
 
-	if (kind != U_VAR_KIND_SINK) {
+	if (kind != U_VAR_KIND_SINK_DEBUG) {
 		return;
 	}
 
@@ -394,25 +406,66 @@ on_elem_sink(struct u_var_info *info, void *priv)
 		return;
 	}
 
-	struct xrt_frame_context *xfctx = p->xp->tracking->xfctx;
-	struct xrt_frame_sink **xsink_ptr = (struct xrt_frame_sink **)ptr;
-	struct xrt_frame_sink *split = NULL;
+	struct u_sink_debug *usd = (struct u_sink_debug *)ptr;
+	struct debug_scene *ds = ((struct priv_tuple *)priv)->ds;
+	struct debug_record *dr = &ds->recs[ds->num_recrs++];
 
-	p->texs[p->num_texs] = gui_ogl_sink_create(name, xfctx, &split);
-	p->texs[p->num_texs++]->ptr = ptr;
+	dr->ptr = ptr;
 
-	u_sink_create_to_r8g8b8_or_l8(xfctx, split, &split);
+	gui_window_record_init(&dr->rw);
+	u_sink_debug_set_sink(usd, &dr->rw.sink);
+}
 
-	if (*xsink_ptr != NULL) {
-		u_sink_split_create(xfctx, split, *xsink_ptr, xsink_ptr);
-	} else {
-		*xsink_ptr = split;
+static void
+on_elem_sink_debug_remove(struct u_var_info *info, void *priv)
+{
+	void *ptr = info->ptr;
+	enum u_var_kind kind = info->kind;
+
+	if (kind != U_VAR_KIND_SINK_DEBUG) {
+		return;
 	}
+
+	struct u_sink_debug *usd = (struct u_sink_debug *)ptr;
+	u_sink_debug_set_sink(usd, NULL);
 }
 
 static void
 on_root_exit_sink(const char *name, void *priv)
 {}
+
+
+/*
+ *
+ * Scene functions.
+ *
+ */
+
+static void
+scene_render(struct gui_scene *scene, struct gui_program *p)
+{
+	struct debug_scene *ds = (struct debug_scene *)scene;
+	struct draw_state state = {p, ds, false};
+
+	u_var_visit(on_root_enter, on_root_exit, on_elem, &state);
+}
+
+static void
+scene_destroy(struct gui_scene *scene, struct gui_program *p)
+{
+	struct debug_scene *ds = (struct debug_scene *)scene;
+
+	// Remove the sink interceptors.
+	struct priv_tuple pt = {p, ds};
+	u_var_visit(on_root_enter_sink, on_root_exit_sink, on_elem_sink_debug_remove, &pt);
+
+	if (ds->xfctx != NULL) {
+		xrt_frame_context_destroy_nodes(ds->xfctx);
+		ds->xfctx = NULL;
+	}
+
+	free(ds);
+}
 
 
 /*
@@ -432,5 +485,6 @@ gui_scene_debug(struct gui_program *p)
 	gui_scene_push_front(p, &ds->base);
 
 	// Create the sink interceptors.
-	u_var_visit(on_root_enter_sink, on_root_exit_sink, on_elem_sink, p);
+	struct priv_tuple pt = {p, ds};
+	u_var_visit(on_root_enter_sink, on_root_exit_sink, on_elem_sink_debug_add, &pt);
 }

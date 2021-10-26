@@ -61,6 +61,10 @@ if 'vive' in drivers
 	driver_libs += [lib_drv_vive]
 endif
 
+if 'wmr' in drivers
+	driver_libs += [lib_drv_wmr]
+endif
+
 if 'survive' in drivers
 	driver_libs += [lib_drv_survive]
 endif
@@ -73,9 +77,23 @@ if 'arduino' in drivers
 	driver_libs += [lib_drv_arduino]
 endif
 
+if 'qwerty' in drivers
+	driver_libs += [lib_drv_qwerty]
+endif
+
 if 'remote' in drivers
 	driver_libs += [lib_drv_remote]
 endif
+
+if 'ulv2' in drivers
+	driver_libs += [lib_drv_ulv2]
+endif
+
+if 'euroc' in drivers
+	driver_libs += [lib_drv_euroc]
+endif
+
+driver_libs += [lib_drv_multi]
 
 subdir('common')
 subdir('openxr')

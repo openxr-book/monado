@@ -4,7 +4,7 @@ directly within the "upstream" source tree.
 
 There is useful stuff, more directed at package maintenance for distro
 submission, in the Debian copy of this file:
-<https://salsa.debian.org/monado-team/monado/-/blob/debian/master/debian/README.source>
+<https://salsa.debian.org/monado-team/monado/-/blob/debian/sid/debian/README.source>
 
 To build a package for local use:
 

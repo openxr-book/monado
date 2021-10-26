@@ -8,11 +8,14 @@
  */
 
 #include "xrt/xrt_config_drivers.h"
+#include "xrt/xrt_settings.h"
 
 #include "util/u_var.h"
 #include "util/u_misc.h"
-#include "util/u_json.h"
+#include "util/u_config_json.h"
 #include "util/u_debug.h"
+#include "util/u_trace_marker.h"
+
 #include "os/os_hid.h"
 #include "p_prober.h"
 
@@ -20,8 +23,12 @@
 #include "v4l2/v4l2_interface.h"
 #endif
 
-#ifdef XRT_HAVE_VF
+#ifdef XRT_BUILD_DRIVER_VF
 #include "vf/vf_interface.h"
+#endif
+
+#ifdef XRT_BUILD_DRIVER_EUROC
+#include "euroc/euroc_interface.h"
 #endif
 
 #ifdef XRT_BUILD_DRIVER_REMOTE
@@ -32,14 +39,27 @@
 #include <string.h>
 #include <assert.h>
 
+#include "multi_wrapper/multi.h"
+
+
+/*
+ *
+ * Env variable options.
+ *
+ */
+
+DEBUG_GET_ONCE_LOG_OPTION(prober_log, "PROBER_LOG", U_LOGGING_INFO)
+DEBUG_GET_ONCE_BOOL_OPTION(qwerty_enable, "QWERTY_ENABLE", false)
+DEBUG_GET_ONCE_BOOL_OPTION(qwerty_combine, "QWERTY_COMBINE", false)
+DEBUG_GET_ONCE_OPTION(vf_path, "VF_PATH", NULL)
+DEBUG_GET_ONCE_OPTION(euroc_path, "EUROC_PATH", NULL)
+
 
 /*
  *
  * Pre-declare functions.
  *
  */
-
-DEBUG_GET_ONCE_LOG_OPTION(prober_log, "PROBER_LOG", U_LOGGING_WARN)
 
 static void
 add_device(struct prober *p, struct prober_device **out_dev);
@@ -54,40 +74,47 @@ static void
 teardown(struct prober *p);
 
 static int
-probe(struct xrt_prober *xp);
+p_probe(struct xrt_prober *xp);
 
 static int
-dump(struct xrt_prober *xp);
+p_dump(struct xrt_prober *xp);
 
 static int
-select_device(struct xrt_prober *xp, struct xrt_device **xdevs, size_t num_xdevs);
+p_select_device(struct xrt_prober *xp, struct xrt_device **xdevs, size_t num_xdevs);
 
 static int
-open_hid_interface(struct xrt_prober *xp,
-                   struct xrt_prober_device *xpdev,
-                   int interface,
-                   struct os_hid_device **out_hid_dev);
+p_open_hid_interface(struct xrt_prober *xp,
+                     struct xrt_prober_device *xpdev,
+                     int interface,
+                     struct os_hid_device **out_hid_dev);
 
 static int
-open_video_device(struct xrt_prober *xp,
-                  struct xrt_prober_device *xpdev,
-                  struct xrt_frame_context *xfctx,
-                  struct xrt_fs **out_xfs);
+p_open_video_device(struct xrt_prober *xp,
+                    struct xrt_prober_device *xpdev,
+                    struct xrt_frame_context *xfctx,
+                    struct xrt_fs **out_xfs);
 
 static int
-list_video_devices(struct xrt_prober *xp, xrt_prober_list_video_cb cb, void *ptr);
+p_list_video_devices(struct xrt_prober *xp, xrt_prober_list_video_cb cb, void *ptr);
+
 static int
-get_string_descriptor(struct xrt_prober *xp,
-                      struct xrt_prober_device *xpdev,
-                      enum xrt_prober_string which_string,
-                      unsigned char *buffer,
-                      int length);
+p_get_entries(struct xrt_prober *xp,
+              size_t *out_num_entries,
+              struct xrt_prober_entry ***out_entries,
+              struct xrt_auto_prober ***out_auto_probers);
+
+static int
+p_get_string_descriptor(struct xrt_prober *xp,
+                        struct xrt_prober_device *xpdev,
+                        enum xrt_prober_string which_string,
+                        unsigned char *buffer,
+                        size_t length);
 
 static bool
-can_open(struct xrt_prober *xp, struct xrt_prober_device *xpdev);
+p_can_open(struct xrt_prober *xp, struct xrt_prober_device *xpdev);
 
 static void
-destroy(struct xrt_prober **xp);
+p_destroy(struct xrt_prober **xp);
 
 
 /*
@@ -145,12 +172,12 @@ xrt_prober_match_string(struct xrt_prober *xp,
 {
 	unsigned char s[256] = {0};
 	int len = xrt_prober_get_string_descriptor(xp, dev, type, s, sizeof(s));
-	if (len == 0)
+	if (len <= 0) {
 		return false;
+	}
 
 	return 0 == strncmp(to_match, (const char *)s, sizeof(s));
 }
-
 
 int
 p_dev_get_usb_dev(struct prober *p,
@@ -298,27 +325,126 @@ collect_entries(struct prober *p)
 	return 0;
 }
 
+
+#define num_driver_conflicts 1
+char *driver_conflicts[num_driver_conflicts][2] = {{"survive", "vive"}};
+
+static void
+disable_drivers_from_conflicts(struct prober *p)
+{
+	if (debug_get_bool_option_qwerty_enable() && !debug_get_bool_option_qwerty_combine()) {
+		for (size_t entry = 0; entry < p->num_entries; entry++) {
+			if (strcmp(p->entries[entry]->driver_name, "Qwerty") != 0) {
+				P_INFO(p, "Disabling %s because we have %s", p->entries[entry]->driver_name, "Qwerty");
+				size_t index = p->num_disabled_drivers++;
+				U_ARRAY_REALLOC_OR_FREE(p->disabled_drivers, char *, p->num_disabled_drivers);
+				p->disabled_drivers[index] = (char *)p->entries[entry]->driver_name;
+			}
+		}
+		return;
+	}
+
+	for (size_t i = 0; i < num_driver_conflicts; i++) {
+		bool have_first = false;
+		bool have_second = false;
+
+		char *first = driver_conflicts[i][0];
+		char *second = driver_conflicts[i][1];
+
+		// disable second driver if we have first driver
+		for (size_t entry = 0; entry < p->num_entries; entry++) {
+			if (strcmp(p->entries[entry]->driver_name, first) == 0) {
+				have_first = true;
+			}
+			if (strcmp(p->entries[entry]->driver_name, second) == 0) {
+				have_second = true;
+			}
+		}
+
+		for (size_t ap = 0; ap < MAX_AUTO_PROBERS; ap++) {
+			if (p->auto_probers[ap] == NULL) {
+				continue;
+			}
+			if (strcmp(p->auto_probers[ap]->name, first) == 0) {
+				have_first = true;
+			}
+			if (strcmp(p->auto_probers[ap]->name, second) == 0) {
+				have_second = true;
+			}
+		}
+
+		if (have_first && have_second) {
+
+			// except don't disable second driver, if first driver is already disabled'
+			bool first_already_disabled = false;
+			;
+			for (size_t disabled = 0; disabled < p->num_disabled_drivers; disabled++) {
+				if (strcmp(p->disabled_drivers[disabled], first) == 0) {
+					first_already_disabled = true;
+					break;
+				}
+			}
+			if (first_already_disabled) {
+				P_INFO(p, "Not disabling %s because %s is disabled", second, first);
+				continue;
+			}
+
+			P_INFO(p, "Disabling %s because we have %s", second, first);
+			size_t index = p->num_disabled_drivers++;
+			U_ARRAY_REALLOC_OR_FREE(p->disabled_drivers, char *, p->num_disabled_drivers);
+			p->disabled_drivers[index] = second;
+		}
+	}
+}
+
+static void
+parse_disabled_drivers(struct prober *p)
+{
+	cJSON *disabled_drivers = cJSON_GetObjectItemCaseSensitive(p->json.root, "disabled");
+	if (!disabled_drivers) {
+		return;
+	}
+
+	cJSON *disabled_driver = NULL;
+	cJSON_ArrayForEach(disabled_driver, disabled_drivers)
+	{
+		if (!cJSON_IsString(disabled_driver)) {
+			continue;
+		}
+
+		size_t index = p->num_disabled_drivers++;
+		U_ARRAY_REALLOC_OR_FREE(p->disabled_drivers, char *, p->num_disabled_drivers);
+		p->disabled_drivers[index] = disabled_driver->valuestring;
+	}
+}
+
 static int
 initialize(struct prober *p, struct xrt_prober_entry_lists *lists)
 {
-	p->base.probe = probe;
-	p->base.dump = dump;
-	p->base.select = select_device;
-	p->base.open_hid_interface = open_hid_interface;
-	p->base.open_video_device = open_video_device;
-	p->base.list_video_devices = list_video_devices;
-	p->base.get_string_descriptor = get_string_descriptor;
-	p->base.can_open = can_open;
-	p->base.destroy = destroy;
+	XRT_TRACE_MARKER();
+
+	p->base.probe = p_probe;
+	p->base.dump = p_dump;
+	p->base.select = p_select_device;
+	p->base.open_hid_interface = p_open_hid_interface;
+	p->base.open_video_device = p_open_video_device;
+	p->base.list_video_devices = p_list_video_devices;
+	p->base.get_entries = p_get_entries;
+	p->base.get_string_descriptor = p_get_string_descriptor;
+	p->base.can_open = p_can_open;
+	p->base.destroy = p_destroy;
 	p->lists = lists;
 	p->ll = debug_get_log_option_prober_log();
 
+	p->json.file_loaded = false;
+	p->json.root = NULL;
+
 	u_var_add_root((void *)p, "Prober", true);
-	u_var_add_ro_u32(p, &p->ll, "Log Level");
+	u_var_add_ro_u32(p, (uint32_t *)&p->ll, "Log Level");
 
 	int ret;
 
-	p_json_open_or_create_main_file(p);
+	u_config_json_open_or_create_main_file(&p->json);
 
 	ret = collect_entries(p);
 	if (ret != 0) {
@@ -352,12 +478,19 @@ initialize(struct prober *p, struct xrt_prober_entry_lists *lists)
 		p->auto_probers[i] = lists->auto_probers[i]();
 	}
 
+
+	p->num_disabled_drivers = 0;
+	parse_disabled_drivers(p);
+	disable_drivers_from_conflicts(p);
+
 	return 0;
 }
 
 static void
 teardown_devices(struct prober *p)
 {
+	XRT_TRACE_MARKER();
+
 	// Need to free all devices.
 	for (size_t i = 0; i < p->num_devices; i++) {
 		struct prober_device *pdev = &p->devices[i];
@@ -433,6 +566,8 @@ teardown_devices(struct prober *p)
 static void
 teardown(struct prober *p)
 {
+	XRT_TRACE_MARKER();
+
 	// First remove the variable tracking.
 	u_var_remove_root((void *)p);
 
@@ -462,68 +597,9 @@ teardown(struct prober *p)
 	p_libusb_teardown(p);
 #endif
 
-	if (p->json.root != NULL) {
-		cJSON_Delete(p->json.root);
-		p->json.root = NULL;
-	}
-}
+	u_config_json_close(&p->json);
 
-
-/*
- *
- * Member functions.
- *
- */
-
-static int
-probe(struct xrt_prober *xp)
-{
-	struct prober *p = (struct prober *)xp;
-	XRT_MAYBE_UNUSED int ret = 0;
-
-	// Free old list first.
-	teardown_devices(p);
-
-#ifdef XRT_HAVE_LIBUDEV
-	ret = p_udev_probe(p);
-	if (ret != 0) {
-		P_ERROR(p, "Failed to enumerate udev devices\n");
-		return -1;
-	}
-#endif
-
-#ifdef XRT_HAVE_LIBUSB
-	ret = p_libusb_probe(p);
-	if (ret != 0) {
-		P_ERROR(p, "Failed to enumerate libusb devices\n");
-		return -1;
-	}
-#endif
-
-#ifdef XRT_HAVE_LIBUVC
-	ret = p_libuvc_probe(p);
-	if (ret != 0) {
-		P_ERROR(p, "Failed to enumerate libuvc devices\n");
-		return -1;
-	}
-#endif
-
-	return 0;
-}
-
-static int
-dump(struct xrt_prober *xp)
-{
-	struct prober *p = (struct prober *)xp;
-	XRT_MAYBE_UNUSED ssize_t k = 0;
-	XRT_MAYBE_UNUSED size_t j = 0;
-
-	for (size_t i = 0; i < p->num_devices; i++) {
-		struct prober_device *pdev = &p->devices[i];
-		p_dump_device(p, pdev, (int)i);
-	}
-
-	return 0;
+	free(p->disabled_drivers);
 }
 
 static void
@@ -576,6 +652,19 @@ add_from_devices(struct prober *p, struct xrt_device **xdevs, size_t num_xdevs, 
 				continue;
 			}
 
+			bool skip = false;
+			for (size_t disabled = 0; disabled < p->num_disabled_drivers; disabled++) {
+				if (strcmp(entry->driver_name, p->disabled_drivers[disabled]) == 0) {
+					P_INFO(p, "Skipping disabled driver %s", entry->driver_name);
+					skip = true;
+					break;
+					;
+				}
+			}
+			if (skip) {
+				continue;
+			}
+
 			struct xrt_device *new_xdevs[XRT_MAX_DEVICES_PER_PROBE] = {NULL};
 			int num_found = entry->found(&p->base, dev_list, p->num_devices, i, NULL, &(new_xdevs[0]));
 
@@ -604,6 +693,19 @@ static void
 add_from_auto_probers(struct prober *p, struct xrt_device **xdevs, size_t num_xdevs, bool *have_hmd)
 {
 	for (int i = 0; i < MAX_AUTO_PROBERS && p->auto_probers[i]; i++) {
+
+		bool skip = false;
+		for (size_t disabled = 0; disabled < p->num_disabled_drivers; disabled++) {
+			if (strcmp(p->auto_probers[i]->name, p->disabled_drivers[disabled]) == 0) {
+				P_INFO(p, "Skipping disabled driver %s", p->auto_probers[i]->name);
+				skip = true;
+				break;
+			}
+		}
+		if (skip) {
+			continue;
+		}
+
 		/*
 		 * If we have found a HMD, tell the auto probers not to open
 		 * any more HMDs. This is mostly to stop OpenHMD and Monado
@@ -611,13 +713,24 @@ add_from_auto_probers(struct prober *p, struct xrt_device **xdevs, size_t num_xd
 		 */
 		bool no_hmds = *have_hmd;
 
-		struct xrt_device *xdev =
-		    p->auto_probers[i]->lelo_dallas_autoprobe(p->auto_probers[i], NULL, no_hmds, &p->base);
-		if (xdev == NULL) {
+		struct xrt_device *new_xdevs[XRT_MAX_DEVICES_PER_PROBE] = {NULL};
+		int num_found =
+		    p->auto_probers[i]->lelo_dallas_autoprobe(p->auto_probers[i], NULL, no_hmds, &p->base, new_xdevs);
+
+		if (num_found <= 0) {
 			continue;
 		}
 
-		handle_found_device(p, xdevs, num_xdevs, have_hmd, xdev);
+		for (int created_idx = 0; created_idx < num_found; ++created_idx) {
+			if (new_xdevs[created_idx] == NULL) {
+				P_DEBUG(p,
+				        "Leaving device creation loop early: %s autoprobe function reported %i "
+				        "created, but only %i non-null",
+				        p->auto_probers[i]->name, num_found, created_idx);
+				continue;
+			}
+			handle_found_device(p, xdevs, num_xdevs, have_hmd, new_xdevs[created_idx]);
+		}
 	}
 }
 
@@ -630,7 +743,7 @@ add_from_remote(struct prober *p, struct xrt_device **xdevs, size_t num_xdevs, b
 
 #ifdef XRT_BUILD_DRIVER_REMOTE
 	int port = 4242;
-	if (!p_json_get_remote_port(p, &port)) {
+	if (!u_config_json_get_remote_port(&p->json, &port)) {
 		port = 4242;
 	}
 
@@ -639,22 +752,133 @@ add_from_remote(struct prober *p, struct xrt_device **xdevs, size_t num_xdevs, b
 #endif
 }
 
-static int
-select_device(struct xrt_prober *xp, struct xrt_device **xdevs, size_t num_xdevs)
+static void
+apply_tracking_override(struct prober *p, struct xrt_device **xdevs, size_t num_xdevs, struct xrt_tracking_override *o)
 {
+	struct xrt_device *target_xdev = NULL;
+	size_t target_idx = 0;
+	struct xrt_device *tracker_xdev = NULL;
+
+	for (size_t i = 0; i < num_xdevs; i++) {
+		struct xrt_device *xdev = xdevs[i];
+		if (xdev == NULL) {
+			continue;
+		}
+
+		if (strncmp(xdev->serial, o->target_device_serial, XRT_DEVICE_NAME_LEN) == 0) {
+			target_xdev = xdev;
+			target_idx = i;
+		}
+		if (strncmp(xdev->serial, o->tracker_device_serial, XRT_DEVICE_NAME_LEN) == 0) {
+			tracker_xdev = xdev;
+		}
+	}
+
+	if (target_xdev == NULL) {
+		P_WARN(p, "Tracking override target xdev %s not found", o->target_device_serial);
+	}
+
+	if (tracker_xdev == NULL) {
+		P_WARN(p, "Tracking override tracker xdev %s not found", o->tracker_device_serial);
+	}
+
+
+	if (target_xdev != NULL && tracker_xdev != NULL) {
+		struct xrt_device *multi = multi_create_tracking_override(o->override_type, target_xdev, tracker_xdev,
+		                                                          o->input_name, &o->offset);
+
+		if (multi) {
+			P_INFO(p, "Applying Tracking override %s <- %s", o->target_device_serial,
+			       o->tracker_device_serial);
+			// drops the target device from the list, but keeps the tracker
+			// a tracker could be attached to multiple targets with different names
+			xdevs[target_idx] = multi;
+		} else {
+			P_ERROR(p, "Failed to create tracking override multi device");
+		}
+	}
+}
+
+
+/*
+ *
+ * Member functions.
+ *
+ */
+
+static int
+p_probe(struct xrt_prober *xp)
+{
+	XRT_TRACE_MARKER();
+
 	struct prober *p = (struct prober *)xp;
-	enum p_active_config active;
+	XRT_MAYBE_UNUSED int ret = 0;
+
+	// Free old list first.
+	teardown_devices(p);
+
+#ifdef XRT_HAVE_LIBUDEV
+	ret = p_udev_probe(p);
+	if (ret != 0) {
+		P_ERROR(p, "Failed to enumerate udev devices\n");
+		return -1;
+	}
+#endif
+
+#ifdef XRT_HAVE_LIBUSB
+	ret = p_libusb_probe(p);
+	if (ret != 0) {
+		P_ERROR(p, "Failed to enumerate libusb devices\n");
+		return -1;
+	}
+#endif
+
+#ifdef XRT_HAVE_LIBUVC
+	ret = p_libuvc_probe(p);
+	if (ret != 0) {
+		P_ERROR(p, "Failed to enumerate libuvc devices\n");
+		return -1;
+	}
+#endif
+
+	return 0;
+}
+
+static int
+p_dump(struct xrt_prober *xp)
+{
+	XRT_TRACE_MARKER();
+
+	struct prober *p = (struct prober *)xp;
+	XRT_MAYBE_UNUSED ssize_t k = 0;
+	XRT_MAYBE_UNUSED size_t j = 0;
+
+	for (size_t i = 0; i < p->num_devices; i++) {
+		struct prober_device *pdev = &p->devices[i];
+		p_dump_device(p, pdev, (int)i);
+	}
+
+	return 0;
+}
+
+static int
+p_select_device(struct xrt_prober *xp, struct xrt_device **xdevs, size_t num_xdevs)
+{
+	XRT_TRACE_MARKER();
+
+	struct prober *p = (struct prober *)xp;
+	enum u_config_json_active_config active;
 	bool have_hmd = false;
 
-	p_json_get_active(p, &active);
+	u_config_json_get_active(&p->json, &active);
 
 	switch (active) {
-	case P_ACTIVE_CONFIG_NONE:
-	case P_ACTIVE_CONFIG_TRACKING:
+	case U_ACTIVE_CONFIG_NONE:
+	case U_ACTIVE_CONFIG_TRACKING:
 		add_from_devices(p, xdevs, num_xdevs, &have_hmd);
 		add_from_auto_probers(p, xdevs, num_xdevs, &have_hmd);
 		break;
-	case P_ACTIVE_CONFIG_REMOTE: add_from_remote(p, xdevs, num_xdevs, &have_hmd); break;
+	case U_ACTIVE_CONFIG_REMOTE: add_from_remote(p, xdevs, num_xdevs, &have_hmd); break;
 	default: assert(false);
 	}
 
@@ -675,6 +899,15 @@ select_device(struct xrt_prober *xp, struct xrt_device **xdevs, size_t num_xdevs
 		}
 		xdevs[0] = hmd;
 		break;
+	}
+
+	struct xrt_tracking_override overrides[XRT_MAX_TRACKING_OVERRIDES];
+	size_t num_overrides = 0;
+	if (u_config_json_get_tracking_overrides(&p->json, overrides, &num_overrides)) {
+		for (size_t i = 0; i < num_overrides; i++) {
+			struct xrt_tracking_override *o = &overrides[i];
+			apply_tracking_override(p, xdevs, num_xdevs, o);
+		}
 	}
 
 	if (have_hmd) {
@@ -699,11 +932,13 @@ select_device(struct xrt_prober *xp, struct xrt_device **xdevs, size_t num_xdevs
 }
 
 static int
-open_hid_interface(struct xrt_prober *xp,
-                   struct xrt_prober_device *xpdev,
-                   int interface,
-                   struct os_hid_device **out_hid_dev)
+p_open_hid_interface(struct xrt_prober *xp,
+                     struct xrt_prober_device *xpdev,
+                     int interface,
+                     struct os_hid_device **out_hid_dev)
 {
+	XRT_TRACE_MARKER();
+
 	struct prober_device *pdev = (struct prober_device *)xpdev;
 	int ret;
 
@@ -732,20 +967,29 @@ open_hid_interface(struct xrt_prober *xp,
 	return -1;
 }
 
-DEBUG_GET_ONCE_OPTION(vf_path, "VF_PATH", NULL)
-
 static int
-open_video_device(struct xrt_prober *xp,
-                  struct xrt_prober_device *xpdev,
-                  struct xrt_frame_context *xfctx,
-                  struct xrt_fs **out_xfs)
+p_open_video_device(struct xrt_prober *xp,
+                    struct xrt_prober_device *xpdev,
+                    struct xrt_frame_context *xfctx,
+                    struct xrt_fs **out_xfs)
 {
+	XRT_TRACE_MARKER();
+
 	XRT_MAYBE_UNUSED struct prober_device *pdev = (struct prober_device *)xpdev;
 
-#if defined(XRT_HAVE_VF)
+#if defined(XRT_BUILD_DRIVER_EUROC)
+	// TODO: If both VF_PATH and EUROC_PATH are set, VF will be ignored on calibration
+	const char *euroc_path = debug_get_option_euroc_path();
+	if (euroc_path != NULL) {
+		*out_xfs = euroc_player_create(xfctx, euroc_path); // Euroc will exit if it can't be created
+		return 0;
+	}
+#endif
+
+#if defined(XRT_BUILD_DRIVER_VF)
 	const char *path = debug_get_option_vf_path();
 	if (path != NULL) {
-		struct xrt_fs *xfs = vf_fs_create(xfctx, path);
+		struct xrt_fs *xfs = vf_fs_open_file(xfctx, path);
 		if (xfs) {
 			*out_xfs = xfs;
 			return 0;
@@ -772,13 +1016,18 @@ open_video_device(struct xrt_prober *xp,
 }
 
 static int
-list_video_devices(struct xrt_prober *xp, xrt_prober_list_video_cb cb, void *ptr)
+p_list_video_devices(struct xrt_prober *xp, xrt_prober_list_video_cb cb, void *ptr)
 {
 	struct prober *p = (struct prober *)xp;
 
 	const char *path = debug_get_option_vf_path();
 	if (path != NULL) {
 		cb(xp, NULL, "Video File", "Collabora", path, ptr);
+	}
+
+	path = debug_get_option_euroc_path();
+	if (path != NULL) {
+		cb(xp, NULL, "Euroc Dataset", "Collabora", path, ptr);
 	}
 
 	// Loop over all devices and find video devices.
@@ -808,31 +1057,61 @@ list_video_devices(struct xrt_prober *xp, xrt_prober_list_video_cb cb, void *ptr
 }
 
 static int
-get_string_descriptor(struct xrt_prober *xp,
-                      struct xrt_prober_device *xpdev,
-                      enum xrt_prober_string which_string,
-                      unsigned char *buffer,
-                      int length)
+p_get_entries(struct xrt_prober *xp,
+              size_t *out_num_entries,
+              struct xrt_prober_entry ***out_entries,
+              struct xrt_auto_prober ***out_auto_probers)
 {
+	XRT_TRACE_MARKER();
+
+	struct prober *p = (struct prober *)xp;
+	*out_num_entries = p->num_entries;
+	*out_entries = p->entries;
+	*out_auto_probers = p->auto_probers;
+
+	return 0;
+}
+
+static int
+p_get_string_descriptor(struct xrt_prober *xp,
+                        struct xrt_prober_device *xpdev,
+                        enum xrt_prober_string which_string,
+                        unsigned char *buffer,
+                        size_t max_length)
+{
+	XRT_TRACE_MARKER();
+
 	XRT_MAYBE_UNUSED struct prober *p = (struct prober *)xp;
 	XRT_MAYBE_UNUSED struct prober_device *pdev = (struct prober_device *)xpdev;
 	XRT_MAYBE_UNUSED int ret;
 #ifdef XRT_HAVE_LIBUSB
-	if (pdev->usb.dev != NULL) {
-		ret = p_libusb_get_string_descriptor(p, pdev, which_string, buffer, length);
+	if (pdev->base.bus == XRT_BUS_TYPE_USB && pdev->usb.dev != NULL) {
+		ret = p_libusb_get_string_descriptor(p, pdev, which_string, buffer, max_length);
 		if (ret >= 0) {
 			return ret;
 		}
 	}
 #endif
+	if (pdev->base.bus == XRT_BUS_TYPE_BLUETOOTH && which_string == XRT_PROBER_STRING_SERIAL_NUMBER) {
+		union {
+			uint8_t arr[8];
+			uint64_t v;
+		} u;
+		u.v = pdev->bluetooth.id;
+		return snprintf((char *)buffer, max_length, "%02X:%02X:%02X:%02X:%02X:%02X", u.arr[5], u.arr[4],
+		                u.arr[3], u.arr[2], u.arr[1], u.arr[0]);
+	}
+
 	//! @todo add more backends
 	//! @todo make this unicode (utf-16)? utf-8 would be better...
 	return 0;
 }
 
 static bool
-can_open(struct xrt_prober *xp, struct xrt_prober_device *xpdev)
+p_can_open(struct xrt_prober *xp, struct xrt_prober_device *xpdev)
 {
+	XRT_TRACE_MARKER();
+
 	XRT_MAYBE_UNUSED struct prober *p = (struct prober *)xp;
 	XRT_MAYBE_UNUSED struct prober_device *pdev = (struct prober_device *)xpdev;
 #ifdef XRT_HAVE_LIBUSB
@@ -844,10 +1123,11 @@ can_open(struct xrt_prober *xp, struct xrt_prober_device *xpdev)
 	return false;
 }
 
-
 static void
-destroy(struct xrt_prober **xp)
+p_destroy(struct xrt_prober **xp)
 {
+	XRT_TRACE_MARKER();
+
 	struct prober *p = (struct prober *)*xp;
 	if (p == NULL) {
 		return;

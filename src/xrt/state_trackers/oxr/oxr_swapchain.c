@@ -1,4 +1,4 @@
-// Copyright 2018-2020, Collabora, Ltd.
+// Copyright 2018-2021, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -179,7 +179,8 @@ convert_usage_bits(XrSwapchainUsageFlags xr_usage)
 	if ((xr_usage & XR_SWAPCHAIN_USAGE_MUTABLE_FORMAT_BIT) != 0) {
 		usage |= XRT_SWAPCHAIN_USAGE_MUTABLE_FORMAT;
 	}
-	if ((xr_usage & XR_SWAPCHAIN_USAGE_INPUT_ATTACHMENT_BIT_MND) != 0) {
+	// aliased to XR_SWAPCHAIN_USAGE_INPUT_ATTACHMENT_BIT_MND
+	if ((xr_usage & XR_SWAPCHAIN_USAGE_INPUT_ATTACHMENT_BIT_KHR) != 0) {
 		usage |= XRT_SWAPCHAIN_USAGE_INPUT_ATTACHMENT;
 	}
 
@@ -205,7 +206,7 @@ oxr_create_swapchain(struct oxr_logger *log,
 	info.array_size = createInfo->arraySize;
 	info.mip_count = createInfo->mipCount;
 
-	struct xrt_swapchain *xsc = NULL;
+	struct xrt_swapchain *xsc = NULL; // Has to be NULL.
 	xret = xrt_comp_create_swapchain(sess->compositor, &info, &xsc);
 	if (xret == XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED) {
 		return oxr_error(log, XR_ERROR_FEATURE_UNSUPPORTED,

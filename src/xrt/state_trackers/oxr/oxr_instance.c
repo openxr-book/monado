@@ -57,7 +57,7 @@ extern int
 oxr_sdl2_hack_create(void **out_hack);
 
 extern void
-oxr_sdl2_hack_start(void *hack, struct xrt_instance *xinst);
+oxr_sdl2_hack_start(void *hack, struct xrt_instance *xinst, struct xrt_device **xdevs);
 
 extern void
 oxr_sdl2_hack_stop(void **hack_ptr);
@@ -119,6 +119,56 @@ static inline size_t
 min_size_t(size_t a, size_t b)
 {
 	return a < b ? a : b;
+}
+
+static bool
+starts_with(const char *with, const char *string)
+{
+	assert(with != NULL);
+
+	if (string == NULL) {
+		return false;
+	}
+
+	for (uint32_t i = 0; with[i] != 0; i++) {
+		if (string[i] != with[i]) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+static void
+detect_engine(struct oxr_logger *log, struct oxr_instance *inst, const XrInstanceCreateInfo *createInfo)
+{
+	if (starts_with("UnrealEngine4", createInfo->applicationInfo.engineName)) {
+		inst->appinfo.detected.engine.name = "UnrealEngine";
+		inst->appinfo.detected.engine.major = 4;
+		inst->appinfo.detected.engine.minor = (createInfo->applicationInfo.engineVersion >> 16) & 0xffff;
+		inst->appinfo.detected.engine.patch = createInfo->applicationInfo.engineVersion & 0xffff;
+	}
+
+	if (starts_with("UnrealEngine5", createInfo->applicationInfo.engineName)) {
+		inst->appinfo.detected.engine.name = "UnrealEngine";
+		inst->appinfo.detected.engine.major = 5;
+		inst->appinfo.detected.engine.minor = (createInfo->applicationInfo.engineVersion >> 16) & 0xffff;
+		inst->appinfo.detected.engine.patch = createInfo->applicationInfo.engineVersion & 0xffff;
+	}
+}
+
+static void
+apply_quirks(struct oxr_logger *log, struct oxr_instance *inst)
+{
+#if 0
+	// This is no longer needed.
+	if (starts_with("UnrealEngine", inst->appinfo.detected.engine.name) && //
+	    inst->appinfo.detected.engine.major == 4 &&                        //
+	    inst->appinfo.detected.engine.minor <= 27 &&                       //
+	    inst->appinfo.detected.engine.patch <= 0) {
+		inst->quirks.disable_vulkan_format_depth_stencil = true;
+	}
+#endif
 }
 
 XrResult
@@ -184,6 +234,8 @@ oxr_instance_create(struct oxr_logger *log, const XrInstanceCreateInfo *createIn
 	cache_path(log, inst, "/interaction_profiles/oculus/touch_controller", &inst->path_cache.oculus_touch_controller);
 	cache_path(log, inst, "/interaction_profiles/valve/index_controller", &inst->path_cache.valve_index_controller);
 	cache_path(log, inst, "/interaction_profiles/mndx/ball_on_a_stick_controller", &inst->path_cache.mndx_ball_on_a_stick_controller);
+	cache_path(log, inst, "/interaction_profiles/microsoft/hand_interaction", &inst->path_cache.msft_hand_interaction);
+
 	// clang-format on
 
 	// fill in our application info - @todo - replicate all createInfo
@@ -321,14 +373,38 @@ oxr_instance_create(struct oxr_logger *log, const XrInstanceCreateInfo *createIn
 
 	inst->timekeeping = time_state_create();
 
-
 	//! @todo check if this (and other creates) failed?
+
+	// Detect game engine.
+	detect_engine(log, inst, createInfo);
+
+	// Apply any quirks
+	apply_quirks(log, inst);
 
 	u_var_add_root((void *)inst, "XrInstance", true);
 
 	/* ---- HACK ---- */
-	oxr_sdl2_hack_start(inst->hack, inst->xinst);
+	oxr_sdl2_hack_start(inst->hack, inst->xinst, sys->xdevs);
 	/* ---- HACK ---- */
+
+	oxr_log(log,
+	        "Instance created\n"
+	        "\tcreateInfo->applicationInfo.applicationName: %s\n"
+	        "\tcreateInfo->applicationInfo.applicationVersion: %i\n"
+	        "\tcreateInfo->applicationInfo.engineName: %s\n"
+	        "\tcreateInfo->applicationInfo.engineVersion: %i\n"
+	        "\tappinfo.detected.engine.name: %s\n"
+	        "\tappinfo.detected.engine.version: %i.%i.%i\n"
+	        "\tquirks.disable_vulkan_format_depth_stencil: %s",
+	        createInfo->applicationInfo.applicationName,                          //
+	        createInfo->applicationInfo.applicationVersion,                       //
+	        createInfo->applicationInfo.engineName,                               //
+	        createInfo->applicationInfo.engineVersion,                            //
+	        inst->appinfo.detected.engine.name,                                   //
+	        inst->appinfo.detected.engine.major,                                  //
+	        inst->appinfo.detected.engine.minor,                                  //
+	        inst->appinfo.detected.engine.patch,                                  //
+	        inst->quirks.disable_vulkan_format_depth_stencil ? "true" : "false"); //
 
 	*out_instance = inst;
 

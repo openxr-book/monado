@@ -1,9 +1,11 @@
-// Copyright 2019-2020, Collabora, Ltd.
+// Copyright 2019-2021, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Misc helpers for device drivers.
  * @author Jakob Bornecrantz <jakob@collabora.com>
+ * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Moses Turner <moses@collabora.com>
  * @ingroup aux_util
  */
 
@@ -131,6 +133,35 @@ u_device_dump_config(struct xrt_device *xdev, const char *prefix, const char *pr
  */
 
 bool
+u_extents_2d_split_side_by_side(struct xrt_device *xdev, const struct u_extents_2d *extents)
+{
+	uint32_t eye_w_pixels = extents->w_pixels / 2;
+	uint32_t eye_h_pixels = extents->h_pixels;
+
+	xdev->hmd->screens[0].w_pixels = extents->w_pixels;
+	xdev->hmd->screens[0].h_pixels = extents->h_pixels;
+
+	// Left
+	xdev->hmd->views[0].display.w_pixels = eye_w_pixels;
+	xdev->hmd->views[0].display.h_pixels = eye_h_pixels;
+	xdev->hmd->views[0].viewport.x_pixels = 0;
+	xdev->hmd->views[0].viewport.y_pixels = 0;
+	xdev->hmd->views[0].viewport.w_pixels = eye_w_pixels;
+	xdev->hmd->views[0].viewport.h_pixels = eye_h_pixels;
+	xdev->hmd->views[0].rot = u_device_rotation_ident;
+
+	// Right
+	xdev->hmd->views[1].display.w_pixels = eye_w_pixels;
+	xdev->hmd->views[1].display.h_pixels = eye_h_pixels;
+	xdev->hmd->views[1].viewport.x_pixels = eye_w_pixels;
+	xdev->hmd->views[1].viewport.y_pixels = 0;
+	xdev->hmd->views[1].viewport.w_pixels = eye_w_pixels;
+	xdev->hmd->views[1].viewport.h_pixels = eye_h_pixels;
+	xdev->hmd->views[1].rot = u_device_rotation_ident;
+	return true;
+}
+
+bool
 u_device_setup_split_side_by_side(struct xrt_device *xdev, const struct u_device_simple_info *info)
 {
 	uint32_t w_pixels = info->display.w_pixels / 2;
@@ -149,7 +180,10 @@ u_device_setup_split_side_by_side(struct xrt_device *xdev, const struct u_device
 	};
 
 	// Common
-	xdev->hmd->blend_mode = XRT_BLEND_MODE_OPAQUE;
+	size_t idx = 0;
+	xdev->hmd->blend_modes[idx++] = XRT_BLEND_MODE_OPAQUE;
+	xdev->hmd->num_blend_modes = idx;
+
 	if (xdev->hmd->distortion.models == 0) {
 		xdev->hmd->distortion.models = XRT_DISTORTION_MODEL_NONE;
 		xdev->hmd->distortion.preferred = XRT_DISTORTION_MODEL_NONE;
@@ -391,4 +425,28 @@ u_device_setup_tracking_origins(struct xrt_device *head,
 	if (right_origin && right_origin != head_origin && right_origin != left_origin) {
 		apply_offset(&right->tracking_origin->offset.position, global_tracking_origin_offset);
 	}
+}
+
+void
+u_device_get_view_pose(const struct xrt_vec3 *eye_relation, uint32_t view_index, struct xrt_pose *out_pose)
+{
+	struct xrt_pose pose = XRT_POSE_IDENTITY;
+	bool adjust = view_index == 0;
+
+	pose.position.x = eye_relation->x / 2.0f;
+	pose.position.y = eye_relation->y / 2.0f;
+	pose.position.z = eye_relation->z / 2.0f;
+
+	// Adjust for left/right while also making sure there aren't any -0.f.
+	if (pose.position.x > 0.0f && adjust) {
+		pose.position.x = -pose.position.x;
+	}
+	if (pose.position.y > 0.0f && adjust) {
+		pose.position.y = -pose.position.y;
+	}
+	if (pose.position.z > 0.0f && adjust) {
+		pose.position.z = -pose.position.z;
+	}
+
+	*out_pose = pose;
 }

@@ -28,8 +28,12 @@
 #ifndef __USE_MISC
 #define __USE_MISC // SOL_TCP on C11
 #endif
+#ifndef _BSD_SOURCE
+#define _BSD_SOURCE // same, but for musl
+#endif
 
 #include <netinet/tcp.h>
+
 
 /*
  *

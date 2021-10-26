@@ -44,6 +44,10 @@ if(XRT_BUILD_DRIVER_NS)
 	target_link_libraries(target_lists PRIVATE drv_ns)
 endif()
 
+if(XRT_BUILD_DRIVER_ULV2)
+	target_link_libraries(target_lists PRIVATE drv_ulv2)
+endif()
+
 if(XRT_BUILD_DRIVER_OHMD)
 	target_link_libraries(target_lists PRIVATE drv_ohmd)
 endif()
@@ -72,7 +76,7 @@ if(XRT_HAVE_V4L2)
 	target_link_libraries(target_lists PRIVATE drv_v4l2)
 endif()
 
-if(XRT_HAVE_VF)
+if(XRT_BUILD_DRIVER_VF)
 	target_link_libraries(target_lists PRIVATE drv_vf)
 endif()
 
@@ -90,6 +94,20 @@ endif()
 
 if(XRT_BUILD_DRIVER_ILLIXR)
 	target_link_libraries(target_lists PRIVATE drv_illixr)
+endif()
+
+target_link_libraries(target_lists PRIVATE drv_multi)
+
+if(XRT_BUILD_DRIVER_QWERTY)
+	target_link_libraries(target_lists PRIVATE drv_qwerty)
+endif()
+
+if(XRT_BUILD_DRIVER_WMR)
+	target_link_libraries(target_lists PRIVATE drv_wmr)
+endif()
+
+if(XRT_BUILD_DRIVER_EUROC)
+	target_link_libraries(target_lists PRIVATE drv_euroc)
 endif()
 
 ####
