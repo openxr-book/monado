@@ -1,8 +1,17 @@
-monado (21.0.0~dfsg1-2) UNRELEASED; urgency=medium
+monado (21.0.0~dfsg1-2) unstable; urgency=medium
 
-  * d/control: Add Build-Depends on libbsd-dev for pidfile support when building service.
+  * d/control
+    - Add Build-Depends on libbsd-dev for pidfile support when
+      building service.
+    - Bump Standards-Version to 4.6.0, no changes required.
+    - Remove Build-Depends that we don't actually use.
+    - Exclude some dependencies on less-common arches to fix builds.
+  * d/copyright: Update
+  * Backport patch for upstream to fix FTBFS, closes: #997239
+  * Clean up/annotate patches
+  * Switch to pandoc from markdown for formatting changelog.
 
- -- Ryan Pavlik <ryan@ryanpavlik.com>  Mon, 11 Oct 2021 13:58:30 -0500
+ -- Ryan Pavlik <ryan@ryanpavlik.com>  Tue, 26 Oct 2021 16:59:16 -0500
 
 monado (21.0.0~dfsg1-1) unstable; urgency=medium
 

@@ -46,7 +46,7 @@ override_dh_install:
 ifeq (,$(findstring nodoc,$(DEB_BUILD_OPTIONS)))
 	mkdir -p debian/tmp/usr/share/doc/monado
 	cp doc/CHANGELOG.md debian/tmp/usr/share/doc/monado/changelog
-	markdown doc/CHANGELOG.md > debian/tmp/usr/share/doc/monado/changelog.html
+	pandoc -f markdown -t html doc/CHANGELOG.md > debian/tmp/usr/share/doc/monado/changelog.html
 endif
 ifneq (,$(findstring linux,$(DEB_HOST_ARCH_OS)))
 	sed -i "s/%N/monado/" debian/tmp/usr/lib/systemd/user/monado.service
