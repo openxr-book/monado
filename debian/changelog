@@ -2,7 +2,7 @@ monado (21.0.0~dfsg1-2~bpo10+1) buster-backports; urgency=medium
 
   * Rebuild for buster-backports.
 
- -- Ryan Pavlik <ryan@ryanpavlik.com>  Tue, 23 Feb 2021 13:40:07 -0600
+ -- Ryan Pavlik <ryan@ryanpavlik.com>  Tue, 26 Oct 2021 17:01:24 -0500
 
 monado (21.0.0~dfsg1-2) unstable; urgency=medium
 
@@ -53,7 +53,7 @@ monado (0.3.0-2) experimental; urgency=medium
 
  -- Ryan Pavlik <ryan@ryanpavlik.com>  Tue, 14 Jul 2020 16:01:24 -0500
 
-monado (0.3.0-1~bpo10+1) backports; urgency=medium
+monado (0.3.0-1~bpo10+1) buster-backports; urgency=medium
 
   * Rebuild for backports.
   * d/rules: Un-comment flag needed before Bullseye
