@@ -1,3 +1,9 @@
+monado (21.0.0~dfsg1-2~ubuntu2110~20211027+2) impish; urgency=medium
+
+  * Add d/patches/0003-Update-catch2-to-2.13.7.patch to fix FTBFS.
+
+ -- Ryan Pavlik <ryan@ryanpavlik.com>  Wed, 27 Oct 2021 13:53:09 -0500
+
 monado (21.0.0~dfsg1-2~ubuntu2110~20211027+1) impish; urgency=medium
 
   * Create branch for backport, updating
