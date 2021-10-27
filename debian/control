@@ -5,10 +5,8 @@ Section: libs
 Priority: optional
 Build-Depends: debhelper-compat (= 12),
                cmake,
-               doxygen,
                glslang-tools,
-               graphviz,
-               libavcodec-dev,
+               libavcodec-dev [!hppa !sh4],
                libbsd-dev [linux-any],
                libcjson-dev,
                libdbus-1-dev [linux-any],
@@ -19,7 +17,7 @@ Build-Depends: debhelper-compat (= 12),
                libgstreamer1.0-dev,
                libgstreamer-plugins-base1.0-dev,
                libhidapi-dev [!hurd-i386],
-               libopencv-dev,
+               libopencv-dev [!alpha !ia64 !sparc64 !x32],
                libsystemd-dev [linux-any],
                libsdl2-dev,
                libudev-dev,
@@ -33,9 +31,9 @@ Build-Depends: debhelper-compat (= 12),
                libxcb-randr0-dev,
                libxrandr-dev,
                libxxf86vm-dev,
-               markdown <!nodoc>,
+               pandoc <!nodoc>,
                pkg-config
-Standards-Version: 4.5.1
+Standards-Version: 4.6.0
 Vcs-Browser: https://gitlab.freedesktop.org/monado/monado/-/tree/ubuntu/focal
 Vcs-Git: https://gitlab.freedesktop.org/monado/monado.git -b ubuntu/focal
 Homepage: https://monado.freedesktop.org/
