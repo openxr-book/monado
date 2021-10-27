@@ -34,8 +34,8 @@ Build-Depends: debhelper-compat (= 12),
                pandoc <!nodoc>,
                pkg-config
 Standards-Version: 4.6.0
-Vcs-Browser: https://gitlab.freedesktop.org/monado/monado/-/tree/debian/sid
-Vcs-Git: https://gitlab.freedesktop.org/monado/monado.git -b debian/sid
+Vcs-Browser: https://gitlab.freedesktop.org/monado/monado/-/tree/ubuntu/hirsute
+Vcs-Git: https://gitlab.freedesktop.org/monado/monado.git -b ubuntu/hirsute
 Homepage: https://monado.freedesktop.org/
 Rules-Requires-Root: no
 
