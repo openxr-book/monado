@@ -167,6 +167,134 @@ renderer_init_semaphores(struct comp_renderer *r)
 }
 
 static void
+renderer_transition_layer_images(struct comp_renderer *r, VkCommandBuffer cmd, bool acquire)
+{
+	struct comp_compositor *c = r->c;
+	struct vk_bundle *vk = &c->base.vk;
+
+	uint32_t layer_count = c->base.slot.layer_count;
+	uint32_t max_images = 4 * layer_count;
+
+	// Allocate an image barrier for each image (using an upper bound)
+	VkImageMemoryBarrier *barriers = U_TYPED_ARRAY_CALLOC(VkImageMemoryBarrier, max_images);
+	uint32_t barrier_count = 0;
+
+	// Fill out the image barriers
+	for (uint32_t i = 0; i < layer_count; i++) {
+		const struct comp_layer *layer = &c->base.slot.layers[i];
+		const struct xrt_sub_image *subimages[4];
+		uint32_t image_count = 0;
+
+		switch (layer->data.type) {
+		case XRT_LAYER_STEREO_PROJECTION:
+			subimages[0] = &layer->data.stereo.l.sub;
+			subimages[1] = &layer->data.stereo.r.sub;
+			image_count = 2;
+			break;
+		case XRT_LAYER_STEREO_PROJECTION_DEPTH:
+			subimages[0] = &layer->data.stereo_depth.l.sub;
+			subimages[1] = &layer->data.stereo_depth.r.sub;
+			subimages[2] = &layer->data.stereo_depth.l_d.sub;
+			subimages[3] = &layer->data.stereo_depth.r_d.sub;
+			image_count = 4;
+			break;
+		case XRT_LAYER_QUAD:
+			subimages[0] = &layer->data.quad.sub;
+			image_count = 1;
+			break;
+		case XRT_LAYER_CYLINDER:
+			subimages[0] = &layer->data.cylinder.sub;
+			image_count = 1;
+			break;
+		case XRT_LAYER_EQUIRECT1:
+			subimages[0] = &layer->data.equirect1.sub;
+			image_count = 1;
+			break;
+		case XRT_LAYER_EQUIRECT2:
+			subimages[0] = &layer->data.equirect2.sub;
+			image_count = 1;
+			break;
+		case XRT_LAYER_CUBE:
+		default: assert(false); break;
+		}
+
+		for (uint32_t j = 0; j < image_count; j++) {
+			if (!layer->sc_array[j]) {
+				continue; // It's probably a bug if the swapchain doesn't exist, maybe this should throw
+			}
+
+			struct vk_image *image = &layer->sc_array[j]->vkic.images[subimages[j]->image_index];
+			VkFormat format = layer->sc_array[j]->vkic.info.format;
+
+			VkImageSubresourceRange subresource_range = {
+			    .aspectMask = vk_csci_get_barrier_aspect_mask(format),
+			    .baseMipLevel = 0,
+			    .levelCount = VK_REMAINING_MIP_LEVELS,
+			    .baseArrayLayer = 0,
+			    .layerCount = VK_REMAINING_ARRAY_LAYERS,
+			};
+
+			if (acquire && !image->acquired) {
+				image->acquired = true;
+				barriers[barrier_count++] = (VkImageMemoryBarrier){
+				    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+				    .srcAccessMask = 0,
+				    .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+				    .oldLayout = vk_csci_get_barrier_optimal_layout(format),
+				    .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+				    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_EXTERNAL,
+				    .dstQueueFamilyIndex = vk->queue_family_index,
+				    .image = image->handle,
+				    .subresourceRange = subresource_range,
+				};
+			} else if (!acquire && image->acquired) {
+				image->acquired = false;
+				barriers[barrier_count++] = (VkImageMemoryBarrier){
+				    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+				    .srcAccessMask = 0,
+				    .dstAccessMask = 0,
+				    .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+				    .newLayout = vk_csci_get_barrier_optimal_layout(format),
+				    .srcQueueFamilyIndex = vk->queue_family_index,
+				    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_EXTERNAL,
+				    .image = image->handle,
+				    .subresourceRange = subresource_range,
+				};
+			}
+		}
+	}
+
+	// Record the image barriers into a single pipeline barrier in the command buffer
+	if (barrier_count > 0) {
+		VkPipelineStageFlags stage_src, stage_dst;
+
+		if (acquire) {
+			stage_src = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+			stage_dst = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+		} else {
+			stage_src = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+			stage_dst = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+		}
+
+		vk->vkCmdPipelineBarrier(cmd, stage_src, stage_dst, 0, 0, NULL, 0, NULL, barrier_count, barriers);
+	}
+
+	free(barriers);
+}
+
+static void
+renderer_acquire_layer_images(struct comp_renderer *r, VkCommandBuffer cmd)
+{
+	renderer_transition_layer_images(r, cmd, true);
+}
+
+static void
+renderer_release_layer_images(struct comp_renderer *r, VkCommandBuffer cmd)
+{
+	renderer_transition_layer_images(r, cmd, false);
+}
+
+static void
 calc_viewport_data(struct comp_renderer *r,
                    struct render_viewport_data *out_l_viewport_data,
                    struct render_viewport_data *out_r_viewport_data)
@@ -284,6 +412,8 @@ renderer_build_rendering(struct comp_renderer *r,
 	render_gfx_init(rr, &c->nr);
 	render_gfx_begin(rr);
 
+	renderer_acquire_layer_images(r, rr->cmd);
+
 
 	/*
 	 * Update
@@ -370,6 +500,8 @@ renderer_build_rendering(struct comp_renderer *r,
 	 */
 
 	render_gfx_end_target(rr);
+
+	renderer_release_layer_images(r, rr->cmd);
 
 	// Make the command buffer usable.
 	render_gfx_end(rr);
@@ -1053,6 +1185,8 @@ dispatch_compute(struct comp_renderer *r, struct render_compute *crc)
 	render_compute_init(crc, &c->nr);
 	render_compute_begin(crc);
 
+	renderer_acquire_layer_images(r, crc->cmd);
+
 	struct render_viewport_data views[2];
 	calc_viewport_data(r, &views[0], &views[1]);
 
@@ -1083,6 +1217,8 @@ dispatch_compute(struct comp_renderer *r, struct render_compute *crc)
 		    target_image_view, //
 		    views);            //
 	}
+
+	renderer_release_layer_images(r, crc->cmd);
 
 	render_compute_end(crc);
 
