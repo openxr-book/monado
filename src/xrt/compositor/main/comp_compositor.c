@@ -418,6 +418,12 @@ compositor_poll_events(struct xrt_compositor *xc, union xrt_compositor_event *ou
 
 	U_ZERO(out_xce);
 
+	enum comp_target_state target_state = c->target->poll_state(c->target);
+	if (target_state == COMP_TARGET_STATE_DISCONNECTED && c->state < COMP_STATE_LOSS_PENDING) {
+		c->state = COMP_STATE_LOSS_PENDING;
+	}
+	//! @todo this state machine only moves toward focused, never the other way...
+
 	switch (c->state) {
 	case COMP_STATE_UNINITIALIZED:
 		COMP_ERROR(c, "Polled uninitialized compositor");
