@@ -740,6 +740,7 @@ struct xrt_compositor_event_state_change
 	enum xrt_compositor_event_type type;
 	bool visible;
 	bool focused;
+	bool loss_pending;
 };
 
 /*!
