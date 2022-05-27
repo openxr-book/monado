@@ -241,6 +241,7 @@ oxr_session_poll(struct oxr_logger *log, struct oxr_session *sess)
 		case XRT_COMPOSITOR_EVENT_STATE_CHANGE:
 			sess->compositor_visible = xce.state.visible;
 			sess->compositor_focused = xce.state.focused;
+			sess->compositor_loss_pending = xce.state.loss_pending;
 			break;
 		case XRT_COMPOSITOR_EVENT_OVERLAY_CHANGE:
 			oxr_event_push_XrEventDataMainSessionVisibilityChangedEXTX(log, sess, xce.overlay.visible);
@@ -253,6 +254,9 @@ oxr_session_poll(struct oxr_logger *log, struct oxr_session *sess)
 		case XRT_COMPOSITOR_EVENT_LOST: sess->has_lost = true; break;
 		default: U_LOG_W("unhandled event type! %d", xce.type); break;
 		}
+	}
+	if (sess->state != XR_SESSION_STATE_LOSS_PENDING && sess->compositor_loss_pending) {
+		oxr_session_change_state(log, sess, XR_SESSION_STATE_LOSS_PENDING);
 	}
 
 	if (sess->state == XR_SESSION_STATE_SYNCHRONIZED && sess->compositor_visible) {

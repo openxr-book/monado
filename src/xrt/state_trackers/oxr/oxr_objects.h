@@ -1437,6 +1437,7 @@ struct oxr_session
 
 	bool compositor_visible;
 	bool compositor_focused;
+	bool compositor_loss_pending;
 
 	// the number of xrWaitFrame calls that did not yet have a corresponding
 	// xrEndFrame or xrBeginFrame (discarded frame) call
