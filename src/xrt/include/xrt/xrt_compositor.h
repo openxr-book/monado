@@ -1215,7 +1215,12 @@ struct xrt_compositor
 	/*!
 	 * @brief Commits all of the submitted layers, with a semaphore.
 	 *
+	 * This is typically implemented (or forwarded) only by native
+	 * compositors, and used by client compositors depending on the
+	 * availability of cross-compatible sync primitives.
+	 *
 	 * Only after this call will the compositor actually use the layers.
+	 *
 	 * @param xc          Self pointer
 	 * @param frame_id    The frame id this commit is for.
 	 * @param xcsem       Semaphore that will be signalled when the app GPU
