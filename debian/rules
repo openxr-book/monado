@@ -19,7 +19,7 @@ include /usr/share/dpkg/architecture.mk
 # We disable absolute systemd unit files too since we install to the path.
 # Don't waste time building the SteamVR driver, we don't package it.
 # Tell the version, instead of letting it guess from Git.
-CONFIG_ARGS := -DXRT_HAVE_SYSTEM_CJSON=ON \
+CONFIG_ARGS := \
 	  -DXRT_OPENXR_INSTALL_ACTIVE_RUNTIME=OFF \
 	  -DXRT_VULKAN_ENABLE_VALIDATION=OFF \
 	  -DBUILD_DOC=OFF \
