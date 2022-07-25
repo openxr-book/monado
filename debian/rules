@@ -7,11 +7,6 @@
 # see FEATURE AREAS in dpkg-buildflags(1)
 export DEB_BUILD_MAINT_OPTIONS = hardening=+all reproducible=+all
 
-# see ENVIRONMENT in dpkg-buildflags(1)
-# package maintainers to append LDFLAGS
-# Not needed on Bullseye and newer
-#export DEB_LDFLAGS_MAINT_APPEND = -Wl,--as-needed
-
 include /usr/share/dpkg/architecture.mk
 
 # We manage active runtime via update-alternatives

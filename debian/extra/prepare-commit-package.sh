@@ -1,5 +1,5 @@
 #!/bin/sh
-# Copyright 2020, Ryan Pavlik <ryan@ryanpavlik.com>
+# SPDX-FileCopyrightText: 2020-2022, Ryan Pavlik <ryan@ryanpavlik.com>
 # SPDX-License-Identifier: CC0-1.0
 
 # Packages produced this way are for automated use only and shouldn't be uploaded to the Debian archive.
@@ -22,7 +22,7 @@ set -e
         PKG_REVISION=$2
         export PKG_REVISION
     else
-        PKG_REVISION=1~ci$(date --utc "+%Y%m%d")
+        PKG_REVISION=1~ubuntu2204~ci$(date --utc "+%Y%m%d")
         export PKG_REVISION
     fi
 

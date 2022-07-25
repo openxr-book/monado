@@ -1,3 +1,14 @@
+monado (21.0.0~dfsg1-2~ubuntu2204~20220724+1) jammy; urgency=medium
+
+  * Create branch for backport, updating
+    - d/control
+    - d/gbp.conf
+    - d/rules
+    - d/extra/prepare-commit-package.sh
+  * Rebuild for jammy
+
+ -- Ryan Pavlik <ryan@ryanpavlik.com>  Mon, 25 Jul 2022 09:26:39 -0500
+
 monado (21.0.0~dfsg1-2) unstable; urgency=medium
 
   * d/control
