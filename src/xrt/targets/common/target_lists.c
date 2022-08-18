@@ -95,11 +95,12 @@ xrt_builder_create_func_t target_builder_list[] = {
 #ifdef T_BUILDER_RGB_TRACKING
     t_builder_rgb_tracking_create,
 #endif // T_BUILDER_RGB_TRACKING
-
+#ifdef T_BUILDER_SIMULA
+    t_builder_simula_create,
+#endif
 #ifdef T_BUILDER_LIGHTHOUSE
     t_builder_lighthouse_create,
 #endif // T_BUILDER_LIGHTHOUSE
-
 #ifdef T_BUILDER_REMOTE
     t_builder_remote_create,
 #endif // T_BUILDER_REMOTE
