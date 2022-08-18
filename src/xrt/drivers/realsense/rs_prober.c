@@ -159,7 +159,7 @@ find_capable_device(int capability, rs2_device_list *device_list)
 }
 
 //! Implements the conditional flow to decide on how to pick which tracking to use
-static struct xrt_device *
+struct xrt_device *
 create_tracked_rs_device(struct xrt_prober *xp)
 {
 	rs2_error *e = NULL;

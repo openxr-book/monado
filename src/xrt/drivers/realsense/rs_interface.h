@@ -9,6 +9,8 @@
 
 #pragma once
 
+#include "xrt/xrt_prober.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -46,6 +48,9 @@ rs_create_auto_prober(void);
  */
 struct xrt_fs *
 rs_source_create(struct xrt_frame_context *xfctx, int device_idx);
+
+struct xrt_device *
+create_tracked_rs_device(struct xrt_prober *xp);
 
 /*!
  * @dir drivers/realsense
