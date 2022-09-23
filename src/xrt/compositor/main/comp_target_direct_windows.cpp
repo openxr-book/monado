@@ -23,6 +23,9 @@
 #include "util/u_misc.h"
 #include "util/u_pacing.h"
 #include "d3d/d3d_dxgi_helpers.hpp"
+#include "d3d/d3d_dxgi_formats.h"
+#include "d3d/d3d_d3d11_helpers.hpp"
+#include "d3d/d3d_winrt_helpers.hpp"
 
 #include <memory>
 #include <algorithm>
@@ -30,6 +33,7 @@
 
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.Collections.h>
+#include <winrt/Windows.Foundation.Metadata.h>
 #include <winrt/Windows.Devices.Display.Core.h>
 #include <winrt/Windows.Graphics.DirectX.h>
 #include <windows.devices.display.core.interop.h>
@@ -43,7 +47,8 @@
 
 namespace winrtWDDC = winrt::Windows::Devices::Display::Core;
 namespace winrtWDD = winrt::Windows::Devices::Display;
-
+namespace Collections = winrt::Windows::Foundation::Collections;
+using winrt::Windows::Graphics::DirectX::DirectXPixelFormat;
 /*
  *
  * Private structs.
@@ -51,13 +56,155 @@ namespace winrtWDD = winrt::Windows::Devices::Display;
  */
 namespace {
 
+static inline bool
+checkForBasicAPI()
+{
+	return winrt::Windows::Foundation::Metadata::ApiInformation::IsApiContractPresent(
+	    L"Windows.Foundation.UniversalApiContract", 7);
+}
+
 /// Look for a contract that includes a Windows 11 function (TryExecuteTask instead of ExecuteTask)
 /// @return
 static inline bool
-checkForTryExecuteTask()
+checkForApi14()
 {
 	return winrt::Windows::Foundation::Metadata::ApiInformation::IsApiContractPresent(
 	    L"Windows.Foundation.UniversalApiContract", 14);
+}
+
+
+struct ActiveDisplayOwnership
+{
+	explicit ActiveDisplayOwnership(struct comp_compositor *comp, winrtWDDC::DisplayDevice device, HANDLE fence);
+	/// The compositor that owns us
+	struct comp_compositor *c;
+
+	/// @name WinRT objects
+	/// @{
+	winrtWDDC::DisplayDevice device{nullptr};
+	winrtWDDC::DisplayFence fence{nullptr};
+	/// @}
+};
+
+/// Things to pass between the opening of the device and the CompositorSwapchain constructor
+using DisplayObjects = std::tuple<winrtWDDC::DisplayDevice, winrtWDDC::DisplayTarget, winrtWDDC::DisplayPath>;
+
+class CompositorSwapchain
+{
+public:
+	CompositorSwapchain(DisplayObjects objects,
+	                    winrt::Windows::Graphics::DirectX::DirectXColorSpace colorSpace,
+	                    uint32_t numImages);
+	CompositorSwapchain(winrtWDDC::DisplayDevice device,
+	                    winrtWDDC::DisplayTarget target,
+	                    winrtWDDC::DisplayPath path,
+	                    winrt::Windows::Graphics::DirectX::DirectXColorSpace colorSpace,
+	                    uint32_t numImages);
+	CompositorSwapchain(CompositorSwapchain const &) = delete;
+	CompositorSwapchain(CompositorSwapchain &&) = default;
+	CompositorSwapchain &
+	operator=(CompositorSwapchain const &) = delete;
+	CompositorSwapchain &
+	operator=(CompositorSwapchain &&) = default;
+
+	winrtWDDC::DisplaySurface
+	getSurface(uint32_t i) const
+	{
+		return m_surfaces[i];
+	}
+
+	HANDLE
+	getSurfaceHandle(uint32_t i) const
+	{
+		return m_surfaceHandles[i].get();
+	}
+
+	uint32_t
+	acquireNext();
+
+	uint32_t
+	getHeight() const
+	{
+		return (uint32_t)m_path.SourceResolution().Value().Height;
+	}
+	uint32_t
+	getWidth() const
+	{
+		return (uint32_t)m_path.SourceResolution().Value().Width;
+	}
+
+	winrt::Windows::Graphics::DirectX::DirectXPixelFormat
+	getFormat() const
+	{
+		return m_path.SourcePixelFormat();
+	}
+
+	void
+	present(uint32_t i, winrtWDDC::DisplayFence fence, uint64_t fenceValue);
+
+private:
+	bool m_haveApi14{checkForApi14()};
+	uint32_t m_nextToAcquire{0};
+	winrtWDDC::DisplaySource m_source;
+	winrtWDDC::DisplayTaskPool m_taskPool;
+	winrtWDDC::DisplayPath m_path;
+	std::vector<winrtWDDC::DisplaySurface> m_surfaces;
+	std::vector<wil::unique_handle> m_surfaceHandles;
+	std::vector<winrtWDDC::DisplayScanout> m_scanouts;
+};
+CompositorSwapchain::CompositorSwapchain(DisplayObjects objects,
+                                         winrt::Windows::Graphics::DirectX::DirectXColorSpace colorSpace,
+                                         uint32_t numImages)
+    : CompositorSwapchain(std::get<winrtWDDC::DisplayDevice>(objects),
+                          std::get<winrtWDDC::DisplayTarget>(objects),
+                          std::get<winrtWDDC::DisplayPath>(objects),
+                          colorSpace,
+                          numImages)
+{}
+
+inline CompositorSwapchain::CompositorSwapchain(winrtWDDC::DisplayDevice device,
+                                                winrtWDDC::DisplayTarget target,
+                                                winrtWDDC::DisplayPath path,
+                                                winrt::Windows::Graphics::DirectX::DirectXColorSpace colorSpace,
+                                                uint32_t numImages)
+
+    : m_source(device.CreateScanoutSource(target)), m_taskPool(device.CreateTaskPool()), m_path(path),
+      m_surfaces(numImages, nullptr), m_surfaceHandles(numImages), m_scanouts(numImages, nullptr)
+{
+	winrt::Windows::Graphics::SizeInt32 resolution = path.SourceResolution().Value();
+	winrt::Windows::Graphics::DirectX::Direct3D11::Direct3DMultisampleDescription multisample{1, 0};
+
+	winrtWDDC::DisplayPrimaryDescription primaryDescription((uint32_t)resolution.Width, (uint32_t)resolution.Height,
+	                                                        path.SourcePixelFormat(), colorSpace,
+	                                                        /* isStereo */ false, multisample);
+	auto deviceInterop = device.as<::IDisplayDeviceInterop>();
+
+	for (uint32_t i = 0; i < numImages; ++i) {
+		auto surface = device.CreatePrimary(target, primaryDescription);
+		m_surfaces[i] = surface;
+		auto surfaceInspectable = surface.as<::IInspectable>();
+		THROW_IF_FAILED(deviceInterop->CreateSharedHandle(surfaceInspectable.get(), nullptr, GENERIC_ALL,
+		                                                  nullptr, m_surfaceHandles[i].put()));
+		m_scanouts[i] =
+		    device.CreateSimpleScanout(m_source, m_surfaces[i], /* SubResourceIndex */ 0, /*SyncInterval */ 0);
+	}
+}
+
+uint32_t
+CompositorSwapchain::acquireNext()
+{
+	uint32_t ret = m_nextToAcquire;
+	m_nextToAcquire = (m_nextToAcquire + 1) % m_surfaces.size();
+	return ret;
+}
+
+void
+CompositorSwapchain::present(uint32_t i, winrtWDDC::DisplayFence fence, uint64_t fenceValue)
+{
+	auto task = m_taskPool.CreateTask();
+	task.SetWait(fence, fenceValue);
+	task.SetScanout(m_scanouts[i]);
+	m_taskPool.ExecuteTask(task);
 }
 
 class Renderer
@@ -65,16 +212,17 @@ class Renderer
 public:
 	explicit Renderer(struct comp_compositor *comp);
 
-	winrt::Windows::Foundation::Collections::IVector<winrtWDDC::DisplayTarget>
+	bool
 	findHmds();
 
 	bool
-	hasImages() const noexcept;
+	openHmd(winrtWDDC::DisplayTarget target, DisplayObjects &outObjects);
 
-
-private:
 	/// The compositor that owns us
 	struct comp_compositor *c;
+
+	/// Whether we can/should use the Windows 11+-only APIs
+	bool useApi14;
 
 	winrtWDDC::DisplayManager manager;
 
@@ -85,21 +233,30 @@ private:
 	wil::com_ptr<ID3D11DeviceContext4> d3d11Context;
 	LUID luid;
 
-	wil::com_ptr<ID3D11Fence> d3d11Fence;
+	wil::com_ptr<ID3D11Fence> d3d11RenderCompleteFence;
 	/// @}
+
+	wil::unique_handle renderCompleteFenceHandle;
 
 	/// @name WinRT objects
 	/// @{
-	winrtWDDC::DisplayDevice device{nullptr};
-	winrtWDDC::DisplayFence fence{nullptr};
-	/// @}
+	winrtWDDC::DisplayAdapter displayAdapter{nullptr};
+	winrtWDDC::DisplayDevice displayDevice{nullptr};
 
+	winrtWDDC::DisplayFence renderCompleteFence{nullptr};
+	std::vector<winrtWDDC::DisplayTarget> hmds;
+
+	// winrtWDDC::DisplayTarget displayTarget{nullptr};
+	// winrtWDDC::DisplayPath displayPath{nullptr};
+	// winrtWDDC::DisplayState displayState{nullptr};
+	/// @}
 };
 
-Renderer::Renderer(struct comp_compositor *comp)
-    : c(comp), manager(winrtWDDC::DisplayManager::Create(winrtWDDC::DisplayManagerOptions::EnforceSourceOwnership)),
-      dxgiAdapter(xrt::auxiliary::d3d::getAdapterByLUID(c->settings.client_gpu_deviceLUID))
 
+Renderer::Renderer(struct comp_compositor *comp)
+    : c(comp), useApi14(checkForApi14()),
+      manager(winrtWDDC::DisplayManager::Create(winrtWDDC::DisplayManagerOptions::EnforceSourceOwnership)),
+      dxgiAdapter(xrt::auxiliary::d3d::getAdapterByLUID(c->settings.client_gpu_deviceLUID))
 {
 	assert(c->settings.client_gpu_deviceLUID_valid);
 
@@ -107,11 +264,13 @@ Renderer::Renderer(struct comp_compositor *comp)
 	{
 		wil::com_ptr<ID3D11Device> our_dev;
 		wil::com_ptr<ID3D11DeviceContext> our_context;
-		std::tie(our_dev, our_context) = xrt::auxiliary::d3d::d3d11::createDevice(adapter, c->log_level);
+		std::tie(our_dev, our_context) =
+		    xrt::auxiliary::d3d::d3d11::createDevice(dxgiAdapter, c->settings.log_level);
 		our_dev.query_to(d3d11Device.put());
 		our_context.query_to(d3d11Context.put());
 
-		THROW_IF_FAILED(d3d11Device->CreateFence(0, D3D11_FENCE_FLAG_SHARED, IID_PPV_ARGS(d3d11Fence.put())));
+		THROW_IF_FAILED(
+		    d3d11Device->CreateFence(0, D3D11_FENCE_FLAG_SHARED, IID_PPV_ARGS(d3d11RenderCompleteFence.put())));
 	}
 
 	// Get the LUID in Windows format
@@ -120,15 +279,41 @@ Renderer::Renderer(struct comp_compositor *comp)
 		THROW_IF_FAILED(dxgiAdapter->GetDesc(&desc));
 		luid = desc.AdapterLuid;
 	}
-}
 
-winrt::Windows::Foundation::Collections::IVector<winrtWDDC::DisplayTarget>
+	// get the adapter and device for winrt
+	{
+		winrt::Windows::Graphics::DisplayAdapterId id{};
+		id.LowPart = luid.LowPart;
+		id.HighPart = luid.HighPart;
+		displayAdapter = winrtWDDC::DisplayAdapter::FromId(id);
+		displayDevice = manager.CreateDisplayDevice(displayAdapter);
+	}
+	// Get the handle for the fence
+	{
+		wil::unique_handle fenceHandle;
+		THROW_IF_FAILED(
+		    d3d11RenderCompleteFence->CreateSharedHandle(nullptr, GENERIC_ALL, nullptr, fenceHandle.put()));
+		renderCompleteFenceHandle = std::move(fenceHandle);
+	}
+	// get the winrt object for the fence
+	{
+		winrt::com_ptr<::IInspectable> fence;
+		THROW_IF_FAILED(displayDevice.as<IDisplayDeviceInterop>()->OpenSharedHandle(
+		    renderCompleteFenceHandle.get(), IID_PPV_ARGS(fence.put())));
+		renderCompleteFence = fence.as<winrtWDDC::DisplayFence>();
+	}
+}
+// template<typename Ret, typename F>
+// static inline Ret
+
+bool
 Renderer::findHmds()
 {
 	using std::begin;
 	using std::end;
+	hmds.clear();
+
 	auto current_targets = manager.GetCurrentTargets();
-	std::vector<winrtWDDC::DisplayTarget> hmds;
 	std::copy_if(begin(current_targets), end(current_targets), std::back_inserter(hmds),
 	             [&](winrtWDDC::DisplayTarget const &target) {
 		             try {
@@ -153,27 +338,81 @@ Renderer::findHmds()
 
 			             LUID thisLuid = {adapter.Id().LowPart, adapter.Id().HighPart};
 
-			             if (thisLuid != luid) {
+			             if (thisLuid.LowPart != luid.LowPart || thisLuid.HighPart != luid.HighPart) {
 				             COMP_INFO(c, "Skipping target because LUID doesn't match.");
 				             return false;
 			             }
 
 			             return true;
 		             } catch (winrt::hresult_error const &e) {
-			             COMP_ERROR(ct->c, "Caught WinRT exception: (%" PRId32 ") %s", e.code().value,
+			             COMP_ERROR(c, "Caught WinRT exception: (%" PRId32 ") %s", e.code().value,
 			                        winrt::to_string(e.message()).c_str());
 			             return false;
 		             } catch (std::exception const &e) {
-			             COMP_ERROR(ct->c, "Caught exception: %s", e.what());
+			             COMP_ERROR(c, "Caught exception: %s", e.what());
 			             return false;
 		             }
 	             });
-	return winrt::single_threaded_vector<winrtWDDC::DisplayTarget>(std::move(hmds));
+	return !hmds.empty();
 }
 
 inline bool
-Renderer::hasImages() const noexcept {
+Renderer::openHmd(winrtWDDC::DisplayTarget target, DisplayObjects &outObjects)
+{
+	Collections::IVector<winrtWDDC::DisplayTarget> singleTargetVector =
+	    winrt::single_threaded_vector<winrtWDDC::DisplayTarget>({target});
 
+	auto stateResult = manager.TryAcquireTargetsAndCreateEmptyState(singleTargetVector);
+	if (!SUCCEEDED(stateResult.ExtendedErrorCode())) {
+		COMP_ERROR(c, "Could not acquire target and create empty state.");
+		return false;
+	}
+	winrtWDDC::DisplayState state = stateResult.State();
+
+	{
+		// this path object is just temporary, we can get it back later if everything worked right
+		winrtWDDC::DisplayPath path = state.ConnectTarget(target);
+		// Parameters we know
+		path.IsInterlaced(false);
+		path.Scaling(winrtWDDC::DisplayPathScaling::Identity);
+
+		winrt::Windows::Foundation::Collections::IVectorView<winrtWDDC::DisplayModeInfo> modes =
+		    path.FindModes(winrtWDDC::DisplayModeQueryOptions::OnlyPreferredResolution);
+		auto it = std::min_element(begin(modes), end(modes), xrt::auxiliary::d3d::winrt::modeComparison);
+		winrtWDDC::DisplayModeInfo mode = *it;
+		if (mode == nullptr) {
+			COMP_WARN(c, "Could not find a suitable mode.");
+			return false;
+		}
+		path.ApplyPropertiesFromMode(mode);
+	}
+
+	// Atomically apply the state
+	auto applyResult = state.TryApply(winrtWDDC::DisplayStateApplyOptions::None);
+	LOG_IF_FAILED((HRESULT)applyResult.ExtendedErrorCode());
+	if (!SUCCEEDED(applyResult.ExtendedErrorCode())) {
+
+		COMP_WARN(c, "Could not apply properties.");
+		return false;
+	}
+
+	// Now, get the full state post-apply
+	auto finalStateResult = manager.TryAcquireTargetsAndReadCurrentState(singleTargetVector);
+	LOG_IF_FAILED((HRESULT)finalStateResult.ExtendedErrorCode());
+	if (!SUCCEEDED(finalStateResult.ExtendedErrorCode())) {
+
+		COMP_WARN(c, "Could not acquire and read state.");
+		return false;
+	}
+	// displayState = finalStateResult.State();
+	// displayTarget = target;
+	// displayDevice = manager.CreateDisplayDevice(target.Adapter());
+	// displayPath = displayState.GetPathForTarget(target);
+	// std::get<winrtWDDC::DisplayState>(outObjects) = finalStateResult.State();
+	// std::get<winrtWDDC::DisplayTarget>(outObjects) = target;
+	// std::get<winrtWDDC::DisplayPath>(outObjects) = displayState.GetPathForTarget(target);
+	outObjects = std::make_tuple(displayDevice, target, finalStateResult.State().GetPathForTarget(target));
+	return true;
 }
 
 } // namespace
@@ -220,6 +459,9 @@ struct comp_target_direct_windows
 	} vblank;
 
 	std::unique_ptr<Renderer> direct_renderer;
+	std::unique_ptr<CompositorSwapchain> swapchain;
+
+	struct vk_image_collection image_collection;
 };
 
 /*
@@ -261,47 +503,60 @@ create_image_views(struct comp_target_direct_windows *ctdw)
 {
 	struct vk_bundle *vk = get_vk(ctdw);
 
-#if 0
-	vk->vkGetSwapchainImagesKHR( //
-	    vk->device,              // device
-	    ctdw->swapchain.handle,  // swapchain
-	    &ctdw->base.image_count, // pSwapchainImageCount
-	    NULL);                   // pSwapchainImages
+
 	assert(ctdw->base.image_count > 0);
 	COMP_DEBUG(ctdw->base.c, "Creating %d image views.", ctdw->base.image_count);
-
 	VkImage *images = U_TYPED_ARRAY_CALLOC(VkImage, ctdw->base.image_count);
-	vk->vkGetSwapchainImagesKHR( //
-	    vk->device,              // device
-	    ctdw->swapchain.handle,  // swapchain
-	    &ctdw->base.image_count, // pSwapchainImageCount
-	    images);                 // pSwapchainImages
+	const uint32_t image_count = ctdw->base.image_count;
+	std::vector<xrt_image_native> xins(image_count);
+	auto interop = ctdw->direct_renderer->displayDevice.as<::IDisplayDeviceInterop>();
+	for (uint32_t i = 0; i < image_count; ++i) {
+		xins[i].handle = ctdw->swapchain->getSurfaceHandle(i);
+		xins[i].size = 0;                         /// @todo might be wrong
+		xins[i].use_dedicated_allocation = false; /// @todo might be wrong
+	}
+	xrt_swapchain_create_info info{};
+	info.create = (enum xrt_swapchain_create_flags)0;
+	info.bits = XRT_SWAPCHAIN_USAGE_COLOR;
+	info.format = ctdw->base.format;
+	info.sample_count = 1;
+	info.width = ctdw->base.width;
+	info.height = ctdw->base.height;
+	info.face_count = 1;
+	info.array_size = 1;
+	info.mip_count = 1;
+
+	VkResult ret = vk_ic_from_natives(vk, &info, xins.data(), image_count, &ctdw->image_collection);
+	if (ret != VK_SUCCESS) {
+		COMP_ERROR(ctdw->base.c, "Could not import display primaries as Vulkan images: %s",
+		           vk_result_string(ret));
+		return;
+	}
 
 	destroy_image_views(ctdw);
 
 	ctdw->base.images = U_TYPED_ARRAY_CALLOC(struct comp_target_image, ctdw->base.image_count);
 
 	VkImageSubresourceRange subresource_range = {
-	    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-	    .baseMipLevel = 0,
-	    .levelCount = 1,
-	    .baseArrayLayer = 0,
-	    .layerCount = 1,
+	    /*.aspectMask = */ VK_IMAGE_ASPECT_COLOR_BIT,
+	    /*.baseMipLevel = */ 0,
+	    /*.levelCount = */ 1,
+	    /*.baseArrayLayer = */ 0,
+	    /*.layerCount = */ 1,
 	};
 
-	for (uint32_t i = 0; i < ctdw->base.image_count; i++) {
-		ctdw->base.images[i].handle = images[i];
+	for (uint32_t i = 0; i < image_count; i++) {
+		ctdw->base.images[i].handle = ctdw->image_collection.images[i].handle;
 		vk_create_view(                  //
 		    vk,                          // vk_bundle
 		    ctdw->base.images[i].handle, // image
 		    VK_IMAGE_VIEW_TYPE_2D,       // type
-		    ctdw->surface.format.format, // format
+		    ctdw->base.format,           // format
 		    subresource_range,           // subresource_range
 		    &ctdw->base.images[i].view); // out_view
 	}
 
 	free(images);
-#endif
 }
 
 static void
@@ -341,8 +596,6 @@ comp_target_direct_windows_create_images(struct comp_target *ct,
 {
 	struct comp_target_direct_windows *ctdw = (struct comp_target_direct_windows *)ct;
 	struct vk_bundle *vk = get_vk(ctdw);
-	VkBool32 supported;
-	VkResult ret;
 
 	uint64_t now_ns = os_monotonic_get_ns();
 	// Some platforms really don't like the pacing_compositor code.
@@ -356,129 +609,69 @@ comp_target_direct_windows_create_images(struct comp_target *ct,
 
 	// Free old image views.
 	destroy_image_views(ctdw);
-
-	VkSwapchainKHR old_swapchain_handle = ctdw->swapchain.handle;
+	ctdw->swapchain = {};
 
 	ctdw->base.image_count = 0;
-	ctdw->swapchain.handle = VK_NULL_HANDLE;
-	ctdw->present_mode = present_mode;
 	ctdw->preferred.color_format = color_format;
 	ctdw->preferred.color_space = color_space;
 
-	/// @todo find and open the device/target here.
-
-	// Preliminary check of the environment
-	ret = vk->vkGetPhysicalDeviceSurfaceSupportKHR( //
-	    vk->physical_device,                        // physicalDevice
-	    vk->queue_family_index,                     // queueFamilyIndex
-	    ctdw->surface.handle,                       // surface
-	    &supported);                                // pSupported
-	if (ret != VK_SUCCESS) {
-		COMP_ERROR(ct->c, "vkGetPhysicalDeviceSurfaceSupportKHR: %s", vk_result_string(ret));
-	} else if (!supported) {
-		COMP_ERROR(ct->c, "vkGetPhysicalDeviceSurfaceSupportKHR: Surface not supported!");
-	}
-
-	if (!check_surface_present_mode(ctdw, ctdw->surface.handle, ctdw->present_mode)) {
-		// Free old.
-		destroy_old(ctdw, old_swapchain_handle);
+	winrt::Windows::Graphics::DirectX::DirectXColorSpace dxColorSpace;
+	if (!xrt::auxiliary::d3d::winrt::colorSpaceFromVulkan(color_space, dxColorSpace)) {
+		COMP_ERROR(ct->c, "Could not get equivalent of Vulkan color space %d", color_space);
 		return;
 	}
 
-	// Find the correct format.
-	if (!find_surface_format(ctdw, ctdw->surface.handle, &ctdw->surface.format)) {
-		// Free old.
-		destroy_old(ctdw, old_swapchain_handle);
+	bool openedOne = false;
+
+	const auto numHmds = ctdw->direct_renderer->hmds.size();
+	DisplayObjects objects{nullptr, nullptr, nullptr};
+	// Sometimes it takes a few tries.
+	for (int attempt = 0; attempt < 3 && !openedOne; ++attempt) {
+		for (size_t i = 0; i < numHmds; ++i) {
+
+			COMP_INFO(ct->c, "Attempting to open HMD %d, attempt %d", i, attempt);
+			if (!ctdw->direct_renderer->openHmd(ctdw->direct_renderer->hmds[i], objects)) {
+				COMP_ERROR(ct->c, "Attempt failed.");
+
+			} else {
+				COMP_INFO(ct->c, "Successfully opened HMD %d on attempt %d", i, attempt);
+				openedOne = true;
+				break;
+			}
+		}
+	}
+	if (!openedOne) {
+		COMP_ERROR(ct->c, "Could not open any HMD despite trying repeatedly.");
 		return;
 	}
-
-	// Get the caps first.
-	VkSurfaceCapabilitiesKHR surface_caps;
-	ret = vk->vkGetPhysicalDeviceSurfaceCapabilitiesKHR(vk->physical_device, ctdw->surface.handle, &surface_caps);
-	if (ret != VK_SUCCESS) {
-		COMP_ERROR(ct->c, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR: %s", vk_result_string(ret));
-
-		// Free old.
-		destroy_old(ctdw, old_swapchain_handle);
-		return;
-	}
-
-	// Get the extents of the swapchain.
-	VkExtent2D extent = select_extent(ctdw, surface_caps, preferred_width, preferred_height);
-
-	if (surface_caps.currentTransform & VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR ||
-	    surface_caps.currentTransform & VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR) {
-		COMP_DEBUG(ct->c, "Swapping width and height, since we are going to pre rotate");
-		uint32_t w2 = extent.width;
-		uint32_t h2 = extent.height;
-		extent.width = h2;
-		extent.height = w2;
-	}
-
-	COMP_DEBUG(ct->c, "swapchain minImageCount %d maxImageCount %d", surface_caps.minImageCount,
-	           surface_caps.maxImageCount);
-
 	// Get the image count.
 	const uint32_t preferred_at_least_image_count = 3;
-	uint32_t image_count = select_image_count(ctdw, surface_caps, preferred_at_least_image_count);
-
+	uint32_t image_count =
+	    preferred_at_least_image_count; // select_image_count(ctdw, surface_caps, preferred_at_least_image_count);
+	ctdw->base.image_count = image_count;
 
 	/*
 	 * Do the creation.
 	 */
 
 	COMP_DEBUG(ct->c, "Creating compositor swapchain with %d images", image_count);
-
-	// Create the swapchain now.
-	VkSwapchainCreateInfoKHR swapchain_info = {
-	    .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
-	    .surface = ctdw->surface.handle,
-	    .minImageCount = image_count,
-	    .imageFormat = ctdw->surface.format.format,
-	    .imageColorSpace = ctdw->surface.format.colorSpace,
-	    .imageExtent =
-	        {
-	            .width = extent.width,
-	            .height = extent.height,
-	        },
-	    .imageArrayLayers = 1,
-	    .imageUsage = image_usage,
-	    .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
-	    .queueFamilyIndexCount = 0,
-	    .preTransform = surface_caps.currentTransform,
-	    .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
-	    .presentMode = ctdw->present_mode,
-	    .clipped = VK_TRUE,
-	    .oldSwapchain = old_swapchain_handle,
-	};
-
-	ret = vk->vkCreateSwapchainKHR(vk->device, &swapchain_info, NULL, &ctdw->swapchain.handle);
-
-	// Always destroy the old.
-	destroy_old(ctdw, old_swapchain_handle);
-
-	if (ret != VK_SUCCESS) {
-		COMP_ERROR(ct->c, "vkCreateSwapchainKHR: %s", vk_result_string(ret));
-		return;
-	}
+	auto &direct = *ctdw->direct_renderer;
+	ctdw->swapchain = std::make_unique<CompositorSwapchain>(objects, dxColorSpace, image_count);
 
 
 	/*
 	 * Set target info.
 	 */
 
-	ctdw->base.width = extent.width;
-	ctdw->base.height = extent.height;
-	ctdw->base.format = ctdw->surface.format.format;
-	ctdw->base.surface_transform = surface_caps.currentTransform;
+	ctdw->base.width = ctdw->swapchain->getWidth();
+	ctdw->base.height = ctdw->swapchain->getHeight();
+	ctdw->base.format =
+	    (VkFormat)d3d_dxgi_format_to_vk((DXGI_FORMAT)(static_cast<int>(ctdw->swapchain->getFormat())));
+	ctdw->base.surface_transform = (VkSurfaceTransformFlagBitsKHR)0;
 
 	create_image_views(ctdw);
 
-#ifdef VK_EXT_display_control
-	if (!check_surface_counter_caps(ct, vk, ctdw)) {
-		COMP_ERROR(ct->c, "Failed to query surface counter capabilities");
-	}
-
+#if 0
 	if (vk->has_EXT_display_control && ctdw->display != VK_NULL_HANDLE) {
 		if (ctdw->vblank.has_started) {
 			// Already running.
@@ -497,12 +690,11 @@ static bool
 comp_target_direct_windows_has_images(struct comp_target *ct)
 {
 	struct comp_target_direct_windows *ctdw = (struct comp_target_direct_windows *)ct;
-	/// @todo probably incomplete
-	return ctdw->direct_renderer != nullptr && ctdw->direct_renderer->device != nullptr;
+	return ctdw->direct_renderer != nullptr && ctdw->swapchain != nullptr;
 }
 
 static VkResult
-comp_target_direct_windows_acquire_next_image(struct comp_target *ct, VkSemaphore semaphore, uint32_t *out_index)
+comp_target_direct_windows_acquire_next_image(struct comp_target *ct, uint32_t *out_index)
 {
 	struct comp_target_direct_windows *ctdw = (struct comp_target_direct_windows *)ct;
 	struct vk_bundle *vk = get_vk(ctdw);
@@ -511,14 +703,25 @@ comp_target_direct_windows_acquire_next_image(struct comp_target *ct, VkSemaphor
 		//! @todo what error to return here?
 		return VK_ERROR_INITIALIZATION_FAILED;
 	}
-	TODO basically waitframe
+	try {
+		uint32_t index = ctdw->swapchain->acquireNext();
+		*out_index = index;
+		return VK_SUCCESS;
+	} catch (winrt::hresult_error const &e) {
+		COMP_ERROR(ctdw->base.c, "Caught WinRT exception: (%" PRId32 ") %s", e.code().value,
+		           winrt::to_string(e.message()).c_str());
+		return VK_ERROR_DEVICE_LOST;
+	} catch (std::exception const &e) {
+		COMP_ERROR(ctdw->base.c, "Caught exception: %s", e.what());
+		return VK_ERROR_DEVICE_LOST;
+	}
 }
 
 static VkResult
 comp_target_direct_windows_present(struct comp_target *ct,
                                    VkQueue queue,
                                    uint32_t index,
-                                   VkSemaphore semaphore,
+                                   uint64_t timeline_semaphore_value,
                                    uint64_t desired_present_time_ns,
                                    uint64_t present_slop_ns)
 {
@@ -528,30 +731,8 @@ comp_target_direct_windows_present(struct comp_target *ct,
 	assert(ctdw->current_frame_id >= 0);
 	assert(ctdw->current_frame_id <= UINT32_MAX);
 
-	VkPresentTimeGOOGLE times = {
-	    .presentID = (uint32_t)ctdw->current_frame_id,
-	    .desiredPresentTime = desired_present_time_ns - present_slop_ns,
-	};
-
-	VkPresentTimesInfoGOOGLE timings = {
-	    .sType = VK_STRUCTURE_TYPE_PRESENT_TIMES_INFO_GOOGLE,
-	    .swapchainCount = 1,
-	    .pTimes = &times,
-	};
-
-	VkPresentInfoKHR presentInfo = {
-	    .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-	    .pNext = vk->has_GOOGLE_display_timing ? &timings : NULL,
-	    .waitSemaphoreCount = 1,
-	    .pWaitSemaphores = &semaphore,
-	    .swapchainCount = 1,
-	    .pSwapchains = &ctdw->swapchain.handle,
-	    .pImageIndices = &index,
-	};
-
-	VkResult ret = vk->vkQueuePresentKHR(queue, &presentInfo);
-
-#ifdef VK_EXT_display_control
+	ctdw->swapchain->present(index, ctdw->direct_renderer->renderCompleteFence, timeline_semaphore_value);
+#if 0
 	if (ctdw->vblank.has_started) {
 		os_thread_helper_lock(&ctdw->vblank.event_thread);
 		if (!ctdw->vblank.should_wait) {
@@ -562,14 +743,14 @@ comp_target_direct_windows_present(struct comp_target *ct,
 	}
 #endif
 
-	return ret;
+	return VK_SUCCESS;
 }
 
 static bool
 comp_target_direct_windows_check_ready(struct comp_target *ct)
 {
 	struct comp_target_direct_windows *ctdw = (struct comp_target_direct_windows *)ct;
-	return ctdw->surface.handle != VK_NULL_HANDLE;
+	return ctdw->direct_renderer && !ctdw->direct_renderer->hmds.empty();
 }
 
 static bool
@@ -587,11 +768,22 @@ comp_target_direct_windows_init_post_vulkan(struct comp_target *ct, uint32_t wid
 	try {
 		ctdw->direct_renderer = std::make_unique<Renderer>(ct->c);
 
-		auto hmds = ctdw->direct_renderer->findHmds();
-		if (hmds.Size() == 0) {
+
+		if (!ctdw->direct_renderer->findHmds()) {
 			COMP_ERROR(ct->c, "No displays with headset EDID flag set are available.");
 			return false;
 		}
+
+		struct vk_bundle *vk = get_vk(ctdw);
+
+		ctdw->base.semaphores.render_complete_is_timeline = true;
+		VkResult vkresult = vk_create_semaphore_from_native(
+		    vk, ctdw->direct_renderer->renderCompleteFenceHandle.get(), &ctdw->base.semaphores.render_complete);
+		if (vkresult != VK_SUCCESS) {
+			COMP_ERROR(ct->c, "Could not import timeline semaphore.");
+			return false;
+		}
+
 
 		return true;
 	} catch (winrt::hresult_error const &e) {
@@ -601,17 +793,10 @@ comp_target_direct_windows_init_post_vulkan(struct comp_target *ct, uint32_t wid
 	} catch (std::exception const &e) {
 		COMP_ERROR(ct->c, "Caught exception: %s", e.what());
 		return false;
-	}
-	VkResult ret = VK_SUCCESS;
-
-	///@todo
-	// ret = comp_target_direct_windows_create_surface(ctdw, &ctdw->base.surface.handle);
-	if (ret != VK_SUCCESS) {
-		COMP_ERROR(ct->c, "Failed to create surface '%s'!", vk_result_string(ret));
+	} catch (...) {
+		COMP_ERROR(ct->c, "Caught exception");
 		return false;
 	}
-
-	return true;
 }
 
 
@@ -630,22 +815,8 @@ comp_target_direct_windows_destroy(struct comp_target *ct)
 	}
 
 	destroy_image_views(ctdw);
-
-	if (ctdw->swapchain.handle != VK_NULL_HANDLE) {
-		vk->vkDestroySwapchainKHR(  //
-		    vk->device,             // device
-		    ctdw->swapchain.handle, // swapchain
-		    NULL);                  //
-		ctdw->swapchain.handle = VK_NULL_HANDLE;
-	}
-
-	if (ctdw->surface.handle != VK_NULL_HANDLE) {
-		vk->vkDestroySurfaceKHR(  //
-		    vk->instance,         // instance
-		    ctdw->surface.handle, // surface
-		    NULL);                //
-		ctdw->surface.handle = VK_NULL_HANDLE;
-	}
+	ctdw->swapchain = {};
+	ctdw->direct_renderer = {};
 
 	u_pc_destroy(&ctdw->upc);
 
@@ -748,6 +919,10 @@ comp_target_direct_windows_update_timings(struct comp_target *ct)
 struct comp_target *
 comp_target_direct_windows_create(struct comp_compositor *c)
 {
+	if (!checkForBasicAPI()) {
+		// Cannot use this API on this Windows version
+		return nullptr;
+	}
 	std::unique_ptr<comp_target_direct_windows> ctdw = std::make_unique<comp_target_direct_windows>();
 
 	/// @todo we can actually get some timing
