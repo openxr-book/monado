@@ -29,6 +29,7 @@ struct vk_image
 	VkDeviceMemory memory;
 	VkDeviceSize size;
 	bool use_dedicated_allocation;
+	bool acquired;
 };
 
 struct vk_image_collection
