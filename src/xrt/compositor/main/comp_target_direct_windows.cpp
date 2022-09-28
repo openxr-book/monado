@@ -36,6 +36,7 @@
 #include <algorithm>
 #include <exception>
 #include <utility>
+#include <set>
 
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.Collections.h>
@@ -132,6 +133,38 @@ to_string(winrtWDDC::DisplayPathStatus e)
 	case winrtWDDC::DisplayPathStatus::InvalidatedAsync: return "DisplayPathStatus::InvalidatedAsync";
 	}
 	return "DisplayPathStatus::UNKNOWN";
+}
+
+struct MyLuid
+{
+	MyLuid(LUID const &luid) : t(luid.LowPart, luid.HighPart) {}
+	MyLuid(winrt::Windows::Graphics::DisplayAdapterId const &id) : t(id.LowPart, id.HighPart) {}
+	operator LUID() const
+	{
+		LUID ret;
+		std::tie(ret.LowPart, ret.HighPart) = t;
+		return ret;
+	}
+	operator winrt::Windows::Graphics::DisplayAdapterId() const
+	{
+		return winrt::Windows::Graphics::DisplayAdapterId{std::get<0>(t), std::get<1>(t)};
+	}
+	std::pair<DWORD, LONG> t;
+};
+inline bool
+operator==(MyLuid const &lhs, MyLuid const &rhs)
+{
+	return lhs.t == rhs.t;
+}
+inline bool
+operator!=(MyLuid const &lhs, MyLuid const &rhs)
+{
+	return !(lhs == rhs);
+}
+inline bool
+operator<(MyLuid const &lhs, MyLuid const &rhs)
+{
+	return lhs.t < rhs.t;
 }
 
 /**
@@ -317,10 +350,14 @@ CompositorSwapchain::present(uint32_t i, const winrtWDDC::DisplayFence &fence, u
 	return true;
 }
 
+
 class CompTargetData
 {
 public:
 	explicit CompTargetData(struct comp_compositor *comp);
+
+	bool
+	populateAdapterSpecificData();
 
 	bool
 	findHmds();
@@ -340,6 +377,11 @@ public:
 
 	winrtWDDC::DisplayManager manager;
 
+	/// The list of possible HMDs available.
+	std::vector<winrtWDDC::DisplayTarget> hmds;
+
+	std::set<MyLuid> luidsWithHmds;
+
 	/// @name DXGI/D3D11 objects
 	/// @{
 	wil::com_ptr<IDXGIAdapter> dxgiAdapter;
@@ -352,75 +394,89 @@ public:
 
 	wil::unique_handle renderCompleteFenceHandle;
 
-	/// @name WinRT objects
+	/// @name WinRT objects that depend on the adapter
 	/// @{
 	winrtWDDC::DisplayAdapter displayAdapter{nullptr};
 	winrtWDDC::DisplayDevice displayDevice{nullptr};
 
 	winrtWDDC::DisplayFence renderCompleteFence{nullptr};
-	std::vector<winrtWDDC::DisplayTarget> hmds;
 
 	DisplayObjects objects{nullptr, nullptr, nullptr, nullptr};
-
-	// winrtWDDC::DisplayTarget displayTarget{nullptr};
-	// winrtWDDC::DisplayPath displayPath{nullptr};
-	// winrtWDDC::DisplayState displayState{nullptr};
 	/// @}
 };
 
 
 CompTargetData::CompTargetData(struct comp_compositor *comp)
     : c(comp), useApi14(checkForApi14()),
-      manager(winrtWDDC::DisplayManager::Create(winrtWDDC::DisplayManagerOptions::EnforceSourceOwnership)),
-      dxgiAdapter(xrt::auxiliary::d3d::getAdapterByLUID(c->settings.client_gpu_deviceLUID))
+      manager(winrtWDDC::DisplayManager::Create(winrtWDDC::DisplayManagerOptions::EnforceSourceOwnership))
+{}
+
+bool
+CompTargetData::populateAdapterSpecificData()
 {
-	assert(c->settings.client_gpu_deviceLUID_valid);
+	try {
+		assert(c->settings.client_gpu_deviceLUID_valid);
 
-	// Get some D3D11 stuff mainly for fence handling
-	{
-		wil::com_ptr<ID3D11Device> our_dev;
-		wil::com_ptr<ID3D11DeviceContext> our_context;
-		std::tie(our_dev, our_context) =
-		    xrt::auxiliary::d3d::d3d11::createDevice(dxgiAdapter, c->settings.log_level);
-		our_dev.query_to(d3d11Device.put());
-		our_context.query_to(d3d11Context.put());
+		dxgiAdapter = xrt::auxiliary::d3d::getAdapterByLUID(c->settings.client_gpu_deviceLUID);
+		// Get some D3D11 stuff mainly for fence handling
+		{
+			wil::com_ptr<ID3D11Device> our_dev;
+			wil::com_ptr<ID3D11DeviceContext> our_context;
+			std::tie(our_dev, our_context) =
+			    xrt::auxiliary::d3d::d3d11::createDevice(dxgiAdapter, c->settings.log_level);
+			our_dev.query_to(d3d11Device.put());
+			our_context.query_to(d3d11Context.put());
 
-		THROW_IF_FAILED(
-		    d3d11Device->CreateFence(0, D3D11_FENCE_FLAG_SHARED, IID_PPV_ARGS(d3d11RenderCompleteFence.put())));
-	}
-
-	// Get the LUID in Windows format
-	{
-		DXGI_ADAPTER_DESC desc{};
-		THROW_IF_FAILED(dxgiAdapter->GetDesc(&desc));
-		luid = desc.AdapterLuid;
-	}
-
-	// get the adapter and device for winrt
-	{
-		winrt::Windows::Graphics::DisplayAdapterId id{};
-		id.LowPart = luid.LowPart;
-		id.HighPart = luid.HighPart;
-		displayAdapter = winrtWDDC::DisplayAdapter::FromId(id);
-		if (displayAdapter == nullptr) {
-			throw std::runtime_error("Could not get adapter by ID in WinRT!");
+			THROW_IF_FAILED(d3d11Device->CreateFence(0, D3D11_FENCE_FLAG_SHARED,
+			                                         IID_PPV_ARGS(d3d11RenderCompleteFence.put())));
 		}
-		THROW_LAST_ERROR_IF_NULL(displayAdapter);
-		displayDevice = manager.CreateDisplayDevice(displayAdapter);
-	}
-	// Get the handle for the fence
-	{
-		wil::unique_handle fenceHandle;
-		THROW_IF_FAILED(
-		    d3d11RenderCompleteFence->CreateSharedHandle(nullptr, GENERIC_ALL, nullptr, fenceHandle.put()));
-		renderCompleteFenceHandle = std::move(fenceHandle);
-	}
-	// get the winrt object for the fence
-	{
-		winrt::com_ptr<::IInspectable> fence;
-		THROW_IF_FAILED(displayDevice.as<IDisplayDeviceInterop>()->OpenSharedHandle(
-		    renderCompleteFenceHandle.get(), IID_PPV_ARGS(fence.put())));
-		renderCompleteFence = fence.as<winrtWDDC::DisplayFence>();
+
+		// Get the LUID in Windows format
+		{
+			DXGI_ADAPTER_DESC desc{};
+			THROW_IF_FAILED(dxgiAdapter->GetDesc(&desc));
+			luid = desc.AdapterLuid;
+		}
+
+		// get the adapter and device for winrt
+		{
+			winrt::Windows::Graphics::DisplayAdapterId id{};
+			id.LowPart = luid.LowPart;
+			id.HighPart = luid.HighPart;
+			displayAdapter = winrtWDDC::DisplayAdapter::FromId(id);
+			if (displayAdapter == nullptr) {
+				throw std::runtime_error("Could not get adapter by ID in WinRT!");
+			}
+			THROW_LAST_ERROR_IF_NULL(displayAdapter);
+			// onecore\windows\directx\database\helperlibrary\lib\directxdatabasehelper.cpp(652)\dxgi.dll!00007FF8D2FACF61:
+			// (caller: 00007FF8D2FACA68) ReturnHr(28) tid(4e54) 80004002 No such interface supported
+			displayDevice = manager.CreateDisplayDevice(displayAdapter);
+		}
+		// Get the handle for the fence
+		{
+			wil::unique_handle fenceHandle;
+			THROW_IF_FAILED(d3d11RenderCompleteFence->CreateSharedHandle(nullptr, GENERIC_ALL, nullptr,
+			                                                             fenceHandle.put()));
+			renderCompleteFenceHandle = std::move(fenceHandle);
+		}
+		// get the winrt object for the fence
+		{
+			winrt::com_ptr<::IInspectable> fence;
+			THROW_IF_FAILED(displayDevice.as<IDisplayDeviceInterop>()->OpenSharedHandle(
+			    renderCompleteFenceHandle.get(), IID_PPV_ARGS(fence.put())));
+			renderCompleteFence = fence.as<winrtWDDC::DisplayFence>();
+		}
+		return true;
+	} catch (winrt::hresult_error const &e) {
+		COMP_ERROR(c, "Caught WinRT exception: (%" PRId32 ") %s", e.code().value,
+		           winrt::to_string(e.message()).c_str());
+		return false;
+	} catch (std::exception const &e) {
+		COMP_ERROR(c, "Caught exception: %s", e.what());
+		return false;
+	} catch (...) {
+		COMP_ERROR(c, "Caught exception");
+		return false;
 	}
 }
 
@@ -430,6 +486,9 @@ CompTargetData::targetPredicate(winrtWDDC::DisplayTarget const &target) const
 	try {
 		if (target == nullptr) {
 			COMP_WARN(c, "Skipping target because it's NULL.");
+			return false;
+		}
+		if (!target.IsConnected()) {
 			return false;
 		}
 		winrtWDD::DisplayMonitor const monitor = target.TryGetMonitor();
@@ -450,12 +509,12 @@ CompTargetData::targetPredicate(winrtWDDC::DisplayTarget const &target) const
 			COMP_INFO(c, "Skipping target because it's not marked as an HMD.");
 			return false;
 		}
-		LUID const thisLuid = {adapter.Id().LowPart, adapter.Id().HighPart};
+		// LUID const thisLuid = {adapter.Id().LowPart, adapter.Id().HighPart};
 
-		if (thisLuid.LowPart != luid.LowPart || thisLuid.HighPart != luid.HighPart) {
-			COMP_INFO(c, "Skipping target because LUID doesn't match.");
-			return false;
-		}
+		// if (thisLuid.LowPart != luid.LowPart || thisLuid.HighPart != luid.HighPart) {
+		// 	COMP_INFO(c, "Skipping target because LUID doesn't match.");
+		// 	return false;
+		// }
 
 		COMP_INFO(c, "Display '%s' meets our requirements for direct mode on Windows!", displayName.c_str());
 		return true;
@@ -471,12 +530,24 @@ CompTargetData::targetPredicate(winrtWDDC::DisplayTarget const &target) const
 		return false;
 	}
 }
+
+
+inline LUID
+luidConvert(const winrt::Windows::Graphics::DisplayAdapterId &id)
+{
+	LUID ret;
+	ret.HighPart = id.HighPart;
+	ret.LowPart = id.LowPart;
+	return ret;
+}
+
 bool
 CompTargetData::findHmds()
 {
 	using std::begin;
 	using std::end;
 	hmds.clear();
+	luidsWithHmds.clear();
 
 	auto currentTargets = manager.GetCurrentTargets();
 
@@ -485,6 +556,10 @@ CompTargetData::findHmds()
 	             [&](winrtWDDC::DisplayTarget const &target) { return this->targetPredicate(target); });
 	COMP_INFO(c, "Filtering left us with %d possible HMD targets", int(hmds.size()));
 
+	for (const auto &target : hmds) {
+		luidsWithHmds.insert(MyLuid(target.Adapter().Id()));
+	}
+	COMP_INFO(c, "They are on a total of with %d different adapters", int(luidsWithHmds.size()));
 	return !hmds.empty();
 }
 
@@ -521,7 +596,8 @@ CompTargetData::openHmd(const winrtWDDC::DisplayTarget &target, DisplayObjects &
 		winrtWDDC::DisplayState const state = stateResult.State();
 
 		{
-			// this path object is just temporary, we can get it back later if everything worked right
+			// this path object is just temporary, we can get it back later if everything worked
+			// right
 			winrtWDDC::DisplayPath const path = state.ConnectTarget(target);
 			// Parameters we know
 			path.IsInterlaced(false);
@@ -563,6 +639,17 @@ CompTargetData::openHmd(const winrtWDDC::DisplayTarget &target, DisplayObjects &
 		// std::get<winrtWDDC::DisplayTarget>(outObjects) = target;
 		// std::get<winrtWDDC::DisplayPath>(outObjects) = displayState.GetPathForTarget(target);
 		winrtWDDC::DisplayPath displayPath = finalStateResult.State().GetPathForTarget(target);
+
+		/// @todo This throws an exception right now:
+		// onecoreuap\windows\directx\dxg\ddisplay\core\ddisplaysource.cpp(210)\DDisplay.dll!00007FF8753A3DF5:
+		// (caller: 00007FF87538738B) ReturnHr(11) tid(e4d0) 80070057 The parameter is incorrect.
+		//     Msg:[onecoreuap\windows\directx\dxg\ddisplay\core\ddisplaysource.cpp(208)\DDisplay.dll!00007FF87538FA5E:
+		//     (caller: 00007FF87538738B) Exception(8) tid(e4d0) 80070057 The parameter is incorrect.
+		//     CallContext:[\DeviceCreateScanoutSource\DeviceCreateScanoutSource]
+		// ] CallContext:[\DeviceCreateScanoutSource\DeviceCreateScanoutSource]
+		// onecoreuap\windows\directx\dxg\ddisplay\core\ddisplaydevice.cpp(113)\DDisplay.dll!00007FF8753873ED:
+		// (caller: 00007FF84ABB422F) ReturnHr(12) tid(e4d0) 80070057 The parameter is incorrect.
+		//     CallContext:[\DeviceCreateScanoutSource]
 		winrtWDDC::DisplaySource displaySource = displayDevice.CreateScanoutSource(target);
 		outObjects = std::make_tuple(displayDevice, target, std::move(displayPath), std::move(displaySource));
 		return true;
@@ -922,16 +1009,8 @@ static bool
 comp_target_direct_windows_init_post_vulkan(struct comp_target *ct, uint32_t width, uint32_t height) noexcept
 {
 	struct comp_target_direct_windows *ctdw = (struct comp_target_direct_windows *)ct;
-	winrt::init_apartment();
 	try {
-
-		ctdw->data = std::make_unique<CompTargetData>(ct->c);
-
-
-		if (!ctdw->data->findHmds()) {
-			COMP_INFO(
-			    ct->c,
-			    "No displays with headset EDID flag set are available: cannot use Windows direct mode.");
+		if (!ctdw->data->populateAdapterSpecificData()) {
 			return false;
 		}
 
@@ -1086,6 +1165,15 @@ comp_target_direct_windows_create(struct comp_compositor *c)
 		}
 
 		std::unique_ptr<comp_target_direct_windows> ctdw = std::make_unique<comp_target_direct_windows>();
+
+		ctdw->data = std::make_unique<CompTargetData>(c);
+
+
+		if (!ctdw->data->findHmds()) {
+			COMP_INFO(
+			    c, "No displays with headset EDID flag set are available: cannot use Windows direct mode.");
+			return nullptr;
+		}
 
 		/// @todo we can actually get some timing
 		ctdw->timing_usage = COMP_TARGET_FORCE_FAKE_DISPLAY_TIMING;
