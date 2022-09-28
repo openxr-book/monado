@@ -13,6 +13,10 @@
  * @ingroup comp_main
  */
 
+#ifndef _SILENCE_CLANG_COROUTINE_MESSAGE
+#define _SILENCE_CLANG_COROUTINE_MESSAGE
+#endif
+
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
@@ -60,6 +64,9 @@ using winrt::Windows::Graphics::DirectX::DirectXPixelFormat;
  */
 namespace {
 
+/// We retry opening an HMD a few times since it sometimes fails spuriously
+constexpr int kMaxOpenAttempts = 2;
+
 inline bool
 checkForBasicAPI()
 {
@@ -80,29 +87,51 @@ constexpr const char *
 to_string(winrtWDDC::DisplayManagerResult e)
 {
 	switch (e) {
-	case winrtWDDC::DisplayManagerResult::Success: return "Success";
-	case winrtWDDC::DisplayManagerResult::UnknownFailure: return "UnknownFailure";
-	case winrtWDDC::DisplayManagerResult::TargetAccessDenied: return "TargetAccessDenied";
-	case winrtWDDC::DisplayManagerResult::TargetStale: return "TargetStale";
-	case winrtWDDC::DisplayManagerResult::RemoteSessionNotSupported: return "RemoteSessionNotSupported";
+	case winrtWDDC::DisplayManagerResult::Success: return "DisplayManagerResult::Success";
+	case winrtWDDC::DisplayManagerResult::UnknownFailure: return "DisplayManagerResult::UnknownFailure";
+	case winrtWDDC::DisplayManagerResult::TargetAccessDenied: return "DisplayManagerResult::TargetAccessDenied";
+	case winrtWDDC::DisplayManagerResult::TargetStale: return "DisplayManagerResult::TargetStale";
+	case winrtWDDC::DisplayManagerResult::RemoteSessionNotSupported:
+		return "DisplayManagerResult::RemoteSessionNotSupported";
 	}
-	return "UNKNOWN";
+	return "DisplayManagerResult::UNKNOWN";
 }
 
 constexpr const char *
 to_string(winrtWDDC::DisplayStateOperationStatus e)
 {
 	switch (e) {
-	case winrtWDDC::DisplayStateOperationStatus::Success: return "Success";
-	case winrtWDDC::DisplayStateOperationStatus::PartialFailure: return "PartialFailure";
-	case winrtWDDC::DisplayStateOperationStatus::UnknownFailure: return "UnknownFailure";
-	case winrtWDDC::DisplayStateOperationStatus::TargetOwnershipLost: return "TargetOwnershipLost";
-	case winrtWDDC::DisplayStateOperationStatus::SystemStateChanged: return "SystemStateChanged";
-	case winrtWDDC::DisplayStateOperationStatus::TooManyPathsForAdapter: return "TooManyPathsForAdapter";
-	case winrtWDDC::DisplayStateOperationStatus::ModesNotSupported: return "ModesNotSupported";
-	case winrtWDDC::DisplayStateOperationStatus::RemoteSessionNotSupported: return "RemoteSessionNotSupported";
+	case winrtWDDC::DisplayStateOperationStatus::Success: return "DisplayStateOperationStatus::Success";
+	case winrtWDDC::DisplayStateOperationStatus::PartialFailure:
+		return "DisplayStateOperationStatus::PartialFailure";
+	case winrtWDDC::DisplayStateOperationStatus::UnknownFailure:
+		return "DisplayStateOperationStatus::UnknownFailure";
+	case winrtWDDC::DisplayStateOperationStatus::TargetOwnershipLost:
+		return "DisplayStateOperationStatus::TargetOwnershipLost";
+	case winrtWDDC::DisplayStateOperationStatus::SystemStateChanged:
+		return "DisplayStateOperationStatus::SystemStateChanged";
+	case winrtWDDC::DisplayStateOperationStatus::TooManyPathsForAdapter:
+		return "DisplayStateOperationStatus::TooManyPathsForAdapter";
+	case winrtWDDC::DisplayStateOperationStatus::ModesNotSupported:
+		return "DisplayStateOperationStatus::ModesNotSupported";
+	case winrtWDDC::DisplayStateOperationStatus::RemoteSessionNotSupported:
+		return "DisplayStateOperationStatus::RemoteSessionNotSupported";
 	}
-	return "UNKNOWN";
+	return "DisplayStateOperationStatus::UNKNOWN";
+}
+
+constexpr const char *
+to_string(winrtWDDC::DisplayPathStatus e)
+{
+	switch (e) {
+	case winrtWDDC::DisplayPathStatus::Unknown: return "DisplayPathStatus::Unknown";
+	case winrtWDDC::DisplayPathStatus::Succeeded: return "DisplayPathStatus::Succeeded";
+	case winrtWDDC::DisplayPathStatus::Pending: return "DisplayPathStatus::Pending";
+	case winrtWDDC::DisplayPathStatus::Failed: return "DisplayPathStatus::Failed";
+	case winrtWDDC::DisplayPathStatus::FailedAsync: return "DisplayPathStatus::FailedAsync";
+	case winrtWDDC::DisplayPathStatus::InvalidatedAsync: return "DisplayPathStatus::InvalidatedAsync";
+	}
+	return "DisplayPathStatus::UNKNOWN";
 }
 
 /**
@@ -151,27 +180,25 @@ using DisplayObjects =
 class CompositorSwapchain
 {
 public:
-	CompositorSwapchain(DisplayObjects objects,
+	CompositorSwapchain(struct comp_compositor *comp,
+	                    DisplayObjects &&objects,
 	                    winrt::Windows::Graphics::DirectX::DirectXColorSpace colorSpace,
 	                    uint32_t numImages);
-	CompositorSwapchain(const winrtWDDC::DisplayDevice &device,
+	CompositorSwapchain(struct comp_compositor *comp,
+	                    const winrtWDDC::DisplayDevice &device,
 	                    const winrtWDDC::DisplayTarget &target,
 	                    const winrtWDDC::DisplayPath &path,
-	                    winrtWDDC::DisplaySource source,
+	                    winrtWDDC::DisplaySource &&source,
 	                    winrt::Windows::Graphics::DirectX::DirectXColorSpace colorSpace,
 	                    uint32_t numImages);
+
 	CompositorSwapchain(CompositorSwapchain const &) = delete;
-	// CompositorSwapchain(CompositorSwapchain &&) = default;
+	CompositorSwapchain(CompositorSwapchain &&) = delete;
 	CompositorSwapchain &
 	operator=(CompositorSwapchain const &) = delete;
-	// CompositorSwapchain &
-	    // operator=(CompositorSwapchain &&) = default;
+	CompositorSwapchain &
+	operator=(CompositorSwapchain &&) = delete;
 
-	    winrtWDDC::DisplaySurface
-	    getSurface(uint32_t i) const
-	{
-		return m_surfaces[i];
-	}
 
 	HANDLE
 	getSurfaceHandle(uint32_t i) const
@@ -193,20 +220,29 @@ public:
 		return (uint32_t)m_path.SourceResolution().Value().Width;
 	}
 
-	winrt::Windows::Graphics::DirectX::DirectXPixelFormat
+	DXGI_FORMAT
 	getFormat() const
 	{
-		return m_path.SourcePixelFormat();
+		return (DXGI_FORMAT)(static_cast<int>(m_path.SourcePixelFormat()));
 	}
 
-	void
+
+	winrtWDDC::DisplayRotation
+	getSurfaceTransform() const
+	{
+		return m_path.Rotation();
+	}
+
+	bool
 	present(uint32_t i, const winrtWDDC::DisplayFence &fence, uint64_t fenceValue);
 
 private:
+	/// The compositor that owns us
+	struct comp_compositor *c;
+	xrt::auxiliary::util::ComGuard com_guard;
 	bool m_haveApi14{checkForApi14()};
 	uint32_t m_nextToAcquire{0};
 
-	xrt::auxiliary::util::ComGuard com_guard;
 	winrtWDDC::DisplaySource m_source;
 	winrtWDDC::DisplayTaskPool m_taskPool;
 	winrtWDDC::DisplayPath m_path;
@@ -215,26 +251,29 @@ private:
 	std::vector<winrtWDDC::DisplayScanout> m_scanouts;
 };
 
-CompositorSwapchain::CompositorSwapchain(DisplayObjects objects,
+CompositorSwapchain::CompositorSwapchain(struct comp_compositor *comp,
+                                         DisplayObjects &&objects,
                                          winrt::Windows::Graphics::DirectX::DirectXColorSpace colorSpace,
                                          uint32_t numImages)
-    : CompositorSwapchain(std::get<winrtWDDC::DisplayDevice>(objects),
+    : CompositorSwapchain(comp,
+                          std::get<winrtWDDC::DisplayDevice>(objects),
                           std::get<winrtWDDC::DisplayTarget>(objects),
                           std::get<winrtWDDC::DisplayPath>(objects),
-                          std::get<winrtWDDC::DisplaySource>(objects),
+                          std::move(std::get<winrtWDDC::DisplaySource>(objects)),
                           colorSpace,
                           numImages)
 {}
 
-inline CompositorSwapchain::CompositorSwapchain(const winrtWDDC::DisplayDevice &device,
+inline CompositorSwapchain::CompositorSwapchain(struct comp_compositor *comp,
+                                                const winrtWDDC::DisplayDevice &device,
                                                 const winrtWDDC::DisplayTarget &target,
                                                 const winrtWDDC::DisplayPath &path,
-                                                winrtWDDC::DisplaySource source,
+                                                winrtWDDC::DisplaySource &&source,
                                                 winrt::Windows::Graphics::DirectX::DirectXColorSpace colorSpace,
                                                 uint32_t numImages)
 
-    : m_source(std::move(source)), m_taskPool(device.CreateTaskPool()), m_path(path), m_surfaces(numImages, nullptr),
-      m_surfaceHandles(numImages), m_scanouts(numImages, nullptr)
+    : c(comp), m_source(std::move(source)), m_taskPool(device.CreateTaskPool()), m_path(path),
+      m_surfaces(numImages, nullptr), m_surfaceHandles(numImages), m_scanouts(numImages, nullptr)
 {
 	winrt::Windows::Graphics::SizeInt32 const resolution = path.SourceResolution().Value();
 	winrt::Windows::Graphics::DirectX::Direct3D11::Direct3DMultisampleDescription const multisample{1, 0};
@@ -263,31 +302,38 @@ CompositorSwapchain::acquireNext()
 	return ret;
 }
 
-void
+bool
 CompositorSwapchain::present(uint32_t i, const winrtWDDC::DisplayFence &fence, uint64_t fenceValue)
 {
+	COMP_INFO(c, "Will scan out surface %" PRIu32 " after fence is signalled with %" PRIu64, i, fenceValue);
 	auto task = m_taskPool.CreateTask();
 	task.SetWait(fence, fenceValue);
 	task.SetScanout(m_scanouts[i]);
 	m_taskPool.ExecuteTask(task);
+	if (m_path.Status() != winrtWDDC::DisplayPathStatus::Succeeded) {
+		COMP_ERROR(c, "Path status is an error: %s", to_string(m_path.Status()));
+		return false;
+	}
+	return true;
 }
 
-class Renderer
+class CompTargetData
 {
 public:
-	explicit Renderer(struct comp_compositor *comp);
+	explicit CompTargetData(struct comp_compositor *comp);
 
 	bool
 	findHmds();
 
 	bool
-	openHmd(const winrtWDDC::DisplayTarget &target, DisplayObjects &outObjects);
+	openHmd(const winrtWDDC::DisplayTarget &target, DisplayObjects &outObjects) noexcept;
 
 	bool
 	targetPredicate(winrtWDDC::DisplayTarget const &target) const;
 
 	/// The compositor that owns us
 	struct comp_compositor *c;
+	xrt::auxiliary::util::ComGuard com_guard;
 
 	/// Whether we can/should use the Windows 11+-only APIs
 	bool useApi14;
@@ -323,7 +369,7 @@ public:
 };
 
 
-Renderer::Renderer(struct comp_compositor *comp)
+CompTargetData::CompTargetData(struct comp_compositor *comp)
     : c(comp), useApi14(checkForApi14()),
       manager(winrtWDDC::DisplayManager::Create(winrtWDDC::DisplayManagerOptions::EnforceSourceOwnership)),
       dxgiAdapter(xrt::auxiliary::d3d::getAdapterByLUID(c->settings.client_gpu_deviceLUID))
@@ -379,7 +425,7 @@ Renderer::Renderer(struct comp_compositor *comp)
 }
 
 bool
-Renderer::targetPredicate(winrtWDDC::DisplayTarget const &target) const
+CompTargetData::targetPredicate(winrtWDDC::DisplayTarget const &target) const
 {
 	try {
 		if (target == nullptr) {
@@ -426,7 +472,7 @@ Renderer::targetPredicate(winrtWDDC::DisplayTarget const &target) const
 	}
 }
 bool
-Renderer::findHmds()
+CompTargetData::findHmds()
 {
 	using std::begin;
 	using std::end;
@@ -443,7 +489,7 @@ Renderer::findHmds()
 }
 
 inline bool
-Renderer::openHmd(const winrtWDDC::DisplayTarget &target, DisplayObjects &outObjects)
+CompTargetData::openHmd(const winrtWDDC::DisplayTarget &target, DisplayObjects &outObjects) noexcept
 {
 	try {
 		if (!target) {
@@ -494,7 +540,8 @@ Renderer::openHmd(const winrtWDDC::DisplayTarget &target, DisplayObjects &outObj
 		}
 
 		// Atomically apply the state
-		auto applyResult = state.TryApply(winrtWDDC::DisplayStateApplyOptions::None);
+		winrtWDDC::DisplayStateOperationResult const applyResult =
+		    state.TryApply(winrtWDDC::DisplayStateApplyOptions::None);
 		if (applyResult.Status() != winrtWDDC::DisplayStateOperationStatus::Success) {
 
 			COMP_WARN(c, "Could not apply state: %s", to_string(applyResult.Status()));
@@ -517,7 +564,7 @@ Renderer::openHmd(const winrtWDDC::DisplayTarget &target, DisplayObjects &outObj
 		// std::get<winrtWDDC::DisplayPath>(outObjects) = displayState.GetPathForTarget(target);
 		winrtWDDC::DisplayPath displayPath = finalStateResult.State().GetPathForTarget(target);
 		winrtWDDC::DisplaySource displaySource = displayDevice.CreateScanoutSource(target);
-		outObjects = std::make_tuple(displayDevice, target, displayPath, displaySource);
+		outObjects = std::make_tuple(displayDevice, target, std::move(displayPath), std::move(displaySource));
 		return true;
 	} catch (winrt::hresult_error const &e) {
 		COMP_ERROR(c, "Caught WinRT exception: (%" PRId32 ") %s", e.code().value,
@@ -554,9 +601,6 @@ struct comp_target_direct_windows
 		VkColorSpaceKHR color_space;
 	} preferred;
 
-	//! Present mode that the system must support.
-	// VkPresentModeKHR present_mode;
-
 	struct
 	{
 		//! Must only be accessed from main compositor thread.
@@ -572,7 +616,7 @@ struct comp_target_direct_windows
 		struct os_thread_helper event_thread;
 	} vblank;
 
-	std::unique_ptr<Renderer> direct_renderer;
+	std::unique_ptr<CompTargetData> data;
 	std::unique_ptr<CompositorSwapchain> swapchain;
 
 	struct vk_image_collection image_collection;
@@ -623,7 +667,7 @@ create_image_views(struct comp_target_direct_windows *ctdw)
 	VkImage *images = U_TYPED_ARRAY_CALLOC(VkImage, ctdw->base.image_count);
 	const uint32_t image_count = ctdw->base.image_count;
 	std::vector<xrt_image_native> xins(image_count);
-	auto interop = ctdw->direct_renderer->displayDevice.as<::IDisplayDeviceInterop>();
+	auto interop = ctdw->data->displayDevice.as<::IDisplayDeviceInterop>();
 	for (uint32_t i = 0; i < image_count; ++i) {
 		xins[i].handle = ctdw->swapchain->getSurfaceHandle(i);
 		xins[i].size = 0;                         /// @todo might be wrong
@@ -641,7 +685,7 @@ create_image_views(struct comp_target_direct_windows *ctdw)
 	info.array_size = 1;
 	info.mip_count = 1;
 
-	VkResult ret = vk_ic_from_natives(vk, &info, xins.data(), image_count, &ctdw->image_collection);
+	VkResult const ret = vk_ic_from_natives(vk, &info, xins.data(), image_count, &ctdw->image_collection);
 	if (ret != VK_SUCCESS) {
 		COMP_ERROR(ctdw->base.c, "Could not import display primaries as Vulkan images: %s",
 		           vk_result_string(ret));
@@ -652,7 +696,7 @@ create_image_views(struct comp_target_direct_windows *ctdw)
 
 	ctdw->base.images = U_TYPED_ARRAY_CALLOC(struct comp_target_image, ctdw->base.image_count);
 
-	VkImageSubresourceRange subresource_range = {
+	VkImageSubresourceRange const subresource_range = {
 	    /*.aspectMask = */ VK_IMAGE_ASPECT_COLOR_BIT,
 	    /*.baseMipLevel = */ 0,
 	    /*.levelCount = */ 1,
@@ -692,20 +736,18 @@ do_update_timings_vblank_thread(struct comp_target_direct_windows *ctdw)
 		u_pc_update_vblank_from_display_control(ctdw->upc, last_vblank_ns);
 	}
 }
-static constexpr int kMaxOpenAttempts = 1;
 static bool
-try_open_hmds(struct comp_target_direct_windows *ctdw)
+try_open_hmds(struct comp_target_direct_windows *ctdw) noexcept
 {
 	struct comp_target *ct = &ctdw->base;
-	const auto numHmds = ctdw->direct_renderer->hmds.size();
+	const auto numHmds = ctdw->data->hmds.size();
 
 	// Sometimes it takes a few tries.
 	for (int attempt = 0; attempt < kMaxOpenAttempts; ++attempt) {
 		for (size_t i = 0; i < numHmds; ++i) {
 
 			COMP_INFO(ct->c, "Attempting to open HMD %d, attempt %d", i, attempt);
-			if (!ctdw->direct_renderer->openHmd(ctdw->direct_renderer->hmds[i],
-			                                    ctdw->direct_renderer->objects)) {
+			if (!ctdw->data->openHmd(ctdw->data->hmds[i], ctdw->data->objects)) {
 				COMP_ERROR(ct->c, "Attempt failed.");
 
 			} else {
@@ -736,9 +778,9 @@ comp_target_direct_windows_create_images(struct comp_target *ct,
 	struct comp_target_direct_windows *ctdw = (struct comp_target_direct_windows *)ct;
 	struct vk_bundle *vk = get_vk(ctdw);
 
-	uint64_t now_ns = os_monotonic_get_ns();
+	uint64_t const now_ns = os_monotonic_get_ns();
 	// Some platforms really don't like the pacing_compositor code.
-	bool use_display_timing_if_available = ctdw->timing_usage == COMP_TARGET_USE_DISPLAY_IF_AVAILABLE;
+	bool const use_display_timing_if_available = ctdw->timing_usage == COMP_TARGET_USE_DISPLAY_IF_AVAILABLE;
 	if (ctdw->upc == NULL && use_display_timing_if_available && vk->has_GOOGLE_display_timing) {
 		u_pc_display_timing_create(ct->c->settings.nominal_frame_interval_ns,
 		                           &U_PC_DISPLAY_TIMING_CONFIG_DEFAULT, &ctdw->upc);
@@ -762,7 +804,7 @@ comp_target_direct_windows_create_images(struct comp_target *ct,
 
 	// Get the image count.
 	const uint32_t preferred_at_least_image_count = 3;
-	uint32_t image_count =
+	uint32_t const image_count =
 	    preferred_at_least_image_count; // select_image_count(ctdw, surface_caps, preferred_at_least_image_count);
 	ctdw->base.image_count = image_count;
 
@@ -770,10 +812,9 @@ comp_target_direct_windows_create_images(struct comp_target *ct,
 	 * Do the creation.
 	 */
 
-	COMP_DEBUG(ct->c, "Creating compositor swapchain with %d images", image_count);
-	auto &direct = *ctdw->direct_renderer;
-	ctdw->swapchain =
-	    std::make_unique<CompositorSwapchain>(ctdw->direct_renderer->objects, dxColorSpace, image_count);
+	COMP_INFO(ct->c, "Creating compositor swapchain with %d images", image_count);
+	ctdw->swapchain = std::make_unique<CompositorSwapchain>(ctdw->base.c, std::move(ctdw->data->objects),
+	                                                        dxColorSpace, image_count);
 
 
 	/*
@@ -782,8 +823,7 @@ comp_target_direct_windows_create_images(struct comp_target *ct,
 
 	ctdw->base.width = ctdw->swapchain->getWidth();
 	ctdw->base.height = ctdw->swapchain->getHeight();
-	ctdw->base.format =
-	    (VkFormat)d3d_dxgi_format_to_vk((DXGI_FORMAT)(static_cast<int>(ctdw->swapchain->getFormat())));
+	ctdw->base.format = (VkFormat)d3d_dxgi_format_to_vk(ctdw->swapchain->getFormat());
 	ctdw->base.surface_transform = (VkSurfaceTransformFlagBitsKHR)0;
 
 	create_image_views(ctdw);
@@ -807,22 +847,21 @@ static bool
 comp_target_direct_windows_has_images(struct comp_target *ct)
 {
 	struct comp_target_direct_windows *ctdw = (struct comp_target_direct_windows *)ct;
-	return ctdw->direct_renderer != nullptr && ctdw->swapchain != nullptr;
+	return ctdw->data != nullptr && ctdw->swapchain != nullptr;
 }
 
 static VkResult
 comp_target_direct_windows_acquire_next_image(struct comp_target *ct, uint32_t *out_index)
 {
 	struct comp_target_direct_windows *ctdw = (struct comp_target_direct_windows *)ct;
-	struct vk_bundle *vk = get_vk(ctdw);
+
 
 	if (!comp_target_direct_windows_has_images(ct)) {
 		//! @todo what error to return here?
 		return VK_ERROR_INITIALIZATION_FAILED;
 	}
 	try {
-		uint32_t index = ctdw->swapchain->acquireNext();
-		*out_index = index;
+		*out_index = ctdw->swapchain->acquireNext();
 		return VK_SUCCESS;
 	} catch (winrt::hresult_error const &e) {
 		COMP_ERROR(ctdw->base.c, "Caught WinRT exception: (%" PRId32 ") %s", e.code().value,
@@ -848,7 +887,9 @@ comp_target_direct_windows_present(struct comp_target *ct,
 	assert(ctdw->current_frame_id >= 0);
 	assert(ctdw->current_frame_id <= UINT32_MAX);
 
-	ctdw->swapchain->present(index, ctdw->direct_renderer->renderCompleteFence, timeline_semaphore_value);
+	if (!ctdw->swapchain->present(index, ctdw->data->renderCompleteFence, timeline_semaphore_value)) {
+		return VK_ERROR_DEVICE_LOST;
+	}
 #if 0
 	if (ctdw->vblank.has_started) {
 		os_thread_helper_lock(&ctdw->vblank.event_thread);
@@ -864,38 +905,41 @@ comp_target_direct_windows_present(struct comp_target *ct,
 }
 
 static bool
-comp_target_direct_windows_check_ready(struct comp_target *ct)
+comp_target_direct_windows_check_ready(struct comp_target *ct) noexcept
 {
 	struct comp_target_direct_windows *ctdw = (struct comp_target_direct_windows *)ct;
-	return ctdw->direct_renderer && !ctdw->direct_renderer->hmds.empty();
+	return ctdw->data && !ctdw->data->hmds.empty();
 }
 
 static bool
-comp_target_direct_windows_init_pre_vulkan(struct comp_target *ct)
+comp_target_direct_windows_init_pre_vulkan(struct comp_target *ct) noexcept
 {
-	struct comp_target_direct_windows *ctdw = (struct comp_target_direct_windows *)ct;
+	// struct comp_target_direct_windows *ctdw = (struct comp_target_direct_windows *)ct;
 	return true;
 }
 
 static bool
-comp_target_direct_windows_init_post_vulkan(struct comp_target *ct, uint32_t width, uint32_t height)
+comp_target_direct_windows_init_post_vulkan(struct comp_target *ct, uint32_t width, uint32_t height) noexcept
 {
 	struct comp_target_direct_windows *ctdw = (struct comp_target_direct_windows *)ct;
 	winrt::init_apartment();
 	try {
-		ctdw->direct_renderer = std::make_unique<Renderer>(ct->c);
+
+		ctdw->data = std::make_unique<CompTargetData>(ct->c);
 
 
-		if (!ctdw->direct_renderer->findHmds()) {
-			COMP_ERROR(ct->c, "No displays with headset EDID flag set are available.");
+		if (!ctdw->data->findHmds()) {
+			COMP_INFO(
+			    ct->c,
+			    "No displays with headset EDID flag set are available: cannot use Windows direct mode.");
 			return false;
 		}
 
 		struct vk_bundle *vk = get_vk(ctdw);
 
 		ctdw->base.semaphores.render_complete_is_timeline = true;
-		VkResult vkresult = vk_create_semaphore_from_native(
-		    vk, ctdw->direct_renderer->renderCompleteFenceHandle.get(), &ctdw->base.semaphores.render_complete);
+		VkResult const vkresult = vk_create_semaphore_from_native(
+		    vk, ctdw->data->renderCompleteFenceHandle.get(), &ctdw->base.semaphores.render_complete);
 		if (vkresult != VK_SUCCESS) {
 			COMP_ERROR(ct->c, "Could not import timeline semaphore.");
 			return false;
@@ -917,11 +961,11 @@ comp_target_direct_windows_init_post_vulkan(struct comp_target *ct, uint32_t wid
 
 
 static void
-comp_target_direct_windows_destroy(struct comp_target *ct)
+comp_target_direct_windows_destroy(struct comp_target *ct) noexcept
 {
 	struct comp_target_direct_windows *ctdw = (struct comp_target_direct_windows *)ct;
 
-	struct vk_bundle *vk = get_vk(ctdw);
+	// struct vk_bundle *vk = get_vk(ctdw);
 
 	// Thread if it has been started must be stopped first.
 	if (ctdw->vblank.has_started) {
@@ -932,7 +976,7 @@ comp_target_direct_windows_destroy(struct comp_target *ct)
 
 	destroy_image_views(ctdw);
 	ctdw->swapchain = {};
-	ctdw->direct_renderer = {};
+	ctdw->data = {};
 
 	u_pc_destroy(&ctdw->upc);
 
@@ -940,15 +984,15 @@ comp_target_direct_windows_destroy(struct comp_target *ct)
 }
 
 static void
-comp_target_direct_windows_update_window_title(struct comp_target *ct, const char *title)
+comp_target_direct_windows_update_window_title(struct comp_target *ct, const char *title) noexcept
 {
-	struct comp_target_direct_windows *ctdw = (struct comp_target_direct_windows *)ct;
+	// struct comp_target_direct_windows *ctdw = (struct comp_target_direct_windows *)ct;
 }
 
 static void
-comp_target_direct_windows_flush(struct comp_target *ct)
+comp_target_direct_windows_flush(struct comp_target *ct) noexcept
 {
-	struct comp_target_direct_windows *ctdw = (struct comp_target_direct_windows *)ct;
+	// struct comp_target_direct_windows *ctdw = (struct comp_target_direct_windows *)ct;
 }
 
 /*
@@ -974,7 +1018,7 @@ comp_target_direct_windows_calc_frame_pacing(struct comp_target *ct,
 	uint64_t predicted_display_time_ns = 0;
 	uint64_t predicted_display_period_ns = 0;
 	uint64_t min_display_period_ns = 0;
-	uint64_t now_ns = os_monotonic_get_ns();
+	uint64_t const now_ns = os_monotonic_get_ns();
 
 	u_pc_predict(ctdw->upc,                    //
 	             now_ns,                       //
@@ -999,7 +1043,7 @@ static void
 comp_target_direct_windows_mark_timing_point(struct comp_target *ct,
                                              enum comp_target_timing_point point,
                                              int64_t frame_id,
-                                             uint64_t when_ns)
+                                             uint64_t when_ns) noexcept
 {
 	struct comp_target_direct_windows *ctdw = (struct comp_target_direct_windows *)ct;
 	assert(frame_id == ctdw->current_frame_id);
@@ -1019,11 +1063,11 @@ comp_target_direct_windows_mark_timing_point(struct comp_target *ct,
 }
 
 static VkResult
-comp_target_direct_windows_update_timings(struct comp_target *ct)
+comp_target_direct_windows_update_timings(struct comp_target *ct) noexcept
 {
 	COMP_TRACE_MARKER();
 
-	struct comp_target_direct_windows *ctdw = (struct comp_target_direct_windows *)ct;
+	// struct comp_target_direct_windows *ctdw = (struct comp_target_direct_windows *)ct;
 
 	/// @todo
 
@@ -1035,30 +1079,44 @@ comp_target_direct_windows_update_timings(struct comp_target *ct)
 struct comp_target *
 comp_target_direct_windows_create(struct comp_compositor *c)
 {
-	if (!checkForBasicAPI()) {
-		// Cannot use this API on this Windows version
+	try {
+		if (!checkForBasicAPI()) {
+			// Cannot use this API on this Windows version
+			return nullptr;
+		}
+
+		std::unique_ptr<comp_target_direct_windows> ctdw = std::make_unique<comp_target_direct_windows>();
+
+		/// @todo we can actually get some timing
+		ctdw->timing_usage = COMP_TARGET_FORCE_FAKE_DISPLAY_TIMING;
+		os_thread_helper_init(&ctdw->vblank.event_thread);
+		ctdw->base.name = "Windows Direct Mode";
+		ctdw->base.acquire = comp_target_direct_windows_acquire_next_image;
+		ctdw->base.calc_frame_pacing = comp_target_direct_windows_calc_frame_pacing;
+		ctdw->base.check_ready = comp_target_direct_windows_check_ready;
+		ctdw->base.create_images = comp_target_direct_windows_create_images;
+		ctdw->base.destroy = comp_target_direct_windows_destroy;
+		ctdw->base.flush = comp_target_direct_windows_flush;
+		ctdw->base.has_images = comp_target_direct_windows_has_images;
+		ctdw->base.init_post_vulkan = comp_target_direct_windows_init_post_vulkan;
+		ctdw->base.init_pre_vulkan = comp_target_direct_windows_init_pre_vulkan;
+		ctdw->base.mark_timing_point = comp_target_direct_windows_mark_timing_point;
+		ctdw->base.present = comp_target_direct_windows_present;
+		ctdw->base.set_title = comp_target_direct_windows_update_window_title;
+		ctdw->base.update_timings = comp_target_direct_windows_update_timings;
+		ctdw->base.c = c;
+
+		return &(ctdw.release())->base;
+
+	} catch (winrt::hresult_error const &e) {
+		COMP_ERROR(c, "Caught WinRT exception: (%" PRId32 ") %s", e.code().value,
+		           winrt::to_string(e.message()).c_str());
+		return nullptr;
+	} catch (std::exception const &e) {
+		COMP_ERROR(c, "Caught exception: %s", e.what());
+		return nullptr;
+	} catch (...) {
+		COMP_ERROR(c, "Caught exception");
 		return nullptr;
 	}
-	std::unique_ptr<comp_target_direct_windows> ctdw = std::make_unique<comp_target_direct_windows>();
-
-	/// @todo we can actually get some timing
-	ctdw->timing_usage = COMP_TARGET_FORCE_FAKE_DISPLAY_TIMING;
-	os_thread_helper_init(&ctdw->vblank.event_thread);
-	ctdw->base.name = "Windows Direct Mode";
-	ctdw->base.acquire = comp_target_direct_windows_acquire_next_image;
-	ctdw->base.calc_frame_pacing = comp_target_direct_windows_calc_frame_pacing;
-	ctdw->base.check_ready = comp_target_direct_windows_check_ready;
-	ctdw->base.create_images = comp_target_direct_windows_create_images;
-	ctdw->base.destroy = comp_target_direct_windows_destroy;
-	ctdw->base.flush = comp_target_direct_windows_flush;
-	ctdw->base.has_images = comp_target_direct_windows_has_images;
-	ctdw->base.init_post_vulkan = comp_target_direct_windows_init_post_vulkan;
-	ctdw->base.init_pre_vulkan = comp_target_direct_windows_init_pre_vulkan;
-	ctdw->base.mark_timing_point = comp_target_direct_windows_mark_timing_point;
-	ctdw->base.present = comp_target_direct_windows_present;
-	ctdw->base.set_title = comp_target_direct_windows_update_window_title;
-	ctdw->base.update_timings = comp_target_direct_windows_update_timings;
-	ctdw->base.c = c;
-
-	return &(ctdw.release())->base;
 }
