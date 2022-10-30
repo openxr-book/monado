@@ -13,6 +13,66 @@
 
 #include "sdl_internal.hpp"
 
+#include "GazeEstimation.h"
+
+#include "LandmarkCoreIncludes.h"
+#include "GazeEstimation.h"
+
+#include <SequenceCapture.h>
+#include <Visualizer.h>
+#include <VisualizationUtils.h>
+
+#include "xrt/xrt_defines.h"
+#include "math/m_api.h"
+#include "math/m_vec3.h"
+
+void
+sdl_program_plus_start_face_tracking(struct sdl_program_plus *spp)
+{
+	// the current image captured by the webcam
+	cv::Mat rgb_image = spp->sequence_reader.GetNextFrame();
+
+	cv::Vec6d pose_estimate = {};
+	xrt_vec3 initialPoseEstimate = XRT_VEC3_ZERO;
+	xrt_vec3 currentPoseEstimate = XRT_VEC3_ZERO;
+	xrt_vec3 previousPoseEstimate = XRT_VEC3_ZERO;
+	xrt_vec3 relativePoseEstimate = XRT_VEC3_ZERO;
+
+	if (!rgb_image.empty()) {
+		// Reading the images
+		cv::Mat_<uchar> grayscale_image = spp->sequence_reader.GetGrayFrame();
+
+		// The actual facial landmark detection / tracking
+		bool detection_success = LandmarkDetector::DetectLandmarksInVideo(rgb_image, spp->face_model,
+		                                                                  spp->det_parameters, grayscale_image);
+
+		// Work out the pose of the head from the tracked model
+		pose_estimate =
+		    LandmarkDetector::GetPose(spp->face_model, spp->sequence_reader.fx, spp->sequence_reader.fy,
+		                              spp->sequence_reader.cx, spp->sequence_reader.cy);
+
+		// Grabbing the next frame in the sequence
+		rgb_image = spp->sequence_reader.GetNextFrame();
+	}
+
+	currentPoseEstimate.x = pose_estimate[0];
+	currentPoseEstimate.y = pose_estimate[1];
+	currentPoseEstimate.z = pose_estimate[2];
+	std::cout << "Current Pose Estimate: " << currentPoseEstimate.x << " " << currentPoseEstimate.y << " "
+	          << currentPoseEstimate.z << std::endl;
+	/*
+	    Our origin would be initialPoseEstimate.
+	    All following pose estimates are then transformed relative to this origin.
+	*/
+	if (initialPoseEstimate.x == 0.0f && initialPoseEstimate.y == 0.0f && initialPoseEstimate.z == 0.0f) {
+		initialPoseEstimate = currentPoseEstimate;
+	}
+
+	math_vec3_subtract(&currentPoseEstimate, &initialPoseEstimate);
+	// relativePoseEstimate = currentPoseEstimate;
+	std::cout << "Relative Pose Estimate: " << relativePoseEstimate.x << relativePoseEstimate.y
+	          << relativePoseEstimate.z << std::endl;
+}
 
 void
 sdl_create_window(struct sdl_program *sp)
@@ -94,6 +154,28 @@ sdl_program_plus_create()
 	sdl_device_init(&spp);
 	sdl_compositor_init(&spp); // Needs the window.
 
+	// start here by creating a function that starts the camera tracker
+	std::vector<std::string> arguments = {"-device", "0"};
+	spp.det_parameters = LandmarkDetector::FaceModelParameters(arguments);
+	// The modules that are being used for tracking
+	spp.face_model = LandmarkDetector::CLNF(spp.det_parameters.model_location);
+
+	if (!spp.face_model.loaded_successfully) {
+		std::cout << "ERROR: Could not load the landmark detector" << std::endl;
+	}
+
+	if (!spp.face_model.eye_model) {
+		std::cout << "WARNING: no eye model found" << std::endl;
+	}
+
+	// Open a sequence
+	if (!spp.sequence_reader.Open(arguments)) {
+		std::cout << "ERROR: Could not open the sequence" << std::endl;
+		// return;
+	} else {
+		std::cout << "Device or file opened\n";
+	}
+
 	return &spp;
 }
 
@@ -111,6 +193,7 @@ sdl_program_plus_render(struct sdl_program_plus *spp_ptr)
 		// Nothing for now.
 	}
 
+	sdl_program_plus_start_face_tracking(spp_ptr);
 	if (spp.c.base.slot.layer_count == 0) {
 		glClearColor(0.2f, 0.2f, 0.2f, 0.0f);
 		glClear(GL_COLOR_BUFFER_BIT);
@@ -172,6 +255,10 @@ sdl_program_plus_render(struct sdl_program_plus *spp_ptr)
 extern "C" void
 sdl_program_plus_destroy(struct sdl_program_plus *spp)
 {
+	// Reset the model, for the next video
+	spp->face_model.Reset();
+	spp->sequence_reader.Close();
+
 	os_mutex_destroy(&spp->current_mutex);
 
 	delete spp;
