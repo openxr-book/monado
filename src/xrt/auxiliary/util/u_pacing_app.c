@@ -35,7 +35,7 @@ DEBUG_GET_ONCE_LOG_OPTION(log_level, "U_PACING_APP_LOG", U_LOGGING_WARN)
  *
  */
 
-#define FRAME_COUNT (8)
+#define FRAME_COUNT (128)
 
 enum u_pa_state
 {

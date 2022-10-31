@@ -32,4 +32,8 @@ struct sdl_program_plus : sdl_program
 	// The modules that are being used for tracking
 	LandmarkDetector::CLNF face_model;
 	Utilities::SequenceCapture sequence_reader;
+
+	xrt_vec3 initialPoseEstimate = XRT_VEC3_ZERO;
+	xrt_vec3 currentPoseEstimate = XRT_VEC3_ZERO;
+	xrt_vec3 relativePoseEstimate = XRT_VEC3_ZERO;
 };
