@@ -15,8 +15,6 @@
 
 #include "sdl_internal.h"
 
-#include "GazeEstimation.h"
-
 #include "LandmarkCoreIncludes.h"
 #include "GazeEstimation.h"
 
@@ -33,7 +31,7 @@ struct sdl_program_plus : sdl_program
 	LandmarkDetector::CLNF face_model;
 	Utilities::SequenceCapture sequence_reader;
 
-	xrt_vec3 initialPoseEstimate = XRT_VEC3_ZERO;
-	xrt_vec3 currentPoseEstimate = XRT_VEC3_ZERO;
-	xrt_vec3 relativePoseEstimate = XRT_VEC3_ZERO;
+	xrt_vec3 initialPoseEstimate;
+	xrt_vec3 currentPoseEstimate;
+	xrt_vec3 relativePoseEstimate;
 };

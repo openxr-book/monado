@@ -10,6 +10,7 @@
 
 #include "util/u_device.h"
 #include "util/u_distortion_mesh.h"
+#include "xrt/xrt_defines.h"
 
 
 static void
@@ -52,6 +53,7 @@ sdl_hmd_get_view_poses(struct xrt_device *xdev,
                        struct xrt_fov *out_fovs,
                        struct xrt_pose *out_poses)
 {
+	struct sdl_program *sp = from_xdev(xdev);
 	u_device_get_view_poses(  //
 	    xdev,                 //
 	    default_eye_relation, //
@@ -60,6 +62,9 @@ sdl_hmd_get_view_poses(struct xrt_device *xdev,
 	    out_head_relation,    //
 	    out_fovs,             //
 	    out_poses);           //
+	out_poses->position.x += -sp->state.relativePoseEstimate.x / 100.0f;
+	out_poses->position.y += sp->state.relativePoseEstimate.y / 100.0f;
+	out_poses->position.z += sp->state.relativePoseEstimate.z / 100.0f;
 }
 
 static void
