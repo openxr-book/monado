@@ -51,33 +51,35 @@ sdl_program_plus_start_face_tracking(struct sdl_program_plus *spp)
 	spp->state.currentPoseEstimate.x = pose_estimate[0];
 	spp->state.currentPoseEstimate.y = pose_estimate[1];
 	spp->state.currentPoseEstimate.z = pose_estimate[2];
-	spp->currentPoseEstimate.x = pose_estimate[0];
-	spp->currentPoseEstimate.y = pose_estimate[1];
-	spp->currentPoseEstimate.z = pose_estimate[2];
-	std::cout << "Current Pose Estimate: " << spp->currentPoseEstimate.x << " " << spp->currentPoseEstimate.y << " "
-	          << spp->currentPoseEstimate.z << std::endl;
+	// spp->currentPoseEstimate.x = pose_estimate[0];
+	// spp->currentPoseEstimate.y = pose_estimate[1];
+	// spp->currentPoseEstimate.z = pose_estimate[2];
+	std::cout << "Current Pose Estimate: " << spp->state.currentPoseEstimate.x << " " << spp->state.currentPoseEstimate.y << " "
+	          << spp->state.currentPoseEstimate.z << std::endl;
 	/*
 	    Our origin would be initialPoseEstimate.
 	    All following pose estimates are then transformed relative to this origin.
 	*/
-	std::cout << "Before: Initial pose estimate: " << spp->initialPoseEstimate.x << " "
-	          << spp->initialPoseEstimate.y << " " << spp->initialPoseEstimate.z << std::endl;
-	if (spp->initialPoseEstimate.x == 0.0f && spp->initialPoseEstimate.y == 0.0f &&
-	    spp->initialPoseEstimate.z == 0.0f) {
+	std::cout << "Before: Initial pose estimate: " << spp->state.initialPoseEstimate.x << " "
+	          << spp->state.initialPoseEstimate.y << " " << spp->state.initialPoseEstimate.z << std::endl;
+	if (spp->state.initialPoseEstimate.x == 0.0f && spp->state.initialPoseEstimate.y == 0.0f &&
+	    spp->state.initialPoseEstimate.z == 0.0f) {
 		std::cout << "Setting the intial pose estimate\n";
-		spp->initialPoseEstimate = spp->currentPoseEstimate;
-		spp->state.initialPoseEstimate = spp->currentPoseEstimate;
-		std::cout << "After: Initial pose estimate: " << spp->initialPoseEstimate.x << " "
-		          << spp->initialPoseEstimate.y << " " << spp->initialPoseEstimate.z << std::endl;
+		// spp->initialPoseEstimate = spp->currentPoseEstimate;
+		spp->state.initialPoseEstimate = spp->state.currentPoseEstimate;
+		std::cout << "After: Initial pose estimate: " << spp->state.initialPoseEstimate.x << " "
+		          << spp->state.initialPoseEstimate.y << " " << spp->state.initialPoseEstimate.z << std::endl;
 	}
-	spp->relativePoseEstimate = spp->currentPoseEstimate;
-	spp->state.relativePoseEstimate = spp->currentPoseEstimate;
 
-	math_vec3_subtract(&spp->initialPoseEstimate, &spp->relativePoseEstimate);
+	spp->state.previousPoseEstimate = spp->state.relativePoseEstimate;
+
+	// spp->relativePoseEstimate = spp->currentPoseEstimate;
+	spp->state.relativePoseEstimate = spp->state.currentPoseEstimate;
+	// math_vec3_subtract(&spp->initialPoseEstimate, &spp->relativePoseEstimate);
 	math_vec3_subtract(&spp->state.initialPoseEstimate, &spp->state.relativePoseEstimate);
 
-	std::cout << "Relative Pose Estimate: " << spp->relativePoseEstimate.x << " " << spp->relativePoseEstimate.y
-	          << " " << spp->relativePoseEstimate.z << std::endl;
+	std::cout << "Relative Pose Estimate: " << spp->state.relativePoseEstimate.x << " " << spp->state.relativePoseEstimate.y
+	          << " " << spp->state.relativePoseEstimate.z << std::endl;
 }
 
 void
@@ -182,9 +184,13 @@ sdl_program_plus_create()
 		std::cout << "Device or file opened\n";
 	}
 
-	spp.initialPoseEstimate = XRT_VEC3_ZERO;
-	spp.currentPoseEstimate = XRT_VEC3_ZERO;
-	spp.relativePoseEstimate = XRT_VEC3_ZERO;
+	// spp.initialPoseEstimate = XRT_VEC3_ZERO;
+	// spp.currentPoseEstimate = XRT_VEC3_ZERO;
+	// spp.relativePoseEstimate = XRT_VEC3_ZERO;
+	spp.state.initialPoseEstimate = XRT_VEC3_ZERO;
+	spp.state.currentPoseEstimate = XRT_VEC3_ZERO;
+	spp.state.relativePoseEstimate = XRT_VEC3_ZERO;
+	spp.state.previousPoseEstimate = XRT_VEC3_ZERO;
 	printf("Inside sdl_program_plus_create()\n");
 	return &spp;
 }

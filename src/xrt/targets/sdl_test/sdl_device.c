@@ -11,6 +11,7 @@
 #include "util/u_device.h"
 #include "util/u_distortion_mesh.h"
 #include "xrt/xrt_defines.h"
+#include <math.h>
 
 
 static void
@@ -53,6 +54,7 @@ sdl_hmd_get_view_poses(struct xrt_device *xdev,
                        struct xrt_fov *out_fovs,
                        struct xrt_pose *out_poses)
 {
+	// static float k = 0.01f;
 	struct sdl_program *sp = from_xdev(xdev);
 	u_device_get_view_poses(  //
 	    xdev,                 //
@@ -62,9 +64,44 @@ sdl_hmd_get_view_poses(struct xrt_device *xdev,
 	    out_head_relation,    //
 	    out_fovs,             //
 	    out_poses);           //
+	// out_poses->position.z += k;
+	// k += 0.01f;
 	out_poses->position.x += -sp->state.relativePoseEstimate.x / 100.0f;
 	out_poses->position.y += sp->state.relativePoseEstimate.y / 100.0f;
 	out_poses->position.z += sp->state.relativePoseEstimate.z / 100.0f;
+
+// out_poses->position.x += -(sp->state.relativePoseEstimate.x - sp->state.previousPoseEstimate.x) / 100.0f;
+// 	out_poses->position.y += (sp->state.relativePoseEstimate.y - sp->state.previousPoseEstimate.y) / 100.0f;
+// 	out_poses->position.z += (sp->state.relativePoseEstimate.z - sp->state.previousPoseEstimate.z) / 100.0f;
+		/*
+            Screen width and height in millimeters
+        */
+		// sp->xdev_base.hmd
+		// in meters
+        float screen_width = 0.13f * 1000;
+        float screen_height = 0.07f * 1000;
+        float screen_half_width = screen_width / 2.0f;
+        float screen_half_height = screen_height / 2.0f;
+
+        float left = sp->state.relativePoseEstimate.x - screen_half_width;
+        float right = sp->state.relativePoseEstimate.x + screen_half_width;
+        float top = -sp->state.relativePoseEstimate.y + screen_half_height;
+        float bottom = -sp->state.relativePoseEstimate.y - screen_half_height;
+
+        float near = 0.1f;
+		float far = 1000.0f;
+        float distance = abs(far + sp->state.relativePoseEstimate.z);
+        float scale = near / distance;
+
+        left *= scale;
+        right *= scale;
+        top *= scale;
+        bottom *= scale;
+
+		// out_fovs->angle_down = bottom * (M_PI / 180.0f);
+		// out_fovs->angle_left = left * (M_PI / 180.0f);
+		// out_fovs->angle_right = right * (M_PI / 180.0f);
+		// out_fovs->angle_up = top * (M_PI / 180.0f);	
 }
 
 static void
