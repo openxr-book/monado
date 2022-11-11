@@ -54,7 +54,6 @@ sdl_hmd_get_view_poses(struct xrt_device *xdev,
                        struct xrt_fov *out_fovs,
                        struct xrt_pose *out_poses)
 {
-	// static float k = 0.01f;
 	struct sdl_program *sp = from_xdev(xdev);
 	u_device_get_view_poses(  //
 	    xdev,                 //
@@ -64,44 +63,50 @@ sdl_hmd_get_view_poses(struct xrt_device *xdev,
 	    out_head_relation,    //
 	    out_fovs,             //
 	    out_poses);           //
-	// out_poses->position.z += k;
-	// k += 0.01f;
+
+	printf("Down angle: %f\n", out_fovs->angle_down);
+	printf("Up angle: %f\n", out_fovs->angle_up);
+	printf("Left angle: %f\n", out_fovs->angle_left);
+	printf("Right angle: %f\n", out_fovs->angle_right);
+
 	out_poses->position.x += -sp->state.relativePoseEstimate.x / 100.0f;
 	out_poses->position.y += sp->state.relativePoseEstimate.y / 100.0f;
 	out_poses->position.z += sp->state.relativePoseEstimate.z / 100.0f;
 
-// out_poses->position.x += -(sp->state.relativePoseEstimate.x - sp->state.previousPoseEstimate.x) / 100.0f;
-// 	out_poses->position.y += (sp->state.relativePoseEstimate.y - sp->state.previousPoseEstimate.y) / 100.0f;
-// 	out_poses->position.z += (sp->state.relativePoseEstimate.z - sp->state.previousPoseEstimate.z) / 100.0f;
-		/*
-            Screen width and height in millimeters
-        */
-		// sp->xdev_base.hmd
-		// in meters
-        float screen_width = 0.13f * 1000;
-        float screen_height = 0.07f * 1000;
-        float screen_half_width = screen_width / 2.0f;
-        float screen_half_height = screen_height / 2.0f;
+	/*
+		Screen width and height in millimeters
+	*/
+	float screen_width = 0.13f * 1000;
+	float screen_height = 0.07f * 1000;
+	float screen_half_width = screen_width / 2.0f;
+	float screen_half_height = screen_height / 2.0f;
 
-        float left = sp->state.relativePoseEstimate.x - screen_half_width;
-        float right = sp->state.relativePoseEstimate.x + screen_half_width;
-        float top = -sp->state.relativePoseEstimate.y + screen_half_height;
-        float bottom = -sp->state.relativePoseEstimate.y - screen_half_height;
+	float left = -(screen_half_width - sp->state.relativePoseEstimate.x);
+	float right = screen_half_width + sp->state.relativePoseEstimate.x;
+	float top = screen_half_height + sp->state.relativePoseEstimate.y;
+	float bottom = -(screen_half_height - sp->state.relativePoseEstimate.y);
 
-        float near = 0.1f;
-		float far = 1000.0f;
-        float distance = abs(far + sp->state.relativePoseEstimate.z);
-        float scale = near / distance;
+	float near = abs(sp->state.initialPoseEstimate.z);
+	float far = 1000.0f;
+	float distance = abs(sp->state.currentPoseEstimate.z);
+	// if(distance != 0.0f)
+	// {
+	float scale = near / distance;
 
-        left *= scale;
-        right *= scale;
-        top *= scale;
-        bottom *= scale;
+	left *= scale;
+	right *= scale;
+	top *= scale;
+	bottom *= scale;
 
-		// out_fovs->angle_down = bottom * (M_PI / 180.0f);
-		// out_fovs->angle_left = left * (M_PI / 180.0f);
-		// out_fovs->angle_right = right * (M_PI / 180.0f);
-		// out_fovs->angle_up = top * (M_PI / 180.0f);	
+	out_fovs->angle_down = bottom * (M_PI / 180.0f);
+	out_fovs->angle_left = left * (M_PI / 180.0f);
+	out_fovs->angle_right = right * (M_PI / 180.0f);
+	out_fovs->angle_up = top * (M_PI / 180.0f);	
+	// }
+	printf("Final Down angle: %f\n", out_fovs->angle_down);
+	printf("Final Up angle: %f\n", out_fovs->angle_up);
+	printf("Final Left angle: %f\n", out_fovs->angle_left);
+	printf("Final Right angle: %f\n", out_fovs->angle_right);
 }
 
 static void
