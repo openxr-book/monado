@@ -33,7 +33,7 @@ target_link_libraries(
 		OpenFace::GazeAnalyser 
 		OpenFace::Utilities 
 		dlib 
-		${OpenCV_LIBS} ${Boost_LIBRARIES} ${TBB_LIBRARIES} ${BLAS_LIBRARIES}
+		${OpenCV_LIBS} ${TBB_LIBRARIES} ${BLAS_LIBRARIES}
 	)
 
 if(WIN32)
