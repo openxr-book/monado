@@ -63,50 +63,27 @@ sdl_hmd_get_view_poses(struct xrt_device *xdev,
 	    out_head_relation,    //
 	    out_fovs,             //
 	    out_poses);           //
+	out_poses->position.x += -sp->state.relativePoseEstimate.x;
+	out_poses->position.y += sp->state.relativePoseEstimate.y;
+	out_poses->position.z += sp->state.relativePoseEstimate.z;
 
-	printf("Down angle: %f\n", out_fovs->angle_down);
-	printf("Up angle: %f\n", out_fovs->angle_up);
-	printf("Left angle: %f\n", out_fovs->angle_left);
-	printf("Right angle: %f\n", out_fovs->angle_right);
-
-	out_poses->position.x += -sp->state.relativePoseEstimate.x / 100.0f;
-	out_poses->position.y += sp->state.relativePoseEstimate.y / 100.0f;
-	out_poses->position.z += sp->state.relativePoseEstimate.z / 100.0f;
-
-	/*
-		Screen width and height in millimeters
-	*/
-	float screen_width = 0.13f * 1000;
-	float screen_height = 0.07f * 1000;
+	float screen_width = 0.374f * 3;
+	float screen_height = 0.245f * 3;
 	float screen_half_width = screen_width / 2.0f;
 	float screen_half_height = screen_height / 2.0f;
 
-	float left = -(screen_half_width - sp->state.relativePoseEstimate.x);
-	float right = screen_half_width + sp->state.relativePoseEstimate.x;
-	float top = screen_half_height + sp->state.relativePoseEstimate.y;
-	float bottom = -(screen_half_height - sp->state.relativePoseEstimate.y);
+	float distance = sp->state.currentPoseEstimate.z >= 0.0f ? sp->state.currentPoseEstimate.z
+	                                                         : -sp->state.currentPoseEstimate.z;
 
-	float near = abs(sp->state.initialPoseEstimate.z);
-	float far = 1000.0f;
-	float distance = abs(sp->state.currentPoseEstimate.z);
-	// if(distance != 0.0f)
-	// {
-	float scale = near / distance;
+	float left = -(screen_half_width - sp->state.relativePoseEstimate.x) / distance;
+	float right = (screen_half_width + sp->state.relativePoseEstimate.x) / distance;
+	float up = (screen_half_height + sp->state.relativePoseEstimate.y) / distance;
+	float down = -(screen_half_height - sp->state.relativePoseEstimate.y) / distance;
 
-	left *= scale;
-	right *= scale;
-	top *= scale;
-	bottom *= scale;
-
-	out_fovs->angle_down = bottom * (M_PI / 180.0f);
-	out_fovs->angle_left = left * (M_PI / 180.0f);
-	out_fovs->angle_right = right * (M_PI / 180.0f);
-	out_fovs->angle_up = top * (M_PI / 180.0f);	
-	// }
-	printf("Final Down angle: %f\n", out_fovs->angle_down);
-	printf("Final Up angle: %f\n", out_fovs->angle_up);
-	printf("Final Left angle: %f\n", out_fovs->angle_left);
-	printf("Final Right angle: %f\n", out_fovs->angle_right);
+	out_fovs->angle_down = atan(down);
+	out_fovs->angle_left = atan(left);
+	out_fovs->angle_right = atan(right);
+	out_fovs->angle_up = atan(up);
 }
 
 static void

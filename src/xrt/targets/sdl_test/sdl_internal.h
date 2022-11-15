@@ -167,7 +167,6 @@ struct sdl_program
 		struct xrt_vec3 initialPoseEstimate;
 		struct xrt_vec3 currentPoseEstimate;
 		struct xrt_vec3 relativePoseEstimate;
-		struct xrt_vec3 previousPoseEstimate;
 	} state;
 
 	//! The main window.
