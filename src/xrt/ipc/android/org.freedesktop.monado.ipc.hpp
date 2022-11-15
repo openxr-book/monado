@@ -1,4 +1,4 @@
-// Copyright 2020, Collabora, Ltd.
+// Copyright 2020-2021, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -101,8 +101,7 @@ namespace org::freedesktop::monado::ipc {
 		 * Wrapper for the blockingConnect method
 		 *
 		 * Java prototype:
-		 * `public int blockingConnect(android.content.Context,
-		 * java.lang.String);`
+		 * `public int blockingConnect(android.content.Context, java.lang.String);`
 		 *
 		 * JNI signature: (Landroid/content/Context;Ljava/lang/String;)I
 		 *
@@ -142,7 +141,7 @@ namespace org::freedesktop::monado::ipc {
 			}
 
 		private:
-			Meta(jni::jclass clazz = nullptr);
+			explicit Meta(jni::jclass clazz);
 		};
 	};
 	/*!
@@ -162,8 +161,8 @@ namespace org::freedesktop::monado::ipc {
 		 * Wrapper for the passAppSurface method
 		 *
 		 * Java prototype:
-		 * `public abstract void passAppSurface(android.view.Surface)
-		 * throws android.os.RemoteException;`
+		 * `public abstract void passAppSurface(android.view.Surface) throws
+		 * android.os.RemoteException;`
 		 *
 		 * JNI signature: (Landroid/view/Surface;)V
 		 *
@@ -184,12 +183,12 @@ namespace org::freedesktop::monado::ipc {
 			static Meta &
 			data()
 			{
-				static Meta instance;
+				static Meta instance{};
 				return instance;
 			}
 
 		private:
-			Meta(jni::jclass clazz = nullptr);
+			Meta();
 		};
 	};
 } // namespace org::freedesktop::monado::ipc

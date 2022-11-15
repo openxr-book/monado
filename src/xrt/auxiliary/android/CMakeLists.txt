@@ -17,10 +17,16 @@ add_library(
 	android_custom_surface.h
 	android_globals.cpp
 	android_globals.h
+	android_instance_base.c
+	android_instance_base.h
+	android_lifecycle_callbacks.cpp
+	android_lifecycle_callbacks.h
 	android_load_class.cpp
 	android_load_class.hpp
 	android_looper.cpp
 	android_looper.h
+	android_surface_callbacks.cpp
+	android_surface_callbacks.h
 	org.freedesktop.monado.auxiliary.cpp
 	org.freedesktop.monado.auxiliary.hpp
 	org.freedesktop.monado.auxiliary.impl.hpp

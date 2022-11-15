@@ -12,9 +12,13 @@
 
 #include "xrt/xrt_prober.h"
 #include "xrt/xrt_instance.h"
+#include "xrt/xrt_config_os.h"
 
 #include "util/u_misc.h"
 
+#ifdef XRT_OS_ANDROID
+#include "android/android_instance_base.h"
+#endif
 
 /*
  *
@@ -33,6 +37,9 @@ struct t_instance
 {
 	struct xrt_instance base;
 	struct xrt_prober *xp;
+#ifdef XRT_OS_ANDROID
+	struct android_instance_base android;
+#endif
 };
 
 static inline struct t_instance *
@@ -68,5 +75,10 @@ t_instance_destroy(struct xrt_instance *xinst)
 	struct t_instance *tinst = t_instance(xinst);
 
 	xrt_prober_destroy(&tinst->xp);
+
+#ifdef XRT_OS_ANDROID
+	android_instance_base_cleanup(&tinst->android);
+#endif // XRT_OS_ANDROID
+
 	free(tinst);
 }

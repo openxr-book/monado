@@ -12,6 +12,8 @@
 #include "org.freedesktop.monado.ipc.hpp"
 
 #include "xrt/xrt_config_android.h"
+#include "android/android_load_class.hpp"
+#include "android/android_custom_surface.h"
 #include "util/u_logging.h"
 
 #include "android/android_load_class.hpp"
@@ -27,13 +29,15 @@ struct ipc_client_android
 	ipc_client_android(jobject act) : activity(act) {}
 	~ipc_client_android();
 
+	struct android_custom_surface *custom_surface;
+
 	Activity activity{};
 	Client client{nullptr};
 };
 
 ipc_client_android::~ipc_client_android()
 {
-
+	android_custom_surface_destroy(&custom_surface);
 	// Tell Java that native code is done with this.
 	try {
 		if (!client.isNull()) {
@@ -64,6 +68,7 @@ ipc_client_android_create(struct _JavaVM *vm, void *activity)
 
 		ret->client = Client::construct(ret.get());
 
+		ret->custom_surface = android_custom_surface_async_start(vm, activity);
 		return ret.release();
 	} catch (std::exception const &e) {
 

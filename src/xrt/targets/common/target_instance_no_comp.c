@@ -11,6 +11,10 @@
 #include "util/u_system_helpers.h"
 #include "target_instance_parts.h"
 
+#ifdef XRT_OS_ANDROID
+#include "android/android_globals.h"
+#endif
+
 #include <assert.h>
 
 
@@ -59,10 +63,23 @@ xrt_instance_create(struct xrt_instance_info *ii, struct xrt_instance **out_xins
 	}
 
 	struct t_instance *tinst = U_TYPED_CALLOC(struct t_instance);
+
+#ifdef XRT_OS_ANDROID
+	ret = android_instance_base_init(&tinst->android, &tinst->base, android_globals_get_vm(),
+	                                 android_globals_get_activity());
+	if (ret < 0) {
+		xrt_prober_destroy(&xp);
+		free(tinst);
+		return ret;
+	}
+	tinst->base.android_instance = &(tinst->android.base);
+#endif
+
 	tinst->base.create_system = t_instance_create_system;
 	tinst->base.get_prober = t_instance_get_prober;
 	tinst->base.destroy = t_instance_destroy;
 	tinst->xp = xp;
+
 
 	*out_xinst = &tinst->base;
 
