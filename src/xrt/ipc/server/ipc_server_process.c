@@ -16,6 +16,7 @@
 #include "xrt/xrt_config_have.h"
 #include "xrt/xrt_config_os.h"
 
+#include "os/os_autorunner.h"
 #include "os/os_time.h"
 #include "util/u_var.h"
 #include "util/u_misc.h"
@@ -24,6 +25,7 @@
 #include "util/u_verify.h"
 #include "util/u_process.h"
 #include "util/u_debug_gui.h"
+#include "util/u_config_json.h"
 
 #include "util/u_git_tag.h"
 
@@ -137,6 +139,8 @@ teardown_all(struct ipc_server *s)
 	xrt_instance_destroy(&s->xinst);
 
 	ipc_server_mainloop_deinit(&s->ml);
+
+	autorunner_destroy(&s->autorunner);
 
 	u_process_destroy(s->process);
 
@@ -472,6 +476,12 @@ init_all(struct ipc_server *s)
 		return -1;
 	}
 
+	// Load json for autorun here (eventually this data will be utilised in xrt_instance_create_system)
+	u_autorunner_load_from_json(&s->autorunner);
+
+	//@todo Implement in msc->sessions.autorun_count, set in comp_multi_create_system_compositor(), initialised in
+	// xrt_gfx_provider_create_system in comp_compositor.c, initialised by t_instance_create_system in
+	// target_instance.c, initialised by xrt_instance_create_system in the main init_all function
 	xret = xrt_instance_create_system(s->xinst, &s->xsysd, &s->xso, &s->xsysc);
 	if (xret != XRT_SUCCESS) {
 		IPC_ERROR(s, "Could not create system!");
@@ -795,6 +805,9 @@ ipc_server_main(int argc, char **argv)
 	init_server_state(s);
 
 	u_debug_gui_start(s->debug_gui, s->xinst, s->xsysd);
+
+	// Start autorun processes here
+	autorunner_start(&s->autorunner);
 
 	ret = main_loop(s);
 
