@@ -10,6 +10,7 @@
 #pragma once
 
 #include "util/u_json.h"
+#include "os/os_autorunner.h"
 #include "xrt/xrt_settings.h"
 
 #ifdef __cplusplus
@@ -116,6 +117,12 @@ u_gui_state_get_scene(struct u_config_json *json, enum u_gui_state_scene scene);
 
 void
 u_gui_state_save_scene(struct u_config_json *json, enum u_gui_state_scene scene, struct cJSON *new_state);
+
+void
+u_autorun_open_file(struct u_config_json *json);
+
+void
+u_autorunner_load_from_json(struct xrt_autorunner *autorunner);
 
 #ifdef __cplusplus
 }

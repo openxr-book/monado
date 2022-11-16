@@ -11,6 +11,8 @@
 #include "xrt/xrt_settings.h"
 #include "xrt/xrt_config.h"
 
+#include "os/os_autorunner.h"
+
 #include "util/u_file.h"
 #include "util/u_json.h"
 #include "util/u_debug.h"
@@ -21,6 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include "os/os_libc_compat.h"
 
 #include "bindings/b_generated_bindings.h"
 #include <assert.h>
@@ -29,6 +32,7 @@ DEBUG_GET_ONCE_OPTION(active_config, "P_OVERRIDE_ACTIVE_CONFIG", NULL)
 
 #define CONFIG_FILE_NAME "config_v0.json"
 #define GUI_STATE_FILE_NAME "gui_state_v0.json"
+#define AUTORUN_FILE_NAME "autorun_v0.json"
 
 void
 u_config_json_close(struct u_config_json *json)
@@ -557,4 +561,107 @@ u_gui_state_save_scene(struct u_config_json *json, enum u_gui_state_scene scene,
 	cJSON_DeleteItemFromObject(sc, scene_name);
 	cJSON_AddItemToObject(sc, scene_name, new_state);
 	u_config_write(json, GUI_STATE_FILE_NAME);
+}
+
+void
+u_autorun_open_file(struct u_config_json *json)
+{
+	u_config_json_open_or_create_file(json, AUTORUN_FILE_NAME);
+}
+
+int
+u_autorunner_load_json_autorun(cJSON *autorun_json, struct xrt_autorun *autorun_struct)
+{
+	int retval = 0;
+
+	// Load executable string
+	char *exec = u_json_get_allocate_string(get_obj(autorun_json, "exec"));
+	if (exec == NULL) {
+		retval = 1;
+		return retval;
+	}
+
+	// Load arguments
+	cJSON *args_array = get_obj(autorun_json, "args");
+	size_t args_count = cJSON_GetArraySize(args_array);
+	char **args = calloc(args_count, sizeof(char *));
+
+	cJSON *arg;
+	size_t args_index = 0;
+	cJSON_ArrayForEach(arg, args_array)
+	{
+		char *arg_str = args[args_index] = u_json_get_allocate_string(arg);
+
+		// If any single argument load fails, we consider this autorun invalid
+		if (arg_str == NULL) {
+			retval = 1;
+			break;
+		}
+
+		args_index++;
+	}
+
+	// Write results
+	autorun_struct->exec = exec;
+	autorun_struct->args = args;
+	autorun_struct->args_count = args_index;
+
+	return retval;
+}
+
+void
+u_autorunner_load_from_json(struct xrt_autorunner *autorunner)
+{
+	// Start with an empty autorunner with 0 objects
+	// If anything fails, it will fall back to this
+	autorunner->autorun_count = 0;
+	autorunner->autoruns = NULL;
+
+	struct u_config_json json = {0};
+	u_autorun_open_file(&json);
+
+	cJSON *autoruns_array;
+
+	// Check that the json exists and the autoruns array exists
+	//@todo Check schema too
+	//@todo Should we really check if the autoruns object is NULL, when cJSON_IsArray already does that too?
+	if (!is_json_ok(&json) || (autoruns_array = get_obj(json.root, "autoruns")) == NULL ||
+	    !cJSON_IsArray(autoruns_array)) {
+		U_LOG_W("No autorun configuration loaded");
+		u_config_json_close(&json);
+		return;
+	}
+
+	// Get autorun count and allocate autoruns array in C
+	//@todo cJSON_GetArraySize uses size_t internally, but cannot expose it without breaking the API. Perhaps the
+	// instance of it here should be replaced with a version of it that does expose size_t.
+	size_t autorun_count = cJSON_GetArraySize(autoruns_array);
+	autorunner->autoruns = calloc(autorun_count, sizeof(struct xrt_autorun));
+
+	U_LOG_I("Loading %zu autorun entries...", autorun_count);
+
+	// Iterate over array to populate array of autorun structs
+	cJSON *autorun_json;
+	size_t autorun_read_index = 0;
+	size_t autorun_write_index = 0;
+	cJSON_ArrayForEach(autorun_json, autoruns_array)
+	{
+		struct xrt_autorun *autorun_struct = &autorunner->autoruns[autorun_write_index];
+		if (u_autorunner_load_json_autorun(autorun_json, autorun_struct)) {
+			autorun_count--;
+			U_LOG_E("Failed to parse autorun entry %zu", autorun_read_index);
+			free_autorun_exec_args(autorun_struct);
+		} else {
+			autorun_write_index++;
+		}
+		autorun_read_index++;
+	}
+	U_LOG_I("Successfully found %zu autorun entries", autorun_count);
+
+	// Set autorun_count in autorunner struct to be the remaining autorun_count
+	autorunner->autorun_count = autorun_count;
+	// Realloc array in case not all elements could be initialised
+	autorunner->autoruns = reallocarray(autorunner->autoruns, autorun_count, sizeof(struct xrt_autorun));
+
+	u_config_json_close(&json);
 }
