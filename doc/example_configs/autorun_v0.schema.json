@@ -1,0 +1,40 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema",
+    "title": "Monado autorun configuration file schema v0",
+    "type": "object",
+    "properties": {
+	"$schema": {
+            "type": "string",
+            "title": "JSON Schema directive",
+            "default": "https://monado.pages.freedesktop.org/monado/autorun_v0.schema.json"
+        },
+	"autoruns": {
+	    "description": "Commands to automatically start and keep running while Monado is running.",
+	    "$comment": "This is an array of autorun objects, rather than an array of strings, so that in future versions the autorun object can be expanded with additional functionality on how to run the command if needed",
+	    "type": "array",
+	    "items": {
+		"$ref": "#/$defs/autorun"
+	    }
+	}
+    },
+    "$defs": {
+	"autorun": {
+	    "title": "A program that is automatically started and stopped by the runtime",
+	    "type": "object",
+	    "required": [
+		"exec"
+	    ],
+	    "properties": {
+		"exec": {
+		    "type": "string"
+		},
+		"args": {
+		    "type": "array",
+		    "items": {
+			"type": "string"
+		    }
+		}
+	    }
+	}
+    }
+}
