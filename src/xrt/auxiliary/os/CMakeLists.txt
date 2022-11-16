@@ -16,6 +16,8 @@ add_library(
 	os_hid_hidraw.c
 	os_threading.h
 	os_time.cpp
+	os_autorunner.c
+	os_autorunner.h
 	)
 target_link_libraries(aux_os PUBLIC aux-includes xrt-pthreads)
 
