@@ -33,6 +33,7 @@
 #cmakedefine XRT_HAVE_OPENVR
 #cmakedefine XRT_HAVE_PERCETTO
 #cmakedefine XRT_HAVE_SDL2
+#cmakedefine XRT_HAVE_SYSTEM_REALLOCARRAY
 #cmakedefine XRT_HAVE_SYSTEMD
 #cmakedefine XRT_HAVE_TRACY
 #cmakedefine XRT_HAVE_V4L2

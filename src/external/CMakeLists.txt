@@ -20,6 +20,14 @@ else()
 	target_compile_definitions(xrt-external-cjson INTERFACE CJSON_HIDE_SYMBOLS)
 endif()
 
+# Libraries for if a standard library function we use is missing
+if(NOT XRT_HAVE_SYSTEM_REALLOCARRAY)
+	add_library(xrt-external-reallocarray STATIC libbsd/reallocarray.c)
+	target_include_directories(
+		xrt-external-reallocarray SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/libbsd
+		)
+endif()
+
 # FlexKalman
 add_library(xrt-external-flexkalman INTERFACE)
 target_include_directories(xrt-external-flexkalman INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/flexkalman)
