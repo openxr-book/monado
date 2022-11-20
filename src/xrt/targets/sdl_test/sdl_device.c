@@ -63,9 +63,9 @@ sdl_hmd_get_view_poses(struct xrt_device *xdev,
 	    out_head_relation,    //
 	    out_fovs,             //
 	    out_poses);           //
-	out_poses->position.x += -sp->state.currentPoseEstimate.x;
-	out_poses->position.y += sp->state.currentPoseEstimate.y;
-	out_poses->position.z += sp->state.currentPoseEstimate.z;
+	out_poses->position.x = -sp->state.currentPoseEstimate.x;
+	out_poses->position.y = sp->state.currentPoseEstimate.y;
+	out_poses->position.z = sp->state.currentPoseEstimate.z;
 
 	float screen_width = 0.34544f;
 	float screen_height = 0.19431f;
