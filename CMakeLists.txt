@@ -235,7 +235,7 @@ option_with_deps(XRT_HAVE_SYSTEM_CJSON "Enable cJSON from system, instead of bun
 
 # SLAM backends and deps (sorted)
 option_with_deps(XRT_HAVE_OPENCV "Enable OpenCV backend" DEPENDS OpenCV_FOUND)
-option_with_deps(XRT_HAVE_OPENFACE "Enable OpenFace" DEPENDS OpenFace_FOUND)
+option_with_deps(XRT_HAVE_OPENFACE "Enable OpenFace integration" DEPENDS OpenFace_FOUND)
 option_with_deps(XRT_HAVE_BASALT_SLAM "Enable Basalt support" DEPENDS basalt_FOUND)
 option_with_deps(XRT_HAVE_KIMERA_SLAM "Enable Kimera support" DEPENDS kimera_vio_FOUND)
 
