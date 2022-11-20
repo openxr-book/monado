@@ -63,22 +63,21 @@ sdl_hmd_get_view_poses(struct xrt_device *xdev,
 	    out_head_relation,    //
 	    out_fovs,             //
 	    out_poses);           //
-	out_poses->position.x += -sp->state.relativePoseEstimate.x;
-	out_poses->position.y += sp->state.relativePoseEstimate.y;
-	out_poses->position.z += sp->state.relativePoseEstimate.z;
+	out_poses->position.x += -sp->state.currentPoseEstimate.x;
+	out_poses->position.y += sp->state.currentPoseEstimate.y;
+	out_poses->position.z += sp->state.currentPoseEstimate.z;
 
-	float screen_width = 0.374f * 3;
-	float screen_height = 0.245f * 3;
+	float screen_width = 0.34544f;
+	float screen_height = 0.19431f;
 	float screen_half_width = screen_width / 2.0f;
-	float screen_half_height = screen_height / 2.0f;
 
 	float distance = sp->state.currentPoseEstimate.z >= 0.0f ? sp->state.currentPoseEstimate.z
 	                                                         : -sp->state.currentPoseEstimate.z;
 
-	float left = -(screen_half_width - sp->state.relativePoseEstimate.x) / distance;
-	float right = (screen_half_width + sp->state.relativePoseEstimate.x) / distance;
-	float up = (screen_half_height + sp->state.relativePoseEstimate.y) / distance;
-	float down = -(screen_half_height - sp->state.relativePoseEstimate.y) / distance;
+	float left = -(screen_half_width - sp->state.currentPoseEstimate.x) / distance;
+	float right = (screen_half_width + sp->state.currentPoseEstimate.x) / distance;
+	float up = -(sp->state.currentPoseEstimate.y) / distance;
+	float down = -(screen_height + sp->state.currentPoseEstimate.y) / distance;
 
 	out_fovs->angle_down = atan(down);
 	out_fovs->angle_left = atan(left);

@@ -53,14 +53,6 @@ sdl_program_plus_start_face_tracking(struct sdl_program_plus *spp)
 	spp->state.currentPoseEstimate.x = pose_estimate[0] / 1000.0f;
 	spp->state.currentPoseEstimate.y = pose_estimate[1] / 1000.0f;
 	spp->state.currentPoseEstimate.z = pose_estimate[2] / 1000.0f;
-
-	if (spp->state.initialPoseEstimate.x == 0.0f && spp->state.initialPoseEstimate.y == 0.0f &&
-	    spp->state.initialPoseEstimate.z == 0.0f) {
-		spp->state.initialPoseEstimate = spp->state.currentPoseEstimate;
-	}
-
-	spp->state.relativePoseEstimate = spp->state.currentPoseEstimate;
-	math_vec3_subtract(&spp->state.initialPoseEstimate, &spp->state.relativePoseEstimate);
 }
 
 void
@@ -143,7 +135,7 @@ sdl_program_plus_create()
 	sdl_device_init(&spp);
 	sdl_compositor_init(&spp); // Needs the window.
 
-	// start here by creating a function that starts the camera tracker
+	// Arguments to be supplied to the face tracking module. This takes the camera with id=0 by default.
 	std::vector<std::string> arguments = {"-device", "0"};
 	spp.det_parameters = LandmarkDetector::FaceModelParameters(arguments);
 	// The modules that are being used for tracking
@@ -165,9 +157,7 @@ sdl_program_plus_create()
 		std::cout << "Device or file opened\n";
 	}
 
-	spp.state.initialPoseEstimate = XRT_VEC3_ZERO;
 	spp.state.currentPoseEstimate = XRT_VEC3_ZERO;
-	spp.state.relativePoseEstimate = XRT_VEC3_ZERO;
 	return &spp;
 }
 

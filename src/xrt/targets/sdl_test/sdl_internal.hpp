@@ -25,13 +25,12 @@
 struct sdl_program_plus : sdl_program
 {
 	// CPP only things
+
 	LandmarkDetector::FaceModelParameters det_parameters;
 
 	// The modules that are being used for tracking
 	LandmarkDetector::CLNF face_model;
 	Utilities::SequenceCapture sequence_reader;
 
-	xrt_vec3 initialPoseEstimate;
 	xrt_vec3 currentPoseEstimate;
-	xrt_vec3 relativePoseEstimate;
 };
