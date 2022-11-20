@@ -32,22 +32,20 @@ sdl_program_plus_start_face_tracking(struct sdl_program_plus *spp)
 
 	cv::Vec6d pose_estimate = {};
 
-	if (!rgb_image.empty()) {
-		// Reading the images
-		cv::Mat_<uchar> grayscale_image = spp->sequence_reader.GetGrayFrame();
-
-		// The actual facial landmark detection / tracking
-		LandmarkDetector::DetectLandmarksInVideo(rgb_image, spp->face_model, spp->det_parameters,
-		                                         grayscale_image);
-
-		// Work out the pose of the head from the tracked model
-		pose_estimate =
-		    LandmarkDetector::GetPose(spp->face_model, spp->sequence_reader.fx, spp->sequence_reader.fy,
-		                              spp->sequence_reader.cx, spp->sequence_reader.cy);
-
-		// Grabbing the next frame in the sequence
-		rgb_image = spp->sequence_reader.GetNextFrame();
+	// Didn't receive any image, return.
+	if (rgb_image.empty()) {
+		return;
 	}
+
+	// Reading the images
+	cv::Mat_<uchar> grayscale_image = spp->sequence_reader.GetGrayFrame();
+
+	// The actual facial landmark detection / tracking
+	LandmarkDetector::DetectLandmarksInVideo(rgb_image, spp->face_model, spp->det_parameters, grayscale_image);
+
+	// Work out the pose of the head from the tracked model
+	pose_estimate = LandmarkDetector::GetPose(spp->face_model, spp->sequence_reader.fx, spp->sequence_reader.fy,
+	                                          spp->sequence_reader.cx, spp->sequence_reader.cy);
 
 	// converting millimetres to metres
 	spp->state.currentPoseEstimate.x = pose_estimate[0] / 1000.0f;
