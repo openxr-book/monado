@@ -165,7 +165,7 @@ struct sdl_program
 			struct xrt_fov fov;
 		} left, right;
 
-		struct xrt_vec3 currentPoseEstimate;
+		struct xrt_vec3 position_estimate;
 	} state;
 
 	//! The main window.
