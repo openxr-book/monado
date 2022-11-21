@@ -10,7 +10,6 @@
 
 #include "util/u_device.h"
 #include "util/u_distortion_mesh.h"
-#include "xrt/xrt_defines.h"
 
 static void
 sdl_hmd_update_inputs(struct xrt_device *xdev)

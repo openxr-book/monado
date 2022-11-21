@@ -35,7 +35,7 @@ sdl_program_plus_estimate_face_pose(struct sdl_program_plus *spp)
 	cv::Vec6d current_pose_estimate =
 	    LandmarkDetector::GetPose(spp->face_model, spp->sequence_reader.fx, spp->sequence_reader.fy,
 	                              spp->sequence_reader.cx, spp->sequence_reader.cy);
-	std::cout << "current pose estimate:" << current_pose_estimate << std::endl;
+
 	// Converting millimetres to metres
 	spp->state.position_estimate.x = current_pose_estimate[0] / 1000.0f;
 	spp->state.position_estimate.y = current_pose_estimate[1] / 1000.0f;
