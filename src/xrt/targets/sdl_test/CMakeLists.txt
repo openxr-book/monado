@@ -29,8 +29,6 @@ target_link_libraries(
 		drv_includes
 		drv_simulated
 		OpenFace::LandmarkDetector
-		OpenFace::FaceAnalyser
-		OpenFace::GazeAnalyser
 		OpenFace::Utilities
 		dlib
 		${OpenCV_LIBS}
