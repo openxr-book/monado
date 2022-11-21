@@ -14,17 +14,6 @@
 
 #include "sdl_internal.hpp"
 
-#include "LandmarkCoreIncludes.h"
-#include "GazeEstimation.h"
-
-#include <SequenceCapture.h>
-#include <Visualizer.h>
-#include <VisualizationUtils.h>
-
-#include "xrt/xrt_defines.h"
-#include "math/m_api.h"
-#include "math/m_vec3.h"
-
 void
 sdl_program_plus_estimate_face_pose(struct sdl_program_plus *spp)
 {
@@ -169,6 +158,7 @@ sdl_program_plus_render(struct sdl_program_plus *spp_ptr)
 	}
 
 	sdl_program_plus_estimate_face_pose(spp_ptr);
+
 	if (spp.c.base.slot.layer_count == 0) {
 		glClearColor(0.2f, 0.2f, 0.2f, 0.0f);
 		glClear(GL_COLOR_BUFFER_BIT);
