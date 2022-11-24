@@ -9,10 +9,38 @@
 
 #include "ogl/ogl_api.h"
 
+#include "util/u_logging.h"
 #include "util/u_misc.h"
 
 #include "sdl_internal.hpp"
 
+void
+sdl_program_plus_estimate_face_pose(struct sdl_program_plus *spp)
+{
+	// The current image captured by the webcam
+	cv::Mat rgb_image = spp->sequence_reader.GetNextFrame();
+
+	// Didn't receive any image, return.
+	if (rgb_image.empty()) {
+		return;
+	}
+
+	// Reading the images
+	cv::Mat_<uchar> grayscale_image = spp->sequence_reader.GetGrayFrame();
+
+	// The actual facial landmark detection / tracking
+	LandmarkDetector::DetectLandmarksInVideo(rgb_image, spp->face_model, spp->det_parameters, grayscale_image);
+
+	// Work out the pose of the head from the tracked model
+	cv::Vec6d current_pose_estimate =
+	    LandmarkDetector::GetPose(spp->face_model, spp->sequence_reader.fx, spp->sequence_reader.fy,
+	                              spp->sequence_reader.cx, spp->sequence_reader.cy);
+
+	// Converting millimetres to metres
+	spp->state.position_estimate.x = current_pose_estimate[0] / 1000.0f;
+	spp->state.position_estimate.y = current_pose_estimate[1] / 1000.0f;
+	spp->state.position_estimate.z = current_pose_estimate[2] / 1000.0f;
+}
 
 void
 sdl_create_window(struct sdl_program *sp)
@@ -94,6 +122,24 @@ sdl_program_plus_create()
 	sdl_device_init(&spp);
 	sdl_compositor_init(&spp); // Needs the window.
 
+	// Arguments to be supplied to the face tracking module. This takes the camera with id=0 by default.
+	std::vector<std::string> arguments = {"-device", "0"};
+	spp.det_parameters = LandmarkDetector::FaceModelParameters(arguments);
+	spp.face_model = LandmarkDetector::CLNF(spp.det_parameters.model_location);
+
+	if (!spp.face_model.loaded_successfully) {
+		U_LOG_E("Could not load the landmark detector");
+		assert(false);
+	}
+	if (!spp.face_model.eye_model) {
+		U_LOG_W("No eye model found");
+	}
+	if (!spp.sequence_reader.Open(arguments)) {
+		U_LOG_E("Could not open the webcam");
+		assert(false);
+	}
+
+	spp.state.position_estimate = XRT_VEC3_ZERO;
 	return &spp;
 }
 
@@ -110,6 +156,8 @@ sdl_program_plus_render(struct sdl_program_plus *spp_ptr)
 	while (SDL_PollEvent(&e)) {
 		// Nothing for now.
 	}
+
+	sdl_program_plus_estimate_face_pose(spp_ptr);
 
 	if (spp.c.base.slot.layer_count == 0) {
 		glClearColor(0.2f, 0.2f, 0.2f, 0.0f);
@@ -172,6 +220,10 @@ sdl_program_plus_render(struct sdl_program_plus *spp_ptr)
 extern "C" void
 sdl_program_plus_destroy(struct sdl_program_plus *spp)
 {
+	// Reset the model, for the next video
+	spp->face_model.Reset();
+	spp->sequence_reader.Close();
+
 	os_mutex_destroy(&spp->current_mutex);
 
 	delete spp;

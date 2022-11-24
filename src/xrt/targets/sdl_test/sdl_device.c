@@ -11,7 +11,6 @@
 #include "util/u_device.h"
 #include "util/u_distortion_mesh.h"
 
-
 static void
 sdl_hmd_update_inputs(struct xrt_device *xdev)
 {
@@ -60,6 +59,28 @@ sdl_hmd_get_view_poses(struct xrt_device *xdev,
 	    out_head_relation,    //
 	    out_fovs,             //
 	    out_poses);           //
+
+	struct sdl_program *sp = from_xdev(xdev);
+
+	out_poses->position.x = -sp->state.position_estimate.x;
+	out_poses->position.y = sp->state.position_estimate.y;
+	out_poses->position.z = sp->state.position_estimate.z;
+
+	float screen_width = 0.34544f;
+	float screen_height = 0.19431f;
+	float screen_half_width = screen_width / 2.0f;
+	float distance =
+	    sp->state.position_estimate.z >= 0.0f ? sp->state.position_estimate.z : -sp->state.position_estimate.z;
+
+	float left = -(screen_half_width - sp->state.position_estimate.x) / distance;
+	float right = (screen_half_width + sp->state.position_estimate.x) / distance;
+	float up = -(sp->state.position_estimate.y) / distance;
+	float down = -(screen_height + sp->state.position_estimate.y) / distance;
+
+	out_fovs->angle_down = atan(down);
+	out_fovs->angle_left = atan(left);
+	out_fovs->angle_right = atan(right);
+	out_fovs->angle_up = atan(up);
 }
 
 static void

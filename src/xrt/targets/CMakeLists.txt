@@ -36,6 +36,7 @@ endif()
 if(XRT_FEATURE_SERVICE
    AND XRT_HAVE_SDL2
    AND XRT_HAVE_VULKAN
+   AND XRT_HAVE_OPENFACE
 	)
 	add_subdirectory(sdl_test)
 endif()

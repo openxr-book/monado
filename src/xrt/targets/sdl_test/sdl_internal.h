@@ -164,6 +164,8 @@ struct sdl_program
 			//! Fov of each individual eye.
 			struct xrt_fov fov;
 		} left, right;
+
+		struct xrt_vec3 position_estimate;
 	} state;
 
 	//! The main window.

@@ -28,6 +28,12 @@ target_link_libraries(
 		st_gui
 		drv_includes
 		drv_simulated
+		OpenFace::LandmarkDetector
+		OpenFace::Utilities
+		dlib
+		${OpenCV_LIBS}
+		${TBB_LIBRARIES}
+		${BLAS_LIBRARIES}
 	)
 
 if(WIN32)
