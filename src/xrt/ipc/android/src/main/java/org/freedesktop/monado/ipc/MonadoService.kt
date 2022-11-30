@@ -82,6 +82,7 @@ class MonadoService : Service(), Watchdog.ShutdownListener {
     }
 
     private fun handleStart() {
+        Log.d(TAG, "handleStart")
         var flags = 0
         // From targeting S+, the PendingIntent needs one of FLAG_IMMUTABLE and FLAG_MUTABLE
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {

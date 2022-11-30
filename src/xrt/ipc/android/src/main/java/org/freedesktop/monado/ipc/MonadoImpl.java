@@ -11,6 +11,7 @@
 package org.freedesktop.monado.ipc;
 
 import android.os.ParcelFileDescriptor;
+import android.os.RemoteException;
 import android.util.Log;
 import android.view.Surface;
 import android.view.SurfaceHolder;
@@ -92,6 +93,11 @@ public class MonadoImpl extends IMonado.Stub {
     }
 
     @Override
+    public void surfaceLost() throws RemoteException {
+
+    }
+
+    @Override
     public boolean createSurface(int displayId, boolean focusable) {
         Log.i(TAG, "createSurface");
         return surfaceManager.createSurfaceOnDisplay(displayId, focusable);
@@ -126,6 +132,12 @@ public class MonadoImpl extends IMonado.Stub {
      */
     @SuppressWarnings("JavaJniMissingFunction")
     private native void nativeAppSurface(@NonNull Surface surface);
+
+    /**
+     * Native handling of a lost surface.
+     */
+    @SuppressWarnings("JavaJniMissingFunction")
+    private native void nativeAppSurfaceLost();
 
     /**
      * Native handling of receiving an FD for a new client: the FD should be used to start up the

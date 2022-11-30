@@ -32,4 +32,9 @@ interface IMonado {
      * Asking service whether it has the capbility to draw over other apps or not.
      */
     boolean canDrawOverOtherApps();
+
+    /*!
+     * Indicate that the surface provided is no longer available.
+     */
+    void surfaceLost();
 }

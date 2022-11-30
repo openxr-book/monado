@@ -43,6 +43,8 @@ struct comp_window_android
 	struct comp_target_swapchain base;
 
 	struct android_custom_surface *custom_surface;
+	uint32_t swapchain_width;
+	uint32_t swapchain_height;
 };
 
 
@@ -125,20 +127,51 @@ comp_window_android_create_surface(struct comp_window_android *cwa,
 
 	return VK_SUCCESS;
 }
+// static bool
+// on_receive_surface(struct comp_window_android *cwa)
+// {
+// 	struct comp_window_android *cwa = (struct comp_window_android *)ct;
+// 	VkResult ret;
 
+// 	struct ANativeWindow *window = NULL;
+
+// 	if (android_globals_get_activity() != NULL) {
+// 		/* In process: Creating surface from activity */
+// 		window = _create_android_window(cwa);
+// 	} else {
+// 		/* Out of process: Getting cached surface */
+// 		window = (struct ANativeWindow *)android_globals_get_window();
+// 	}
+
+// 	if (window == NULL) {
+// 		COMP_ERROR(cwa->base.base.c, "could not get ANativeWindow");
+// 		return false;
+// 	}
+
+// 	ret = comp_window_android_create_surface(cwa, window, &cwa->base.surface.handle);
+// 	if (ret != VK_SUCCESS) {
+// 		COMP_ERROR(ct->c, "Failed to create surface '%s'!", vk_result_string(ret));
+// 		return false;
+// 	}
+
+// 	return true;
+// }
 static bool
 comp_window_android_init_swapchain(struct comp_target *ct, uint32_t width, uint32_t height)
 {
 	struct comp_window_android *cwa = (struct comp_window_android *)ct;
 	VkResult ret;
-
+	cwa->swapchain_width = width;
+	cwa->swapchain_height = height;
 	struct ANativeWindow *window = NULL;
 
 	if (android_globals_get_activity() != NULL) {
 		/* In process: Creating surface from activity */
+		COMP_INFO(cwa->base.base.c, "We have an activity, so assuming in-process.");
 		window = _create_android_window(cwa);
 	} else {
 		/* Out of process: Getting cached surface */
+		COMP_INFO(cwa->base.base.c, "No activity, so assuming out-of-process.");
 		window = (struct ANativeWindow *)android_globals_get_window();
 	}
 
