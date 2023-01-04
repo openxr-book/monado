@@ -1,20 +1,27 @@
-// Copyright 2020, Collabora, Ltd.
+// Copyright 2020-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Simple main activity for Android.
  * @author Rylie Pavlik <rylie.pavlik@collabora.com>
+ * @author Korcan Hussein <korcan.hussein@collabora.com>
  */
 
 package org.freedesktop.monado.android_common;
 
+import android.Manifest;
+import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.text.method.LinkMovementMethod;
 import android.view.View;
 import android.widget.ImageView;
 import android.widget.TextView;
+import android.widget.Toast;
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.app.AppCompatDelegate;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 import androidx.fragment.app.Fragment;
 import androidx.fragment.app.FragmentTransaction;
 import dagger.hilt.android.AndroidEntryPoint;
@@ -44,6 +51,8 @@ public class AboutActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        requestPermissions();
+
         setContentView(R.layout.activity_about);
 
         // Default to dark mode universally?
@@ -88,5 +97,46 @@ public class AboutActivity extends AppCompatActivity {
         }
 
         fragmentTransaction.commit();
+    }
+
+    static class RequestCode {
+        public static final int READ_EXTERNAL_STORAGE = 1;
+    }
+    ;
+
+    private void requestPermissions() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
+                != PackageManager.PERMISSION_GRANTED) {
+
+            if (ActivityCompat.shouldShowRequestPermissionRationale(
+                    this, Manifest.permission.READ_EXTERNAL_STORAGE)) {
+                Toast.makeText(
+                                this,
+                                "Please grant permissions to read external storage",
+                                Toast.LENGTH_LONG)
+                        .show();
+            }
+
+            String[] permissionStrings = new String[] {Manifest.permission.READ_EXTERNAL_STORAGE};
+            ActivityCompat.requestPermissions(
+                    this, permissionStrings, RequestCode.READ_EXTERNAL_STORAGE);
+        } else {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE);
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(
+            int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == RequestCode.READ_EXTERNAL_STORAGE) {
+            if (grantResults.length <= 0 || grantResults[0] != PackageManager.PERMISSION_GRANTED) {
+                Toast.makeText(
+                                this,
+                                "Permissions Denied to read external storage",
+                                Toast.LENGTH_LONG)
+                        .show();
+            }
+        }
     }
 }

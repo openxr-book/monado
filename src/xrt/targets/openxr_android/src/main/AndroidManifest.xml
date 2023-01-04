@@ -43,6 +43,7 @@
         tools:ignore="HighSamplingRate" />
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
 
     <application
         android:name="org.freedesktop.monado.openxr_runtime.MonadoOpenXrApplication"
