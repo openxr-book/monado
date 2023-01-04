@@ -1,4 +1,4 @@
-# Copyright 2019-2022, Collabora, Ltd.
+# Copyright 2019-2023, Collabora, Ltd.
 # SPDX-License-Identifier: BSL-1.0
 
 add_library(
@@ -15,6 +15,8 @@ add_library(
 	android_ahardwarebuffer_allocator.h
 	android_custom_surface.cpp
 	android_custom_surface.h
+	android_environment.cpp
+	android_environment.h
 	android_globals.cpp
 	android_globals.h
 	android_load_class.cpp
