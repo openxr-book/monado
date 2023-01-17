@@ -39,12 +39,27 @@ struct xrt_application_info
 	bool ext_hand_tracking_enabled;
 };
 
+#if defined(XRT_OS_ANDROID) || defined(XRT_DOXYGEN)
+struct _JavaVM;
+/*!
+ * Android-specific information for an instance.
+ */
+struct xrt_instance_info_android
+{
+	struct _JavaVM *vm;
+	void *context;
+};
+#endif // XRT_OS_ANDROID || XRT_DOXYGEN
+
 /*!
  * Information provided by the application at instance create time.
  */
 struct xrt_instance_info
 {
 	struct xrt_application_info app_info;
+#if defined(XRT_OS_ANDROID) || defined(XRT_DOXYGEN)
+	struct xrt_instance_info_android inst_info_android;
+#endif // XRT_OS_ANDROID || XRT_DOXYGEN
 };
 
 /*!

@@ -25,7 +25,6 @@
 
 #ifdef XRT_OS_ANDROID
 #include "android/android_globals.h"
-#include "android/android_looper.h"
 #endif
 
 #include "oxr_objects.h"
@@ -242,21 +241,22 @@ oxr_instance_create(struct oxr_logger *log,
 
 	// clang-format on
 
-	// fill in our application info - @todo - replicate all createInfo
-	// fields?
-
+	// fill in our application info
 	struct xrt_instance_info i_info = {0};
 	snprintf(i_info.app_info.application_name, sizeof(i_info.app_info.application_name), "%s",
 	         createInfo->applicationInfo.applicationName);
 	i_info.app_info.ext_hand_tracking_enabled = extensions->EXT_hand_tracking;
 
 #ifdef XRT_OS_ANDROID
+	/// @todo should not depend on this, use loader init data instead
 	XrInstanceCreateInfoAndroidKHR const *create_info_android = OXR_GET_INPUT_FROM_CHAIN(
 	    createInfo, XR_TYPE_INSTANCE_CREATE_INFO_ANDROID_KHR, XrInstanceCreateInfoAndroidKHR);
+	/// @todo should be removed once we find a proper way to access JavaVM/context through
+	///       xrt_instance_android interface
 	android_globals_store_vm_and_activity((struct _JavaVM *)create_info_android->applicationVM,
 	                                      create_info_android->applicationActivity);
-	// Trick to avoid deadlock on main thread. Only works for NativeActivity with app-glue.
-	android_looper_poll_until_activity_resumed();
+	i_info.inst_info_android.vm = (struct _JavaVM *)create_info_android->applicationVM;
+	i_info.inst_info_android.context = create_info_android->applicationActivity;
 #endif
 
 

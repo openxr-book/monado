@@ -15,6 +15,7 @@
 #include "util/u_logging.h"
 
 #include "android/android_load_class.hpp"
+#include "android/android_looper.h"
 
 #include "wrap/android.app.h"
 
@@ -76,6 +77,10 @@ int
 ipc_client_android_blocking_connect(struct ipc_client_android *ica)
 {
 	try {
+		// Trick to avoid deadlock on main thread. Only works for NativeActivity with app-glue.
+		JavaVM *vm = nullptr;
+		jni::env()->GetJavaVM(&vm);
+		android_looper_poll_until_activity_resumed(vm, ica->activity.object().getHandle());
 		int fd = ica->client.blockingConnect(ica->activity, XRT_ANDROID_PACKAGE);
 		return fd;
 	} catch (std::exception const &e) {
@@ -85,11 +90,9 @@ ipc_client_android_blocking_connect(struct ipc_client_android *ica)
 	}
 }
 
-
 void
 ipc_client_android_destroy(struct ipc_client_android **ptr_ica)
 {
-
 	if (ptr_ica == NULL) {
 		return;
 	}
