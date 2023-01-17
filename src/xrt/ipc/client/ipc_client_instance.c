@@ -49,6 +49,7 @@
 #endif
 
 #ifdef XRT_OS_ANDROID
+#include "xrt/xrt_android.h"
 #include "android/ipc_client_android.h"
 #endif // XRT_OS_ANDROID
 
@@ -200,6 +201,10 @@ ipc_client_instance_destroy(struct xrt_instance *xinst)
 		ii->xtracks[i] = NULL;
 	}
 	ii->xtrack_count = 0;
+
+#ifdef XRT_OS_ANDROID
+	xrt_instance_android_destroy(&ii->base.android_instance);
+#endif // XRT_OS_ANDROID
 
 	free(ii);
 }

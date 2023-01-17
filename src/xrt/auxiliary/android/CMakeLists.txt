@@ -17,6 +17,8 @@ add_library(
 	android_custom_surface.h
 	android_globals.cpp
 	android_globals.h
+	android_instance.c
+	android_instance.h
 	android_lifecycle_callbacks.cpp
 	android_lifecycle_callbacks.h
 	android_load_class.cpp

@@ -158,4 +158,8 @@ typedef enum xrt_result
 	 * Some D3D12 error
 	 */
 	XRT_ERROR_D3D12 = -25,
+	/*!
+	 * Some Android error
+	 */
+	XRT_ERROR_ANDROID = -26,
 } xrt_result_t;
