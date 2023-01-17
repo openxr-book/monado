@@ -290,7 +290,7 @@ ipc_client_connection_init(struct ipc_connection *ipc_c,
 	}
 
 	struct ipc_app_state desc = {0};
-	desc.info = *i_info;
+	desc.info = i_info->app_info;
 	desc.pid = getpid(); // Extra info.
 
 	xret = ipc_call_system_set_client_info(ipc_c, &desc);

@@ -294,7 +294,7 @@ struct ipc_app_state
 	bool io_active;
 	uint32_t z_order;
 	pid_t pid;
-	struct xrt_instance_info info;
+	struct xrt_application_info info;
 };
 
 

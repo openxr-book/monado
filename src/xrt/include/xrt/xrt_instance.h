@@ -33,13 +33,18 @@ struct xrt_system_compositor;
 
 #define XRT_MAX_APPLICATION_NAME_SIZE 128
 
+struct xrt_application_info
+{
+	char application_name[XRT_MAX_APPLICATION_NAME_SIZE];
+	bool ext_hand_tracking_enabled;
+};
+
 /*!
  * Information provided by the application at instance create time.
  */
 struct xrt_instance_info
 {
-	char application_name[XRT_MAX_APPLICATION_NAME_SIZE];
-	bool ext_hand_tracking_enabled;
+	struct xrt_application_info app_info;
 };
 
 /*!
