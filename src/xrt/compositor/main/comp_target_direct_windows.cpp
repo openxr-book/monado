@@ -13,14 +13,9 @@
  * @ingroup comp_main
  */
 
-#ifndef _SILENCE_CLANG_COROUTINE_MESSAGE
-#define _SILENCE_CLANG_COROUTINE_MESSAGE
-#endif
 
-#include <errno.h>
-#include <stdlib.h>
-#include <string.h>
-#include <inttypes.h>
+#include "main/comp_target_direct_windows_swapchain.hpp"
+#include "xrt/xrt_defines.h"
 #include "os/os_threading.h"
 #include "xrt/xrt_compiler.h"
 #include "main/comp_window.h"
@@ -31,12 +26,19 @@
 #include "d3d/d3d_dxgi_formats.h"
 #include "d3d/d3d_d3d11_helpers.hpp"
 #include "d3d/d3d_winrt_helpers.hpp"
+#include "d3d/d3d_convertible_luid.hpp"
 
 #include <memory>
 #include <algorithm>
 #include <exception>
 #include <utility>
 #include <set>
+#include <optional>
+#include <vector>
+#include <errno.h>
+#include <stdlib.h>
+#include <string.h>
+#include <inttypes.h>
 
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.Collections.h>
@@ -51,12 +53,13 @@
 #include <wil/com.h> // must be after winrt
 #include <wil/resource.h>
 #include <wil/result_macros.h>
-#include <winrt/impl/Windows.Devices.Display.Core.0.h>
-#include <winrt/impl/Windows.Devices.Display.Core.2.h>
 
 namespace winrtWDDC = winrt::Windows::Devices::Display::Core;
 namespace winrtWDD = winrt::Windows::Devices::Display;
 namespace Collections = winrt::Windows::Foundation::Collections;
+
+using xrt::auxiliary::d3d::ConvertibleLuid;
+using namespace xrt::compositor::main;
 /*
  *
  * Private structs.
@@ -64,26 +67,7 @@ namespace Collections = winrt::Windows::Foundation::Collections;
  */
 namespace {
 
-/// We retry opening an HMD a few times since it sometimes fails spuriously
-constexpr int kMaxOpenAttempts = 2;
 
-inline XRT_CHECK_RESULT bool
-checkForBasicAPI()
-{
-	constexpr uint16_t ContractVersionForBasicAPI = 7;
-	return winrt::Windows::Foundation::Metadata::ApiInformation::IsApiContractPresent(
-	    L"Windows.Foundation.UniversalApiContract", ContractVersionForBasicAPI);
-}
-
-/// Look for a contract that includes a Windows 11 function (TryExecuteTask instead of ExecuteTask)
-/// @return
-inline XRT_CHECK_RESULT bool
-checkForEnhancedApi()
-{
-	constexpr uint16_t ContractVersionForWin11 = 14;
-	return winrt::Windows::Foundation::Metadata::ApiInformation::IsApiContractPresent(
-	    L"Windows.Foundation.UniversalApiContract", ContractVersionForWin11);
-}
 
 #define MAKE_STRINGIFY_CASE(WDDC_ENUM)                                                                                 \
 	case winrtWDDC::WDDC_ENUM: return #WDDC_ENUM
@@ -131,241 +115,6 @@ to_string(winrtWDDC::DisplayPathStatus e)
 	return "DisplayPathStatus::UNKNOWN";
 }
 
-struct MyLuid
-{
-	MyLuid(LUID const &luid) : t(luid.LowPart, luid.HighPart) {}
-	MyLuid(winrt::Windows::Graphics::DisplayAdapterId const &id) : t(id.LowPart, id.HighPart) {}
-	operator LUID() const
-	{
-		LUID ret;
-		std::tie(ret.LowPart, ret.HighPart) = t;
-		return ret;
-	}
-	operator winrt::Windows::Graphics::DisplayAdapterId() const
-	{
-		return winrt::Windows::Graphics::DisplayAdapterId{std::get<0>(t), std::get<1>(t)};
-	}
-	std::pair<DWORD, LONG> t;
-};
-static inline XRT_CHECK_RESULT bool
-operator==(MyLuid const &lhs, MyLuid const &rhs)
-{
-	return lhs.t == rhs.t;
-}
-static inline XRT_CHECK_RESULT bool
-operator!=(MyLuid const &lhs, MyLuid const &rhs)
-{
-	return !(lhs == rhs);
-}
-static inline XRT_CHECK_RESULT bool
-operator<(MyLuid const &lhs, MyLuid const &rhs)
-{
-	return lhs.t < rhs.t;
-}
-
-/**
- * CreateSimpleScanout is prone to spurious IllegalArgument failures, so
- * this wrapper tries twice.
- *
- * See https://github.com/MicrosoftDocs/winrt-api/issues/1942
- *
- * @param device Display device
- * @param source Display source
- * @param primary Primary display surface
- * @param subResourceIndex as in CreateSimpleScanout. Usually 0 unless you are using hardware stereo (like 3D TV)
- * @param syncInterval as in CreateSimpleScanout
- * @param allowTearing determines the sync interval value in Win10 and Win11, and the flags to create the scanout in
- * Win11.
- * @return winrtWDDC::DisplayScanout
- */
-winrtWDDC::DisplayScanout
-createScanout(winrtWDDC::DisplayDevice const &device,
-              winrtWDDC::DisplaySource const &source,
-              winrtWDDC::DisplaySurface const &primary,
-              uint32_t subResourceIndex,
-              bool allowTearing)
-{
-	winrtWDDC::DisplayScanout ret{nullptr};
-	auto haveWin11 = checkForEnhancedApi();
-
-	auto TryCreateScanout = [&] {
-		winrtWDDC::DisplayScanout ret{nullptr};
-
-		try {
-			if (haveWin11) {
-				// Can always use syncinterval 0 when we have API 14 (win 11) or newer because we can
-				// explicitly choose tearing or not.
-				const uint32_t syncInterval = 0;
-				auto options =
-				    allowTearing
-				        ? winrt::Windows::Devices::Display::Core::DisplayScanoutOptions::AllowTearing
-				        : winrt::Windows::Devices::Display::Core::DisplayScanoutOptions::None;
-				ret = device.CreateSimpleScanoutWithDirtyRectsAndOptions(
-				    source, primary, subResourceIndex, syncInterval, nullptr, options);
-
-			} else {
-				// On Win10, sync internal of 0 has tearing, unexpectedly.
-				const uint32_t syncInterval = allowTearing ? 0 : 1;
-
-				ret = device.CreateSimpleScanout(source, primary, subResourceIndex, syncInterval);
-			}
-		} catch (winrt::hresult_invalid_argument const &) {
-			// ignore
-		}
-		return ret;
-	};
-	for (int i = 0; i < kMaxOpenAttempts && ret == nullptr; ++i) {
-		TryCreateScanout();
-	}
-	if (ret == nullptr) {
-		throw std::runtime_error("Couldn't construct a scanout even after repeated tries.");
-	}
-	return ret;
-}
-/// Things to pass between the opening of the device and the CompositorSwapchain constructor
-using DisplayObjects =
-    std::tuple<winrtWDDC::DisplayDevice, winrtWDDC::DisplayTarget, winrtWDDC::DisplayPath, winrtWDDC::DisplaySource>;
-
-class CompositorSwapchain
-{
-public:
-	CompositorSwapchain(struct comp_compositor *comp,
-	                    DisplayObjects &&objects,
-	                    winrt::Windows::Graphics::DirectX::DirectXColorSpace colorSpace,
-	                    uint32_t numImages);
-	CompositorSwapchain(struct comp_compositor *comp,
-	                    const winrtWDDC::DisplayDevice &device,
-	                    const winrtWDDC::DisplayTarget &target,
-	                    const winrtWDDC::DisplayPath &path,
-	                    winrtWDDC::DisplaySource &&source,
-	                    winrt::Windows::Graphics::DirectX::DirectXColorSpace colorSpace,
-	                    uint32_t numImages);
-
-	CompositorSwapchain(CompositorSwapchain const &) = delete;
-	CompositorSwapchain(CompositorSwapchain &&) = delete;
-	CompositorSwapchain &
-	operator=(CompositorSwapchain const &) = delete;
-	CompositorSwapchain &
-	operator=(CompositorSwapchain &&) = delete;
-
-
-	HANDLE
-	getSurfaceHandle(uint32_t i) const
-	{
-		return m_surfaceHandles[i].get();
-	}
-
-	uint32_t
-	acquireNext();
-
-	uint32_t
-	getHeight() const
-	{
-		return (uint32_t)m_path.SourceResolution().Value().Height;
-	}
-	uint32_t
-	getWidth() const
-	{
-		return (uint32_t)m_path.SourceResolution().Value().Width;
-	}
-
-	DXGI_FORMAT
-	getFormat() const
-	{
-		return (DXGI_FORMAT)(static_cast<int>(m_path.SourcePixelFormat()));
-	}
-
-
-	winrtWDDC::DisplayRotation
-	getSurfaceTransform() const
-	{
-		return m_path.Rotation();
-	}
-
-	bool
-	present(uint32_t i, const winrtWDDC::DisplayFence &fence, uint64_t fenceValue);
-
-private:
-	/// The compositor that owns us
-	struct comp_compositor *c;
-	xrt::auxiliary::util::ComGuard com_guard;
-	bool m_haveApi14{checkForEnhancedApi()};
-	uint32_t m_nextToAcquire{0};
-
-	winrtWDDC::DisplaySource m_source;
-	winrtWDDC::DisplayTaskPool m_taskPool;
-	winrtWDDC::DisplayPath m_path;
-	std::vector<winrtWDDC::DisplaySurface> m_surfaces;
-	std::vector<wil::unique_handle> m_surfaceHandles;
-	std::vector<winrtWDDC::DisplayScanout> m_scanouts;
-};
-
-CompositorSwapchain::CompositorSwapchain(struct comp_compositor *comp,
-                                         DisplayObjects &&objects,
-                                         winrt::Windows::Graphics::DirectX::DirectXColorSpace colorSpace,
-                                         uint32_t numImages)
-    : CompositorSwapchain(comp,
-                          std::get<winrtWDDC::DisplayDevice>(objects),
-                          std::get<winrtWDDC::DisplayTarget>(objects),
-                          std::get<winrtWDDC::DisplayPath>(objects),
-                          std::move(std::get<winrtWDDC::DisplaySource>(objects)),
-                          colorSpace,
-                          numImages)
-{}
-
-inline CompositorSwapchain::CompositorSwapchain(struct comp_compositor *comp,
-                                                const winrtWDDC::DisplayDevice &device,
-                                                const winrtWDDC::DisplayTarget &target,
-                                                const winrtWDDC::DisplayPath &path,
-                                                winrtWDDC::DisplaySource &&source,
-                                                winrt::Windows::Graphics::DirectX::DirectXColorSpace colorSpace,
-                                                uint32_t numImages)
-
-    : c(comp), m_source(std::move(source)), m_taskPool(device.CreateTaskPool()), m_path(path),
-      m_surfaces(numImages, nullptr), m_surfaceHandles(numImages), m_scanouts(numImages, nullptr)
-{
-	winrt::Windows::Graphics::SizeInt32 const resolution = path.SourceResolution().Value();
-	winrt::Windows::Graphics::DirectX::Direct3D11::Direct3DMultisampleDescription const multisample{1, 0};
-
-	winrtWDDC::DisplayPrimaryDescription const primaryDescription(
-	    (uint32_t)resolution.Width, (uint32_t)resolution.Height, path.SourcePixelFormat(), colorSpace,
-	    /* isStereo */ false, multisample);
-	auto deviceInterop = device.as<::IDisplayDeviceInterop>();
-
-	for (uint32_t i = 0; i < numImages; ++i) {
-		auto surface = device.CreatePrimary(target, primaryDescription);
-		m_surfaces[i] = surface;
-		auto surfaceInspectable = surface.as<::IInspectable>();
-		THROW_IF_FAILED(deviceInterop->CreateSharedHandle(surfaceInspectable.get(), nullptr, GENERIC_ALL,
-		                                                  nullptr, m_surfaceHandles[i].put()));
-		//! @todo debug var for allow tearing
-		m_scanouts[i] =
-		    createScanout(device, m_source, m_surfaces[i], /* SubResourceIndex */ 0, /* allowTearing */ false);
-	}
-}
-
-uint32_t
-CompositorSwapchain::acquireNext()
-{
-	uint32_t const ret = m_nextToAcquire;
-	m_nextToAcquire = (m_nextToAcquire + 1) % m_surfaces.size();
-	return ret;
-}
-
-bool
-CompositorSwapchain::present(uint32_t i, const winrtWDDC::DisplayFence &fence, uint64_t fenceValue)
-{
-	COMP_INFO(c, "Will scan out surface %" PRIu32 " after fence is signalled with %" PRIu64, i, fenceValue);
-	auto task = m_taskPool.CreateTask();
-	task.SetWait(fence, fenceValue);
-	task.SetScanout(m_scanouts[i]);
-	m_taskPool.ExecuteTask(task);
-	if (m_path.Status() != winrtWDDC::DisplayPathStatus::Succeeded) {
-		COMP_ERROR(c, "Path status is an error: %s", to_string(m_path.Status()));
-		return false;
-	}
-	return true;
-}
 
 
 class CompTargetData
@@ -381,30 +130,27 @@ public:
 
 	bool
 	openHmd(const winrtWDDC::DisplayTarget &target, DisplayObjects &outObjects) noexcept;
-
-	bool
-	targetPredicate(winrtWDDC::DisplayTarget const &target) const;
-
+\
 	/// The compositor that owns us
 	struct comp_compositor *c;
 	xrt::auxiliary::util::ComGuard com_guard;
 
 	/// Whether we can/should use the Windows 11+-only APIs
-	bool useApi14;
+	xrt::auxiliary::d3d::winrt::SystemApiCapability capabilities;
 
 	winrtWDDC::DisplayManager manager;
 
 	/// The list of possible HMDs available.
 	std::vector<winrtWDDC::DisplayTarget> hmds;
 
-	std::set<MyLuid> luidsWithHmds;
+	std::set<ConvertibleLuid> luidsWithHmds;
 
 	/// @name DXGI/D3D11 objects
 	/// @{
 	wil::com_ptr<IDXGIAdapter> dxgiAdapter;
 	wil::com_ptr<ID3D11Device5> d3d11Device;
 	wil::com_ptr<ID3D11DeviceContext4> d3d11Context;
-	LUID luid;
+	std::optional<ConvertibleLuid> luid;
 
 	wil::com_ptr<ID3D11Fence> d3d11RenderCompleteFence;
 	/// @}
@@ -424,9 +170,10 @@ public:
 
 
 CompTargetData::CompTargetData(struct comp_compositor *comp)
-    : c(comp), useApi14(checkForEnhancedApi()),
-      manager(winrtWDDC::DisplayManager::Create(winrtWDDC::DisplayManagerOptions::EnforceSourceOwnership))
-{}
+    : c(comp), manager(winrtWDDC::DisplayManager::Create(winrtWDDC::DisplayManagerOptions::EnforceSourceOwnership))
+{
+	capabilities.populate();
+}
 
 bool
 CompTargetData::populateAdapterSpecificData()
@@ -435,6 +182,7 @@ CompTargetData::populateAdapterSpecificData()
 		assert(c->settings.client_gpu_deviceLUID_valid);
 
 		dxgiAdapter = xrt::auxiliary::d3d::getAdapterByLUID(c->settings.client_gpu_deviceLUID);
+		ConvertibleLuid adapterLuid{c->settings.client_gpu_deviceLUID};
 		// Get some D3D11 stuff mainly for fence handling
 		{
 			wil::com_ptr<ID3D11Device> our_dev;
@@ -449,22 +197,19 @@ CompTargetData::populateAdapterSpecificData()
 		}
 
 		// Get the LUID in Windows format
-		{
-			DXGI_ADAPTER_DESC desc{};
-			THROW_IF_FAILED(dxgiAdapter->GetDesc(&desc));
-			luid = desc.AdapterLuid;
-		}
+		// {
+		// 	DXGI_ADAPTER_DESC desc{};
+		// 	THROW_IF_FAILED(dxgiAdapter->GetDesc(&desc));
+		// 	luid = ConvertibleLuid{desc.AdapterLuid};
+		// }
 
 		// get the adapter and device for winrt
 		{
-			winrt::Windows::Graphics::DisplayAdapterId id{};
-			id.LowPart = luid.LowPart;
-			id.HighPart = luid.HighPart;
+			winrt::Windows::Graphics::DisplayAdapterId id = adapterLuid;
 			displayAdapter = winrtWDDC::DisplayAdapter::FromId(id);
 			if (displayAdapter == nullptr) {
 				throw std::runtime_error("Could not get adapter by ID in WinRT!");
 			}
-			THROW_LAST_ERROR_IF_NULL(displayAdapter);
 			// onecore\windows\directx\database\helperlibrary\lib\directxdatabasehelper.cpp(652)\dxgi.dll!00007FF8D2FACF61:
 			// (caller: 00007FF8D2FACA68) ReturnHr(28) tid(4e54) 80004002 No such interface supported
 			displayDevice = manager.CreateDisplayDevice(displayAdapter);
@@ -497,8 +242,17 @@ CompTargetData::populateAdapterSpecificData()
 	}
 }
 
-bool
-CompTargetData::targetPredicate(winrtWDDC::DisplayTarget const &target) const
+
+struct HmdSearchResults
+{
+	std::vector<winrtWDDC::DisplayTarget> hmds;
+	std::set<ConvertibleLuid> luidsWithHmds;
+};
+
+static bool
+targetPredicate(struct comp_compositor *c,
+                winrtWDDC::DisplayTarget const &target,
+                std::optional<ConvertibleLuid> requiredLuid)
 {
 	try {
 		if (target == nullptr) {
@@ -526,12 +280,13 @@ CompTargetData::targetPredicate(winrtWDDC::DisplayTarget const &target) const
 			COMP_INFO(c, "Skipping target because it's not marked as an HMD.");
 			return false;
 		}
-		// LUID const thisLuid = {adapter.Id().LowPart, adapter.Id().HighPart};
-
-		// if (thisLuid.LowPart != luid.LowPart || thisLuid.HighPart != luid.HighPart) {
-		// 	COMP_INFO(c, "Skipping target because LUID doesn't match.");
-		// 	return false;
-		// }
+		if (requiredLuid) {
+			auto thisLuid = ConvertibleLuid{adapter.Id()};
+			if (*requiredLuid != thisLuid) {
+				COMP_INFO(c, "Skipping target because LUID doesn't match.");
+				return false;
+			}
+		}
 
 		COMP_INFO(c, "Display '%s' meets our requirements for direct mode on Windows!", displayName.c_str());
 		return true;
@@ -547,36 +302,36 @@ CompTargetData::targetPredicate(winrtWDDC::DisplayTarget const &target) const
 		return false;
 	}
 }
-
-
-inline LUID
-luidConvert(const winrt::Windows::Graphics::DisplayAdapterId &id)
+HmdSearchResults
+findHmds(struct comp_compositor *c,
+         const winrtWDDC::DisplayManager &manager,
+         std::optional<ConvertibleLuid> requiredLuid)
 {
-	LUID ret;
-	ret.HighPart = id.HighPart;
-	ret.LowPart = id.LowPart;
+	using std::begin;
+	using std::end;
+	HmdSearchResults ret;
+
+	auto currentTargets = manager.GetCurrentTargets();
+
+	COMP_INFO(c, "About to filter targets: starting with %d", int(currentTargets.Size()));
+	std::copy_if(begin(currentTargets), end(currentTargets), std::back_inserter(ret.hmds),
+	             [&](winrtWDDC::DisplayTarget const &target) { return targetPredicate(c, target); });
+	COMP_INFO(c, "Filtering left us with %d possible HMD targets", int(ret.hmds.size()));
+	if (!ret.hmds.empty()) {
+		for (const auto &target : ret.hmds) {
+			ret.luidsWithHmds.insert(ConvertibleLuid(target.Adapter().Id()));
+		}
+		COMP_INFO(c, "They are on a total of with %d different adapters", int(ret.luidsWithHmds.size()));
+	}
 	return ret;
 }
 
 bool
 CompTargetData::findHmds()
 {
-	using std::begin;
-	using std::end;
-	hmds.clear();
-	luidsWithHmds.clear();
-
-	auto currentTargets = manager.GetCurrentTargets();
-
-	COMP_INFO(c, "About to filter targets: starting with %d", int(currentTargets.Size()));
-	std::copy_if(begin(currentTargets), end(currentTargets), std::back_inserter(hmds),
-	             [&](winrtWDDC::DisplayTarget const &target) { return this->targetPredicate(target); });
-	COMP_INFO(c, "Filtering left us with %d possible HMD targets", int(hmds.size()));
-
-	for (const auto &target : hmds) {
-		luidsWithHmds.insert(MyLuid(target.Adapter().Id()));
-	}
-	COMP_INFO(c, "They are on a total of with %d different adapters", int(luidsWithHmds.size()));
+	HmdSearchResults results = ::findHmds(c, manager);
+	hmds = results.hmds;
+	luidsWithHmds = results.luidsWithHmds;
 	return !hmds.empty();
 }
 

@@ -222,8 +222,13 @@ if(XRT_MODULE_COMPOSITOR_MAIN)
 		target_sources(comp_main PRIVATE main/comp_window_mswin.c)
 	endif()
 	if(XRT_HAVE_WIN_DIRECT)
-		target_sources(comp_main PRIVATE main/comp_target_direct_windows.cpp)
+		target_sources(
+			comp_main PRIVATE main/comp_target_direct_windows.cpp
+					  main/comp_target_direct_windows_swapchain.cpp
+			)
 		target_link_libraries(comp_main PRIVATE aux_d3d)
+		# So winrt does not complain if clang/clangd/clang-tidy looks at the code
+		target_compile_definitions(comp_main PRIVATE _SILENCE_CLANG_COROUTINE_MESSAGE)
 	endif()
 	if(VK_USE_PLATFORM_DISPLAY_KHR)
 		target_sources(comp_main PRIVATE main/comp_window_vk_display.c)
