@@ -57,7 +57,6 @@
 namespace winrtWDDC = winrt::Windows::Devices::Display::Core;
 namespace winrtWDD = winrt::Windows::Devices::Display;
 namespace Collections = winrt::Windows::Foundation::Collections;
-using winrt::Windows::Graphics::DirectX::DirectXPixelFormat;
 /*
  *
  * Private structs.
@@ -68,69 +67,66 @@ namespace {
 /// We retry opening an HMD a few times since it sometimes fails spuriously
 constexpr int kMaxOpenAttempts = 2;
 
-inline bool
+inline XRT_CHECK_RESULT bool
 checkForBasicAPI()
 {
+	constexpr uint16_t ContractVersionForBasicAPI = 7;
 	return winrt::Windows::Foundation::Metadata::ApiInformation::IsApiContractPresent(
-	    L"Windows.Foundation.UniversalApiContract", 7);
+	    L"Windows.Foundation.UniversalApiContract", ContractVersionForBasicAPI);
 }
 
 /// Look for a contract that includes a Windows 11 function (TryExecuteTask instead of ExecuteTask)
 /// @return
-inline bool
-checkForApi14()
+inline XRT_CHECK_RESULT bool
+checkForEnhancedApi()
 {
+	constexpr uint16_t ContractVersionForWin11 = 14;
 	return winrt::Windows::Foundation::Metadata::ApiInformation::IsApiContractPresent(
-	    L"Windows.Foundation.UniversalApiContract", 14);
+	    L"Windows.Foundation.UniversalApiContract", ContractVersionForWin11);
 }
 
-constexpr const char *
+#define MAKE_STRINGIFY_CASE(WDDC_ENUM)                                                                                 \
+	case winrtWDDC::WDDC_ENUM: return #WDDC_ENUM
+
+XRT_CHECK_RESULT constexpr const char *
 to_string(winrtWDDC::DisplayManagerResult e)
 {
 	switch (e) {
-	case winrtWDDC::DisplayManagerResult::Success: return "DisplayManagerResult::Success";
-	case winrtWDDC::DisplayManagerResult::UnknownFailure: return "DisplayManagerResult::UnknownFailure";
-	case winrtWDDC::DisplayManagerResult::TargetAccessDenied: return "DisplayManagerResult::TargetAccessDenied";
-	case winrtWDDC::DisplayManagerResult::TargetStale: return "DisplayManagerResult::TargetStale";
-	case winrtWDDC::DisplayManagerResult::RemoteSessionNotSupported:
-		return "DisplayManagerResult::RemoteSessionNotSupported";
+		MAKE_STRINGIFY_CASE(DisplayManagerResult::Success);
+		MAKE_STRINGIFY_CASE(DisplayManagerResult::UnknownFailure);
+		MAKE_STRINGIFY_CASE(DisplayManagerResult::TargetAccessDenied);
+		MAKE_STRINGIFY_CASE(DisplayManagerResult::TargetStale);
+		MAKE_STRINGIFY_CASE(DisplayManagerResult::RemoteSessionNotSupported);
 	}
 	return "DisplayManagerResult::UNKNOWN";
 }
 
-constexpr const char *
+XRT_CHECK_RESULT constexpr const char *
 to_string(winrtWDDC::DisplayStateOperationStatus e)
 {
 	switch (e) {
-	case winrtWDDC::DisplayStateOperationStatus::Success: return "DisplayStateOperationStatus::Success";
-	case winrtWDDC::DisplayStateOperationStatus::PartialFailure:
-		return "DisplayStateOperationStatus::PartialFailure";
-	case winrtWDDC::DisplayStateOperationStatus::UnknownFailure:
-		return "DisplayStateOperationStatus::UnknownFailure";
-	case winrtWDDC::DisplayStateOperationStatus::TargetOwnershipLost:
-		return "DisplayStateOperationStatus::TargetOwnershipLost";
-	case winrtWDDC::DisplayStateOperationStatus::SystemStateChanged:
-		return "DisplayStateOperationStatus::SystemStateChanged";
-	case winrtWDDC::DisplayStateOperationStatus::TooManyPathsForAdapter:
-		return "DisplayStateOperationStatus::TooManyPathsForAdapter";
-	case winrtWDDC::DisplayStateOperationStatus::ModesNotSupported:
-		return "DisplayStateOperationStatus::ModesNotSupported";
-	case winrtWDDC::DisplayStateOperationStatus::RemoteSessionNotSupported:
-		return "DisplayStateOperationStatus::RemoteSessionNotSupported";
+		MAKE_STRINGIFY_CASE(DisplayStateOperationStatus::Success);
+		MAKE_STRINGIFY_CASE(DisplayStateOperationStatus::PartialFailure);
+		MAKE_STRINGIFY_CASE(DisplayStateOperationStatus::UnknownFailure);
+		MAKE_STRINGIFY_CASE(DisplayStateOperationStatus::TargetOwnershipLost);
+		MAKE_STRINGIFY_CASE(DisplayStateOperationStatus::SystemStateChanged);
+		MAKE_STRINGIFY_CASE(DisplayStateOperationStatus::TooManyPathsForAdapter);
+		MAKE_STRINGIFY_CASE(DisplayStateOperationStatus::ModesNotSupported);
+		MAKE_STRINGIFY_CASE(DisplayStateOperationStatus::RemoteSessionNotSupported);
 	}
 	return "DisplayStateOperationStatus::UNKNOWN";
 }
 
-constexpr const char *
+XRT_CHECK_RESULT constexpr const char *
 to_string(winrtWDDC::DisplayPathStatus e)
 {
 	switch (e) {
-	case winrtWDDC::DisplayPathStatus::Unknown: return "DisplayPathStatus::Unknown";
-	case winrtWDDC::DisplayPathStatus::Succeeded: return "DisplayPathStatus::Succeeded";
-	case winrtWDDC::DisplayPathStatus::Pending: return "DisplayPathStatus::Pending";
-	case winrtWDDC::DisplayPathStatus::Failed: return "DisplayPathStatus::Failed";
-	case winrtWDDC::DisplayPathStatus::FailedAsync: return "DisplayPathStatus::FailedAsync";
-	case winrtWDDC::DisplayPathStatus::InvalidatedAsync: return "DisplayPathStatus::InvalidatedAsync";
+		MAKE_STRINGIFY_CASE(DisplayPathStatus::Unknown);
+		MAKE_STRINGIFY_CASE(DisplayPathStatus::Succeeded);
+		MAKE_STRINGIFY_CASE(DisplayPathStatus::Pending);
+		MAKE_STRINGIFY_CASE(DisplayPathStatus::Failed);
+		MAKE_STRINGIFY_CASE(DisplayPathStatus::FailedAsync);
+		MAKE_STRINGIFY_CASE(DisplayPathStatus::InvalidatedAsync);
 	}
 	return "DisplayPathStatus::UNKNOWN";
 }
@@ -151,17 +147,17 @@ struct MyLuid
 	}
 	std::pair<DWORD, LONG> t;
 };
-inline bool
+static inline XRT_CHECK_RESULT bool
 operator==(MyLuid const &lhs, MyLuid const &rhs)
 {
 	return lhs.t == rhs.t;
 }
-inline bool
+static inline XRT_CHECK_RESULT bool
 operator!=(MyLuid const &lhs, MyLuid const &rhs)
 {
 	return !(lhs == rhs);
 }
-inline bool
+static inline XRT_CHECK_RESULT bool
 operator<(MyLuid const &lhs, MyLuid const &rhs)
 {
 	return lhs.t < rhs.t;
@@ -178,31 +174,51 @@ operator<(MyLuid const &lhs, MyLuid const &rhs)
  * @param primary Primary display surface
  * @param subResourceIndex as in CreateSimpleScanout. Usually 0 unless you are using hardware stereo (like 3D TV)
  * @param syncInterval as in CreateSimpleScanout
+ * @param allowTearing determines the sync interval value in Win10 and Win11, and the flags to create the scanout in
+ * Win11.
  * @return winrtWDDC::DisplayScanout
  */
-static winrtWDDC::DisplayScanout
+winrtWDDC::DisplayScanout
 createScanout(winrtWDDC::DisplayDevice const &device,
               winrtWDDC::DisplaySource const &source,
               winrtWDDC::DisplaySurface const &primary,
               uint32_t subResourceIndex,
-              uint32_t syncInterval)
+              bool allowTearing)
 {
 	winrtWDDC::DisplayScanout ret{nullptr};
-	try {
-		ret = device.CreateSimpleScanout(source, primary, subResourceIndex, syncInterval);
-	} catch (winrt::hresult_invalid_argument const &) {
-		// ignore
-	}
-	if (ret == nullptr) {
+	auto haveWin11 = checkForEnhancedApi();
+
+	auto TryCreateScanout = [&] {
+		winrtWDDC::DisplayScanout ret{nullptr};
+
 		try {
-			ret = device.CreateSimpleScanout(source, primary, subResourceIndex, syncInterval);
+			if (haveWin11) {
+				// Can always use syncinterval 0 when we have API 14 (win 11) or newer because we can
+				// explicitly choose tearing or not.
+				const uint32_t syncInterval = 0;
+				auto options =
+				    allowTearing
+				        ? winrt::Windows::Devices::Display::Core::DisplayScanoutOptions::AllowTearing
+				        : winrt::Windows::Devices::Display::Core::DisplayScanoutOptions::None;
+				ret = device.CreateSimpleScanoutWithDirtyRectsAndOptions(
+				    source, primary, subResourceIndex, syncInterval, nullptr, options);
+
+			} else {
+				// On Win10, sync internal of 0 has tearing, unexpectedly.
+				const uint32_t syncInterval = allowTearing ? 0 : 1;
+
+				ret = device.CreateSimpleScanout(source, primary, subResourceIndex, syncInterval);
+			}
 		} catch (winrt::hresult_invalid_argument const &) {
 			// ignore
 		}
+		return ret;
+	};
+	for (int i = 0; i < kMaxOpenAttempts && ret == nullptr; ++i) {
+		TryCreateScanout();
 	}
-
 	if (ret == nullptr) {
-		throw std::runtime_error("Couldn't construct a scanout even after two tries.");
+		throw std::runtime_error("Couldn't construct a scanout even after repeated tries.");
 	}
 	return ret;
 }
@@ -273,7 +289,7 @@ private:
 	/// The compositor that owns us
 	struct comp_compositor *c;
 	xrt::auxiliary::util::ComGuard com_guard;
-	bool m_haveApi14{checkForApi14()};
+	bool m_haveApi14{checkForEnhancedApi()};
 	uint32_t m_nextToAcquire{0};
 
 	winrtWDDC::DisplaySource m_source;
@@ -322,8 +338,9 @@ inline CompositorSwapchain::CompositorSwapchain(struct comp_compositor *comp,
 		auto surfaceInspectable = surface.as<::IInspectable>();
 		THROW_IF_FAILED(deviceInterop->CreateSharedHandle(surfaceInspectable.get(), nullptr, GENERIC_ALL,
 		                                                  nullptr, m_surfaceHandles[i].put()));
+		//! @todo debug var for allow tearing
 		m_scanouts[i] =
-		    createScanout(device, m_source, m_surfaces[i], /* SubResourceIndex */ 0, /*SyncInterval */ 0);
+		    createScanout(device, m_source, m_surfaces[i], /* SubResourceIndex */ 0, /* allowTearing */ false);
 	}
 }
 
@@ -407,7 +424,7 @@ public:
 
 
 CompTargetData::CompTargetData(struct comp_compositor *comp)
-    : c(comp), useApi14(checkForApi14()),
+    : c(comp), useApi14(checkForEnhancedApi()),
       manager(winrtWDDC::DisplayManager::Create(winrtWDDC::DisplayManagerOptions::EnforceSourceOwnership))
 {}
 
