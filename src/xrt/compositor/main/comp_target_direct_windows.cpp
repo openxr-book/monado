@@ -1208,3 +1208,38 @@ comp_target_direct_windows_create(struct comp_compositor *c)
 		return nullptr;
 	}
 }
+
+// No special detection
+static bool
+detect(struct comp_target_factory *ctf, struct comp_compositor *c)
+{
+	return false;
+}
+
+static bool
+create_target(struct comp_target_factory *ctf, struct comp_compositor *c, struct comp_target **out_ct)
+{
+	struct comp_target *ct = comp_target_direct_windows_create(c);
+	if (ct == NULL) {
+		return false;
+	}
+
+	*out_ct = ct;
+
+	return true;
+}
+
+// static const char *instance_extensions[] = {
+//     VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
+// };
+
+extern "C" struct comp_target_factory comp_target_factory_directwinrt = {
+    .name = "Microsoft Windows(TM) Direct Mode via WinRT",
+    .identifier = "directwinrt",
+    .requires_vulkan_for_create = false,
+    .is_deferred = true,
+    .required_instance_extensions = nullptr,
+    .required_instance_extension_count = 0,
+    .detect = detect,
+    .create_target = create_target,
+};

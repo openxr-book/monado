@@ -596,6 +596,12 @@ comp_target_factory_create_target(const struct comp_target_factory *ctf,
 	return ctf->create_target(ctf, c, out_ct);
 }
 
+#ifdef XRT_HAVE_WIN_DIRECT
+/*!
+ * Target factory for Windows built-in direct mode API
+ */
+extern struct comp_target_factory comp_target_factory_directwinrt;
+#endif
 
 #ifdef __cplusplus
 }
