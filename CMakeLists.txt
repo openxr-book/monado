@@ -38,6 +38,11 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+if(MSVC)
+	# Tell MSVC C++20 so we get designated initializers
+	set(CMAKE_CXX_STANDARD 20)
+endif()
+
 # So that clangd/Intellisense/Sourcetrail know how to parse our code.
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
