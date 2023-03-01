@@ -15,6 +15,7 @@
 
 #include "math/m_rational.hpp"
 
+#include "xrt/xrt_compiler.h"
 #include "xrt/xrt_vulkan_includes.h"
 
 #include <winrt/Windows.Graphics.DirectX.h>
@@ -73,4 +74,96 @@ colorSpaceFromVulkan(VkColorSpaceKHR colorSpace, ::winrt::Windows::Graphics::Dir
 	}
 	return false;
 }
+
+/**
+ * Describes the supported Windows API features for direct mode.
+ */
+struct SystemApiCapability
+{
+	/// Supports the minimum WinRT API contract (7.0) for direct mode
+	bool supportsBasicDirectMode{};
+
+	/// Supports the WinRT API contract (14.0) for the improved direct mode that debuted in Windows 11
+	bool supportsScanoutOptions{};
+
+	/// Populate the fields based on the system we are running on
+	void
+	populate();
+};
+
+/**
+ * Create a "scanout" object for scanning out a surface to a direct mode display.
+ *
+ * The underlying function CreateSimpleScanout is prone to spurious IllegalArgument failures, so
+ * this wrapper tries twice.
+ *
+ * See https://github.com/MicrosoftDocs/winrt-api/issues/1942
+ *
+ * @param capability A populated @ref SystemApiCapability describing the features available and allowed for use.
+ * @param maxAttempts The maximum number of times to try creating a scanout: consider at least 2, since this is prone to
+ * spurious failure
+ * @param device Display device
+ * @param source Display source
+ * @param primary Primary display surface
+ * @param subResourceIndex as in CreateSimpleScanout. Usually 0 unless you are using hardware stereo (like 3D TV)
+ * @param allowTearing determines the sync interval value in Win10 and Win11, and the flags to create the scanout in
+ * Win11.
+ * @return ::winrt::Windows::Devices::Display::Core::DisplayScanout
+ */
+::winrt::Windows::Devices::Display::Core::DisplayScanout
+createScanout(SystemApiCapability const &capability,
+              int maxAttempts,
+              ::winrt::Windows::Devices::Display::Core::DisplayDevice const &device,
+              ::winrt::Windows::Devices::Display::Core::DisplaySource const &source,
+              ::winrt::Windows::Devices::Display::Core::DisplaySurface const &primary,
+              uint32_t subResourceIndex,
+              bool allowTearing);
+
+
+#define D3D_WINRT_MAKE_STRINGIFY_CASE(WDDC_ENUM)                                                                       \
+	case ::winrt::Windows::Devices::Display::Core::WDDC_ENUM: return #WDDC_ENUM
+
+XRT_CHECK_RESULT constexpr const char *
+to_string(::winrt::Windows::Devices::Display::Core::DisplayManagerResult e)
+{
+	switch (e) {
+		D3D_WINRT_MAKE_STRINGIFY_CASE(DisplayManagerResult::Success);
+		D3D_WINRT_MAKE_STRINGIFY_CASE(DisplayManagerResult::UnknownFailure);
+		D3D_WINRT_MAKE_STRINGIFY_CASE(DisplayManagerResult::TargetAccessDenied);
+		D3D_WINRT_MAKE_STRINGIFY_CASE(DisplayManagerResult::TargetStale);
+		D3D_WINRT_MAKE_STRINGIFY_CASE(DisplayManagerResult::RemoteSessionNotSupported);
+	}
+	return "DisplayManagerResult::UNKNOWN";
+}
+
+XRT_CHECK_RESULT constexpr const char *
+to_string(::winrt::Windows::Devices::Display::Core::DisplayStateOperationStatus e)
+{
+	switch (e) {
+		D3D_WINRT_MAKE_STRINGIFY_CASE(DisplayStateOperationStatus::Success);
+		D3D_WINRT_MAKE_STRINGIFY_CASE(DisplayStateOperationStatus::PartialFailure);
+		D3D_WINRT_MAKE_STRINGIFY_CASE(DisplayStateOperationStatus::UnknownFailure);
+		D3D_WINRT_MAKE_STRINGIFY_CASE(DisplayStateOperationStatus::TargetOwnershipLost);
+		D3D_WINRT_MAKE_STRINGIFY_CASE(DisplayStateOperationStatus::SystemStateChanged);
+		D3D_WINRT_MAKE_STRINGIFY_CASE(DisplayStateOperationStatus::TooManyPathsForAdapter);
+		D3D_WINRT_MAKE_STRINGIFY_CASE(DisplayStateOperationStatus::ModesNotSupported);
+		D3D_WINRT_MAKE_STRINGIFY_CASE(DisplayStateOperationStatus::RemoteSessionNotSupported);
+	}
+	return "DisplayStateOperationStatus::UNKNOWN";
+}
+
+XRT_CHECK_RESULT constexpr const char *
+to_string(::winrt::Windows::Devices::Display::Core::DisplayPathStatus e)
+{
+	switch (e) {
+		D3D_WINRT_MAKE_STRINGIFY_CASE(DisplayPathStatus::Unknown);
+		D3D_WINRT_MAKE_STRINGIFY_CASE(DisplayPathStatus::Succeeded);
+		D3D_WINRT_MAKE_STRINGIFY_CASE(DisplayPathStatus::Pending);
+		D3D_WINRT_MAKE_STRINGIFY_CASE(DisplayPathStatus::Failed);
+		D3D_WINRT_MAKE_STRINGIFY_CASE(DisplayPathStatus::FailedAsync);
+		D3D_WINRT_MAKE_STRINGIFY_CASE(DisplayPathStatus::InvalidatedAsync);
+	}
+	return "DisplayPathStatus::UNKNOWN";
+}
+
 } // namespace xrt::auxiliary::d3d::winrt

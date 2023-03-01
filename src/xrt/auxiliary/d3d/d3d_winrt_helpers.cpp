@@ -16,6 +16,7 @@
 
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.Collections.h>
+#include <winrt/Windows.Foundation.Metadata.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Devices.Display.Core.h>
 #include <winrt/Windows.Graphics.DirectX.h>
@@ -32,6 +33,8 @@
 #include <tuple>
 #include <algorithm>
 #include <utility>
+#include <winrt/impl/Windows.Devices.Display.Core.0.h>
+#include <winrt/impl/Windows.Devices.Display.Core.2.h>
 
 namespace xrt::auxiliary::d3d::winrt {
 
@@ -114,6 +117,76 @@ void
 sortModes(std::vector<::winrt::Windows::Devices::Display::Core::DisplayModeInfo> &acceptableModes)
 {
 	std::sort(begin(acceptableModes), end(acceptableModes), modeComparison);
+}
+
+static bool
+checkForBasicAPI()
+{
+	constexpr uint16_t ContractVersionForBasicAPI = 7;
+	return ::winrt::Windows::Foundation::Metadata::ApiInformation::IsApiContractPresent(
+	    L"Windows.Foundation.UniversalApiContract", ContractVersionForBasicAPI);
+}
+
+static bool
+checkForEnhancedApi()
+{
+	constexpr uint16_t ContractVersionForWin11 = 14;
+	return ::winrt::Windows::Foundation::Metadata::ApiInformation::IsApiContractPresent(
+	    L"Windows.Foundation.UniversalApiContract", ContractVersionForWin11);
+}
+
+void
+SystemApiCapability::populate()
+{
+	supportsBasicDirectMode = checkForBasicAPI();
+	supportsScanoutOptions = checkForEnhancedApi();
+}
+
+::winrt::Windows::Devices::Display::Core::DisplayScanout
+createScanout(SystemApiCapability const &capability,
+              int maxAttempts,
+              ::winrt::Windows::Devices::Display::Core::DisplayDevice const &device,
+              ::winrt::Windows::Devices::Display::Core::DisplaySource const &source,
+              ::winrt::Windows::Devices::Display::Core::DisplaySurface const &primary,
+              uint32_t subResourceIndex,
+              bool allowTearing)
+{
+	using ::winrt::Windows::Devices::Display::Core::DisplayScanout;
+	using ::winrt::Windows::Devices::Display::Core::DisplayScanoutOptions;
+	DisplayScanout ret{nullptr};
+	auto haveWin11 = capability.supportsScanoutOptions;
+
+	auto TryCreateScanout = [&] {
+		winrtWDDC::DisplayScanout ret{nullptr};
+
+		try {
+			if (haveWin11) {
+				// Can always use syncinterval 0 when we have API 14 (win 11) or newer because we can
+				// explicitly choose tearing or not.
+				const uint32_t syncInterval = 0;
+				DisplayScanoutOptions options =
+				    allowTearing ? DisplayScanoutOptions::AllowTearing : DisplayScanoutOptions::None;
+				ret = device.CreateSimpleScanoutWithDirtyRectsAndOptions(
+				    source, primary, subResourceIndex, syncInterval, nullptr, options);
+
+			} else {
+				// On Win10, sync internal of 0 has tearing, unexpectedly.
+				const uint32_t syncInterval = allowTearing ? 0 : 1;
+
+				ret = device.CreateSimpleScanout(source, primary, subResourceIndex, syncInterval);
+			}
+		} catch (::winrt::hresult_invalid_argument const &) {
+			// ignore
+		}
+		return ret;
+	};
+	for (int i = 0; i < maxAttempts && ret == nullptr; ++i) {
+		TryCreateScanout();
+	}
+	if (ret == nullptr) {
+		throw std::runtime_error("Couldn't construct a scanout even after repeated tries.");
+	}
+	return ret;
 }
 
 } // namespace xrt::auxiliary::d3d::winrt
