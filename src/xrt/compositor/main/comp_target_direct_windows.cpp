@@ -130,7 +130,7 @@ public:
 
 	bool
 	openHmd(const winrtWDDC::DisplayTarget &target, DisplayObjects &outObjects) noexcept;
-\
+
 	/// The compositor that owns us
 	struct comp_compositor *c;
 	xrt::auxiliary::util::ComGuard com_guard;
@@ -315,7 +315,7 @@ findHmds(struct comp_compositor *c,
 
 	COMP_INFO(c, "About to filter targets: starting with %d", int(currentTargets.Size()));
 	std::copy_if(begin(currentTargets), end(currentTargets), std::back_inserter(ret.hmds),
-	             [&](winrtWDDC::DisplayTarget const &target) { return targetPredicate(c, target); });
+	             [&](winrtWDDC::DisplayTarget const &target) { return targetPredicate(c, target, requiredLuid); });
 	COMP_INFO(c, "Filtering left us with %d possible HMD targets", int(ret.hmds.size()));
 	if (!ret.hmds.empty()) {
 		for (const auto &target : ret.hmds) {
@@ -329,7 +329,7 @@ findHmds(struct comp_compositor *c,
 bool
 CompTargetData::findHmds()
 {
-	HmdSearchResults results = ::findHmds(c, manager);
+	HmdSearchResults results = ::findHmds(c, manager, ConvertibleLuid{c->settings.client_gpu_deviceLUID});
 	hmds = results.hmds;
 	luidsWithHmds = results.luidsWithHmds;
 	return !hmds.empty();
@@ -602,7 +602,7 @@ try_open_hmds(struct comp_target_direct_windows *ctdw) noexcept
 	const auto numHmds = ctdw->data->hmds.size();
 
 	// Sometimes it takes a few tries.
-	for (int attempt = 0; attempt < kMaxOpenAttempts; ++attempt) {
+	for (int attempt = 0; attempt < 3; ++attempt) {
 		for (size_t i = 0; i < numHmds; ++i) {
 
 			COMP_INFO(ct->c, "Attempting to open HMD %d, attempt %d", i, attempt);
@@ -931,8 +931,13 @@ struct comp_target *
 comp_target_direct_windows_create(struct comp_compositor *c)
 {
 	try {
-		if (!checkForBasicAPI()) {
+		xrt::auxiliary::d3d::winrt::SystemApiCapability capability;
+		capability.populate();
+
+		if (!capability.supportsBasicDirectMode) {
 			// Cannot use this API on this Windows version
+			COMP_INFO(
+			    c, "Cannot use Windows direct mode on this OS version.");
 			return nullptr;
 		}
 
