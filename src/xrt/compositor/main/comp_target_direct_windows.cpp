@@ -283,7 +283,9 @@ targetPredicate(struct comp_compositor *c,
 		if (requiredLuid) {
 			auto thisLuid = ConvertibleLuid{adapter.Id()};
 			if (*requiredLuid != thisLuid) {
-				COMP_INFO(c, "Skipping target because LUID doesn't match.");
+				COMP_WARN(c,
+				          "Skipping target because LUID doesn't match: we found an HMD but it is not "
+				          "plugged in to the GPU we already chose!");
 				return false;
 			}
 		}
@@ -936,8 +938,7 @@ comp_target_direct_windows_create(struct comp_compositor *c)
 
 		if (!capability.supportsBasicDirectMode) {
 			// Cannot use this API on this Windows version
-			COMP_INFO(
-			    c, "Cannot use Windows direct mode on this OS version.");
+			COMP_INFO(c, "Cannot use Windows direct mode on this OS version.");
 			return nullptr;
 		}
 
