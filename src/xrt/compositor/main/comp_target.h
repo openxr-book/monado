@@ -600,7 +600,7 @@ comp_target_factory_create_target(const struct comp_target_factory *ctf,
 /*!
  * Target factory for Windows built-in direct mode API
  */
-extern struct comp_target_factory comp_target_factory_directwinrt;
+extern const struct comp_target_factory comp_target_factory_directwinrt;
 #endif
 
 #ifdef __cplusplus
