@@ -84,7 +84,7 @@ struct SystemApiCapability
 	bool supportsBasicDirectMode{};
 
 	/// Supports the WinRT API contract (14.0) for the improved direct mode that debuted in Windows 11
-	bool supportsScanoutOptions{};
+	bool supportsScanoutOptionsAndTryExecuteTask{};
 
 	/// Populate the fields based on the system we are running on
 	void
@@ -123,6 +123,7 @@ createScanout(SystemApiCapability const &capability,
 #define D3D_WINRT_MAKE_STRINGIFY_CASE(WDDC_ENUM)                                                                       \
 	case ::winrt::Windows::Devices::Display::Core::WDDC_ENUM: return #WDDC_ENUM
 
+/// Convert Windows.Devices.Display.Core.DisplayManagerResult enum values to string
 XRT_CHECK_RESULT constexpr const char *
 to_string(::winrt::Windows::Devices::Display::Core::DisplayManagerResult e)
 {
@@ -136,6 +137,7 @@ to_string(::winrt::Windows::Devices::Display::Core::DisplayManagerResult e)
 	return "DisplayManagerResult::UNKNOWN";
 }
 
+/// Convert Windows.Devices.Display.Core.DisplayStateOperationStatus enum values to string
 XRT_CHECK_RESULT constexpr const char *
 to_string(::winrt::Windows::Devices::Display::Core::DisplayStateOperationStatus e)
 {
@@ -152,6 +154,7 @@ to_string(::winrt::Windows::Devices::Display::Core::DisplayStateOperationStatus 
 	return "DisplayStateOperationStatus::UNKNOWN";
 }
 
+/// Convert Windows.Devices.Display.Core.DisplayPathStatus enum values to string
 XRT_CHECK_RESULT constexpr const char *
 to_string(::winrt::Windows::Devices::Display::Core::DisplayPathStatus e)
 {
@@ -166,4 +169,19 @@ to_string(::winrt::Windows::Devices::Display::Core::DisplayPathStatus e)
 	return "DisplayPathStatus::UNKNOWN";
 }
 
+/// Convert Windows.Devices.Display.Core.DisplayPresentStatus enum values to string
+XRT_CHECK_RESULT constexpr const char *
+to_string(::winrt::Windows::Devices::Display::Core::DisplayPresentStatus e)
+{
+	switch (e) {
+		D3D_WINRT_MAKE_STRINGIFY_CASE(DisplayPresentStatus::Success);
+		D3D_WINRT_MAKE_STRINGIFY_CASE(DisplayPresentStatus::SourceStatusPreventedPresent);
+		D3D_WINRT_MAKE_STRINGIFY_CASE(DisplayPresentStatus::ScanoutInvalid);
+		D3D_WINRT_MAKE_STRINGIFY_CASE(DisplayPresentStatus::SourceInvalid);
+		D3D_WINRT_MAKE_STRINGIFY_CASE(DisplayPresentStatus::DeviceInvalid);
+		D3D_WINRT_MAKE_STRINGIFY_CASE(DisplayPresentStatus::UnknownFailure);
+	}
+	return "DisplayPresentStatus::UNKNOWN";
+}
+#undef D3D_WINRT_MAKE_STRINGIFY_CASE
 } // namespace xrt::auxiliary::d3d::winrt

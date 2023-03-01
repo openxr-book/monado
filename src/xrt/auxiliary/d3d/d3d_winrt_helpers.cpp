@@ -139,7 +139,7 @@ void
 SystemApiCapability::populate()
 {
 	supportsBasicDirectMode = checkForBasicAPI();
-	supportsScanoutOptions = checkForEnhancedApi();
+	supportsScanoutOptionsAndTryExecuteTask = checkForEnhancedApi();
 }
 
 ::winrt::Windows::Devices::Display::Core::DisplayScanout
@@ -154,7 +154,7 @@ createScanout(SystemApiCapability const &capability,
 	using ::winrt::Windows::Devices::Display::Core::DisplayScanout;
 	using ::winrt::Windows::Devices::Display::Core::DisplayScanoutOptions;
 	DisplayScanout ret{nullptr};
-	auto haveWin11 = capability.supportsScanoutOptions;
+	auto haveWin11 = capability.supportsScanoutOptionsAndTryExecuteTask;
 
 	auto TryCreateScanout = [&] {
 		winrtWDDC::DisplayScanout ret{nullptr};
