@@ -7,6 +7,7 @@
  * @ingroup ipc_client
  */
 
+#include "xrt/xrt_results.h"
 #if defined(_MSC_VER) && !defined(_CRT_SECURE_NO_WARNINGS)
 #define _CRT_SECURE_NO_WARNINGS
 #endif
@@ -376,12 +377,13 @@ ipc_client_instance_create_system(struct xrt_instance *xinst,
 	return XRT_SUCCESS;
 }
 
-static int
+static xrt_result_t
 ipc_client_instance_get_prober(struct xrt_instance *xinst, struct xrt_prober **out_xp)
 {
 	*out_xp = NULL;
 
-	return -1;
+	//! @todo Is this the right value to return?
+	return XRT_SUCCESS;
 }
 
 static void
