@@ -373,6 +373,46 @@
 		]
 	},
 
+	"device_begin_plane_detection_ext": {
+		"in": [
+			{"name": "id", "type": "uint32_t"},
+			{"name": "plane_detection_id", "type": "uint64_t"}
+		],
+		"out": [
+			{"name": "out_plane_detection_id", "type": "uint64_t"}
+		]
+	},
+
+	"device_destroy_plane_detection_ext": {
+		"in": [
+			{"name": "id", "type": "uint32_t"},
+			{"name": "plane_detection_id", "type": "uint64_t"}
+		]
+	},
+
+	"device_get_plane_detection_state_ext": {
+		"in": [
+			{"name": "id", "type": "uint32_t"},
+			{"name": "plane_detection_id", "type": "uint64_t"}
+		],
+		"out": [
+			{"name": "state", "type": "enum xrt_plane_detector_state_ext"}
+		]
+	},
+
+	"device_get_plane_detections_ext": {
+		"varlen": true,
+		"in": [
+			{"name": "id", "type": "uint32_t"},
+			{"name": "plane_detection_id", "type": "uint64_t"}
+		],
+		"out": [
+			{"name": "location_size", "type": "uint32_t"},
+			{"name": "polygon_size", "type": "uint32_t"},
+			{"name": "vertex_size", "type": "uint32_t"}
+		]
+	},
+
 	"device_set_output": {
 		"in": [
 			{"name": "id", "type": "uint32_t"},

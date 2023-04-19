@@ -35,6 +35,16 @@
 #define XRT_MAX_SWAPCHAIN_FORMATS 16
 
 /*!
+ * Max number of plane orientations that can be requested at a time.
+ */
+#define XRT_MAX_PLANE_ORIENTATIONS_EXT 256
+
+/*!
+ * Max number of plane semantic types that can be requested at a time.
+ */
+#define XRT_MAX_PLANE_SEMANTIC_TYPE_EXT 256
+
+/*!
  * Max formats in the swapchain creation info formats list, artificial limit.
  */
 #define XRT_MAX_SWAPCHAIN_CREATE_INFO_FORMAT_LIST_COUNT 8

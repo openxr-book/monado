@@ -252,6 +252,158 @@ ipc_client_hmd_is_form_factor_available(struct xrt_device *xdev, enum xrt_form_f
 	return available;
 }
 
+static enum xrt_result
+ipc_client_hmd_begin_plane_detection_ext(struct xrt_device *xdev,
+                                         const struct xrt_plane_detector_begin_info_ext *begin_info,
+                                         uint64_t plane_detection_id,
+                                         uint64_t *out_plane_detection_id)
+{
+	ipc_client_hmd_t *ich = ipc_client_hmd(xdev);
+
+	ich->ipc_c->ism->plane_begin_info_ext = *begin_info;
+
+	xrt_result_t r = ipc_call_device_begin_plane_detection_ext(ich->ipc_c, ich->device_id, plane_detection_id,
+	                                                           out_plane_detection_id);
+	if (r != XRT_SUCCESS) {
+		IPC_ERROR(ich->ipc_c, "Error sending hmd_begin_plane_detection_ext!");
+		return r;
+	}
+
+	return XRT_SUCCESS;
+}
+
+static enum xrt_result
+ipc_client_hmd_destroy_plane_detection_ext(struct xrt_device *xdev, uint64_t plane_detection_id)
+{
+	ipc_client_hmd_t *ich = ipc_client_hmd(xdev);
+
+	xrt_result_t r = ipc_call_device_destroy_plane_detection_ext(ich->ipc_c, ich->device_id, plane_detection_id);
+	if (r != XRT_SUCCESS) {
+		IPC_ERROR(ich->ipc_c, "Error sending destroy_plane_detection_ext!");
+		return r;
+	}
+
+	return XRT_SUCCESS;
+}
+
+/*!
+ * Helper function for @ref xrt_device::get_plane_detection_state.
+ *
+ * @public @memberof xrt_device
+ */
+static inline enum xrt_result
+ipc_client_hmd_get_plane_detection_state_ext(struct xrt_device *xdev,
+                                             uint64_t plane_detection_id,
+                                             enum xrt_plane_detector_state_ext *out_state)
+{
+	ipc_client_hmd_t *ich = ipc_client_hmd(xdev);
+
+	xrt_result_t r =
+	    ipc_call_device_get_plane_detection_state_ext(ich->ipc_c, ich->device_id, plane_detection_id, out_state);
+	if (r != XRT_SUCCESS) {
+		IPC_ERROR(ich->ipc_c, "Error sending get_plane_detection_state_ext!");
+		return r;
+	}
+
+	return XRT_SUCCESS;
+}
+
+/*!
+ * Helper function for @ref xrt_device::get_plane_detections.
+ *
+ * @public @memberof xrt_device
+ */
+static inline enum xrt_result
+ipc_client_hmd_get_plane_detections_ext(struct xrt_device *xdev,
+                                        uint64_t plane_detection_id,
+                                        struct xrt_plane_detections_ext *out_detections)
+{
+	ipc_client_hmd_t *ich = ipc_client_hmd(xdev);
+	struct ipc_connection *ipc_c = ich->ipc_c;
+
+	ipc_client_connection_lock(ipc_c);
+
+	xrt_result_t xret = ipc_send_device_get_plane_detections_ext_locked(ipc_c, ich->device_id, plane_detection_id);
+	IPC_CHK_WITH_GOTO(ich->ipc_c, xret, "ipc_send_device_get_plane_detections_ext_locked", out);
+
+	// in this case, size == count
+	uint32_t location_size = 0;
+	uint32_t polygon_size = 0;
+	uint32_t vertex_size = 0;
+
+	xret = ipc_receive_device_get_plane_detections_ext_locked(ipc_c, &location_size, &polygon_size, &vertex_size);
+	IPC_CHK_WITH_GOTO(ich->ipc_c, xret, "ipc_receive_device_get_plane_detections_ext_locked", out);
+
+
+	// With no locations, the service won't send anything else
+	if (location_size < 1) {
+		out_detections->location_count = 0;
+		goto out;
+	}
+
+	// realloc arrays in out_detections if necessary, then receive contents
+
+	out_detections->location_count = location_size;
+	if (out_detections->location_size < location_size) {
+		U_ARRAY_REALLOC_OR_FREE(out_detections->locations, struct xrt_plane_detector_locations_ext,
+		                        location_size);
+		U_ARRAY_REALLOC_OR_FREE(out_detections->polygon_info_start_index, uint32_t, location_size);
+		out_detections->location_size = location_size;
+	}
+
+	if (out_detections->polygon_info_size < polygon_size) {
+		U_ARRAY_REALLOC_OR_FREE(out_detections->polygon_infos, struct xrt_plane_polygon_info_ext, polygon_size);
+		out_detections->polygon_info_size = polygon_size;
+	}
+
+	if (out_detections->vertex_size < vertex_size) {
+		U_ARRAY_REALLOC_OR_FREE(out_detections->vertices, struct xrt_vec2, vertex_size);
+		out_detections->vertex_size = vertex_size;
+	}
+
+	if ((location_size > 0 &&
+	     (out_detections->locations == NULL || out_detections->polygon_info_start_index == NULL)) ||
+	    (polygon_size > 0 && out_detections->polygon_infos == NULL) ||
+	    (vertex_size > 0 && out_detections->vertices == NULL)) {
+		IPC_ERROR(ich->ipc_c, "Error allocating memory for plane detections!");
+		out_detections->location_size = 0;
+		out_detections->polygon_info_size = 0;
+		out_detections->vertex_size = 0;
+		xret = XRT_ERROR_IPC_FAILURE;
+		goto out;
+	}
+
+	if (location_size > 0) {
+		// receive location_count * locations
+		xret = ipc_receive(&ipc_c->imc, out_detections->locations,
+		                   sizeof(struct xrt_plane_detector_locations_ext) * location_size);
+		IPC_CHK_WITH_GOTO(ich->ipc_c, xret, "ipc_receive(1)", out);
+
+		// receive location_count * polygon_info_start_index
+		xret = ipc_receive(&ipc_c->imc, out_detections->polygon_info_start_index,
+		                   sizeof(uint32_t) * location_size);
+		IPC_CHK_WITH_GOTO(ich->ipc_c, xret, "ipc_receive(2)", out);
+	}
+
+
+	if (polygon_size > 0) {
+		// receive polygon_count * polygon_infos
+		xret = ipc_receive(&ipc_c->imc, out_detections->polygon_infos,
+		                   sizeof(struct xrt_plane_polygon_info_ext) * polygon_size);
+		IPC_CHK_WITH_GOTO(ich->ipc_c, xret, "ipc_receive(3)", out);
+	}
+
+	if (vertex_size > 0) {
+		// receive vertex_count * vertices
+		xret = ipc_receive(&ipc_c->imc, out_detections->vertices, sizeof(struct xrt_vec2) * vertex_size);
+		IPC_CHK_WITH_GOTO(ich->ipc_c, xret, "ipc_receive(4)", out);
+	}
+
+out:
+	ipc_client_connection_unlock(ipc_c);
+	return xret;
+}
+
 static xrt_result_t
 ipc_client_hmd_get_visibility_mask(struct xrt_device *xdev,
                                    enum xrt_visibility_mask_type type,
@@ -312,6 +464,10 @@ ipc_client_hmd_create(struct ipc_connection *ipc_c, struct xrt_tracking_origin *
 	ich->base.get_tracked_pose = ipc_client_hmd_get_tracked_pose;
 	ich->base.get_view_poses = ipc_client_hmd_get_view_poses;
 	ich->base.compute_distortion = ipc_client_hmd_compute_distortion;
+	ich->base.begin_plane_detection_ext = ipc_client_hmd_begin_plane_detection_ext;
+	ich->base.destroy_plane_detection_ext = ipc_client_hmd_destroy_plane_detection_ext;
+	ich->base.get_plane_detection_state_ext = ipc_client_hmd_get_plane_detection_state_ext;
+	ich->base.get_plane_detections_ext = ipc_client_hmd_get_plane_detections_ext;
 	ich->base.destroy = ipc_client_hmd_destroy;
 	ich->base.is_form_factor_available = ipc_client_hmd_is_form_factor_available;
 	ich->base.get_visibility_mask = ipc_client_hmd_get_visibility_mask;
@@ -372,6 +528,8 @@ ipc_client_hmd_create(struct ipc_connection *ipc_c, struct xrt_tracking_origin *
 	ich->base.eye_gaze_supported = isdev->eye_gaze_supported;
 	ich->base.force_feedback_supported = isdev->force_feedback_supported;
 	ich->base.form_factor_check_supported = isdev->form_factor_check_supported;
+	ich->base.planes_supported = isdev->planes_supported;
+	ich->base.plane_capability_flags = isdev->plane_capability_flags;
 
 	return &ich->base;
 }

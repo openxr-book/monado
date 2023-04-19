@@ -16,6 +16,9 @@
 
 #include "xrt/xrt_results.h"
 
+#include "xrt/xrt_limits.h"
+#include <stdlib.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -1174,6 +1177,166 @@ enum xrt_output_type
 
 #define XRT_OUTPUT_NAME(id, type) ((UINT32_C(id) << XRT_OUTPUT_TYPE_BITWIDTH) | (uint32_t)XRT_OUTPUT_TYPE_##type)
 
+// XR_EXT_plane_detection
+enum xrt_plane_detection_capability_flags_ext
+{
+	XRT_PLANE_DETECTION_CAPABILITY_PLANE_DETECTION_BIT_EXT = 0x00000001,
+	XRT_PLANE_DETECTION_CAPABILITY_PLANE_HOLES_BIT_EXT = 0x00000002,
+	XRT_PLANE_DETECTION_CAPABILITY_SEMANTIC_CEILING_BIT_EXT = 0x00000004,
+	XRT_PLANE_DETECTION_CAPABILITY_SEMANTIC_FLOOR_BIT_EXT = 0x00000008,
+	XRT_PLANE_DETECTION_CAPABILITY_SEMANTIC_WALL_BIT_EXT = 0x00000010,
+	XRT_PLANE_DETECTION_CAPABILITY_SEMANTIC_PLATFORM_BIT_EXT = 0x00000020,
+	XRT_PLANE_DETECTION_CAPABILITY_ORIENTATION_BIT_EXT = 0x00000040,
+};
+
+enum xrt_plane_detector_flags_ext
+{
+	XRT_PLANE_DETECTOR_FLAGS_CONTOUR_EXT = 1,
+};
+
+enum xrt_plane_detector_orientation_ext
+{
+	XRT_PLANE_DETECTOR_ORIENTATION_HORIZONTAL_UPWARD_EXT = 0,
+	XRT_PLANE_DETECTOR_ORIENTATION_HORIZONTAL_DOWNWARD_EXT = 1,
+	XRT_PLANE_DETECTOR_ORIENTATION_VERTICAL_EXT = 2,
+	XRT_PLANE_DETECTOR_ORIENTATION_ARBITRARY_EXT = 3,
+};
+
+enum xrt_plane_detector_semantic_type_ext
+{
+	XRT_PLANE_DETECTOR_SEMANTIC_TYPE_UNDEFINED_EXT = 0,
+	XRT_PLANE_DETECTOR_SEMANTIC_TYPE_CEILING_EXT = 1,
+	XRT_PLANE_DETECTOR_SEMANTIC_TYPE_FLOOR_EXT = 2,
+	XRT_PLANE_DETECTOR_SEMANTIC_TYPE_WALL_EXT = 3,
+	XRT_PLANE_DETECTOR_SEMANTIC_TYPE_PLATFORM_EXT = 4,
+};
+
+enum xrt_plane_detector_state_ext
+{
+	XRT_PLANE_DETECTOR_STATE_NONE_EXT = 0,
+	XRT_PLANE_DETECTOR_STATE_PENDING_EXT = 1,
+	XRT_PLANE_DETECTOR_STATE_DONE_EXT = 2,
+	XRT_PLANE_DETECTOR_STATE_ERROR_EXT = 3,
+	XRT_PLANE_DETECTOR_STATE_FATAL_EXT = 4,
+};
+
+
+
+/*!
+ * A query for a plane. Corresponds to XrPlaneDetectorBeginInfoEXT.
+ *
+ * @ingroup xrt_iface
+ */
+struct xrt_plane_detector_begin_info_ext
+{
+	enum xrt_plane_detector_flags_ext detector_flags;
+	uint32_t orientation_count;
+	enum xrt_plane_detector_orientation_ext orientations[XRT_MAX_PLANE_ORIENTATIONS_EXT];
+	uint32_t semantic_type_count;
+	enum xrt_plane_detector_semantic_type_ext semantic_types[XRT_MAX_PLANE_SEMANTIC_TYPE_EXT];
+	uint32_t max_planes;
+	float min_area;
+	struct xrt_pose bounding_box_pose;
+	//! width, height, depth
+	struct xrt_vec3 bounding_box_extent;
+};
+
+struct xrt_plane_detector_locations_ext
+{
+	uint64_t planeId;
+	struct xrt_space_relation relation;
+	//! x = width, y = height
+	struct xrt_vec2 extents;
+	enum xrt_plane_detector_orientation_ext orientation;
+	enum xrt_plane_detector_semantic_type_ext semantic_type;
+	uint32_t polygon_buffer_count;
+};
+
+//! Helper struct to pair up metadata for one polygon.
+struct xrt_plane_polygon_info_ext
+{
+	uint32_t vertex_count;
+
+	//! Index into the continuous array of vertices for all planes of a query.
+	uint32_t vertices_start_index;
+};
+
+/**
+ * Each plane has n polygons; ultimately plane metadata from @ref locations and @ref vetices is
+ * reconstructed. Therefore lay out the data in flattened arrays:
+ *
+ * @ref locations stores continuous metadata for each plane:
+ * location 1 | location 2 | location 3 | location 4 | ...
+ *
+ * @ref polygon_info_start_index is a helper array to go from a location entry to a polygon_info entry.
+ *
+ * @ref polygon_info stores info (metadata) for each polygon, flattened:
+ * plane 1 polygon 1 info | plane 1 polygon 2 info | ... | plane 2 polygon 1 info | ...
+ *
+ * @ref polygon_info.vertices_start_index is a helper array to go from a polygon_info entry to vertices
+ * entry.
+ *
+ * @ref vertices stores vertex data for each polygon, for each plane, flattened:
+ * plane 1 polygon 1 vertex 1 | plane 1 polygon 1 vertex 2 | ... | plane 1 polygon 2 vertex 1 | ...
+ *
+ * To reconstruct the vertices of a certain plane polygon:
+ * - Find the index i of the plane with the requested plane_id in the locations array.
+ * - Use this index i to generate a new index j = polygon_info_start_index[i].
+ * - polygon_info[j] is the info of the first polygon of the locations[i] plane.
+ * - polygon_info[j + polygonBufferIndex] is the info of the requested polygon.
+ * - polygon_info[j + polygonBufferIndex].vertex_count is the vertex count of this polygon.
+ * - polygon_info[j + polygonBufferIndex].vertices_start_index is another new index k.
+ * - vertices[k] is the first vertex of the requested polygon.
+ *
+ * Convention: Whoever writes to this struct checks the size values first and reallocates arrays if necessary.
+ */
+struct xrt_plane_detections_ext
+{
+	//! How many locations were found.
+	uint32_t location_count;
+
+	//! size of @ref locations and @ref polygon_info_start_index arrays.
+	uint32_t location_size;
+
+	///! array of detected locations.
+	struct xrt_plane_detector_locations_ext *locations;
+
+	//! Parallel array to @ref locations.
+	//! Index into @ref polygon_info of polygon_infos for all planes of a query.
+	uint32_t *polygon_info_start_index;
+
+	//! size of @ref polygon_infos array.
+	uint32_t polygon_info_size;
+
+	//! Continuous array of polygon_infos of all polygons for all planes of a query.
+	struct xrt_plane_polygon_info_ext *polygon_infos;
+
+	//! size of @ref vertices array.
+	uint32_t vertex_size;
+
+	//! Continuous array of polygon vertices of all polygons for all planes of a query.
+	struct xrt_vec2 *vertices;
+};
+
+static inline void
+xrt_clear_plane_detections_ext(struct xrt_plane_detections_ext *detections)
+{
+	free(detections->locations);
+	detections->locations = NULL; // set to NULL so that the next detection won't realloc an invalid pointer
+
+	free(detections->polygon_info_start_index);
+	detections->polygon_info_start_index = NULL;
+
+	free(detections->polygon_infos);
+	detections->polygon_infos = NULL;
+
+	free(detections->vertices);
+	detections->vertices = NULL;
+
+	detections->location_size = 0;
+	detections->polygon_info_size = 0;
+	detections->vertex_size = 0;
+}
 /*!
  * Name of a output with a baked in type.
  *

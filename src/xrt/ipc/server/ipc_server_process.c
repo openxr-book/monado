@@ -285,6 +285,8 @@ init_shm(struct ipc_server *s)
 		isdev->force_feedback_supported = xdev->force_feedback_supported;
 		isdev->form_factor_check_supported = xdev->form_factor_check_supported;
 		isdev->eye_gaze_supported = xdev->eye_gaze_supported;
+		isdev->planes_supported = xdev->planes_supported;
+		isdev->plane_capability_flags = xdev->plane_capability_flags;
 
 		// Is this a HMD?
 		if (xdev->hmd != NULL) {
@@ -445,6 +447,11 @@ ipc_server_handle_client_connected(struct ipc_server *vs, xrt_ipc_handle_t ipc_h
 	ics->server_thread_index = cs_index;
 	ics->io_active = true;
 
+	ics->plane_detection_size = 0;
+	ics->plane_detection_count = 0;
+	ics->plane_detection_ids = NULL;
+	ics->plane_detection_xdev = NULL;
+
 	os_thread_start(&it->thread, ipc_server_client_thread, (void *)ics);
 
 	// Unlock when we are done.
@@ -548,6 +555,7 @@ init_server_state(struct ipc_server *s)
 	s->global_state.active_client_index = -1; // we start off with no active client.
 	s->global_state.last_active_client_index = -1;
 	s->current_slot_index = 0;
+
 
 	for (uint32_t i = 0; i < IPC_MAX_CLIENTS; i++) {
 		volatile struct ipc_client_state *ics = &s->threads[i].ics;
