@@ -48,6 +48,24 @@ ipc_server_main_android(struct ipc_server **ps, void (*startup_complete_callback
 
 #endif
 
+#if defined(XRT_OS_WINDOWS)
+/*!
+ * Main entrypoint to the server process for a MS Windows Service.
+ *
+ * @ingroup ipc_server
+ */
+int
+ipc_server_main_windows_service(void *svc);
+
+/*!
+ * Notify outer object when the ipc_server has started and about to exit.
+ *
+ * @ingroup ipc_server
+ */
+void
+ipc_server_outer_set_server(void *svc, struct ipc_server *s);
+#endif
+
 
 #ifdef __cplusplus
 }

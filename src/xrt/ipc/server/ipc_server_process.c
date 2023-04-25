@@ -44,6 +44,13 @@
 #include <assert.h>
 #include <limits.h>
 
+#if defined(XRT_OS_WINDOWS)
+#include "util/u_windows.h"
+#include <timeapi.h>
+#include <winsvc.h>
+#endif
+
+
 /*
  *
  * Defines and helpers.
@@ -52,7 +59,6 @@
 
 DEBUG_GET_ONCE_BOOL_OPTION(exit_on_disconnect, "IPC_EXIT_ON_DISCONNECT", false)
 DEBUG_GET_ONCE_LOG_OPTION(ipc_log, "IPC_LOG", U_LOGGING_INFO)
-
 
 /*
  *
@@ -962,8 +968,21 @@ ipc_server_handle_client_connected(struct ipc_server *vs, xrt_ipc_handle_t ipc_h
 
 #ifndef XRT_OS_ANDROID
 int
-ipc_server_main(int argc, char **argv)
+ipc_server_main_loop(void *outer)
 {
+#ifdef XRT_OS_WINDOWS
+	SERVICE_TABLE_ENTRYA service_table[] = {{"", win32_service_main}, {0, 0}};
+	if (StartServiceCtrlDispatcherA(service_table)) {
+		return 0;
+	} else {
+		DWORD err = GetLastError();
+		if (err != ERROR_FAILED_SERVICE_CONTROLLER_CONNECT) {
+			U_LOG_E("StartServiceCtrlDispatcherA failed %d %s", err, ipc_winerror(err));
+			return err;
+		}
+	}
+#endif
+
 	// Get log level first.
 	enum u_logging_level log_level = debug_get_log_option_ipc_log();
 
@@ -999,8 +1018,18 @@ ipc_server_main(int argc, char **argv)
 	// Print a very clear service started message.
 	print_linux_end_user_started_information(log_level);
 #endif
+
+	s->outer = outer;
+#ifdef XRT_OS_WINDOWS
+	ipc_server_outer_set_server(outer, s);
+#endif
+
 	// Main loop.
 	ret = main_loop(s);
+
+#ifdef XRT_OS_WINDOWS
+	ipc_server_outer_set_server(outer, 0);
+#endif
 
 	// Stop the UI before tearing everything down.
 	u_debug_gui_stop(&s->debug_gui);
@@ -1014,7 +1043,21 @@ ipc_server_main(int argc, char **argv)
 	return ret;
 }
 
+int
+ipc_server_main(int argc, char **argv)
+{
+	return ipc_server_main_loop(NULL);
+}
+
 #endif // !XRT_OS_ANDROID
+
+#if defined(XRT_OS_WINDOWS)
+int
+ipc_server_main_windows_service(void *outer)
+{
+	return ipc_server_main_loop(outer);
+}
+#endif // XRT_OS_WINDOWS
 
 #ifdef XRT_OS_ANDROID
 int

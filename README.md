@@ -146,6 +146,44 @@ make install
 
 Documentation can be browsed by opening `doc/html/index.html` in the build directory in a web browser.
 
+## Configuring Monado to run as a win32 service on MS Windows
+
+All of the following `sc.exe` commands are required to be run in a command prompt in Administrator mode on windows.
+
+Create a win32 service for the `monado-service.exe` executable:
+```bash
+sc create monado binPath= "full-path-to-monado-service.exe" type= userown DisplayName= "Monado Service"
+```
+The above creates a service template for the windows service control manager to create a per-user service instance
+on the next user logon. Therefore, after the above command the user needs to log out and back on.
+
+To start the service (after logging on), you can use the `services.msc` applet, or the following commands.
+
+First find the instance of the per-user service that that windows service control manager created at logon time.
+It starts with `monado` and is decorated with a _LUID.
+Note that this instance is automatically deleted on user logout and a new instance is created at the next logon so
+the decoration part of the instance name will change each logon.
+
+```bash
+sc query type= userservice state= inactive
+```
+copy the monado instance name decorated with the logon LUID eg. `monado_f9b28`
+then use that name to start the service:
+
+```bash
+sc start monado_f9b28
+```
+
+To delete the service template when no longer needed, use this command:
+```bash
+sc delete monado
+```
+
+The per-user service instance is automatically deleted at user logout.
+
+You can change the config of the service template and/or the current service instance as needed using `sc config`.
+The service template is only used at the next user logon by the windows service control manager to create the new service instance.
+
 ## Getting started using OpenXR with Monado
 
 This implements the [OpenXR][] API,

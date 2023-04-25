@@ -135,5 +135,6 @@ elseif(WIN32)
 	target_sources(
 		ipc_server
 		PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_windows.cpp
+			${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_win32_service_main.cpp
 		)
 endif()
