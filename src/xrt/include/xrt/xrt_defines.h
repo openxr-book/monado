@@ -529,13 +529,16 @@ enum xrt_space_relation_flags
 	XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT =     (1u << 3u),
 	XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT =        (1u << 4u),
 	XRT_SPACE_RELATION_POSITION_TRACKED_BIT =           (1u << 5u),
+	XRT_SPACE_RELATION_SAMPLE_TIME_VALID_BIT =          (1u << 6u),
 	// clang-format on
-	XRT_SPACE_RELATION_BITMASK_ALL = (uint32_t)XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |      //
-	                                 (uint32_t)XRT_SPACE_RELATION_POSITION_VALID_BIT |         //
-	                                 (uint32_t)XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT |  //
-	                                 (uint32_t)XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT | //
-	                                 (uint32_t)XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |    //
-	                                 (uint32_t)XRT_SPACE_RELATION_POSITION_TRACKED_BIT,
+	XRT_SPACE_RELATION_BITMASK_ALL_BUT_SAMPLE_TIME = (uint32_t)XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |      //
+	                                                 (uint32_t)XRT_SPACE_RELATION_POSITION_VALID_BIT |         //
+	                                                 (uint32_t)XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT |  //
+	                                                 (uint32_t)XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT | //
+	                                                 (uint32_t)XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |    //
+	                                                 (uint32_t)XRT_SPACE_RELATION_POSITION_TRACKED_BIT,
+	XRT_SPACE_RELATION_BITMASK_ALL = (uint32_t)XRT_SPACE_RELATION_BITMASK_ALL_BUT_SAMPLE_TIME | //
+	                                 (uint32_t)XRT_SPACE_RELATION_SAMPLE_TIME_VALID_BIT,
 	XRT_SPACE_RELATION_BITMASK_NONE = 0
 };
 
@@ -554,6 +557,8 @@ struct xrt_space_relation
 	struct xrt_pose pose;
 	struct xrt_vec3 linear_velocity;
 	struct xrt_vec3 angular_velocity;
+	// A monotonic timestamp
+	uint64_t sample_time_ns;
 };
 
 /*!
@@ -628,6 +633,8 @@ enum xrt_device_name
 
 	XRT_DEVICE_HAND_INTERACTION,
 
+	XRT_DEVICE_EYE_GAZE_INTERACTION,
+
 	XRT_DEVICE_PSMV,
 	XRT_DEVICE_PSSENSE,
 	XRT_DEVICE_HYDRA,
@@ -652,6 +659,7 @@ enum xrt_device_type
 	XRT_DEVICE_TYPE_ANY_HAND_CONTROLLER,
 	XRT_DEVICE_TYPE_GENERIC_TRACKER,
 	XRT_DEVICE_TYPE_HAND_TRACKER,
+	XRT_DEVICE_TYPE_EYE_TRACKER
 };
 
 /*!
@@ -948,6 +956,8 @@ enum xrt_input_name
 	XRT_INPUT_PSSENSE_THUMBSTICK_TOUCH                = XRT_INPUT_NAME(0x0314, BOOLEAN),
 	XRT_INPUT_PSSENSE_GRIP_POSE                       = XRT_INPUT_NAME(0x0315, POSE),
 	XRT_INPUT_PSSENSE_AIM_POSE                        = XRT_INPUT_NAME(0x0316, POSE),
+
+	XRT_INPUT_EYE_GAZE_POSE                           = XRT_INPUT_NAME(0x0300, POSE),
 	// clang-format on
 };
 

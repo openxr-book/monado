@@ -63,6 +63,7 @@ m_space_relation_from_pose(const struct xrt_pose *pose, struct xrt_space_relatio
 	    *pose,
 	    XRT_VEC3_ZERO,
 	    XRT_VEC3_ZERO,
+	    0
 	};
 
 	*out_relation = relation;
