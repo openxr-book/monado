@@ -554,6 +554,18 @@ compositor_check_and_prepare_xdev(struct comp_compositor *c, struct xrt_device *
 // If any of these lists are updated, please also update the appropriate column
 // in `vulkan-extensions.md`
 
+// clang-format off
+#define COMP_INSTANCE_EXTENSIONS_COMMON                         \
+	VK_EXT_DEBUG_REPORT_EXTENSION_NAME,                     \
+	VK_KHR_EXTERNAL_FENCE_CAPABILITIES_EXTENSION_NAME,      \
+	VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME,     \
+	VK_KHR_EXTERNAL_SEMAPHORE_CAPABILITIES_EXTENSION_NAME,  \
+	VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME, \
+	VK_KHR_SURFACE_EXTENSION_NAME, \
+	"VK_MVK_macos_surface"
+
+// clang-format on
+
 static const char *instance_extensions_common[] = {
     COMP_INSTANCE_EXTENSIONS_COMMON,
 };
@@ -581,6 +593,9 @@ static const char *required_device_extensions[] = {
 #if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
     VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
 
+#elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_XPC)
+    // TODO?
+
 #elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER)
     VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME,
 
@@ -593,6 +608,8 @@ static const char *required_device_extensions[] = {
 
 // Platform version of "external_fence" and "external_semaphore"
 #if defined(XRT_GRAPHICS_SYNC_HANDLE_IS_FD) // Optional
+
+#elif defined(XRT_GRAPHICS_SYNC_HANDLE_IS_XPC) // Optional
 
 #elif defined(XRT_GRAPHICS_SYNC_HANDLE_IS_WIN32_HANDLE)
     VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME,
@@ -611,6 +628,9 @@ static const char *optional_device_extensions[] = {
 #if defined(XRT_GRAPHICS_SYNC_HANDLE_IS_FD)
     VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME, //
     VK_KHR_EXTERNAL_FENCE_FD_EXTENSION_NAME,     //
+
+#elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_XPC)
+    // TODO?
 
 #elif defined(XRT_GRAPHICS_SYNC_HANDLE_IS_WIN32_HANDLE) // Not optional
 
@@ -1113,6 +1133,12 @@ comp_main_create_system_compositor(struct xrt_device *xdev,
 	comp_vulkan_formats_check(get_vk(c), &formats);
 	comp_vulkan_formats_copy_to_info(&formats, info);
 	comp_vulkan_formats_log(c->settings.log_level, &formats);
+
+	// HACK
+	if (info->format_count == 0) {
+		info->formats[0] = VK_FORMAT_R8G8B8A8_UNORM;
+		info->format_count = 1;
+	}
 
 
 	/*
