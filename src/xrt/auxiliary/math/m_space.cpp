@@ -91,6 +91,7 @@ struct flags
 	unsigned int has_angular_velocity : 1;
 	unsigned int has_tracked_orientation : 1;
 	unsigned int has_tracked_position : 1;
+	unsigned int has_sample_time : 1;
 };
 
 flags
@@ -104,6 +105,7 @@ get_flags(const struct xrt_space_relation *r)
 	flags.has_angular_velocity = (r->relation_flags & XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT) != 0;
 	flags.has_tracked_orientation = (r->relation_flags & XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT) != 0;
 	flags.has_tracked_position = (r->relation_flags & XRT_SPACE_RELATION_POSITION_TRACKED_BIT) != 0;
+	flags.has_sample_time = (r->relation_flags & XRT_SPACE_RELATION_SAMPLE_TIME_VALID_BIT) != 0;
 	// clang-format on
 
 	return flags;
@@ -137,6 +139,7 @@ apply_relation(const struct xrt_space_relation *a,
 	struct xrt_pose pose = XRT_POSE_IDENTITY;
 	struct xrt_vec3 linear_velocity = XRT_VEC3_ZERO;
 	struct xrt_vec3 angular_velocity = XRT_VEC3_ZERO;
+	uint64_t sample_time = {};
 
 
 	/*
@@ -216,6 +219,18 @@ apply_relation(const struct xrt_space_relation *a,
 		linear_velocity += tangental_velocity;
 	}
 
+	/*
+	 * Sample time
+	 */
+
+	if (af.has_sample_time && bf.has_sample_time) {
+		// take the "older" time
+		sample_time = MIN(a->sample_time_ns, b->sample_time_ns);
+	} else if (af.has_sample_time) {
+		sample_time = a->sample_time_ns;
+	} else if (bf.has_sample_time) {
+		sample_time = b->sample_time_ns;
+	}
 
 	/*
 	 * Flags.
@@ -255,6 +270,9 @@ apply_relation(const struct xrt_space_relation *a,
 	if (nf.has_angular_velocity) {
 		new_flags |= XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT;
 	}
+	if (af.has_sample_time || bf.has_sample_time) {
+		new_flags |= XRT_SPACE_RELATION_SAMPLE_TIME_VALID_BIT;
+	}
 
 
 	/*
@@ -266,6 +284,7 @@ apply_relation(const struct xrt_space_relation *a,
 	tmp.pose = pose;
 	tmp.linear_velocity = linear_velocity;
 	tmp.angular_velocity = angular_velocity;
+	tmp.sample_time_ns = sample_time;
 
 	*out_relation = tmp;
 }

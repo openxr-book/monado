@@ -230,7 +230,11 @@ oxr_space_locate(
 
 	// Used in a lot of places.
 	XrSpaceVelocity *vel = OXR_GET_OUTPUT_FROM_CHAIN(location->next, XR_TYPE_SPACE_VELOCITY, XrSpaceVelocity);
-
+	XrEyeGazeSampleTimeEXT *gaze_sample_time =
+	    OXR_GET_OUTPUT_FROM_CHAIN(location->next, XR_TYPE_EYE_GAZE_SAMPLE_TIME_EXT, XrEyeGazeSampleTimeEXT);
+	if (gaze_sample_time) {
+		gaze_sample_time->time = 0;
+	}
 
 	/*
 	 * Seek knowledge about the spaces from the space overseer.
@@ -296,6 +300,14 @@ oxr_space_locate(
 
 	OXR_XRT_POSE_TO_XRPOSEF(result.pose, location->pose);
 	location->locationFlags = xrt_to_xr_space_location_flags(result.relation_flags);
+
+	if (gaze_sample_time) {
+		if ((result.relation_flags & XRT_SPACE_RELATION_SAMPLE_TIME_VALID_BIT) != 0) {
+			// Convert monotonic time from a device back
+			gaze_sample_time->time =
+			    time_state_monotonic_to_ts_ns(sys->inst->timekeeping, result.sample_time_ns);
+		}
+	}
 
 	if (vel) {
 		vel->velocityFlags = 0;

@@ -273,6 +273,7 @@ u_pp_xrt_input_name(struct u_pp_delegate dg, enum xrt_input_name name)
 	case XRT_INPUT_ML2_CONTROLLER_GRIP_POSE: DG("XRT_INPUT_ML2_CONTROLLER_GRIP_POSE"); return;
 	case XRT_INPUT_ML2_CONTROLLER_AIM_POSE: DG("XRT_INPUT_ML2_CONTROLLER_AIM_POSE"); return;
 	case XRT_INPUT_ML2_CONTROLLER_SHOULDER_CLICK: DG("XRT_INPUT_ML2_CONTROLLER_SHOULDER_CLICK"); return;
+	case XRT_INPUT_EYE_GAZE_POSE: DG("XRT_INPUT_EYE_GAZE_POSE"); return;
 	default: break;
 	}
 

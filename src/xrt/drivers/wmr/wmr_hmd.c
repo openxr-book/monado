@@ -1016,7 +1016,7 @@ wmr_hmd_get_3dof_tracked_pose(struct xrt_device *xdev,
 	// Variables needed for prediction.
 	uint64_t last_imu_timestamp_ns = 0;
 	struct xrt_space_relation relation = {0};
-	relation.relation_flags = XRT_SPACE_RELATION_BITMASK_ALL;
+	relation.relation_flags = XRT_SPACE_RELATION_BITMASK_ALL_BUT_SAMPLE_TIME;
 	relation.pose.position = wh->pose.position;
 	relation.linear_velocity = (struct xrt_vec3){0, 0, 0};
 
