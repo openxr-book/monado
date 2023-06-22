@@ -12,10 +12,22 @@
 
 #include "os/os_threading.h"
 
-//@todo Testing of whether the OS is posix-compliant or not should be done in xrt_config_os.h
+// Needed for determining which method of launching processes to use
+#include "xrt/xrt_config_os.h"
+
+//@todo Testing of whether the OS is POSIX-compliant or not should be done in xrt_config_os.h
 #if __has_include(<unistd.h>)
+
+// Needed for various functions and variables for launching processes
 #include <unistd.h>
+
+#if __has_include(<spawn.h>)
+// Needed for `posix_spawn` functions
+#include <spawn.h>
 #endif
+
+#endif
+
 
 #include <stdlib.h>
 
@@ -96,38 +108,51 @@ start_autorun_manage_thread(void *ptr)
 	// but with everything explicit, so that functionality can be added, for, e.g
 	//@todo Ability to auto-restart crashed processes in manage_autorun_process()
 
-#if __has_include(<unistd.h>)
+#ifdef XRT_OS_ANDROID
 
-	pid_t pid = fork();
-	if (pid == 0) {
-		// Child process
-		U_LOG_D("Child process launched");
+	// The functions in spawn.h are not implemneted on Android API versions under 28
+	// Furthermore, it is preferred to:
+	//@todo Implement native Android launch using JNI bridge
+	U_LOG_E("Autorunner not yet implemented on Android");
 
-		char *exec = autorun->exec;
-		size_t args_count = autorun->args_count;
-		size_t argv_count = 1 + args_count;
-		char *cmd_argv[argv_count + 1];
-		concat_argv(cmd_argv, exec, autorun->args, args_count);
+#elif __has_include(<spawn.h>)
 
-		size_t command_str_buf_size = space_concat_str_array_buf_req(cmd_argv, argv_count);
-		char command_str[command_str_buf_size];
-		space_concat_str_array(command_str, cmd_argv, argv_count);
+	// Generic launch code for posix-compliant systems with spawn.h
 
-		U_LOG_I("Executing autorun process \"%s\"", command_str);
-		execvp(exec, cmd_argv);
-		os_thread_helper_signal_stop(&autorun->managing_thread);
-		pthread_exit((void *)0);
-	} else if (pid < 0) {
-		// Error
+	// Set up exec, argv arguments
+	char *exec = autorun->exec;
+	size_t args_count = autorun->args_count;
+	size_t argv_count = 1 + args_count;
+	char *cmd_argv[argv_count + 1];
+	concat_argv(cmd_argv, exec, autorun->args, args_count);
+
+	// Logging info
+	size_t command_str_buf_size = space_concat_str_array_buf_req(cmd_argv, argv_count);
+	char command_str[command_str_buf_size];
+	space_concat_str_array(command_str, cmd_argv, argv_count);
+
+	// Return variables
+	pid_t pid = -1;
+	int launch_error = 0;
+
+	// Use posix_spawnp to spawn and execute child process
+	U_LOG_I("Executing autorun process \"%s\"", command_str);
+	launch_error = posix_spawnp(&pid, exec, NULL, NULL, cmd_argv, environ);
+	if (launch_error) {
+		// Error in `posix_spawnp`
 		os_thread_helper_signal_stop(&autorun->managing_thread);
 		pthread_exit((void *)-1);
-	} else {
-		// Parent process
-		manage_autorun_process(pid);
-		os_thread_helper_signal_stop(&autorun->managing_thread);
-		pthread_exit((void *)0);
 	}
+
+	// Parent process code
+	manage_autorun_process(pid);
+
+	// Once managing function exits, close this thread
+	os_thread_helper_signal_stop(&autorun->managing_thread);
+	pthread_exit((void *)0);
+
 #else
+	// Emit error log if autorun management is not implemented for the OS
 	U_LOG_E("Cannot start autorun management thread because this OS is not posix-compliant");
 #endif
 }
