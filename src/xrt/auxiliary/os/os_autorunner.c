@@ -31,11 +31,18 @@
 
 #include <stdlib.h>
 
-static void
-manage_autorun_process(pid_t pid)
+static int
+manage_autorun_process(pid_t pid, int pipe_filedes)
 {
-	// Not implemented yet
-	pthread_exit((void *)0);
+
+#if __has_include(<unistd.h>)
+
+	// Pause this thread, with the pipe open, until further notice
+	pause();
+
+#endif
+
+	return 0;
 }
 
 // Calculate buffer requirements for space_concat_str_array()
@@ -99,6 +106,31 @@ debug_print_argv(char **argv)
 	}
 }
 
+#if __has_include(<spawn.h>) && !defined(XRT_OS_ANDROID)
+
+static void
+autorunner_posix_spawn_error_handle_exit(struct os_thread_helper *managing_thread,
+                                         int pipe_filedes[2],
+                                         posix_spawn_file_actions_t *file_actions)
+{
+	// If appliciple, attempt to destroy posix_spawn file_actions object
+	if (file_actions != NULL) {
+		posix_spawn_file_actions_destroy(file_actions);
+	}
+
+	// If appliciple, close pipes
+	if (pipe_filedes != NULL) {
+		close(pipe_filedes[0]);
+		close(pipe_filedes[1]);
+	}
+
+	// Close management thread
+	os_thread_helper_signal_stop(managing_thread);
+	pthread_exit((void *)-1);
+}
+
+#endif
+
 void *
 start_autorun_manage_thread(void *ptr)
 {
@@ -117,7 +149,7 @@ start_autorun_manage_thread(void *ptr)
 
 #elif __has_include(<spawn.h>)
 
-	// Generic launch code for posix-compliant systems with spawn.h
+	// Launch code for posix-compliant systems with spawn.h
 
 	// Set up exec, argv arguments
 	char *exec = autorun->exec;
@@ -134,22 +166,70 @@ start_autorun_manage_thread(void *ptr)
 	// Return variables
 	pid_t pid = -1;
 	int launch_error = 0;
+	int pipe_filedes[2];
+
+	// Create pipe to use as stdin of child process
+	// This enables us to stop it from stealing the stdin of the parent process,
+	// While also avoiding the bug where `hello_xr` will immediately close
+	// if a normal file (or anything else where `getchar` will return anything) is substituted as stdin instead.
+	// Furthermore, it could be useful for automated interaction with child processes in the future
+	launch_error = pipe(pipe_filedes);
+	if (launch_error) {
+		U_LOG_E("Error in creation of pipe");
+
+		os_thread_helper_signal_stop(&autorun->managing_thread);
+		pthread_exit((void *)-1);
+	}
+
+	// Initialise posix file actions object
+	posix_spawn_file_actions_t file_actions;
+	launch_error = posix_spawn_file_actions_init(&file_actions);
+	if (launch_error) {
+		U_LOG_E("Error in creation of posix file actions object");
+
+		// Clean up and exit thread
+		autorunner_posix_spawn_error_handle_exit(&autorun->managing_thread, pipe_filedes, NULL);
+	}
+
+	// Close unused write end of pipe
+	launch_error = posix_spawn_file_actions_addclose(&file_actions, pipe_filedes[1]);
+	if (launch_error) {
+		U_LOG_E("Error in initialisation of posix file actions object");
+
+		// Clean up and exit thread
+		autorunner_posix_spawn_error_handle_exit(&autorun->managing_thread, pipe_filedes, &file_actions);
+	}
+
+	// Use read end of pipe as stdin
+	launch_error = posix_spawn_file_actions_adddup2(&file_actions, pipe_filedes[0], STDIN_FILENO);
+	if (launch_error) {
+		U_LOG_E("Error in initialisation of posix file actions object");
+
+		// Clean up and exit thread
+		autorunner_posix_spawn_error_handle_exit(&autorun->managing_thread, pipe_filedes, &file_actions);
+	}
 
 	// Use posix_spawnp to spawn and execute child process
 	U_LOG_I("Executing autorun process \"%s\"", command_str);
-	launch_error = posix_spawnp(&pid, exec, NULL, NULL, cmd_argv, environ);
+	launch_error = posix_spawnp(&pid, exec, &file_actions, NULL, cmd_argv, environ);
 	if (launch_error) {
 		// Error in `posix_spawnp`
 		os_thread_helper_signal_stop(&autorun->managing_thread);
 		pthread_exit((void *)-1);
 	}
 
-	// Parent process code
-	manage_autorun_process(pid);
+	// Clean up file_actions object
+	posix_spawn_file_actions_destroy(&file_actions);
+	// Close unused read end of pipe
+	close(pipe_filedes[0]);
 
-	// Once managing function exits, close this thread
+	// Parent process code
+	long long int pm_exit_code = manage_autorun_process(pid, pipe_filedes[1]);
+
+	// Once managing function exits, clean up and exit thread
+	close(pipe_filedes[1]);
 	os_thread_helper_signal_stop(&autorun->managing_thread);
-	pthread_exit((void *)0);
+	pthread_exit((void *)pm_exit_code);
 
 #else
 	// Emit error log if autorun management is not implemented for the OS
