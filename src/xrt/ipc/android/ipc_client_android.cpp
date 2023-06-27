@@ -15,6 +15,7 @@
 #include "util/u_logging.h"
 
 #include "android/android_load_class.hpp"
+#include "android/android_looper.h"
 
 #include "wrap/android.app.h"
 
@@ -24,8 +25,9 @@ using xrt::auxiliary::android::loadClassFromRuntimeApk;
 
 struct ipc_client_android
 {
-	ipc_client_android(jobject act) : activity(act) {}
+	ipc_client_android(struct _JavaVM *vm_, jobject act) : vm(vm_), activity(act) {}
 	~ipc_client_android();
+	struct _JavaVM *vm;
 
 	Activity activity{};
 	Client client{nullptr};
@@ -60,7 +62,7 @@ ipc_client_android_create(struct _JavaVM *vm, void *activity)
 
 		// Teach the wrapper our class before we start to use it.
 		Client::staticInitClass((jclass)clazz.object().getHandle());
-		std::unique_ptr<ipc_client_android> ret = std::make_unique<ipc_client_android>((jobject)activity);
+		std::unique_ptr<ipc_client_android> ret = std::make_unique<ipc_client_android>(vm, (jobject)activity);
 
 		ret->client = Client::construct(ret.get());
 
@@ -76,6 +78,9 @@ int
 ipc_client_android_blocking_connect(struct ipc_client_android *ica)
 {
 	try {
+		// Trick to avoid deadlock on main thread. Only works for NativeActivity with app-glue.
+		JavaVM *vm = ica->vm;
+		android_looper_poll_until_activity_resumed(vm, ica->activity.object().getHandle());
 		int fd = ica->client.blockingConnect(ica->activity, XRT_ANDROID_PACKAGE);
 		return fd;
 	} catch (std::exception const &e) {
@@ -85,11 +90,9 @@ ipc_client_android_blocking_connect(struct ipc_client_android *ica)
 	}
 }
 
-
 void
 ipc_client_android_destroy(struct ipc_client_android **ptr_ica)
 {
-
 	if (ptr_ica == NULL) {
 		return;
 	}

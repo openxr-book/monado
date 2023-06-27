@@ -9,6 +9,9 @@
 #include "xrt/xrt_space.h"
 #include "xrt/xrt_system.h"
 #include "xrt/xrt_config_build.h"
+#ifdef XRT_OS_ANDROID
+#include "xrt/xrt_android.h"
+#endif // XRT_OS_ANDROID
 
 #include "os/os_time.h"
 
@@ -141,6 +144,16 @@ xrt_instance_create(struct xrt_instance_info *ii, struct xrt_instance **out_xins
 	tinst->xp = xp;
 
 	tinst->base.startup_timestamp = os_monotonic_get_ns();
+
+#ifdef XRT_OS_ANDROID
+	if (ii != NULL) {
+		xrt_result_t xret = xrt_instance_android_create(ii, &tinst->base.android_instance);
+		if (xret != XRT_SUCCESS) {
+			free(tinst);
+			return xret;
+		}
+	}
+#endif // XRT_OS_ANDROID
 
 	*out_xinst = &tinst->base;
 

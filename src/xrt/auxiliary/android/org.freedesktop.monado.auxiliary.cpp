@@ -28,5 +28,11 @@ namespace org::freedesktop::monado::auxiliary {
 	      markAsDiscardedByNative(classRef().getMethod("markAsDiscardedByNative", "()V")),
 	      waitGetSurfaceHolder(classRef().getMethod("waitGetSurfaceHolder", "(I)Landroid/view/SurfaceHolder;"))
 	{}
+
+	ActivityLifecycleListener::Meta::Meta(jni::jclass clazz)
+	    : MetaBase(ActivityLifecycleListener::getTypeName(), clazz), init(classRef().getMethod("<init>", "(J)V")),
+	      registerCallback(classRef().getMethod("registerCallback", "(Landroid/app/Activity;)V")),
+	      unregisterCallback(classRef().getMethod("unregisterCallback", "(Landroid/app/Activity;)V"))
+	{}
 } // namespace org::freedesktop::monado::auxiliary
 } // namespace wrap

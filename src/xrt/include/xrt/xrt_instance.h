@@ -11,6 +11,7 @@
 
 #include "xrt/xrt_compiler.h"
 #include "xrt/xrt_defines.h"
+#include "xrt/xrt_android.h"
 
 
 #ifdef __cplusplus
@@ -32,13 +33,33 @@ struct xrt_system_compositor;
 
 #define XRT_MAX_APPLICATION_NAME_SIZE 128
 
+struct xrt_application_info
+{
+	char application_name[XRT_MAX_APPLICATION_NAME_SIZE];
+	bool ext_hand_tracking_enabled;
+};
+
+#if defined(XRT_OS_ANDROID) || defined(XRT_DOXYGEN)
+struct _JavaVM;
+/*!
+ * Android-specific information for an instance.
+ */
+struct xrt_instance_info_android
+{
+	struct _JavaVM *vm;
+	void *context;
+};
+#endif // XRT_OS_ANDROID || XRT_DOXYGEN
+
 /*!
  * Information provided by the application at instance create time.
  */
 struct xrt_instance_info
 {
-	char application_name[XRT_MAX_APPLICATION_NAME_SIZE];
-	bool ext_hand_tracking_enabled;
+	struct xrt_application_info app_info;
+#if defined(XRT_OS_ANDROID) || defined(XRT_DOXYGEN)
+	struct xrt_instance_info_android inst_info_android;
+#endif // XRT_OS_ANDROID || XRT_DOXYGEN
 };
 
 /*!
@@ -63,7 +84,7 @@ struct xrt_instance
 	/*!
 	 * @name Interface Methods
 	 *
-	 * All implementations of the xrt_instance implementation must
+	 * All implementations of the xrt_instance interface must
 	 * populate all these function pointers with their implementation
 	 * methods. To use this interface, see the helper functions.
 	 * @{
@@ -125,6 +146,15 @@ struct xrt_instance
 	struct xrt_instance_info instance_info;
 
 	uint64_t startup_timestamp;
+
+#ifdef XRT_OS_ANDROID
+	/*!
+	 * An extension of the xrt_instance interface used only on Android.
+	 *
+	 * @see xrt_instance_android
+	 */
+	struct xrt_instance_android *android_instance;
+#endif // XRT_OS_ANDROID
 };
 
 /*!

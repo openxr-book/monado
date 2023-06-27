@@ -12,6 +12,9 @@
 
 #include "xrt/xrt_prober.h"
 #include "xrt/xrt_instance.h"
+#ifdef XRT_OS_ANDROID
+#include "xrt/xrt_android.h"
+#endif // XRT_OS_ANDROID
 
 #include "util/u_misc.h"
 #include "util/u_trace_marker.h"
@@ -73,5 +76,8 @@ t_instance_destroy(struct xrt_instance *xinst)
 	struct t_instance *tinst = t_instance(xinst);
 
 	xrt_prober_destroy(&tinst->xp);
+#ifdef XRT_OS_ANDROID
+	xrt_instance_android_destroy(&tinst->base.android_instance);
+#endif // XRT_OS_ANDROID
 	free(tinst);
 }
