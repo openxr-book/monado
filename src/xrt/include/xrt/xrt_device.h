@@ -11,6 +11,7 @@
 #pragma once
 
 #include "xrt/xrt_defines.h"
+#include "xrt/xrt_plane_detector.h"
 #include "xrt/xrt_visibility_mask.h"
 
 
