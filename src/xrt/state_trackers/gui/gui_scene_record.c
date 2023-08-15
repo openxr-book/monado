@@ -64,6 +64,9 @@ struct camera_window
 
 		// Use ELP.
 		bool elp;
+
+		// Use ZED Mini camera
+		bool zed_mini;
 	} use;
 
 	struct
@@ -151,12 +154,14 @@ window_create(struct gui_program *p, const char *camera)
 	cw->use.depthai_stereo = camera == NULL ? false : strcmp(camera, "depthai_stereo") == 0;
 	cw->use.depthai_stereo = camera == NULL ? false : strcmp(camera, "depthai-stereo") == 0;
 	cw->use.elp = camera == NULL ? false : strcmp(camera, "elp") == 0;
+	cw->use.zed_mini = camera == NULL ? false : strcmp(camera, "zed_mini") == 0;
 
 	if (!cw->use.index &&             //
 	    !cw->use.leap_motion &&       //
 	    !cw->use.depthai_monocular && //
 	    !cw->use.depthai_stereo &&    //
-	    !cw->use.elp) {
+	    !cw->use.elp &&
+		!cw->use.zed_mini) {
 		U_LOG_W(
 		    "Can't recongnize camera name '%s', options are 'elp', 'depthai-[monocular|stereo]', index' & "
 		    "'leap_motion'.\n\tFalling back to 'index'.",
@@ -293,6 +298,12 @@ is_camera_leap_motion(const char *product, const char *manufacturer)
 	return strcmp(product, "Leap Motion Controller") == 0 && strcmp(manufacturer, "Leap Motion") == 0;
 }
 
+static bool
+is_camera_zed_mini(const char *product, const char *manufacturer)
+{
+	return strcmp(product, "ZED-M Hid Device") == 0 && strcmp(manufacturer, "STEREOLABS");
+}
+
 static void
 on_video_device(struct xrt_prober *xp,
                 struct xrt_prober_device *pdev,
@@ -320,6 +331,10 @@ on_video_device(struct xrt_prober *xp,
 
 	// Hardcoded for the Leap Motion.
 	if (rw->use.leap_motion && !is_camera_leap_motion(product, manufacturer)) {
+		return;
+	}
+
+	if (rw->use.zed_mini && !is_camera_zed_mini(product, manufacturer)) {
 		return;
 	}
 

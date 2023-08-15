@@ -192,6 +192,27 @@ if(XRT_BUILD_DRIVER_REALSENSE)
 	list(APPEND ENABLED_HEADSET_DRIVERS rs)
 endif()
 
+if (XRT_BUILD_DRIVER_STEREOLABS)
+	add_library(
+		drv_stereolabs STATIC
+		stereolabs/sl_zed_mini.cpp
+		stereolabs/sl_prober.cpp
+		stereolabs/sl_interface.h
+	)
+	target_link_libraries(
+		drv_stereolabs PRIVATE
+		aux_util
+		aux_math
+		${ZED_LIBRARIES}
+	)
+	target_include_directories(
+		drv_stereolabs PRIVATE
+		${ZED_INCLUDE_DIRS}
+		${CUDA_INCLUDE_DIRS}
+	)
+	list(APPEND ENABLED_DRIVERS sl)
+endif()
+
 if(XRT_BUILD_DRIVER_REMOTE)
 	add_library(
 		drv_remote STATIC
