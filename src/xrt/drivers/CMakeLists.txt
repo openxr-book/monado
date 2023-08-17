@@ -201,8 +201,8 @@ if (XRT_BUILD_DRIVER_STEREOLABS)
 	)
 	target_link_libraries(
 		drv_stereolabs PRIVATE
+		xrt-interfaces
 		aux_util
-		aux_math
 		${ZED_LIBRARIES}
 	)
 	target_include_directories(

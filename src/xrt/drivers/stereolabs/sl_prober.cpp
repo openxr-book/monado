@@ -1,10 +1,10 @@
-// Copyright 2020-2021, Collabora, Ltd.
+// Copyright 2023, Joseph Albers
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  Sample prober code.
- * @author Jakob Bornecrantz <jakob@collabora.com>
- * @ingroup drv_sample
+ * @brief Stereolabs prober code.
+ * @author Joseph Albers <joseph.albers@outlook.de>
+ * @ingroup drv_stereolabs
  */
 
 #include "xrt/xrt_prober.h"
@@ -12,8 +12,9 @@
 #include "util/u_misc.h"
 #include "util/u_debug.h"
 
-#include "sample_interface.h"
+#include "sl_interface.h"
 
+#include <stdio.h>
 
 /*!
  * @implements xrt_auto_prober
@@ -34,9 +35,9 @@ sl_auto_prober(struct xrt_auto_prober *p)
 static void
 sl_auto_prober_destroy(struct xrt_auto_prober *p)
 {
-	struct sl_auto_prober *sl_ap = sl_auto_prober(p);
+	struct sl_auto_prober *slap = sl_auto_prober(p);
 
-	free(sl_ap);
+	free(slap);
 }
 
 //! @public @memberof sl_auto_prober
@@ -47,8 +48,8 @@ sl_auto_prober_autoprobe(struct xrt_auto_prober *xap,
                              struct xrt_prober *xp,
                              struct xrt_device **out_xdevs)
 {
-	struct sl_auto_prober *sl_ap = sl_auto_prober(xap);
-	(void)sl_ap;
+	struct sl_auto_prober *slap = sl_auto_prober(xap);
+	(void)slap;
 
 	out_xdevs[0] = sl_zed_mini_create();
 	return 1;

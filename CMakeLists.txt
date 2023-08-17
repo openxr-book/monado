@@ -400,6 +400,7 @@ list(
 	"PSSENSE"
 	"PSVR"
 	"REALSENSE"
+	"STEREOLABS"
 	"REMOTE"
 	"RIFT_S"
 	"SURVIVE"
@@ -548,6 +549,12 @@ message(STATUS "#    WAYLAND_DIRECT:  ${XRT_HAVE_WAYLAND_DIRECT}")
 message(STATUS "#    XCB:             ${XRT_HAVE_XCB}")
 message(STATUS "#    XLIB:            ${XRT_HAVE_XLIB}")
 message(STATUS "#    XRANDR:          ${XRT_HAVE_XRANDR}")
+message(STATUS "#")
+# the real solution is a GUI to change each variable and have a drivers section to select the drivers
+# drivers that have missing dependencies are greyed out (with an actionable thing to install deps)
+# like a monado installer (only support on linux for now)
+message(STATUS "#    docs [BUILD_DOC]:       ${BUILD_DOC}")
+message(STATUS "#    testing [BUILD_TESTING]:   ${BUILD_TESTING}")
 message(STATUS "#")
 message(STATUS "#    MODULE_AUX_VIVE:             ${XRT_MODULE_AUX_VIVE}")
 message(STATUS "#    MODULE_COMPOSITOR:           ${XRT_MODULE_COMPOSITOR}")
