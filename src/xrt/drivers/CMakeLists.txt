@@ -226,6 +226,21 @@ if(XRT_BUILD_DRIVER_REMOTE)
 	list(APPEND ENABLED_HEADSET_DRIVERS remote)
 endif()
 
+if(XRT_BUILD_DRIVER_ROKID)
+	add_library(drv_rokid STATIC rokid/rokid_hmd.c rokid/rokid_interface.h)
+	target_link_libraries(
+		drv_rokid
+		PRIVATE
+			xrt-interfaces
+			aux_util
+			aux_os
+			aux_math
+			${LIBUSB1_LIBRARIES}
+		)
+	target_include_directories(drv_rokid PUBLIC ${LIBUSB1_INCLUDE_DIRS})
+	list(APPEND ENABLED_HEADSET_DRIVERS rokid)
+endif()
+
 if(XRT_BUILD_DRIVER_RIFT_S)
 	add_library(
 		drv_rift_s STATIC
@@ -470,6 +485,7 @@ if(XRT_BUILD_DRIVER_STEAMVR_LIGHTHOUSE)
 		PRIVATE
 			aux_util
 			aux_math
+			aux_vive
 			xrt-interfaces
 			xrt-external-openvr
 			xrt-external-cjson

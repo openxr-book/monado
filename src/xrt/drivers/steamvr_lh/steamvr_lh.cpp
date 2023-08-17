@@ -54,7 +54,7 @@ find_steamvr_install()
 } // namespace
 
 #define CTX_ERR(...) U_LOG_IFL_E(log_level, __VA_ARGS__)
-#define CTX_WARN(...) U_LOG_IFL_E(log_level, __VA_ARGS__)
+#define CTX_WARN(...) U_LOG_IFL_W(log_level, __VA_ARGS__)
 #define CTX_INFO(...) U_LOG_IFL_I(log_level, __VA_ARGS__)
 #define CTX_TRACE(...) U_LOG_IFL_T(log_level, __VA_ARGS__)
 #define CTX_DEBUG(...) U_LOG_IFL_D(log_level, __VA_ARGS__)
@@ -227,6 +227,10 @@ Context::TrackedDeviceAdded(const char *pchDeviceSerialNumber,
 		return setup_controller(pchDeviceSerialNumber, pDriver);
 		break;
 	}
+	case vr::TrackedDeviceClass_TrackingReference: {
+		CTX_INFO("Found lighthouse device: %s", pchDeviceSerialNumber);
+		return false;
+	}
 	default: {
 		CTX_WARN("Attempted to add unsupported device class: %u", eDeviceClass);
 		return false;
@@ -320,7 +324,9 @@ void
 Context::SetDisplayEyeToHead(uint32_t unWhichDevice,
                              const vr::HmdMatrix34_t &eyeToHeadLeft,
                              const vr::HmdMatrix34_t &eyeToHeadRight)
-{}
+{
+	hmd->SetDisplayEyeToHead(unWhichDevice, eyeToHeadLeft, eyeToHeadRight);
+}
 
 void
 Context::SetDisplayProjectionRaw(uint32_t unWhichDevice, const vr::HmdRect2_t &eyeLeft, const vr::HmdRect2_t &eyeRight)
@@ -345,9 +351,17 @@ Context::create_component_common(vr::PropertyContainerHandle_t container,
 	}
 	if (xrt_input *input = device->get_input_from_name(name); input) {
 		CTX_DEBUG("creating component %s", name);
-		vr::VRInputComponentHandle_t handle = handle_to_input.size() + 1;
+		vr::VRInputComponentHandle_t handle = new_handle();
 		handle_to_input[handle] = input;
 		*pHandle = handle;
+	} else if (device != hmd) {
+		auto *controller = static_cast<ControllerDevice *>(device);
+		if (IndexFingerInput *finger = controller->get_finger_from_name(name); finger) {
+			CTX_DEBUG("creating finger component %s", name);
+			vr::VRInputComponentHandle_t handle = new_handle();
+			handle_to_finger[handle] = finger;
+			*pHandle = handle;
+		}
 	}
 	return vr::VRInputError_None;
 }
@@ -398,7 +412,8 @@ Context::CreateScalarComponent(vr::PropertyContainerHandle_t ulContainer,
 	// Lighthouse gives thumbsticks/trackpads as x/y components,
 	// we need to combine them for Monado
 	auto end = name.back();
-	if (end == 'x' || end == 'y') {
+	auto second_last = name.at(name.size() - 2);
+	if (second_last == '/' && (end == 'x' || end == 'y')) {
 		Device *device = prop_container_to_device(ulContainer);
 		if (!device) {
 			return vr::VRInputError_InvalidHandle;
@@ -415,7 +430,7 @@ Context::CreateScalarComponent(vr::PropertyContainerHandle_t ulContainer,
 		Vec2Components *components =
 		    vec2_input_to_components.try_emplace(input, new Vec2Components).first->second.get();
 
-		vr::VRInputComponentHandle_t new_handle = handle_to_input.size() + 1;
+		vr::VRInputComponentHandle_t new_handle = this->new_handle();
 		if (x)
 			components->x = new_handle;
 		else
@@ -431,8 +446,8 @@ Context::CreateScalarComponent(vr::PropertyContainerHandle_t ulContainer,
 vr::EVRInputError
 Context::UpdateScalarComponent(vr::VRInputComponentHandle_t ulComponent, float fNewValue, double fTimeOffset)
 {
-	xrt_input *input = update_component_common(ulComponent, fTimeOffset);
-	if (input) {
+	if (auto h = handle_to_input.find(ulComponent); h != handle_to_input.end() && h->second) {
+		xrt_input *input = update_component_common(ulComponent, fTimeOffset);
 		if (XRT_GET_INPUT_TYPE(input->name) == XRT_INPUT_TYPE_VEC2_MINUS_ONE_TO_ONE) {
 			std::unique_ptr<Vec2Components> &components = vec2_input_to_components.at(input);
 			if (components->x == ulComponent) {
@@ -449,6 +464,21 @@ Context::UpdateScalarComponent(vr::VRInputComponentHandle_t ulComponent, float f
 
 		} else {
 			input->value.vec1.x = fNewValue;
+		}
+	} else {
+		if (ulComponent != vr::k_ulInvalidInputComponentHandle) {
+			if (auto finger_input = handle_to_finger.find(ulComponent);
+			    finger_input != handle_to_finger.end() && finger_input->second) {
+				auto now = std::chrono::steady_clock::now();
+				std::chrono::duration<double, std::chrono::seconds::period> offset_dur(fTimeOffset);
+				std::chrono::duration offset = (now + offset_dur).time_since_epoch();
+				int64_t timestamp =
+				    std::chrono::duration_cast<std::chrono::nanoseconds>(offset).count();
+				finger_input->second->timestamp = timestamp;
+				finger_input->second->value = fNewValue;
+			} else {
+				CTX_WARN("Unmapped component %lu", ulComponent);
+			}
 		}
 	}
 	return vr::VRInputError_None;
@@ -473,7 +503,7 @@ Context::CreateHapticComponent(vr::PropertyContainerHandle_t ulContainer,
 	}
 
 	auto *device = static_cast<ControllerDevice *>(d);
-	vr::VRInputComponentHandle_t handle = handle_to_input.size() + 1;
+	vr::VRInputComponentHandle_t handle = new_handle();
 	handle_to_input[handle] = nullptr;
 	device->set_haptic_handle(handle);
 	*pHandle = handle;
