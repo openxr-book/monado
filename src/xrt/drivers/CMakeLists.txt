@@ -110,6 +110,17 @@ if(XRT_BUILD_DRIVER_NS)
 	list(APPEND ENABLED_HEADSET_DRIVERS ns)
 endif()
 
+if(XRT_BUILD_DRIVER_GATS)
+	add_library(
+		drv_gats STATIC
+		ghost_and_the_shell/gats_hmd.h
+		ghost_and_the_shell/gats_hmd.c
+		ghost_and_the_shell/gats_interface.h
+		)
+	target_link_libraries(drv_gats PRIVATE xrt-interfaces aux_math xrt-external-cjson)
+	list(APPEND ENABLED_HEADSET_DRIVERS gats)
+endif()
+
 if(XRT_BUILD_DRIVER_ULV2)
 	add_library(drv_ulv2 STATIC ultraleap_v2/ulv2_driver.cpp ultraleap_v2/ulv2_interface.h)
 	target_link_libraries(drv_ulv2 PRIVATE xrt-interfaces aux_util aux_math LeapV2::LeapV2)

@@ -128,6 +128,10 @@ xrt_builder_create_func_t target_builder_list[] = {
     t_builder_north_star_create,
 #endif // T_BUILDER_NS
 
+#ifdef T_BUILDER_GATS
+    t_builder_ghost_and_the_shell_create,
+#endif // T_BUILDER_GATS
+
 #ifdef T_BUILDER_WMR
     t_builder_wmr_create,
 #endif // T_BUILDER_WMR

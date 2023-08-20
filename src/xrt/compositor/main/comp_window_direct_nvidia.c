@@ -371,6 +371,7 @@ _test_for_nvidia(struct comp_compositor *c, struct vk_bundle *vk)
 static bool
 check_vulkan_caps(struct comp_compositor *c, bool *out_detected)
 {
+	printf("ROFL\n");
 	VkResult ret;
 
 	*out_detected = false;
@@ -434,6 +435,7 @@ check_vulkan_caps(struct comp_compositor *c, bool *out_detected)
 static bool
 detect(const struct comp_target_factory *ctf, struct comp_compositor *c)
 {
+	printf("trying to detect nvidia direct display\n");
 	bool detected = false;
 
 	if (!check_vulkan_caps(c, &detected)) {
