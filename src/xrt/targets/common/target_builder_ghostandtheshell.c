@@ -201,7 +201,6 @@ gats_estimate_system(struct xrt_builder *xb, cJSON *config, struct xrt_prober *x
 	size_t xpdev_count = 0;
 	xrt_result_t xret = XRT_SUCCESS;
 
-	printf("before locking prober list\n");
 	// Lock the device list
 	xret = xrt_prober_lock_list(xp, &xpdevs, &xpdev_count);
 	if (xret != XRT_SUCCESS) {
@@ -213,14 +212,11 @@ gats_estimate_system(struct xrt_builder *xb, cJSON *config, struct xrt_prober *x
 
 	bool hand_tracking = false;
 
-	printf("before ULV2\n");
-
 #ifdef XRT_BUILD_DRIVER_ULV2
 	hand_tracking =
 	    hand_tracking || u_builder_find_prober_device(xpdevs, xpdev_count, ULV2_VID, ULV2_PID, XRT_BUS_TYPE_USB);
 #endif
 
-	printf("before REALSENSE\n");
 #ifdef XRT_BUILD_DRIVER_REALSENSE
 	estimate->certain.dof6 =
 	    estimate->certain.dof6 || u_builder_find_prober_device(xpdevs, xpdev_count, REALSENSE_MOVIDIUS_VID,
@@ -230,7 +226,6 @@ gats_estimate_system(struct xrt_builder *xb, cJSON *config, struct xrt_prober *x
 	                                                           REALSENSE_TM2_VID, REALSENSE_TM2_PID, //
 	                                                           XRT_BUS_TYPE_USB);
 #endif
-	printf("after REALSENSE\n");
 
 	estimate->certain.left = estimate->certain.right = estimate->maybe.left = estimate->maybe.right = hand_tracking;
 

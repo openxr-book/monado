@@ -128,6 +128,7 @@ cli_cmd_test(int argc, const char **argv)
 	printf(" :: All ok, shutting down.\n");
 
 	xrt_space_overseer_destroy(&xso);
+	// segfaults for ghost and the shell system
 	xrt_system_devices_destroy(&xsysd);
 
 	// Finally done

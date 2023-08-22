@@ -32,6 +32,62 @@ DEBUG_GET_ONCE_LOG_OPTION(gats_log, "GATS_LOG", U_LOGGING_INFO)
 
 /*
  *
+ * Common functions
+ *
+ */
+
+static void
+gats_hmd_destroy(struct xrt_device *xdev)
+{
+	struct gats_hmd *gats = gats_hmd(xdev);
+	u_device_free(&gats->base);
+}
+
+static void
+gats_hmd_update_inputs(struct xrt_device *xdev)
+{
+	struct gats_hmd *gats = gats_hmd(xdev);
+}
+
+static void
+gats_hmd_get_tracked_pose(struct xrt_device *xdev,
+						enum xrt_input_name name,
+                        uint64_t at_timestamp_ns,
+                        struct xrt_space_relation *out_relation)
+{
+	struct gats_hmd *gats = gats_hmd(xdev);
+
+	if (name != XRT_INPUT_GENERIC_HEAD_POSE) {
+		GATS_ERROR(gats, "unknown input name");
+		return;
+	}
+
+	*out_relation = gats->tracker_relation; // you can change this using the debug gui
+}
+
+static void
+gats_hmd_get_view_poses(struct xrt_device *xdev,
+                      const struct xrt_vec3 *default_eye_relation,
+                      uint64_t at_timestamp_ns,
+                      uint32_t view_count,
+                      struct xrt_space_relation *out_head_relation,
+                      struct xrt_fov *out_fovs,
+                      struct xrt_pose *out_poses)
+{
+	struct gats_hmd *gats = gats_hmd(xdev);
+
+	// // Use this to take care of most stuff, then fix up below.
+	// u_device_get_view_poses(xdev, default_eye_relation, at_timestamp_ns, view_count, out_head_relation, out_fovs,
+	//                         out_poses);
+
+	// // Fix fix.
+	// for (uint32_t i = 0; i < view_count && i < ARRAY_SIZE(gats->config.head_pose_to_eye); i++) {
+	// 	out_poses[i] = ns->config.head_pose_to_eye[i];
+	// }
+}
+
+/*
+ *
  * Create function.
  *
  */
@@ -43,79 +99,41 @@ gats_hmd_create(const cJSON *config_json)
 	    (enum u_device_alloc_flags)(U_DEVICE_ALLOC_HMD | U_DEVICE_ALLOC_TRACKING_NONE);
 	struct gats_hmd *gats = U_DEVICE_ALLOCATE(struct gats_hmd, flags, 1, 0);
 
+	size_t idx = 0;
+	gats->base.hmd->blend_modes[idx++] = XRT_BLEND_MODE_OPAQUE;
+	gats->base.hmd->blend_mode_count = idx;
+
+	gats->base.update_inputs = gats_hmd_update_inputs;
+	gats->base.get_tracked_pose = gats_hmd_get_tracked_pose;
+	gats->base.get_view_poses = gats_hmd_get_view_poses;
+	gats->base.destroy = gats_hmd_destroy;
+
 	gats->config_json = config_json;
-
-	gats->log_level = debug_get_log_option_gats_log();
-	GATS_DEBUG(gats, "Called!");
-
-	//gats->base.compute_distortion = ns_mesh_calc;
-/*
-	ns->base.update_inputs = ns_hmd_update_inputs;
-	ns->base.get_tracked_pose = ns_hmd_get_tracked_pose;
-	ns->base.get_view_poses = ns_hmd_get_view_poses;
-	ns->base.destroy = ns_hmd_destroy;
-	ns->base.name = XRT_DEVICE_GENERIC_HMD;
-	math_pose_identity(&ns->no_tracker_relation.pose);
-	ns->no_tracker_relation.relation_flags = (enum xrt_space_relation_flags)(
+	gats->tracker_relation.pose = (struct xrt_pose)XRT_POSE_IDENTITY;
+	gats->tracker_relation.relation_flags = (enum xrt_space_relation_flags)(
 	    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_POSITION_VALID_BIT |
-	    XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
-	// Appeases the inner workings of Monado for when there's no head tracker and we're giving a fake pose through
-	// the debug gui
-	ns->base.orientation_tracking_supported = true;
-	ns->base.position_tracking_supported = true;
-	ns->base.device_type = XRT_DEVICE_TYPE_HMD;
+	    XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT);
+	gats->log_level = debug_get_log_option_gats_log();
 
+	snprintf(gats->base.str, XRT_DEVICE_NAME_LEN, "Ghost and the Shell");
+	snprintf(gats->base.serial, XRT_DEVICE_NAME_LEN, "Ghost and the Shell");
 
-	// Print name.
-	snprintf(ns->base.str, XRT_DEVICE_NAME_LEN, "North Star");
-	snprintf(ns->base.serial, XRT_DEVICE_NAME_LEN, "North Star");
-	// Setup input.
-	ns->base.inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;
+	gats->base.name = XRT_DEVICE_GENERIC_HMD;
+	gats->base.device_type = XRT_DEVICE_TYPE_HMD;
+	gats->base.inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;
+	gats->base.orientation_tracking_supported = true;
+	gats->base.position_tracking_supported = false;
+
+	gats->base.hmd->screens[0].nominal_frame_interval_ns = time_s_to_ns(1.0f / 60.0f);
 
 	struct u_extents_2d exts;
+	// in the mode the screens are operated, each display only does 60Hz @ 1920x1920 => total view = 3840x1920
+	exts.w_pixels = 1920 * 2;
+	exts.h_pixels = 1920;
 
-	// info.w_meters = 0.0588f * 2.0f;
-	// info.h_meters = 0.0655f;
+	u_extents_2d_split_side_by_side(&gats->base, &exts);
+	// no distortion for now
+	u_distortion_mesh_set_none(&gats->base);
 
-	// one NS screen is 1440px wide, but there are two of them.
-	exts.w_pixels = 1440 * 2;
-	// Both NS screens are 1600px tall
-	exts.h_pixels = 1600;
-
-	u_extents_2d_split_side_by_side(&ns->base, &exts);
-
-	// Setup variable tracker.
-	u_var_add_root(ns, "North Star", true);
-	u_var_add_pose(ns, &ns->no_tracker_relation.pose, "pose");
-	ns->base.orientation_tracking_supported = true;
-	ns->base.device_type = XRT_DEVICE_TYPE_HMD;
-
-	size_t idx = 0;
-	// Preferred; almost all North Stars (as of early 2021) are see-through.
-	ns->base.hmd->blend_modes[idx++] = XRT_BLEND_MODE_ADDITIVE;
-
-	// XRT_BLEND_MODE_OPAQUE is not preferred and kind of a lie, but you can totally use North Star for VR apps,
-	// despite its see-through display. And there's nothing stopping you from covering up the outside of the
-	// reflector, turning it into an opaque headset. As most VR apps I've encountered require BLEND_MODE_OPAQUE to
-	// be an option, we need to support it.
-	ns->base.hmd->blend_modes[idx++] = XRT_BLEND_MODE_OPAQUE;
-
-	// Not supporting ALPHA_BLEND for now, because I know nothing about it, have no reason to use it, and want to
-	// avoid unintended consequences. As soon as you have a specific reason to support it, go ahead and support it.
-	ns->base.hmd->blend_mode_count = idx;
-
-	uint64_t start;
-	uint64_t end;
-
-	start = os_monotonic_get_ns();
-	u_distortion_mesh_fill_in_compute(&ns->base);
-	end = os_monotonic_get_ns();
-
-	float diff = (end - start);
-	diff /= U_TIME_1MS_IN_NS;
-
-	NS_DEBUG(ns, "Filling mesh took %f ms", diff);
-
-*/
 	return &gats->base;
 }

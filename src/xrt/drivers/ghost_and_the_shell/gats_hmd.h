@@ -25,11 +25,28 @@ extern "C" {
 struct gats_hmd
 {
 	struct xrt_device base;
-	struct xrt_space_relation no_tracker_relation;
+	struct xrt_space_relation tracker_relation;
 	const cJSON *config_json;
 
 	enum u_logging_level log_level;
 };
+
+/*
+ *
+ * Functions
+ *
+ */
+
+/*!
+ * Get the Ghost and the Shell information from a @ref xrt_device.
+ *
+ * @ingroup drv_gats
+ */
+static inline struct gats_hmd *
+gats_hmd(struct xrt_device *xdev)
+{
+	return (struct gats_hmd *)xdev;
+}
 
 #ifdef __cplusplus
 }

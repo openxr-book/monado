@@ -238,7 +238,7 @@ rs_create_tracked_device_internal_slam()
 
 	int ddev_idx = find_capable_device(RS_TRACKING_DEVICE_SLAM, rsc.device_list);
 	if (ddev_idx < 0)
-		ERROR("No T265/T261 connected!");
+		ERROR("No T26x connected or the wrong version of librealsense is installed. T26x is only supported up to version librealsense 2.50.0");
 
 
 	rs_container_cleanup(&rsc); // We got ddev_idx and hdev_idx, release realsense resources
