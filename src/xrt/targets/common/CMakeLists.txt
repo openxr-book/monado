@@ -48,9 +48,9 @@ if(XRT_BUILD_DRIVER_NS)
 	target_link_libraries(target_lists PRIVATE drv_ns)
 endif()
 
-if(XRT_BUILD_DRIVER_GATS)
-	target_sources(target_lists PRIVATE target_builder_ghostandtheshell.c)
-	target_link_libraries(target_lists PRIVATE drv_gats)
+if(XRT_BUILD_DRIVER_DAEMON)
+	target_sources(target_lists PRIVATE target_builder_daemon.c)
+	target_link_libraries(target_lists PRIVATE drv_daemon)
 endif()
 
 if(XRT_BUILD_DRIVER_WMR)

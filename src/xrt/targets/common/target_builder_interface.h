@@ -27,8 +27,8 @@
 #define T_BUILDER_NS
 #endif
 
-#if defined(XRT_BUILD_DRIVER_GATS) || defined(XRT_DOXYGEN)
-#define T_BUILDER_GATS
+#if defined(XRT_BUILD_DRIVER_DAEMON) || defined(XRT_DOXYGEN)
+#define T_BUILDER_DAEMON
 #endif
 
 #if defined(XRT_BUILD_DRIVER_REMOTE) || defined(XRT_DOXYGEN)
@@ -86,12 +86,12 @@ struct xrt_builder *
 t_builder_north_star_create(void);
 #endif
 
-#ifdef T_BUILDER_GATS
+#ifdef T_BUILDER_DAEMON
 /*!
- * Builder for Ghost and the Shell headsets
+ * Builder for daemon headsets
  */
 struct xrt_builder *
-t_builder_ghost_and_the_shell_create(void);
+t_builder_daemon_create(void);
 #endif
 
 #ifdef T_BUILDER_QWERTY

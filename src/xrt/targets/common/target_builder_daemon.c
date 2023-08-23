@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  System builder for Ghost in the Shell headsets
+ * @brief  System builder for daemon headsets
  * @author Joseph Albers <joseph.albers@outlook.de>
  * @ingroup xrt_iface
  */
@@ -29,7 +29,7 @@
 
 #include "target_builder_interface.h"
 
-#include "ghost_and_the_shell/gats_interface.h"
+#include "daemon/daemon_interface.h"
 
 #ifdef XRT_BUILD_DRIVER_ULV2
 #include "ultraleap_v2/ulv2_interface.h"
@@ -48,20 +48,20 @@
 #include <assert.h>
 #include "math/m_mathinclude.h"
 
-DEBUG_GET_ONCE_OPTION(gats_config_path, "GATS_CONFIG_PATH", NULL)
-DEBUG_GET_ONCE_LOG_OPTION(gats_log, "GATS_LOG", U_LOGGING_WARN)
+DEBUG_GET_ONCE_OPTION(daemon_config_path, "DAEMON_CONFIG_PATH", NULL)
+DEBUG_GET_ONCE_LOG_OPTION(daemon_log, "DAEMON_LOG", U_LOGGING_WARN)
 
-#define GATS_TRACE(...) U_LOG_IFL_T(debug_get_log_option_gats_log(), __VA_ARGS__)
-#define GATS_DEBUG(...) U_LOG_IFL_D(debug_get_log_option_gats_log(), __VA_ARGS__)
-#define GATS_INFO(...) U_LOG_IFL_I(debug_get_log_option_gats_log(), __VA_ARGS__)
-#define GATS_WARN(...) U_LOG_IFL_W(debug_get_log_option_gats_log(), __VA_ARGS__)
-#define GATS_ERROR(...) U_LOG_IFL_E(debug_get_log_option_gats_log(), __VA_ARGS__)
+#define DAEMON_TRACE(...) U_LOG_IFL_T(debug_get_log_option_daemon_log(), __VA_ARGS__)
+#define DAEMON_DEBUG(...) U_LOG_IFL_D(debug_get_log_option_daemon_log(), __VA_ARGS__)
+#define DAEMON_INFO(...) U_LOG_IFL_I(debug_get_log_option_daemon_log(), __VA_ARGS__)
+#define DAEMON_WARN(...) U_LOG_IFL_W(debug_get_log_option_daemon_log(), __VA_ARGS__)
+#define DAEMON_ERROR(...) U_LOG_IFL_E(debug_get_log_option_daemon_log(), __VA_ARGS__)
 
 static const char *driver_list[] = {
-    "ghost_and_the_shell",
+    "daemon",
 };
 
-struct gats_ultraleap_device
+struct daemon_ultraleap_device
 {
 	bool active;
 
@@ -71,30 +71,30 @@ struct gats_ultraleap_device
 	struct xrt_pose P_trackingcenter_to_middleofeyes_oxr;
 };
 
-struct gats_t265
+struct daemon_t265
 {
 	bool active;
 	struct xrt_pose P_middleofeyes_to_trackingcenter_oxr;
 };
 
-struct gats_builder
+struct daemon_builder
 {
 	struct xrt_builder base;
 
 	const char *config_path;
 	cJSON *config_json;
 
-	struct gats_ultraleap_device ultraleap_device;
-	struct gats_t265 t265;
+	struct daemon_ultraleap_device ultraleap_device;
+	struct daemon_t265 t265;
 };
 
 static bool
-gats_config_load(struct gats_builder *gb)
+daemon_config_load(struct daemon_builder *db)
 {
-	const char *file_content = u_file_read_content_from_path(gb->config_path);
+	const char *file_content = u_file_read_content_from_path(db->config_path);
 	if (file_content == NULL) {
 		U_LOG_E("The file at \"%s\" was unable to load. Either there wasn't a file there or it was empty.",
-		        gb->config_path);
+		        db->config_path);
 		return false;
 	}
 
@@ -103,97 +103,27 @@ gats_config_load(struct gats_builder *gb)
 
 	if (config_json == NULL) {
 		const char *error_ptr = cJSON_GetErrorPtr();
-		U_LOG_E("The JSON file at path \"%s\" was unable to parse", gb->config_path);
+		U_LOG_E("The JSON file at path \"%s\" was unable to parse", db->config_path);
 		if (error_ptr != NULL) {
 			U_LOG_E("because of an error before %s", error_ptr);
 		}
 		free((void *)file_content);
 		return false;
 	}
-	gb->config_json = config_json;
+	db->config_json = config_json;
 	free((void *)file_content);
 	return true;
 }
 
-/*
-static void
-gats_tracking_config_parse_ultraleap(struct gats_builder *gb, bool *out_config_valid)
-{
-	*out_config_valid = true;
-	const cJSON *root = u_json_get(gb->config_json, "leapTracker");
-	if (root == NULL) {
-		// not invalid, but doesn't exist. active is not set and won't be used
-		return;
-	}
-
-	struct xrt_pose P_middleofeyes_to_trackingcenter_oxr;
-
-	struct xrt_pose localpose_unity = XRT_POSE_IDENTITY;
-
-	if (u_json_get_pose_permissive(u_json_get(root, "localPose"), &localpose_unity)) {
-		GATS_INFO(
-		    "Found key `localPose` in your Ultraleap tracker config. Converting this from Unity's coordinate "
-		    "space to OpenXR's coordinate space.");
-		GATS_INFO(
-		    "If you just want to specify the offset in OpenXR coordinates, use key "
-		    "`P_middleofeyes_to_trackingcenter` instead.");
-
-
-		// This is the conversion from Unity to OpenXR coordinates.
-		// Unity: X+ Right; Y+ Up; Z+ Forward
-		// OpenXR: X+ Right; Y+ Up; Z- Forward
-		// Check tests_quat_change_of_basis to understand the quaternion element negations.
-		P_middleofeyes_to_trackingcenter_oxr.position.x = localpose_unity.position.x;
-		P_middleofeyes_to_trackingcenter_oxr.position.y = localpose_unity.position.y;
-		P_middleofeyes_to_trackingcenter_oxr.position.z = -localpose_unity.position.z;
-
-
-		P_middleofeyes_to_trackingcenter_oxr.orientation.x = localpose_unity.orientation.x;
-		P_middleofeyes_to_trackingcenter_oxr.orientation.y = localpose_unity.orientation.y;
-		P_middleofeyes_to_trackingcenter_oxr.orientation.z = -localpose_unity.orientation.z;
-		P_middleofeyes_to_trackingcenter_oxr.orientation.w = -localpose_unity.orientation.w;
-
-		*out_config_valid = *out_config_valid && true;
-	} else {
-		*out_config_valid = *out_config_valid && //
-		                    u_json_get_pose(u_json_get(root, "P_middleofeyes_to_trackingcenter_oxr"),
-		                                    &P_middleofeyes_to_trackingcenter_oxr);
-	}
-
-	math_pose_invert(&P_middleofeyes_to_trackingcenter_oxr,
-	                 &gb->ultraleap_device.P_trackingcenter_to_middleofeyes_oxr);
-	gb->ultraleap_device.active = true;
-}
-
-static void
-gats_tracking_config_parse_t265(struct gats_builder *gb, bool *out_config_valid)
-{
-	*out_config_valid = true;
-	const cJSON *root = u_json_get(gb->config_json, "t265");
-
-	if (root == NULL) {
-		// not invalid, but doesn't exist. active is not set and won't be used
-		return;
-	}
-
-	*out_config_valid = *out_config_valid && //
-	                    u_json_get_bool(u_json_get(root, "active"), &gb->t265.active);
-
-	*out_config_valid = *out_config_valid && //
-	                    u_json_get_pose(u_json_get(root, "P_middleofeyes_to_trackingcenter_oxr"),
-	                                    &gb->t265.P_middleofeyes_to_trackingcenter_oxr);
-}
-*/
-
 static xrt_result_t
-gats_estimate_system(struct xrt_builder *xb, cJSON *config, struct xrt_prober *xp, struct xrt_builder_estimate *estimate)
+daemon_estimate_system(struct xrt_builder *xb, cJSON *config, struct xrt_prober *xp, struct xrt_builder_estimate *estimate)
 {
-	struct gats_builder *gb = (struct gats_builder *)xb;
+	struct daemon_builder *db = (struct daemon_builder *)xb;
 	U_ZERO(estimate);
 /*
-	gb->config_path = debug_get_option_gats_config_path();
+	db->config_path = debug_get_option_daemon_config_path();
 
-	if (gb->config_path == NULL) {
+	if (db->config_path == NULL) {
 		return XRT_SUCCESS;
 	}
 */
@@ -238,45 +168,45 @@ gats_estimate_system(struct xrt_builder *xb, cJSON *config, struct xrt_prober *x
 }
 
 static xrt_result_t
-gats_open_system(struct xrt_builder *xb,
+daemon_open_system(struct xrt_builder *xb,
                cJSON *config,
                struct xrt_prober *xp,
                struct xrt_system_devices **out_xsysd,
                struct xrt_space_overseer **out_xso)
 {
-	struct gats_builder *gb = (struct gats_builder *)xb;
+	struct daemon_builder *db = (struct daemon_builder *)xb;
 
 	struct u_system_devices *usysd = u_system_devices_allocate();
 	xrt_result_t result = XRT_SUCCESS;
 
 	if (out_xsysd == NULL || *out_xsysd != NULL) {
-		GATS_ERROR("Invalid output system pointer");
+		DAEMON_ERROR("Invalid output system pointer");
 		result = XRT_ERROR_DEVICE_CREATION_FAILED;
 		goto end;
 	}
 /*
-	bool load_success = gats_config_load(gb);
+	bool load_success = daemon_config_load(db);
 	if (!load_success) {
 		result = XRT_ERROR_DEVICE_CREATION_FAILED;
 		goto end;
 	}
 */
-	struct xrt_device *gb_hmd = gats_hmd_create(gb->config_json);
-	if (gb_hmd == NULL) {
+	struct xrt_device *db_hmd = daemon_hmd_create(db->config_json);
+	if (db_hmd == NULL) {
 		result = XRT_ERROR_DEVICE_CREATION_FAILED;
 		goto end;
 	}
 
 /*
 	bool config_valid = true;
-	gats_tracking_config_parse_ultraleap(gb, &config_valid);
+	daemon_tracking_config_parse_ultraleap(db, &config_valid);
 	if (!config_valid) {
-		GATS_ERROR("Leap device config was invalid!");
+		DAEMON_ERROR("Leap device config was invalid!");
 	}
 
-	gats_tracking_config_parse_t265(gb, &config_valid);
+	daemon_tracking_config_parse_t265(db, &config_valid);
 	if (!config_valid) {
-		GATS_ERROR("T265 device config was invalid!");
+		DAEMON_ERROR("T265 device config was invalid!");
 	}
 */
 
@@ -295,28 +225,28 @@ gats_open_system(struct xrt_builder *xb,
 	// For now we use t265 for head + ultraleap for hand.
 #ifdef XRT_BUILD_DRIVER_REALSENSE
 	slam_device = rs_create_tracked_device_internal_slam();
-	head_offset = gb->t265.P_middleofeyes_to_trackingcenter_oxr;
+	head_offset = db->t265.P_middleofeyes_to_trackingcenter_oxr;
 	// got_head_tracker = true;
 #else
-	GATS_ERROR(
+	DAEMON_ERROR(
 		"Realsense head tracker specified in config but Realsense support was not compiled in!");
 #endif
 
 #ifdef XRT_BUILD_DRIVER_ULV2
 	ulv2_create_device(&hand_device);
-	hand_offset = gb->ultraleap_device.P_trackingcenter_to_middleofeyes_oxr;
+	hand_offset = db->ultraleap_device.P_trackingcenter_to_middleofeyes_oxr;
 	hand_parented_to_head_tracker = false;
 #else
-	GATS_ERROR(
+	DAEMON_ERROR(
 		"Ultraleap hand tracker specified in config but Ultraleap support was not compiled in!");
 #endif
 
 	struct xrt_device *head_wrap = NULL;
 
-    // wrap the tracked pose function of ghost and the shell driver into the t265 tracked pose function
+    // wrap the tracked pose function of daemon driver into the t265 tracked pose function
 	if (slam_device != NULL) {
 		usysd->base.xdevs[usysd->base.xdev_count++] = slam_device;
-		head_wrap = multi_create_tracking_override(XRT_TRACKING_OVERRIDE_DIRECT, gb_hmd, slam_device,
+		head_wrap = multi_create_tracking_override(XRT_TRACKING_OVERRIDE_DIRECT, db_hmd, slam_device,
 		                                           XRT_INPUT_GENERIC_TRACKER_POSE, &head_offset);
         
         usysd->base.xdevs[usysd->base.xdev_count++] = head_wrap;
@@ -354,15 +284,15 @@ end:
 	} else {
 		u_system_devices_destroy(&usysd);
 	}
-	if (gb->config_json != NULL) {
-		cJSON_Delete(gb->config_json);
+	if (db->config_json != NULL) {
+		cJSON_Delete(db->config_json);
 	}
 
 	return result;
 }
 
 static void
-gats_destroy(struct xrt_builder *xb)
+daemon_destroy(struct xrt_builder *xb)
 {
 	free(xb);
 }
@@ -374,16 +304,16 @@ gats_destroy(struct xrt_builder *xb)
  */
 
 struct xrt_builder *
-t_builder_ghost_and_the_shell_create(void)
+t_builder_daemon_create(void)
 {
-    struct gats_builder *gb = U_TYPED_CALLOC(struct gats_builder);
-	gb->base.estimate_system = gats_estimate_system;
-	gb->base.open_system = gats_open_system;
-	gb->base.destroy = gats_destroy;
-	gb->base.identifier = "ghost_and_the_shell";
-	gb->base.name = "Ghost and the Shell";
-	gb->base.driver_identifiers = driver_list;
-	gb->base.driver_identifier_count = ARRAY_SIZE(driver_list);
+    struct daemon_builder *db = U_TYPED_CALLOC(struct daemon_builder);
+	db->base.estimate_system = daemon_estimate_system;
+	db->base.open_system = daemon_open_system;
+	db->base.destroy = daemon_destroy;
+	db->base.identifier = "daemon";
+	db->base.name = "daemon";
+	db->base.driver_identifiers = driver_list;
+	db->base.driver_identifier_count = ARRAY_SIZE(driver_list);
 
-	return &gb->base;
+	return &db->base;
 }

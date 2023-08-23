@@ -1,3 +1,12 @@
+// Copyright 2023, Joseph Albers.
+// SPDX-License-Identifier: BSL-1.0
+/*!
+ * @file
+ * @brief daemon HMD code.
+ * @author Joseph Albers <joseph.albers@outlook.de>
+ * @ingroup drv_daemon
+ */
+
 #pragma once
 
 #include "math/m_api.h"
@@ -16,13 +25,13 @@ extern "C" {
 #endif
 
 /*!
- * Information about the whole North Star headset.
+ * Information about the whole daemon headset.
  *
- * @ingroup drv_ns
+ * @ingroup drv_daemon
  * @implements xrt_device
  */
 
-struct gats_hmd
+struct daemon_hmd
 {
 	struct xrt_device base;
 	struct xrt_space_relation tracker_relation;
@@ -38,14 +47,14 @@ struct gats_hmd
  */
 
 /*!
- * Get the Ghost and the Shell information from a @ref xrt_device.
+ * Get the dameon headset information from a @ref xrt_device.
  *
- * @ingroup drv_gats
+ * @ingroup drv_daemon
  */
-static inline struct gats_hmd *
-gats_hmd(struct xrt_device *xdev)
+static inline struct daemon_hmd *
+daemon_hmd(struct xrt_device *xdev)
 {
-	return (struct gats_hmd *)xdev;
+	return (struct daemon_hmd *)xdev;
 }
 
 #ifdef __cplusplus

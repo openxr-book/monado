@@ -110,15 +110,15 @@ if(XRT_BUILD_DRIVER_NS)
 	list(APPEND ENABLED_HEADSET_DRIVERS ns)
 endif()
 
-if(XRT_BUILD_DRIVER_GATS)
+if(XRT_BUILD_DRIVER_DAEMON)
 	add_library(
-		drv_gats STATIC
-		ghost_and_the_shell/gats_hmd.h
-		ghost_and_the_shell/gats_hmd.c
-		ghost_and_the_shell/gats_interface.h
+		drv_daemon STATIC
+		daemon/daemon_hmd.h
+		daemon/daemon_hmd.c
+		daemon/daemon_interface.h
 		)
-	target_link_libraries(drv_gats PRIVATE xrt-interfaces aux_math xrt-external-cjson)
-	list(APPEND ENABLED_HEADSET_DRIVERS gats)
+	target_link_libraries(drv_daemon PRIVATE xrt-interfaces aux_math xrt-external-cjson)
+	list(APPEND ENABLED_HEADSET_DRIVERS daemon)
 endif()
 
 if(XRT_BUILD_DRIVER_ULV2)
