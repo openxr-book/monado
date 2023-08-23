@@ -184,31 +184,12 @@ daemon_open_system(struct xrt_builder *xb,
 		result = XRT_ERROR_DEVICE_CREATION_FAILED;
 		goto end;
 	}
-/*
-	bool load_success = daemon_config_load(db);
-	if (!load_success) {
-		result = XRT_ERROR_DEVICE_CREATION_FAILED;
-		goto end;
-	}
-*/
+
 	struct xrt_device *db_hmd = daemon_hmd_create(db->config_json);
 	if (db_hmd == NULL) {
 		result = XRT_ERROR_DEVICE_CREATION_FAILED;
 		goto end;
 	}
-
-/*
-	bool config_valid = true;
-	daemon_tracking_config_parse_ultraleap(db, &config_valid);
-	if (!config_valid) {
-		DAEMON_ERROR("Leap device config was invalid!");
-	}
-
-	daemon_tracking_config_parse_t265(db, &config_valid);
-	if (!config_valid) {
-		DAEMON_ERROR("T265 device config was invalid!");
-	}
-*/
 
 	struct xrt_device *hand_device = NULL;
 	struct xrt_device *slam_device = NULL;
@@ -253,7 +234,6 @@ daemon_open_system(struct xrt_builder *xb,
 	    usysd->base.roles.head = head_wrap;
 	}
 
-	
 	if (hand_device != NULL) {
 		// note: hand_parented_to_head_tracker is always false when slam_device is NULL
 		struct xrt_device *hand_wrap = multi_create_tracking_override(
