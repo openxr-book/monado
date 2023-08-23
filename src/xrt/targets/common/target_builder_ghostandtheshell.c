@@ -313,7 +313,7 @@ gats_open_system(struct xrt_builder *xb,
 
 	struct xrt_device *head_wrap = NULL;
 
-    // not sure whats happening here
+    // wrap the tracked pose function of ghost and the shell driver into the t265 tracked pose function
 	if (slam_device != NULL) {
 		usysd->base.xdevs[usysd->base.xdev_count++] = slam_device;
 		head_wrap = multi_create_tracking_override(XRT_TRACKING_OVERRIDE_DIRECT, gb_hmd, slam_device,

@@ -46,7 +46,7 @@ gats_hmd_destroy(struct xrt_device *xdev)
 static void
 gats_hmd_update_inputs(struct xrt_device *xdev)
 {
-	struct gats_hmd *gats = gats_hmd(xdev);
+	//struct gats_hmd *gats = gats_hmd(xdev);
 }
 
 static void
@@ -76,14 +76,8 @@ gats_hmd_get_view_poses(struct xrt_device *xdev,
 {
 	struct gats_hmd *gats = gats_hmd(xdev);
 
-	// // Use this to take care of most stuff, then fix up below.
-	// u_device_get_view_poses(xdev, default_eye_relation, at_timestamp_ns, view_count, out_head_relation, out_fovs,
-	//                         out_poses);
-
-	// // Fix fix.
-	// for (uint32_t i = 0; i < view_count && i < ARRAY_SIZE(gats->config.head_pose_to_eye); i++) {
-	// 	out_poses[i] = ns->config.head_pose_to_eye[i];
-	// }
+	u_device_get_view_poses(xdev, default_eye_relation, at_timestamp_ns, view_count, out_head_relation, out_fovs,
+	                        out_poses);
 }
 
 /*
@@ -126,13 +120,48 @@ gats_hmd_create(const cJSON *config_json)
 
 	gats->base.hmd->screens[0].nominal_frame_interval_ns = time_s_to_ns(1.0f / 60.0f);
 
-	struct u_extents_2d exts;
-	// in the mode the screens are operated, each display only does 60Hz @ 1920x1920 => total view = 3840x1920
-	exts.w_pixels = 1920 * 2;
-	exts.h_pixels = 1920;
+	// in radians
+	const double hFOV = 90 * (M_PI / 180.0);
+	const double vFOV = 90 * (M_PI / 180.0);
+	// center of projection
+	const double hCOP = 0.5;
+	const double vCOP = 0.5;
+	if (
+	    /* right eye */
+	    !math_compute_fovs(1, hCOP, hFOV, 1, vCOP, vFOV, &gats->base.hmd->distortion.fov[1]) ||
+	    /*
+	     * left eye - same as right eye, except the horizontal center of projection is moved in the opposite
+	     * direction now
+	     */
+	    !math_compute_fovs(1, 1.0 - hCOP, hFOV, 1, vCOP, vFOV, &gats->base.hmd->distortion.fov[0])) {
+		// If those failed, it means our math was impossible.
+		GATS_ERROR(gats, "Failed to setup basic device info");
+		gats_hmd_destroy(&gats->base);
+		return NULL;
+	}
+	const int panel_w = 1920;
+	const int panel_h = 1920;
 
-	u_extents_2d_split_side_by_side(&gats->base, &exts);
-	// no distortion for now
+	// Single "screen" (always the case)
+	gats->base.hmd->screens[0].w_pixels = panel_w * 2;
+	gats->base.hmd->screens[0].h_pixels = panel_h;
+
+	// Left, Right
+	for (uint8_t eye = 0; eye < 2; ++eye) {
+		gats->base.hmd->views[eye].display.w_pixels = panel_w;
+		gats->base.hmd->views[eye].display.h_pixels = panel_h;
+		gats->base.hmd->views[eye].viewport.x_pixels = 0;
+		gats->base.hmd->views[eye].viewport.y_pixels = 0;
+		gats->base.hmd->views[eye].viewport.w_pixels = panel_w;
+		gats->base.hmd->views[eye].viewport.h_pixels = panel_h;
+		// if rotation is not identity, the dimensions can get more complex.
+		gats->base.hmd->views[eye].rot = u_device_rotation_ident;
+	}
+	// left eye starts at x=0, right eye starts at x=panel_width
+	gats->base.hmd->views[0].viewport.x_pixels = 0;
+	gats->base.hmd->views[1].viewport.x_pixels = panel_w;
+
+	// Distortion information, fills in xdev->compute_distortion().
 	u_distortion_mesh_set_none(&gats->base);
 
 	return &gats->base;
