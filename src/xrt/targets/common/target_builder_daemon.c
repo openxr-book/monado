@@ -390,7 +390,7 @@ t_builder_daemon_create(void)
 	db->base.open_system = daemon_open_system;
 	db->base.destroy = daemon_destroy;
 	db->base.identifier = "daemon";
-	db->base.name = "daemon";
+	db->base.name = "daemon headset";
 	db->base.driver_identifiers = driver_list;
 	db->base.driver_identifier_count = ARRAY_SIZE(driver_list);
 
