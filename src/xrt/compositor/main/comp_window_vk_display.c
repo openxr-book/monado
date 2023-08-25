@@ -126,8 +126,8 @@ comp_window_vk_display_destroy(struct comp_target *ct)
 static bool
 append_vk_display_entry(struct comp_window_vk_display *w, struct VkDisplayPropertiesKHR *disp)
 {
-	w->base.base.c->settings.preferred.width = disp->physicalResolution.width;
-	w->base.base.c->settings.preferred.height = disp->physicalResolution.height;
+	w->base.base.c->settings.preferred.width = 3840;//disp->physicalResolution.width;
+	w->base.base.c->settings.preferred.height = 1920;//disp->physicalResolution.height;
 	struct vk_display d = {.display_properties = *disp, .display = disp->display};
 
 	w->display_count += 1;
