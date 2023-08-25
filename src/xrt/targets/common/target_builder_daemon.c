@@ -39,6 +39,18 @@
 #include "realsense/rs_interface.h"
 #endif
 
+#ifdef XRT_BUILD_DRIVER_DEPTHAI
+#include "depthai/depthai_interface.h"
+#endif
+
+#ifdef XRT_BUILD_DRIVER_TWRAP
+#include "twrap/twrap_interface.h"
+#endif
+
+#ifdef XRT_BUILD_DRIVER_HANDTRACKING
+#include "ht/ht_interface.h"
+#endif
+
 #include "ht_ctrl_emu/ht_ctrl_emu_interface.h"
 
 #include "xrt/xrt_frameserver.h"
@@ -71,6 +83,14 @@ struct daemon_ultraleap_device
 	struct xrt_pose P_trackingcenter_to_middleofeyes_oxr;
 };
 
+struct daemon_depthai_device
+{
+	bool active;
+	bool upside_down;
+	struct xrt_pose P_imu_to_left_camera_basalt;
+	struct xrt_pose P_middleofeyes_to_imu_oxr;
+};
+
 struct daemon_t265
 {
 	bool active;
@@ -85,48 +105,110 @@ struct daemon_builder
 	cJSON *config_json;
 
 	struct daemon_ultraleap_device ultraleap_device;
+	struct daemon_depthai_device depthai_device;
 	struct daemon_t265 t265;
 };
 
-static bool
-daemon_config_load(struct daemon_builder *db)
+#ifdef XRT_BUILD_DRIVER_DEPTHAI
+static xrt_result_t
+daemon_setup_depthai_device(struct daemon_builder *db,
+                        struct u_system_devices *usysd,
+                        struct xrt_device **out_hand_device,
+                        struct xrt_device **out_head_device)
 {
-	const char *file_content = u_file_read_content_from_path(db->config_path);
-	if (file_content == NULL) {
-		U_LOG_E("The file at \"%s\" was unable to load. Either there wasn't a file there or it was empty.",
-		        db->config_path);
-		return false;
+	struct depthai_slam_startup_settings settings = {0};
+	xrt_result_t xret;
+
+	settings.frames_per_second = 60;
+	settings.half_size_ov9282 = true;
+	settings.want_cameras = true;
+	settings.want_imu = true;
+
+	struct xrt_fs *the_fs = depthai_fs_slam(&usysd->xfctx, &settings);
+
+	if (the_fs == NULL) {
+		return XRT_ERROR_DEVICE_CREATION_FAILED;
 	}
 
-	// leaks?
-	cJSON *config_json = cJSON_Parse(file_content);
+	struct t_stereo_camera_calibration *calib = NULL;
+	depthai_fs_get_stereo_calibration(the_fs, &calib);
 
-	if (config_json == NULL) {
-		const char *error_ptr = cJSON_GetErrorPtr();
-		U_LOG_E("The JSON file at path \"%s\" was unable to parse", db->config_path);
-		if (error_ptr != NULL) {
-			U_LOG_E("because of an error before %s", error_ptr);
-		}
-		free((void *)file_content);
-		return false;
+
+#ifdef XRT_BUILD_DRIVER_HANDTRACKING
+	struct xrt_slam_sinks *hand_sinks = NULL;
+
+	struct t_camera_extra_info extra_camera_info = {0};
+
+	if (db->depthai_device.upside_down) {
+		extra_camera_info.views[0].camera_orientation = CAMERA_ORIENTATION_180;
+		extra_camera_info.views[1].camera_orientation = CAMERA_ORIENTATION_180;
+	} else {
+		extra_camera_info.views[0].camera_orientation = CAMERA_ORIENTATION_0;
+		extra_camera_info.views[1].camera_orientation = CAMERA_ORIENTATION_0;
 	}
-	db->config_json = config_json;
-	free((void *)file_content);
-	return true;
+
+	extra_camera_info.views[0].boundary_type = HT_IMAGE_BOUNDARY_NONE;
+	extra_camera_info.views[1].boundary_type = HT_IMAGE_BOUNDARY_NONE;
+
+	int create_status = ht_device_create(&usysd->xfctx,     //
+	                                     calib,             //
+	                                     extra_camera_info, //
+	                                     &hand_sinks,       //
+	                                     out_hand_device);
+	t_stereo_camera_calibration_reference(&calib, NULL);
+	if (create_status != 0) {
+		return XRT_ERROR_DEVICE_CREATION_FAILED;
+	}
+#endif
+
+	struct xrt_slam_sinks *slam_sinks = NULL;
+	xret = twrap_slam_create_device(&usysd->xfctx, XRT_DEVICE_DEPTHAI, &slam_sinks, out_head_device);
+	if (xret != XRT_SUCCESS) {
+		U_LOG_E("twrap_slam_create_device: %u", xret);
+		return xret;
+	}
+	if (slam_sinks == NULL) {
+		U_LOG_E("twrap_slam_create_device: Returned NULL slam_sinks!");
+		return XRT_ERROR_DEVICE_CREATION_FAILED;
+	}
+
+	struct xrt_slam_sinks entry_sinks = {0};
+	struct xrt_frame_sink *entry_left_sink = NULL;
+	struct xrt_frame_sink *entry_right_sink = NULL;
+
+#ifdef XRT_BUILD_DRIVER_HANDTRACKING
+	u_sink_split_create(&usysd->xfctx, slam_sinks->cams[0], hand_sinks->cams[0], &entry_left_sink);
+	u_sink_split_create(&usysd->xfctx, slam_sinks->cams[1], hand_sinks->cams[1], &entry_right_sink);
+#else
+	entry_left_sink = slam_sinks->cams[0];
+	entry_right_sink = slam_sinks->cams[1];
+#endif
+
+	entry_sinks = (struct xrt_slam_sinks){
+	    .cams[0] = entry_left_sink,
+	    .cams[1] = entry_right_sink,
+	    .imu = slam_sinks->imu,
+	    .gt = slam_sinks->gt,
+	};
+
+	struct xrt_slam_sinks dummy_slam_sinks = {0};
+	dummy_slam_sinks.imu = entry_sinks.imu;
+
+	u_sink_force_genlock_create(&usysd->xfctx, entry_sinks.cams[0], entry_sinks.cams[1], &dummy_slam_sinks.cams[0],
+	                            &dummy_slam_sinks.cams[1]);
+
+	xrt_fs_slam_stream_start(the_fs, &dummy_slam_sinks);
+
+	return XRT_SUCCESS;
 }
+#endif
 
 static xrt_result_t
 daemon_estimate_system(struct xrt_builder *xb, cJSON *config, struct xrt_prober *xp, struct xrt_builder_estimate *estimate)
 {
 	struct daemon_builder *db = (struct daemon_builder *)xb;
 	U_ZERO(estimate);
-/*
-	db->config_path = debug_get_option_daemon_config_path();
 
-	if (db->config_path == NULL) {
-		return XRT_SUCCESS;
-	}
-*/
 	struct xrt_prober_device **xpdevs = NULL;
 	size_t xpdev_count = 0;
 	xrt_result_t xret = XRT_SUCCESS;
@@ -155,6 +237,13 @@ daemon_estimate_system(struct xrt_builder *xb, cJSON *config, struct xrt_prober 
 	    estimate->certain.dof6 || u_builder_find_prober_device(xpdevs, xpdev_count,                  //
 	                                                           REALSENSE_TM2_VID, REALSENSE_TM2_PID, //
 	                                                           XRT_BUS_TYPE_USB);
+#endif
+
+#ifdef XRT_BUILD_DRIVER_DEPTHAI
+	bool depthai = u_builder_find_prober_device(xpdevs, xpdev_count, DEPTHAI_VID, DEPTHAI_PID, XRT_BUS_TYPE_USB);
+#ifdef XRT_BUILD_DRIVER_HANDTRACKING
+	hand_tracking = hand_tracking || depthai;
+#endif
 #endif
 
 	estimate->certain.left = estimate->certain.right = estimate->maybe.left = estimate->maybe.right = hand_tracking;
@@ -202,6 +291,16 @@ daemon_open_system(struct xrt_builder *xb,
 	struct xrt_pose hand_offset = XRT_POSE_IDENTITY;
 
 	// bool got_head_tracker = false;
+
+#ifdef XRT_BUILD_DRIVER_DEPTHAI
+	DAEMON_INFO("Using DepthAI device!");
+	daemon_setup_depthai_device(db, usysd, &hand_device, &slam_device);
+	head_offset = db->depthai_device.P_middleofeyes_to_imu_oxr;
+	//db_compute_depthai_ht_offset(&db->depthai_device.P_imu_to_left_camera_basalt, &hand_offset);
+	// got_head_tracker = true;
+#else
+	DAEMON_ERROR("DepthAI head+hand tracker specified in config but DepthAI support was not compiled in!");
+#endif
 
 	// For now we use t265 for head + ultraleap for hand.
 #ifdef XRT_BUILD_DRIVER_REALSENSE
