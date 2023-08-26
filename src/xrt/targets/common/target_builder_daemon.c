@@ -161,38 +161,16 @@ daemon_setup_depthai_device(struct daemon_builder *db,
 	}
 #endif
 
-	struct xrt_slam_sinks *slam_sinks = NULL;
-	xret = twrap_slam_create_device(&usysd->xfctx, XRT_DEVICE_DEPTHAI, &slam_sinks, out_head_device);
-	if (xret != XRT_SUCCESS) {
-		U_LOG_E("twrap_slam_create_device: %u", xret);
-		return xret;
-	}
-	if (slam_sinks == NULL) {
-		U_LOG_E("twrap_slam_create_device: Returned NULL slam_sinks!");
-		return XRT_ERROR_DEVICE_CREATION_FAILED;
-	}
-
 	struct xrt_slam_sinks entry_sinks = {0};
 	struct xrt_frame_sink *entry_left_sink = NULL;
 	struct xrt_frame_sink *entry_right_sink = NULL;
 
-#ifdef XRT_BUILD_DRIVER_HANDTRACKING
-	u_sink_split_create(&usysd->xfctx, slam_sinks->cams[0], hand_sinks->cams[0], &entry_left_sink);
-	u_sink_split_create(&usysd->xfctx, slam_sinks->cams[1], hand_sinks->cams[1], &entry_right_sink);
-#else
-	entry_left_sink = slam_sinks->cams[0];
-	entry_right_sink = slam_sinks->cams[1];
-#endif
-
 	entry_sinks = (struct xrt_slam_sinks){
-	    .cams[0] = entry_left_sink,
-	    .cams[1] = entry_right_sink,
-	    .imu = slam_sinks->imu,
-	    .gt = slam_sinks->gt,
+	    .cams[0] = hand_sinks->cams[0],
+	    .cams[1] = hand_sinks->cams[1],
 	};
 
 	struct xrt_slam_sinks dummy_slam_sinks = {0};
-	dummy_slam_sinks.imu = entry_sinks.imu;
 
 	u_sink_force_genlock_create(&usysd->xfctx, entry_sinks.cams[0], entry_sinks.cams[1], &dummy_slam_sinks.cams[0],
 	                            &dummy_slam_sinks.cams[1]);
