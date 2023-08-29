@@ -14,6 +14,10 @@
 extern "C" {
 #endif
 
+// Stereolabs ZED Mini
+#define SLZM_VID 0x2B03
+#define SLZM_PID 0xF681
+
 /*!
  * @defgroup drv_sample Sample driver
  * @ingroup drv

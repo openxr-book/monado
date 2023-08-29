@@ -43,7 +43,7 @@
  *
  */
 
- DEBUG_GET_ONCE_LOG_OPTION(stereolabs_log, "STEREOLABS_LOG", U_LOGGING_WARN)
+DEBUG_GET_ONCE_LOG_OPTION(stereolabs_log, "STEREOLABS_LOG", U_LOGGING_WARN)
 
 #define SL_TRACE(sl, ...) U_LOG_XDEV_IFL_T(&sl->base, sl->log_level, __VA_ARGS__)
 #define SL_DEBUG(sl, ...) U_LOG_XDEV_IFL_D(&sl->base, sl->log_level, __VA_ARGS__)
@@ -57,9 +57,9 @@ struct sl_zed_mini
 
 	struct os_thread_helper oth;
 
-	sl::Camera *camera;
-
 	enum u_logging_level log_level;
+
+	sl::Camera *camera;
 };
 
 /// Casting helper function
@@ -81,7 +81,7 @@ sl_zed_mini(struct xrt_device *xdev)
 static int
 create_zed_mini_device(struct sl_zed_mini *sl_zm)
 {
-	printf("creating zed mini device...\n");
+	SL_DEBUG(sl_zm, "creating device\n");
 	sl::InitParameters init_p;
 	init_p.camera_resolution = sl::RESOLUTION::AUTO;
 	init_p.coordinate_system = sl::COORDINATE_SYSTEM::RIGHT_HANDED_Y_UP;
@@ -90,18 +90,19 @@ create_zed_mini_device(struct sl_zed_mini *sl_zm)
 	init_p.async_grab_camera_recovery = true;
 
 	if (sl_zm->camera->open(init_p) != sl::ERROR_CODE::SUCCESS) {
-		printf("no zed mini camera connected!!\n");
+		SL_ERROR(sl_zm, "no zed camera connected!!\n");
 		return -1;
 	}
 
 	sl::PositionalTrackingParameters tracking_p;
 	if (sl_zm->camera->enablePositionalTracking(tracking_p) != sl::ERROR_CODE::SUCCESS) {
-		printf("couldn't enable positional tracking!!\n");
+		SL_ERROR(sl_zm, "couldn't enable positional tracking!!\n");
 		return -1;
 	}
 
-	bool has_imu = sl_zm->camera->getCameraInformation().sensors_configuration.isSensorAvailable(sl::SENSOR_TYPE::GYROSCOPE);
-	
+	bool has_imu =
+	    sl_zm->camera->getCameraInformation().sensors_configuration.isSensorAvailable(sl::SENSOR_TYPE::GYROSCOPE);
+
 	return 0;
 }
 
@@ -113,6 +114,13 @@ update(struct sl_zed_mini *sl_zm)
 
 	if (sl_zm->camera->grab() == sl::ERROR_CODE::SUCCESS) {
 
+		// TIME_REFERENCE::IMAGE is synchronized to the image frame
+		// TIME_REFERENCE::CURRENT is synchronized to the function call time
+		sl_zm->camera->getSensorsData(sensor_d, sl::TIME_REFERENCE::IMAGE);
+		sl::float3 angular_velocity = sensor_d.imu.angular_velocity;
+
+		// REFERENCE_FRAME::WORLD is transform with reference to world frame
+		// REFERENCE_FRAME::CAMERA is transform with reference to previous camera frame
 		sl_zm->camera->getPosition(pose_d, sl::REFERENCE_FRAME::WORLD);
 		sl::Translation translation = pose_d.getTranslation();
 		sl::Orientation orientation = pose_d.getOrientation();
@@ -131,20 +139,20 @@ update(struct sl_zed_mini *sl_zm)
 		relation.pose.orientation.y = orientation.y;
 		relation.pose.orientation.z = orientation.z;
 		relation.pose.orientation.w = orientation.w;
+		// relation.angular_velocity.x = angular_velocity.x;
+		// relation.angular_velocity.y = angular_velocity.y;
+		// relation.angular_velocity.z = angular_velocity.z;
 
-		// Position
-		relation.pose.position.x = translation.x;
-		relation.pose.position.y = translation.y;
-		relation.pose.position.z = translation.z;
-/*
-		// clang-format off
-		relation.relation_flags =
-			XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
-			XRT_SPACE_RELATION_POSITION_VALID_BIT |
-			XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |
-			XRT_SPACE_RELATION_POSITION_TRACKED_BIT;
-		// clang-format on
-*/
+		// Position divided by 100 because it feels right, aka check back later
+		relation.pose.position.x = translation.x / 100;
+		relation.pose.position.y = translation.y / 100;
+		relation.pose.position.z = translation.z / 100;
+
+		relation.relation_flags = (enum xrt_space_relation_flags)(
+		    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_POSITION_VALID_BIT |
+		    XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT);
+		    // XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT);
+
 		m_relation_history_push(sl_zm->relation_hist, &relation, timestamp_ns);
 	}
 
@@ -157,8 +165,6 @@ sl_run_thread(void *ptr)
 	struct sl_zed_mini *sl_zm = (struct sl_zed_mini *)ptr;
 
 	os_thread_helper_lock(&sl_zm->oth);
-
-	printf("running second thread\n");
 
 	while (os_thread_helper_is_running_locked(&sl_zm->oth)) {
 
@@ -181,9 +187,9 @@ sl_zed_mini_update_inputs(struct xrt_device *xdev)
 
 static void
 sl_zed_mini_get_tracked_pose(struct xrt_device *xdev,
-                            enum xrt_input_name name,
-                            uint64_t at_timestamp_ns,
-                            struct xrt_space_relation *out_relation)
+                             enum xrt_input_name name,
+                             uint64_t at_timestamp_ns,
+                             struct xrt_space_relation *out_relation)
 {
 	struct sl_zed_mini *sl_zm = sl_zed_mini(xdev);
 
@@ -197,12 +203,12 @@ sl_zed_mini_get_tracked_pose(struct xrt_device *xdev,
 
 static void
 sl_zed_mini_get_view_poses(struct xrt_device *xdev,
-                          const struct xrt_vec3 *default_eye_relation,
-                          uint64_t at_timestamp_ns,
-                          uint32_t view_count,
-                          struct xrt_space_relation *out_head_relation,
-                          struct xrt_fov *out_fovs,
-                          struct xrt_pose *out_poses)
+                           const struct xrt_vec3 *default_eye_relation,
+                           uint64_t at_timestamp_ns,
+                           uint32_t view_count,
+                           struct xrt_space_relation *out_head_relation,
+                           struct xrt_fov *out_fovs,
+                           struct xrt_pose *out_poses)
 {
 	assert(false);
 }
@@ -210,11 +216,7 @@ sl_zed_mini_get_view_poses(struct xrt_device *xdev,
 static void
 sl_zed_mini_destroy(struct xrt_device *xdev)
 {
-	printf("destroying zed mini device\n");
 	struct sl_zed_mini *sl_zm = sl_zed_mini(xdev);
-
-	// Remove the variable tracking.
-	//u_var_remove_root(sl_zm);
 
 	// 1. lock mutex and shutdown thread
 	os_thread_helper_destroy(&sl_zm->oth);
@@ -237,7 +239,7 @@ sl_zed_mini_create(void)
 	m_relation_history_create(&sl_zm->relation_hist);
 
 	sl_zm->log_level = debug_get_log_option_stereolabs_log();
-	
+
 	sl_zm->base.update_inputs = sl_zed_mini_update_inputs;
 	sl_zm->base.get_tracked_pose = sl_zed_mini_get_tracked_pose;
 	sl_zm->base.get_view_poses = sl_zed_mini_get_view_poses;
@@ -254,13 +256,6 @@ sl_zed_mini_create(void)
 	sl_zm->base.device_type = XRT_DEVICE_TYPE_GENERIC_TRACKER;
 	sl_zm->base.orientation_tracking_supported = true;
 	sl_zm->base.position_tracking_supported = true;
-
-	/*
-	// Setup variable tracker: Optional but useful for debugging
-	u_var_add_root(sh, "Sample HMD", true);
-	u_var_add_pose(sh, &sh->pose, "pose");
-	u_var_add_log_level(sh, &sh->log_level, "log_level");
-	*/
 
 	int ret = 0;
 

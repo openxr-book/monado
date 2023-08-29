@@ -43,10 +43,10 @@ sl_auto_prober_destroy(struct xrt_auto_prober *p)
 //! @public @memberof sl_auto_prober
 static int
 sl_auto_prober_autoprobe(struct xrt_auto_prober *xap,
-                             cJSON *attached_data,
-                             bool no_hmds,
-                             struct xrt_prober *xp,
-                             struct xrt_device **out_xdevs)
+                         cJSON *attached_data,
+                         bool no_hmds,
+                         struct xrt_prober *xp,
+                         struct xrt_device **out_xdevs)
 {
 	struct sl_auto_prober *slap = sl_auto_prober(xap);
 	(void)slap;

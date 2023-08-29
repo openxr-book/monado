@@ -160,8 +160,7 @@ window_create(struct gui_program *p, const char *camera)
 	    !cw->use.leap_motion &&       //
 	    !cw->use.depthai_monocular && //
 	    !cw->use.depthai_stereo &&    //
-	    !cw->use.elp &&
-		!cw->use.zed_mini) {
+	    !cw->use.elp && !cw->use.zed_mini) {
 		U_LOG_W(
 		    "Can't recongnize camera name '%s', options are 'elp', 'depthai-[monocular|stereo]', index' & "
 		    "'leap_motion'.\n\tFalling back to 'index'.",
