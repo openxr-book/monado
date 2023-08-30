@@ -51,6 +51,10 @@
 #include "ht/ht_interface.h"
 #endif
 
+#ifdef XRT_BUILD_DRIVER_STEREOLABS
+#include "stereolabs/sl_interface.h"
+#endif
+
 #include "ht_ctrl_emu/ht_ctrl_emu_interface.h"
 
 #include "xrt/xrt_frameserver.h"
@@ -70,31 +74,38 @@ DEBUG_GET_ONCE_LOG_OPTION(daemon_log, "DAEMON_LOG", U_LOGGING_WARN)
 #define DAEMON_ERROR(...) U_LOG_IFL_E(debug_get_log_option_daemon_log(), __VA_ARGS__)
 
 static const char *driver_list[] = {
-    "daemon",
+    "daemon hmd",
+};
+
+struct daemon_realsense_t26x
+{
+	bool active;
+	//! @todo make P_middleofeyes_to_trackingcenter_oxr settable by the user/config file
+	struct xrt_pose P_middleofeyes_to_trackingcenter_oxr;
+};
+
+struct daemon_stereolabs_zed_mini
+{
+	bool active;
+	//! @todo make P_middleofeyes_to_trackingcenter_oxr settable by the user/config file
+	struct xrt_pose P_middleofeyes_to_trackingcenter_oxr;
 };
 
 struct daemon_ultraleap_device
 {
 	bool active;
-
 	// Users input `P_middleofeyes_to_trackingcenter_oxr`, and we invert it into this pose.
 	// It's a lot simpler to (and everybody does) care about the transform from the eyes center to the device,
 	// but tracking overrides care about this value.
+	//! @todo make P_trackingcenter_to_middleofeyes_oxr settable by the user/config file
 	struct xrt_pose P_trackingcenter_to_middleofeyes_oxr;
 };
 
 struct daemon_depthai_device
 {
 	bool active;
-	bool upside_down;
-	struct xrt_pose P_imu_to_left_camera_basalt;
+	//! @todo make P_middleofeyes_to_imu_oxr settable by the user/config file
 	struct xrt_pose P_middleofeyes_to_imu_oxr;
-};
-
-struct daemon_t265
-{
-	bool active;
-	struct xrt_pose P_middleofeyes_to_trackingcenter_oxr;
 };
 
 struct daemon_builder
@@ -104,17 +115,17 @@ struct daemon_builder
 	const char *config_path;
 	cJSON *config_json;
 
+	struct daemon_realsense_t26x realsense_t26x;
+	struct daemon_stereolabs_zed_mini stereolabs_device;
 	struct daemon_ultraleap_device ultraleap_device;
 	struct daemon_depthai_device depthai_device;
-	struct daemon_t265 t265;
 };
 
-#ifdef XRT_BUILD_DRIVER_DEPTHAI
+#if defined(XRT_BUILD_DRIVER_DEPTHAI) && defined(XRT_BUILD_DRIVER_HANDTRACKING)
 static xrt_result_t
 daemon_setup_depthai_device(struct daemon_builder *db,
-                        struct u_system_devices *usysd,
-                        struct xrt_device **out_hand_device,
-                        struct xrt_device **out_head_device)
+                            struct u_system_devices *usysd,
+                            struct xrt_device **out_hand_device)
 {
 	struct depthai_slam_startup_settings settings = {0};
 	xrt_result_t xret;
@@ -133,19 +144,12 @@ daemon_setup_depthai_device(struct daemon_builder *db,
 	struct t_stereo_camera_calibration *calib = NULL;
 	depthai_fs_get_stereo_calibration(the_fs, &calib);
 
-
-#ifdef XRT_BUILD_DRIVER_HANDTRACKING
 	struct xrt_slam_sinks *hand_sinks = NULL;
 
 	struct t_camera_extra_info extra_camera_info = {0};
 
-	if (db->depthai_device.upside_down) {
-		extra_camera_info.views[0].camera_orientation = CAMERA_ORIENTATION_180;
-		extra_camera_info.views[1].camera_orientation = CAMERA_ORIENTATION_180;
-	} else {
-		extra_camera_info.views[0].camera_orientation = CAMERA_ORIENTATION_0;
-		extra_camera_info.views[1].camera_orientation = CAMERA_ORIENTATION_0;
-	}
+	extra_camera_info.views[0].camera_orientation = CAMERA_ORIENTATION_0;
+	extra_camera_info.views[1].camera_orientation = CAMERA_ORIENTATION_0;
 
 	extra_camera_info.views[0].boundary_type = HT_IMAGE_BOUNDARY_NONE;
 	extra_camera_info.views[1].boundary_type = HT_IMAGE_BOUNDARY_NONE;
@@ -159,11 +163,8 @@ daemon_setup_depthai_device(struct daemon_builder *db,
 	if (create_status != 0) {
 		return XRT_ERROR_DEVICE_CREATION_FAILED;
 	}
-#endif
 
 	struct xrt_slam_sinks entry_sinks = {0};
-	struct xrt_frame_sink *entry_left_sink = NULL;
-	struct xrt_frame_sink *entry_right_sink = NULL;
 
 	entry_sinks = (struct xrt_slam_sinks){
 	    .cams[0] = hand_sinks->cams[0],
@@ -182,7 +183,10 @@ daemon_setup_depthai_device(struct daemon_builder *db,
 #endif
 
 static xrt_result_t
-daemon_estimate_system(struct xrt_builder *xb, cJSON *config, struct xrt_prober *xp, struct xrt_builder_estimate *estimate)
+daemon_estimate_system(struct xrt_builder *xb,
+                       cJSON *config,
+                       struct xrt_prober *xp,
+                       struct xrt_builder_estimate *estimate)
 {
 	struct daemon_builder *db = (struct daemon_builder *)xb;
 	U_ZERO(estimate);
@@ -197,33 +201,34 @@ daemon_estimate_system(struct xrt_builder *xb, cJSON *config, struct xrt_prober 
 		return xret;
 	}
 
-	estimate->certain.head = true;
-	estimate->maybe.head = true;
-
+	bool head_tracking_6dof = false;
 	bool hand_tracking = false;
 
+// HEAD
+#ifdef XRT_BUILD_DRIVER_REALSENSE
+	head_tracking_6dof =
+	    head_tracking_6dof || u_builder_find_prober_device(xpdevs, xpdev_count, REALSENSE_MOVIDIUS_VID,
+	                                                       REALSENSE_MOVIDIUS_PID, XRT_BUS_TYPE_USB);
+	head_tracking_6dof = head_tracking_6dof || u_builder_find_prober_device(xpdevs, xpdev_count,                  //
+	                                                                        REALSENSE_TM2_VID, REALSENSE_TM2_PID, //
+	                                                                        XRT_BUS_TYPE_USB);
+#endif
+#ifdef XRT_BUILD_DRIVER_STEREOLABS
+	head_tracking_6dof = head_tracking_6dof ||
+	                     u_builder_find_prober_device(xpdevs, xpdev_count, SLZM_VID, SLZM_PID, XRT_BUS_TYPE_USB);
+#endif
+	estimate->certain.head = head_tracking_6dof;
+
+// HANDS
 #ifdef XRT_BUILD_DRIVER_ULV2
 	hand_tracking =
 	    hand_tracking || u_builder_find_prober_device(xpdevs, xpdev_count, ULV2_VID, ULV2_PID, XRT_BUS_TYPE_USB);
 #endif
-
-#ifdef XRT_BUILD_DRIVER_REALSENSE
-	estimate->certain.dof6 =
-	    estimate->certain.dof6 || u_builder_find_prober_device(xpdevs, xpdev_count, REALSENSE_MOVIDIUS_VID,
-	                                                           REALSENSE_MOVIDIUS_PID, XRT_BUS_TYPE_USB);
-	estimate->certain.dof6 =
-	    estimate->certain.dof6 || u_builder_find_prober_device(xpdevs, xpdev_count,                  //
-	                                                           REALSENSE_TM2_VID, REALSENSE_TM2_PID, //
-	                                                           XRT_BUS_TYPE_USB);
+#if defined(XRT_BUILD_DRIVER_DEPTHAI) && defined(XRT_BUILD_DRIVER_HANDTRACKING)
+	hand_tracking = hand_tracking ||
+	                u_builder_find_prober_device(xpdevs, xpdev_count, DEPTHAI_VID, DEPTHAI_PID, XRT_BUS_TYPE_USB);
+	;
 #endif
-
-#ifdef XRT_BUILD_DRIVER_DEPTHAI
-	bool depthai = u_builder_find_prober_device(xpdevs, xpdev_count, DEPTHAI_VID, DEPTHAI_PID, XRT_BUS_TYPE_USB);
-#ifdef XRT_BUILD_DRIVER_HANDTRACKING
-	hand_tracking = hand_tracking || depthai;
-#endif
-#endif
-
 	estimate->certain.left = estimate->certain.right = estimate->maybe.left = estimate->maybe.right = hand_tracking;
 
 	xret = xrt_prober_unlock_list(xp, &xpdevs);
@@ -236,10 +241,10 @@ daemon_estimate_system(struct xrt_builder *xb, cJSON *config, struct xrt_prober 
 
 static xrt_result_t
 daemon_open_system(struct xrt_builder *xb,
-               cJSON *config,
-               struct xrt_prober *xp,
-               struct xrt_system_devices **out_xsysd,
-               struct xrt_space_overseer **out_xso)
+                   cJSON *config,
+                   struct xrt_prober *xp,
+                   struct xrt_system_devices **out_xsysd,
+                   struct xrt_space_overseer **out_xso)
 {
 	struct daemon_builder *db = (struct daemon_builder *)xb;
 
@@ -258,6 +263,11 @@ daemon_open_system(struct xrt_builder *xb,
 		goto end;
 	}
 
+	db->realsense_t26x.active = false;
+	db->stereolabs_device.active = true;
+	db->ultraleap_device.active = true;
+	db->depthai_device.active = false;
+
 	struct xrt_device *hand_device = NULL;
 	struct xrt_device *slam_device = NULL;
 
@@ -268,47 +278,44 @@ daemon_open_system(struct xrt_builder *xb,
 	bool hand_parented_to_head_tracker = true;
 	struct xrt_pose hand_offset = XRT_POSE_IDENTITY;
 
-	// bool got_head_tracker = false;
-
-#ifdef XRT_BUILD_DRIVER_DEPTHAI
-	DAEMON_INFO("Using DepthAI device!");
-	daemon_setup_depthai_device(db, usysd, &hand_device, &slam_device);
-	head_offset = db->depthai_device.P_middleofeyes_to_imu_oxr;
-	//db_compute_depthai_ht_offset(&db->depthai_device.P_imu_to_left_camera_basalt, &hand_offset);
-	// got_head_tracker = true;
-#else
-	DAEMON_ERROR("DepthAI head+hand tracker specified in config but DepthAI support was not compiled in!");
-#endif
-
-	// For now we use t265 for head + ultraleap for hand.
+	// HEAD
+	if (db->realsense_t26x.active) {
 #ifdef XRT_BUILD_DRIVER_REALSENSE
-	slam_device = rs_create_tracked_device_internal_slam();
-	head_offset = db->t265.P_middleofeyes_to_trackingcenter_oxr;
-	// got_head_tracker = true;
-#else
-	DAEMON_ERROR(
-		"Realsense head tracker specified in config but Realsense support was not compiled in!");
+		slam_device = rs_create_tracked_device_internal_slam();
+		head_offset = db->realsense_t26x.P_middleofeyes_to_trackingcenter_oxr;
 #endif
+	} else if (db->stereolabs_device.active) {
+#ifdef XRT_BUILD_DRIVER_STEREOLABS
+		slam_device = sl_zed_mini_create();
+		head_offset = db->stereolabs_device.P_middleofeyes_to_trackingcenter_oxr;
+#endif
+	}
 
+	// HANDS
+	if (db->ultraleap_device.active) {
 #ifdef XRT_BUILD_DRIVER_ULV2
-	ulv2_create_device(&hand_device);
-	hand_offset = db->ultraleap_device.P_trackingcenter_to_middleofeyes_oxr;
-	hand_parented_to_head_tracker = false;
-#else
-	DAEMON_ERROR(
-		"Ultraleap hand tracker specified in config but Ultraleap support was not compiled in!");
+		ulv2_create_device(&hand_device);
+		hand_offset = db->ultraleap_device.P_trackingcenter_to_middleofeyes_oxr;
+		hand_parented_to_head_tracker = false;
 #endif
+	} else if (db->depthai_device.active) {
+#if defined(XRT_BUILD_DRIVER_DEPTHAI) && defined(XRT_BUILD_DRIVER_HANDTRACKING)
+		daemon_setup_depthai_device(db, usysd, &hand_device);
+		head_offset = db->depthai_device.P_middleofeyes_to_imu_oxr;
+		hand_parented_to_head_tracker = true;
+#endif
+	}
 
 	struct xrt_device *head_wrap = NULL;
 
-    // wrap the tracked pose function of daemon driver into the t265 tracked pose function
+	// wrap the tracked pose function of daemon driver into the t26x/zed mini tracked pose function
 	if (slam_device != NULL) {
 		usysd->base.xdevs[usysd->base.xdev_count++] = slam_device;
 		head_wrap = multi_create_tracking_override(XRT_TRACKING_OVERRIDE_DIRECT, db_hmd, slam_device,
 		                                           XRT_INPUT_GENERIC_TRACKER_POSE, &head_offset);
-        
-        usysd->base.xdevs[usysd->base.xdev_count++] = head_wrap;
-	    usysd->base.roles.head = head_wrap;
+
+		usysd->base.xdevs[usysd->base.xdev_count++] = head_wrap;
+		usysd->base.roles.head = head_wrap;
 	}
 
 	if (hand_device != NULL) {
@@ -321,11 +328,8 @@ daemon_open_system(struct xrt_builder *xb,
 		struct xrt_device *two_hands[2];
 		cemu_devices_create(head_wrap, hand_wrap, two_hands);
 
-
-		// usysd->base.xdev_count = 0;
 		usysd->base.xdevs[usysd->base.xdev_count++] = two_hands[0];
 		usysd->base.xdevs[usysd->base.xdev_count++] = two_hands[1];
-
 
 		usysd->base.roles.hand_tracking.left = two_hands[0];
 		usysd->base.roles.hand_tracking.right = two_hands[1];
@@ -363,7 +367,7 @@ daemon_destroy(struct xrt_builder *xb)
 struct xrt_builder *
 t_builder_daemon_create(void)
 {
-    struct daemon_builder *db = U_TYPED_CALLOC(struct daemon_builder);
+	struct daemon_builder *db = U_TYPED_CALLOC(struct daemon_builder);
 	db->base.estimate_system = daemon_estimate_system;
 	db->base.open_system = daemon_open_system;
 	db->base.destroy = daemon_destroy;

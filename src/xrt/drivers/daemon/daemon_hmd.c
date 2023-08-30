@@ -55,14 +55,14 @@ daemon_hmd_destroy(struct xrt_device *xdev)
 static void
 daemon_hmd_update_inputs(struct xrt_device *xdev)
 {
-	//struct daemon_hmd *daemon = daemon_hmd(xdev);
+	// struct daemon_hmd *daemon = daemon_hmd(xdev);
 }
 
 static void
 daemon_hmd_get_tracked_pose(struct xrt_device *xdev,
-						enum xrt_input_name name,
-                        uint64_t at_timestamp_ns,
-                        struct xrt_space_relation *out_relation)
+                            enum xrt_input_name name,
+                            uint64_t at_timestamp_ns,
+                            struct xrt_space_relation *out_relation)
 {
 	struct daemon_hmd *daemon = daemon_hmd(xdev);
 
@@ -76,12 +76,12 @@ daemon_hmd_get_tracked_pose(struct xrt_device *xdev,
 
 static void
 daemon_hmd_get_view_poses(struct xrt_device *xdev,
-                      const struct xrt_vec3 *default_eye_relation,
-                      uint64_t at_timestamp_ns,
-                      uint32_t view_count,
-                      struct xrt_space_relation *out_head_relation,
-                      struct xrt_fov *out_fovs,
-                      struct xrt_pose *out_poses)
+                          const struct xrt_vec3 *default_eye_relation,
+                          uint64_t at_timestamp_ns,
+                          uint32_t view_count,
+                          struct xrt_space_relation *out_head_relation,
+                          struct xrt_fov *out_fovs,
+                          struct xrt_pose *out_poses)
 {
 	struct daemon_hmd *daemon = daemon_hmd(xdev);
 
@@ -125,7 +125,7 @@ daemon_hmd_create(const cJSON *config_json)
 	daemon->base.device_type = XRT_DEVICE_TYPE_HMD;
 	daemon->base.inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;
 	daemon->base.orientation_tracking_supported = true;
-	daemon->base.position_tracking_supported = false;
+	daemon->base.position_tracking_supported = true;
 
 	daemon->base.hmd->screens[0].nominal_frame_interval_ns = time_s_to_ns(1.0f / 60.0f);
 
