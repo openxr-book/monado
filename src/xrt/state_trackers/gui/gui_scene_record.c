@@ -34,6 +34,10 @@
 #include "depthai/depthai_interface.h"
 #endif
 
+#ifdef XRT_BUILD_DRIVER_STEREOLABS
+#include "stereolabs/sl_interface.h"
+#endif
+
 #include "gui_imgui.h"
 #include "gui_common.h"
 #include "gui_window_record.h"
@@ -238,6 +242,40 @@ create_depthai_stereo(struct camera_window *cw)
 
 /*
  *
+ * Stereolabs functions
+ *
+ */
+
+#ifdef XRT_BUILD_DRIVER_STEREOLABS
+static void
+create_stereolabs_stereo(struct camera_window *cw)
+{
+	// Should we be using a DepthAI camera?
+	if (!cw->use.zed_mini) {
+		return;
+	}
+
+	cw->camera.xfs = sl_frameserver_create(&cw->camera.xfctx);
+
+	if (cw->camera.xfs == NULL) {
+		U_LOG_W("Could not create depthai camera!");
+		return;
+	}
+
+	struct xrt_frame_sink *window_sink = &cw->base.sink;
+
+	struct xrt_slam_sinks sinks;
+	u_sink_combiner_create(&cw->camera.xfctx, window_sink, &sinks.cams[0], &sinks.cams[1]);
+
+	// start slam frameserver and stream into sinks
+	xrt_fs_slam_stream_start(cw->camera.xfs, &sinks);
+	// xrt_fs_stream_start(cw->camera.xfs, window_sink, XRT_FS_CAPTURE_TYPE_TRACKING, 0);
+}
+#endif /* XRT_BUILD_DRIVER_STEREOLABS */
+
+
+/*
+ *
  * Video frame functions
  *
  */
@@ -297,12 +335,6 @@ is_camera_leap_motion(const char *product, const char *manufacturer)
 	return strcmp(product, "Leap Motion Controller") == 0 && strcmp(manufacturer, "Leap Motion") == 0;
 }
 
-static bool
-is_camera_zed_mini(const char *product, const char *manufacturer)
-{
-	return strcmp(product, "ZED-M Hid Device") == 0 && strcmp(manufacturer, "STEREOLABS");
-}
-
 static void
 on_video_device(struct xrt_prober *xp,
                 struct xrt_prober_device *pdev,
@@ -330,10 +362,6 @@ on_video_device(struct xrt_prober *xp,
 
 	// Hardcoded for the Leap Motion.
 	if (rw->use.leap_motion && !is_camera_leap_motion(product, manufacturer)) {
-		return;
-	}
-
-	if (rw->use.zed_mini && !is_camera_zed_mini(product, manufacturer)) {
 		return;
 	}
 
@@ -441,6 +469,12 @@ gui_scene_record(struct gui_program *p, const char *camera)
 
 	if (!window_has_source(rs->window)) {
 		create_depthai_stereo(rs->window);
+	}
+#endif
+
+#ifdef XRT_BUILD_DRIVER_STEREOLABS
+	if (!window_has_source(rs->window)) {
+		create_stereolabs_stereo(rs->window);
 	}
 #endif
 
