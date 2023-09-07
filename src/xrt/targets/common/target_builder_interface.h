@@ -27,6 +27,10 @@
 #define T_BUILDER_NS
 #endif
 
+#if defined(XRT_BUILD_DRIVER_DAEMON) || defined(XRT_DOXYGEN)
+#define T_BUILDER_DAEMON
+#endif
+
 #if defined(XRT_BUILD_DRIVER_REMOTE) || defined(XRT_DOXYGEN)
 #define T_BUILDER_REMOTE
 #endif
@@ -80,6 +84,14 @@ t_builder_lighthouse_create(void);
  */
 struct xrt_builder *
 t_builder_north_star_create(void);
+#endif
+
+#ifdef T_BUILDER_DAEMON
+/*!
+ * Builder for daemon headsets
+ */
+struct xrt_builder *
+t_builder_daemon_create(void);
 #endif
 
 #ifdef T_BUILDER_QWERTY
