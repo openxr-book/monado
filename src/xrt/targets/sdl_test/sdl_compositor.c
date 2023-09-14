@@ -31,6 +31,9 @@
 #include <stdarg.h>
 
 
+const int window_width = 1280;
+const int window_height = 720;
+
 /*
  *
  * Helper functions.
@@ -261,27 +264,19 @@ compositor_init_sys_info(struct sdl_compositor *c, struct sdl_program *sp, struc
 	(void)sys_info->client_d3d_deviceLUID;
 	(void)sys_info->client_d3d_deviceLUID_valid;
 
-	// Get window size and set recommended size to it.
-	const int min = 128;
+	// Set recommended sizes for the views (same than the window's size).
 	const int max = 16 * 1024;
-	int w = 0, h = 0;
-	SDL_GetWindowSize(sp->win, &w, &h);
-	if (w <= min || h <= min) {
-		U_LOG_W("Window size is %ix%i which is smaller then %ix%i upping size.", w, h, min, min);
-		w = min;
-		h = min;
-	}
 
 	// clang-format off
-	sys_info->views[0].recommended.width_pixels  = w;
-	sys_info->views[0].recommended.height_pixels = h;
+	sys_info->views[0].recommended.width_pixels  = window_width;
+	sys_info->views[0].recommended.height_pixels = window_height;
 	sys_info->views[0].recommended.sample_count  = 1;
 	sys_info->views[0].max.width_pixels          = max;
 	sys_info->views[0].max.height_pixels         = max;
 	sys_info->views[0].max.sample_count          = 1;
 
-	sys_info->views[1].recommended.width_pixels  = min; // Second view is minimum
-	sys_info->views[1].recommended.height_pixels = min; // Second view is minimum
+	sys_info->views[1].recommended.width_pixels  = window_width;
+	sys_info->views[1].recommended.height_pixels = window_height;
 	sys_info->views[1].recommended.sample_count  = 1;
 	sys_info->views[1].max.width_pixels          = max;
 	sys_info->views[1].max.height_pixels         = max;
@@ -323,6 +318,10 @@ sdl_compositor_begin_session(struct xrt_compositor *xc, const struct xrt_begin_s
 	 * compositor as a base for a new compositor put desired logic here.
 	 */
 
+	struct sdl_program *sp = from_comp(xc);
+	sdl_create_window(sp, window_width, window_height);
+	sp->need_texture_creation = true;
+
 	return XRT_SUCCESS;
 }
 
@@ -336,6 +335,8 @@ sdl_compositor_end_session(struct xrt_compositor *xc)
 	 * No logic needed here for the null compositor, if using the null
 	 * compositor as a base for a new compositor put desired logic here.
 	 */
+	struct sdl_program *sp = from_comp(xc);
+	sdl_destroy_window(sp);
 
 	return XRT_SUCCESS;
 }
@@ -453,6 +454,12 @@ sdl_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_
 	}
 
 	// Render with SDL.
+	if (sp->need_texture_creation) {
+		// OpenGL textures creation is deferred, until the swapchains to use
+		// for rendering are 'connected' to the layer
+		sdl_create_gl_texture(sp);
+		sp->need_texture_creation = false;
+	}
 	sdl_program_plus_render(sp->spp);
 
 	// When we are submitting to the GPU.

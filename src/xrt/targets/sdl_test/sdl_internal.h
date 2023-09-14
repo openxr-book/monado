@@ -41,8 +41,12 @@ struct sdl_swapchain
 	//! Pointer back to main program.
 	struct sdl_program *sp;
 
-	//! Cached width and height.
+	//! Cached values for texture creation.
 	int w, h;
+	int array_size;
+	int mip_count;
+	int gl_format;
+	int texture_target;
 
 	//! Number of textures in base.base.base.image_count.
 	GLuint textures[XRT_MAX_SWAPCHAIN_IMAGES];
@@ -135,6 +139,7 @@ struct sdl_program
 
 	//! SDL compositor struct.
 	struct sdl_compositor c;
+	bool need_texture_creation;
 
 	//! Created system compositor.
 	struct xrt_system_compositor *xsysc;
@@ -331,6 +336,14 @@ sdl_swapchain_import(struct xrt_compositor *xc,
                      struct xrt_swapchain **out_xsc);
 
 
+/*!
+ * Deferred creation of the swapchains' texture objects, connected to the Vulkan shared texture storages.
+ *
+ * @ingroup sdl_test
+ */
+void
+sdl_create_gl_texture(struct sdl_program *sp);
+
 /*
  *
  * sdl_compositor.c
@@ -407,6 +420,21 @@ sdl_program_plus_render(struct sdl_program_plus *spp);
 void
 sdl_program_plus_destroy(struct sdl_program_plus *spp);
 
+/*!
+ * Create an SDL window, and an OpenGL context.
+ *
+ * @ingroup sdl_test
+ */
+ void
+sdl_create_window(struct sdl_program *sp, int width, int height);
+
+/*!
+ * Destroy an SDL window, and the associated OpenGL context.
+ *
+ * @ingroup sdl_test
+ */
+ void
+sdl_destroy_window(struct sdl_program *sp);
 
 #ifdef __cplusplus
 }
