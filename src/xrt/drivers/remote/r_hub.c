@@ -357,7 +357,7 @@ r_hub_system_devices_destroy(struct xrt_system_devices *xsysd)
 	}
 
 	if (r->rc.fd >= 0) {
-		close(r->rc.fd);
+		socket_close(r->rc.fd);
 		r->rc.fd = -1;
 	}
 

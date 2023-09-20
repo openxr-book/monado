@@ -14,7 +14,6 @@
 
 #include <inttypes.h>
 
-
 static int64_t
 vk_format_to_gl(int64_t format)
 {
@@ -51,62 +50,17 @@ post_init_setup(struct sdl_swapchain *ssc, struct sdl_program *sp, const struct 
 	ssc->sp = sp;
 	ssc->w = (int)info->width;
 	ssc->h = (int)info->height;
-
-
-	sdl_make_current(sp);
+	ssc->mip_count = (int)info->mip_count;
+	ssc->array_size = (int)info->array_size;
+	ssc->gl_format = (int)vk_format_to_gl(info->format);
 
 	GLuint binding_enum = 0;
 	GLuint tex_target = 0;
 	ogl_texture_target_for_swapchain_info(info, &tex_target, &binding_enum);
-
-	uint32_t image_count = ssc->base.base.base.image_count;
-	GLuint gl_format = vk_format_to_gl(info->format);
-
-	glCreateTextures(tex_target, image_count, ssc->textures);
-	CHECK_GL();
-	glCreateMemoryObjectsEXT(image_count, ssc->memory);
-	CHECK_GL();
-
-	for (uint32_t i = 0; i < image_count; i++) {
-		GLint dedicated = ssc->base.base.images[i].use_dedicated_allocation ? GL_TRUE : GL_FALSE;
-		glMemoryObjectParameterivEXT(ssc->memory[i], GL_DEDICATED_MEMORY_OBJECT_EXT, &dedicated);
-		CHECK_GL();
-
-		// The below function consumes the handle, need to reference it.
-		xrt_graphics_buffer_handle_t handle = u_graphics_buffer_ref(ssc->base.base.images[i].handle);
-
-		glImportMemoryFdEXT(               //
-		    ssc->memory[i],                //
-		    ssc->base.base.images[i].size, //
-		    GL_HANDLE_TYPE_OPAQUE_FD_EXT,  //
-		    (GLint)handle);                //
-		CHECK_GL();
-
-		if (info->array_size == 1) {
-			glTextureStorageMem2DEXT( //
-			    ssc->textures[i],     //
-			    info->mip_count,      //
-			    gl_format,            //
-			    info->width,          //
-			    info->height,         //
-			    ssc->memory[i],       //
-			    0);                   //
-		} else {
-			glTextureStorageMem3DEXT( //
-			    ssc->textures[i],     //
-			    info->mip_count,      //
-			    gl_format,            //
-			    info->width,          //
-			    info->height,         //
-			    info->array_size,     //
-			    ssc->memory[i],       //
-			    0);                   //
-		}
-		CHECK_GL();
-	}
-
-	sdl_make_uncurrent(sp);
+	ssc->texture_target = (int)tex_target;
 }
+
+
 
 static void
 really_destroy(struct comp_swapchain *sc)
@@ -172,7 +126,7 @@ sdl_swapchain_create(struct xrt_compositor *xc,
 		return xret;
 	}
 
-	// Init SDL fields and create OpenGL resources.
+	// Init SDL fields.
 	post_init_setup(ssc, sp, info);
 
 	// Correctly setup refcounts, init sets refcount to zero.
@@ -206,11 +160,84 @@ sdl_swapchain_import(struct xrt_compositor *xc,
 		return xret;
 	}
 
-	// Init SDL fields and create OpenGL resources.
+	// Init SDL fields.
 	post_init_setup(ssc, sp, info);
 
 	// Correctly setup refcounts, init sets refcount to zero.
 	xrt_swapchain_reference(out_xsc, &ssc->base.base.base);
 
 	return xret;
+}
+
+void
+sdl_create_gl_texture(struct sdl_program *sp)
+{
+	sdl_make_current(sp);
+
+	// For each layer
+	for (uint32_t layer_idx = 0; layer_idx < sp->c.base.slot.layer_count; layer_idx++) {
+		struct comp_layer *l = &(sp->c.base.slot.layers[layer_idx]);
+
+		// For each swap chain
+		for (uint32_t sc_idx = 0; sc_idx < sizeof(l->sc_array)/sizeof(l->sc_array[0]); sc_idx++) {
+			struct sdl_swapchain *ssc = (struct sdl_swapchain *)(l->sc_array[sc_idx]);
+			if (ssc == NULL) continue; // no more swap chain to set
+
+			// Create the texture objects, and connect them to the shared storage
+			uint32_t image_count = ssc->base.base.base.image_count;
+			glCreateTextures((GLuint)ssc->texture_target, (GLsizei)image_count, ssc->textures);
+			CHECK_GL();
+			glCreateMemoryObjectsEXT((GLsizei)image_count, ssc->memory);
+			CHECK_GL();
+
+			for (uint32_t i = 0; i < image_count; i++) {
+				GLint dedicated = ssc->base.base.images[i].use_dedicated_allocation ? GL_TRUE : GL_FALSE;
+				glMemoryObjectParameterivEXT(ssc->memory[i], GL_DEDICATED_MEMORY_OBJECT_EXT, &dedicated);
+				CHECK_GL();
+
+				// The below function consumes the handle, need to reference it.
+				xrt_graphics_buffer_handle_t handle = u_graphics_buffer_ref(ssc->base.base.images[i].handle);
+
+#ifdef XRT_OS_WINDOWS
+				glImportMemoryWin32HandleEXT(        //
+					ssc->memory[i],                  //
+					ssc->base.base.images[i].size,   //
+					GL_HANDLE_TYPE_OPAQUE_WIN32_EXT, //
+					handle);                         //
+#else
+				glImportMemoryFdEXT(               //
+					ssc->memory[i],                //
+					ssc->base.base.images[i].size, //
+					GL_HANDLE_TYPE_OPAQUE_FD_EXT,  //
+					(GLint)handle);                //
+#endif
+				CHECK_GL();
+
+				if (ssc->array_size == 1) {
+					glTextureStorageMem2DEXT( //
+						ssc->textures[i],     //
+						ssc->mip_count,       //
+						ssc->gl_format,       //
+						ssc->w,               //
+						ssc->h,               //
+						ssc->memory[i],       //
+						0);                   //
+				} else {
+					glTextureStorageMem3DEXT( //
+						ssc->textures[i],     //
+						ssc->mip_count,       //
+						ssc->gl_format,       //
+						ssc->w,               //
+						ssc->h,               //
+						ssc->array_size,      //
+						ssc->memory[i],       //
+						0);                   //
+				}
+				CHECK_GL();
+			}
+
+		}
+	}
+
+	sdl_make_uncurrent(sp);
 }

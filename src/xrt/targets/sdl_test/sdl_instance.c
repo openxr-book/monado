@@ -77,6 +77,8 @@ sdl_instance_create_system(struct xrt_instance *xinst,
 
 	sdl_compositor_create_system(sp, out_xsysc);
 
+	ST_INFO(sp, "Ready to receive a client connection...");
+
 	return XRT_SUCCESS;
 }
 
