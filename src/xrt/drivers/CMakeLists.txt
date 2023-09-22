@@ -204,6 +204,28 @@ if(XRT_BUILD_DRIVER_REALSENSE)
 	list(APPEND ENABLED_HEADSET_DRIVERS rs)
 endif()
 
+if(XRT_BUILD_DRIVER_XVISIO)
+add_library(
+	drv_xvisio STATIC
+	xvisio/xv_xr50.cpp
+	xvisio/xv_prober.c
+	xvisio/xv_interface.h
+)
+
+target_link_libraries(
+	drv_xvisio PRIVATE 
+	xrt-interfaces
+	aux_util
+	${xvsdk_LIBRARIES}
+)
+
+include_directories(
+	${xvsdk_INCLUDE_DIRS}/xvsdk
+)
+
+list(APPEND ENABLED_HEADSET_DRIVERS xvisio)
+endif()
+
 if(XRT_BUILD_DRIVER_REMOTE)
 	add_library(
 		drv_remote STATIC
