@@ -10,6 +10,8 @@
 
 #include "xrt/xrt_device.h"
 #include "math/m_relation_history.h"
+#include "math/m_mathinclude.h"
+#include "math/m_api.h"
 
 #include "os/os_time.h"
 #include "os/os_threading.h"
@@ -37,6 +39,8 @@ DEBUG_GET_ONCE_LOG_OPTION(xvisio_xr50_fs_log, "XVISIO_XR50_FS_LOG", U_LOGGING_WA
 #define XV_XR50_TRACE(xvisio, ...) U_LOG_XDEV_IFL_T(&xvisio->base, xvisio->log_level, __VA_ARGS__)
 #define XV_XR50_DEBUG(xvisio, ...) U_LOG_XDEV_IFL_D(&xvisio->base, xvisio->log_level, __VA_ARGS__)
 #define XV_XR50_ERROR(xvisio, ...) U_LOG_XDEV_IFL_E(&xvisio->base, xvisio->log_level, __VA_ARGS__)
+
+#define DEG_TO_RAD(D) ((D)*M_PI / 180.)
 
 struct xvisio_xr50
 {
@@ -96,7 +100,7 @@ xvisio_xr50_destroy(struct xrt_device *xdev)
 }
 
 static int
-push_position_and_orientation(struct xvisio_xr50 *xv_xr50)
+push_position_and_orientation(struct xvisio_xr50 *xv_xr50, struct xrt_quat *rotation_quat)
 {
 	xv::Pose pose;
 	// need to experiment with this, just took the value from the xvisio demo code
@@ -120,22 +124,31 @@ push_position_and_orientation(struct xvisio_xr50 *xv_xr50)
 
 		struct xrt_space_relation relation;
 
+		struct xrt_quat xr50_orientation;
+		xr50_orientation.x = orientation_quat[0];
+		xr50_orientation.y = orientation_quat[1];
+		xr50_orientation.z = orientation_quat[2];
+		xr50_orientation.w = orientation_quat[3];
+
+		struct xrt_quat corrected_coord_system_quat;
+		math_quat_rotate(&xr50_orientation, rotation_quat, &corrected_coord_system_quat);
+
  		// Rotation
-		relation.pose.orientation.x = orientation_quat[0];
-		relation.pose.orientation.y = orientation_quat[1];
-		relation.pose.orientation.z = orientation_quat[2];
-		relation.pose.orientation.w = orientation_quat[3];
-		relation.angular_velocity.x = angular_velocity[0];
-		relation.angular_velocity.y = angular_velocity[1];
-		relation.angular_velocity.z = angular_velocity[2];
+		relation.pose.orientation.x = corrected_coord_system_quat.x;
+		relation.pose.orientation.y = -corrected_coord_system_quat.y;
+		relation.pose.orientation.z = -corrected_coord_system_quat.z;
+		relation.pose.orientation.w = corrected_coord_system_quat.w;
+		// relation.angular_velocity.x = angular_velocity[0];
+		// relation.angular_velocity.y = angular_velocity[1];
+		// relation.angular_velocity.z = angular_velocity[2];
 
  		// Position
 		relation.pose.position.x = translation[0];
-		relation.pose.position.y = translation[1];
-		relation.pose.position.z = translation[2];
-		relation.linear_velocity.x = linear_velocity[0];
-		relation.linear_velocity.y = linear_velocity[1];
-		relation.linear_velocity.z = linear_velocity[2];
+		relation.pose.position.y = -translation[1];
+		relation.pose.position.z = -translation[2];
+		// relation.linear_velocity.x = linear_velocity[0];
+		// relation.linear_velocity.y = -linear_velocity[1];
+		// relation.linear_velocity.z = -linear_velocity[2];
 
 		relation.relation_flags = (enum xrt_space_relation_flags)(
 		    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_POSITION_VALID_BIT |
@@ -169,13 +182,18 @@ xvisio_run_position_and_orientation_thread(void *ptr)
         xv_xr50->xr50->slam()->start(xv::Slam::Mode::Mixed);
     }
 
+	// to figure out the correct rotations an ancient technique of brute-force is applied
+	const struct xrt_vec3 z_axis = XRT_VEC3_UNIT_Z;
+	struct xrt_quat rotation_quat = XRT_QUAT_IDENTITY;
+	math_quat_from_angle_vector(DEG_TO_RAD(180), &z_axis, &rotation_quat);
+
 	os_thread_helper_lock(&xv_xr50->oth);
 
 	while (os_thread_helper_is_running_locked(&xv_xr50->oth)) {
 
 		os_thread_helper_unlock(&xv_xr50->oth);
 
-		int ret = push_position_and_orientation(xv_xr50);
+		int ret = push_position_and_orientation(xv_xr50, &rotation_quat);
 		if (ret < 0) {
 			return NULL;
 		}
@@ -259,7 +277,7 @@ xvisio_xr50_create(void)
 
 	m_relation_history_create(&xvisio_xr50->relation_hist);
 
-	// xvisio_xr50->log_level = debug_get_log_option_xvisio_xr50_log();
+	xvisio_xr50->log_level = debug_get_log_option_xvisio_xr50_log();
 	set_xvisio_log_level();
 
 	xvisio_xr50->base.update_inputs = xvisio_xr50_update_inputs;
