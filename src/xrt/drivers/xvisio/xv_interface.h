@@ -13,9 +13,9 @@
 extern "C" {
 #endif
 
-// // Stereolabs ZED Mini
-// #define SLZM_VID 0x2B03
-// #define SLZM_PID 0xF681
+// Xvisio SeerSense XR50
+#define XR50_VID 0x040E
+#define XR50_PID 0xF408
 
 struct xrt_auto_prober *
 xvisio_create_auto_prober(void);
