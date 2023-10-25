@@ -286,6 +286,11 @@ handle_non_null(struct oxr_instance *inst, struct oxr_logger *log, const char *n
 	ENTRY_IF_EXT(xrGetD3D12GraphicsRequirementsKHR, KHR_D3D12_enable);
 #endif // OXR_HAVE_KHR_D3D12_enable
 
+#ifdef OXR_HAVE_KHR_android_surface_swapchain
+#ifdef XRT_OS_ANDROID
+	ENTRY_IF_EXT(xrCreateSwapchainAndroidSurfaceKHR, KHR_android_surface_swapchain);
+#endif // XRT_OS_ANDROID
+#endif // OXR_HAVE_KHR_android_surface_swapchain
 	/*
 	 * Not logging here because there's no need to loudly advertise
 	 * which extensions the loader knows about (it calls this on

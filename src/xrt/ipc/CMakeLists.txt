@@ -106,6 +106,8 @@ if(ANDROID)
 		ipc_android STATIC
 		android/ipc_client_android.cpp
 		android/ipc_client_android.h
+		android/surface_swapchain_manager.cpp
+		android/surface_swapchain_manager.h
 		android/org.freedesktop.monado.ipc.cpp
 		android/org.freedesktop.monado.ipc.hpp
 		android/org.freedesktop.monado.ipc.impl.hpp

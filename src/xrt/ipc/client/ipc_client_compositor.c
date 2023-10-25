@@ -13,6 +13,7 @@
 #include "xrt/xrt_defines.h"
 #include "xrt/xrt_config_os.h"
 
+#include "android/ipc_client_android.h"
 
 #include "os/os_time.h"
 
@@ -49,6 +50,8 @@
 
 //! Define to test the loopback allocator.
 #undef IPC_USE_LOOPBACK_IMAGE_ALLOCATOR
+
+#define INVALID_SWAPCHAIN_ID (-1)
 
 /*!
  * Client proxy for an xrt_compositor_native implementation over IPC.
@@ -305,6 +308,7 @@ swapchain_server_create(struct ipc_client_compositor *icc,
 	ics->base.base.destroy = ipc_compositor_swapchain_destroy;
 	ics->base.base.reference.count = 1;
 	ics->base.limited_unique_id = u_limited_unique_id_get();
+	ics->base.base.is_client = false;
 	ics->icc = icc;
 	ics->id = handle;
 
@@ -362,6 +366,7 @@ swapchain_server_import(struct ipc_client_compositor *icc,
 	ics->base.base.release_image = ipc_compositor_swapchain_release_image;
 	ics->base.base.destroy = ipc_compositor_swapchain_destroy;
 	ics->base.base.reference.count = 1;
+	ics->base.base.is_client = false;
 	ics->base.limited_unique_id = u_limited_unique_id_get();
 	ics->icc = icc;
 	ics->id = id;
@@ -432,6 +437,27 @@ ipc_compositor_swapchain_create(struct xrt_compositor *xc,
 		r = swapchain_allocator_create(icc, xina, info, out_xsc);
 	}
 
+	return r;
+}
+
+static xrt_result_t
+ipc_compositor_swapchain_create_android_surface(struct xrt_compositor *xc,
+                                                const struct xrt_swapchain_create_info *info,
+                                                struct xrt_swapchain **out_xsc,
+                                                jobject *out_surface)
+{
+	struct ipc_client_compositor *icc = ipc_client_compositor(xc);
+
+	ipc_client_android_acquire_android_surface(info->width, info->height, icc->ipc_c->ica, out_xsc, out_surface);
+	xrt_result_t r;
+
+	if (out_surface != NULL) {
+		r = XRT_SUCCESS;
+	} else {
+		r = XRT_ERROR_ANDROID_SURFACE_SWAPCHAIN;
+		IPC_ERROR(icc->ipc_c, "Failed to create surface , r = %d", r);
+	}
+	IPC_INFO(icc->ipc_c, "got the Android Surface = 0x%lx", (long)(*out_surface));
 	return r;
 }
 
@@ -569,6 +595,20 @@ ipc_compositor_layer_begin(struct xrt_compositor *xc, const struct xrt_layer_fra
 	return XRT_SUCCESS;
 }
 
+static int
+get_ipc_client_swapchain_id(struct ipc_client_swapchain *icsc)
+{
+	if (icsc == NULL) {
+		return INVALID_SWAPCHAIN_ID;
+	}
+	if (icsc->base.base.is_client) {
+		return 0;
+	} else {
+		return icsc->id;
+	}
+	return INVALID_SWAPCHAIN_ID;
+}
+
 static xrt_result_t
 ipc_compositor_layer_stereo_projection(struct xrt_compositor *xc,
                                        struct xrt_device *xdev,
@@ -587,10 +627,10 @@ ipc_compositor_layer_stereo_projection(struct xrt_compositor *xc,
 	struct ipc_client_swapchain *r = ipc_client_swapchain(r_xsc);
 
 	layer->xdev_id = 0; //! @todo Real id.
-	layer->swapchain_ids[0] = l->id;
-	layer->swapchain_ids[1] = r->id;
-	layer->swapchain_ids[2] = -1;
-	layer->swapchain_ids[3] = -1;
+	layer->swapchain_ids[0] = get_ipc_client_swapchain_id(l);
+	layer->swapchain_ids[1] = get_ipc_client_swapchain_id(r);
+	layer->swapchain_ids[2] = INVALID_SWAPCHAIN_ID;
+	layer->swapchain_ids[3] = INVALID_SWAPCHAIN_ID;
 	layer->data = *data;
 
 	// Increment the number of layers.
@@ -621,10 +661,10 @@ ipc_compositor_layer_stereo_projection_depth(struct xrt_compositor *xc,
 	struct ipc_client_swapchain *r_d = ipc_client_swapchain(r_d_xsc);
 
 	layer->xdev_id = 0; //! @todo Real id.
-	layer->swapchain_ids[0] = l->id;
-	layer->swapchain_ids[1] = r->id;
-	layer->swapchain_ids[2] = l_d->id;
-	layer->swapchain_ids[3] = r_d->id;
+	layer->swapchain_ids[0] = get_ipc_client_swapchain_id(l);
+	layer->swapchain_ids[1] = get_ipc_client_swapchain_id(r);
+	layer->swapchain_ids[2] = get_ipc_client_swapchain_id(l_d);
+	layer->swapchain_ids[3] = get_ipc_client_swapchain_id(r_d);
 	layer->data = *data;
 
 	// Increment the number of layers.
@@ -650,7 +690,7 @@ handle_layer(struct xrt_compositor *xc,
 	struct ipc_client_swapchain *ics = ipc_client_swapchain(xsc);
 
 	layer->xdev_id = 0; //! @todo Real id.
-	layer->swapchain_ids[0] = ics->id;
+	layer->swapchain_ids[0] = get_ipc_client_swapchain_id(ics);
 	layer->swapchain_ids[1] = -1;
 	layer->swapchain_ids[2] = -1;
 	layer->swapchain_ids[3] = -1;
@@ -804,6 +844,7 @@ ipc_compositor_init(struct ipc_client_compositor *icc, struct xrt_compositor_nat
 {
 	icc->base.base.get_swapchain_create_properties = ipc_compositor_get_swapchain_create_properties;
 	icc->base.base.create_swapchain = ipc_compositor_swapchain_create;
+	icc->base.base.create_swapchain_android_surface = ipc_compositor_swapchain_create_android_surface;
 	icc->base.base.import_swapchain = ipc_compositor_swapchain_import;
 	icc->base.base.create_semaphore = ipc_compositor_semaphore_create;
 	icc->base.base.begin_session = ipc_compositor_begin_session;

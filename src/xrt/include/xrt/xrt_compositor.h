@@ -13,6 +13,7 @@
 
 #pragma once
 
+#include <jni.h>
 #include "xrt/xrt_limits.h"
 #include "xrt/xrt_defines.h"
 #include "xrt/xrt_handles.h"
@@ -302,6 +303,8 @@ struct xrt_layer_data
 	 */
 	enum xrt_layer_composition_flags flags;
 
+	uint64_t client_sc_identity;
+
 	/*!
 	 * Whether the main compositor should flip the direction of y when
 	 * rendering.
@@ -411,6 +414,8 @@ struct xrt_swapchain
 	 */
 	uint32_t image_count;
 
+	bool is_client;
+
 	/*!
 	 * @ref dec_image_use must have been called as often as @ref inc_image_use.
 	 */
@@ -469,6 +474,7 @@ struct xrt_swapchain
 	 * See xrReleaseSwapchainImage, state tracker needs to track index.
 	 */
 	xrt_result_t (*release_image)(struct xrt_swapchain *xsc, uint32_t index);
+
 };
 
 /*!
@@ -1260,6 +1266,22 @@ struct xrt_compositor
 	 */
 	xrt_result_t (*set_thread_hint)(struct xrt_compositor *xc, enum xrt_thread_hint hint, uint32_t thread_id);
 
+
+	/*!
+	 * @name Function pointers for swapchain and android surface creation
+	 * @{
+	 */
+	/*!
+	 * Create a swapchain with a surface.
+	 *
+	 * The pointer pointed to by @p out_xsc has to either be NULL or a valid
+	 * @ref xrt_swapchain pointer. If there is a valid @ref xrt_swapchain
+	 * pointed by the pointed pointer it will have it reference decremented.
+	 */
+	xrt_result_t (*create_swapchain_android_surface)(struct xrt_compositor *xc,
+	                                                 const struct xrt_swapchain_create_info *info,
+	                                                 struct xrt_swapchain **out_xsc,
+	                                                 jobject *out_surface);
 	/*! @} */
 };
 
@@ -1296,6 +1318,22 @@ xrt_comp_create_swapchain(struct xrt_compositor *xc,
                           struct xrt_swapchain **out_xsc)
 {
 	return xc->create_swapchain(xc, info, out_xsc);
+}
+
+/*!
+ * @copydoc xrt_compositor::create_swapchain_android_surface
+ *
+ * Helper for calling through the function pointer.
+ *
+ * @public @memberof xrt_compositor
+ */
+static inline xrt_result_t
+xrt_comp_create_swapchain_android_surface(struct xrt_compositor *xc,
+                                          const struct xrt_swapchain_create_info *info,
+                                          struct xrt_swapchain **out_xsc,
+                                          jobject *out_surface)
+{
+	return xc->create_swapchain_android_surface(xc, info, out_xsc, out_surface);
 }
 
 /*!

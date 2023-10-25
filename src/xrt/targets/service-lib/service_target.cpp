@@ -21,6 +21,8 @@
 #include <android/native_window_jni.h>
 
 #include "android/android_globals.h"
+#include "android/org.freedesktop.monado.ipc.hpp"
+#include "android/surface_swapchain_manager.h"
 
 #include <chrono>
 #include <memory>
@@ -184,4 +186,29 @@ Java_org_freedesktop_monado_ipc_MonadoImpl_nativeShutdownServer(JNIEnv *env, job
 	jni::Object monadoImpl(thiz);
 
 	return IpcServerHelper::instance().shutdownServer();
+}
+
+
+extern "C" JNIEXPORT jint JNICALL
+Java_org_freedesktop_monado_ipc_SurfaceSwapchainManager_nativeAcquireTextureId(JNIEnv *env, jobject thiz)
+{
+	jni::init(env);
+
+	NativeSurfaceSwapchainManager &manager = NativeSurfaceSwapchainManager::getInstance();
+	manager.setJavaSurfaceSwapchainManager(thiz);
+	int32_t texture_id = manager.acquireTextureId();
+	// FIXED ME : update tex image first to init the jvm
+	manager.updateTexImage(texture_id);
+	U_LOG_D("nativeGetTextureId = %d", texture_id);
+	return texture_id;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_org_freedesktop_monado_ipc_SurfaceSwapchainManager_nativeReleaseTextureId(JNIEnv *env, jobject thiz, int textureId)
+{
+	jni::init(env);
+
+	NativeSurfaceSwapchainManager &manager = NativeSurfaceSwapchainManager::getInstance();
+	manager.releaseTextureId(textureId);
+	U_LOG_D("nativeReleaseTextureId = %d", textureId);
 }

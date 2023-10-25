@@ -63,6 +63,20 @@ ipc_client_android_blocking_connect(struct ipc_client_android *ica);
 void
 ipc_client_android_destroy(struct ipc_client_android **ptr_ica);
 
+/**
+ * @brief Acquire Android Surface from IPC server
+ *
+ * @param width, the width of Surface
+ * @param height, the height of Surface
+ * @param ica
+ * @return xrt_swapchain_android_surface
+ *
+ * @public @memberof ipc_client_android
+ */
+void
+ipc_client_android_acquire_android_surface(
+    int width, int height, struct ipc_client_android *ica, struct xrt_swapchain **out_xsc, void *out_surface);
+
 #ifdef __cplusplus
 }
 #endif

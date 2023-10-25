@@ -11,8 +11,10 @@
 
 #include "org.freedesktop.monado.ipc.hpp"
 
+#include "xrt/xrt_compositor.h"
 #include "xrt/xrt_config_android.h"
 #include "util/u_logging.h"
+#include "util/u_misc.h"
 
 #include "android/android_load_class.hpp"
 
@@ -29,6 +31,15 @@ struct ipc_client_android
 
 	Activity activity{};
 	Client client{nullptr};
+};
+
+struct android_surface_swapchain
+{
+	struct xrt_swapchain_native base;
+
+	struct ipc_client_android *ica;
+
+	jobject android_surface;
 };
 
 ipc_client_android::~ipc_client_android()
@@ -99,4 +110,43 @@ ipc_client_android_destroy(struct ipc_client_android **ptr_ica)
 	}
 	delete ica;
 	*ptr_ica = NULL;
+}
+
+static void
+ipc_client_android_release_android_surface(struct xrt_swapchain *xsc)
+{
+	struct android_surface_swapchain *assc = (struct android_surface_swapchain *)(xsc);
+	struct ipc_client_android *ica = assc->ica;
+	try {
+		ica->client.releaseSurface((long)(assc));
+		jni::env()->DeleteGlobalRef(assc->android_surface);
+	} catch (std::exception const &e) {
+		U_LOG_E("Failure to get android surface: %s", e.what());
+	}
+	U_LOG_I("ipc_client_android_release_android_surface");
+	free(xsc);
+}
+
+
+void
+ipc_client_android_acquire_android_surface(
+    int width, int height, struct ipc_client_android *ica, struct xrt_swapchain **out_xsc, void *out_surface)
+{
+	struct android_surface_swapchain *assc = U_TYPED_CALLOC(struct android_surface_swapchain);
+	assc->ica = ica;
+	assc->base.base.destroy = ipc_client_android_release_android_surface;
+	struct xrt_swapchain *xsc = &assc->base.base;
+	try {
+		xsc->is_client = true;
+		jni::Object surface_obj = ica->client.acquireSurface((long)(assc), width, height);
+		assc->android_surface = jni::env()->NewGlobalRef(surface_obj.getHandle());
+		*out_xsc = xsc;
+		U_LOG_I("assc->android_surface = 0x%lx", (long)(assc->android_surface));
+		*(uint64_t *)out_surface = (uint64_t)assc->android_surface;
+	} catch (std::exception const &e) {
+		out_surface = NULL;
+		*out_xsc = NULL;
+		U_LOG_E("Failure to get android surface: %s", e.what());
+	}
+	U_LOG_D("get android surface by out_surface = 0x%lx", (long)(*out_surface));
 }
