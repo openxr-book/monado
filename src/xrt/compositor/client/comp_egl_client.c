@@ -209,7 +209,7 @@ create_context(
 	eglBindAPI(api_type);
 
 	size_t attrc = 0;
-	EGLint attrs[7] = {0};
+	EGLint attrs[9] = {0};
 
 	attrs[attrc++] = EGL_CONTEXT_MAJOR_VERSION;
 	attrs[attrc++] = 3;
@@ -219,6 +219,12 @@ create_context(
 	if (api_type == EGL_OPENGL_API) {
 		attrs[attrc++] = EGL_CONTEXT_OPENGL_PROFILE_MASK;
 		attrs[attrc++] = EGL_CONTEXT_OPENGL_COMPATIBILITY_PROFILE_BIT;
+	}
+
+	EGLint strategy;
+	if (eglQueryContext(display, app_context, EGL_CONTEXT_OPENGL_RESET_NOTIFICATION_STRATEGY_EXT, &strategy)) {
+		attrs[attrc++] = EGL_CONTEXT_OPENGL_RESET_NOTIFICATION_STRATEGY_EXT;
+		attrs[attrc++] = strategy;
 	}
 
 	attrs[attrc++] = EGL_NONE;
