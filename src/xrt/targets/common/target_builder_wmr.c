@@ -271,43 +271,51 @@ wmr_open_system(struct xrt_builder *xb,
 	assert(xret_unlock == XRT_SUCCESS);
 	(void)xret_unlock;
 
-	struct u_system_devices *usysd = u_system_devices_allocate();
+	struct u_system_devices_static *usysds = u_system_devices_static_allocate();
+	struct xrt_system_devices *xsysd = &usysds->base.base;
 
-	usysd->base.xdevs[usysd->base.xdev_count++] = head;
+	xsysd->xdevs[xsysd->xdev_count++] = head;
 	if (left != NULL) {
-		usysd->base.xdevs[usysd->base.xdev_count++] = left;
+		xsysd->xdevs[xsysd->xdev_count++] = left;
 	}
 	if (right != NULL) {
-		usysd->base.xdevs[usysd->base.xdev_count++] = right;
+		xsysd->xdevs[xsysd->xdev_count++] = right;
 	}
 	if (ht_left != NULL) {
-		usysd->base.xdevs[usysd->base.xdev_count++] = ht_left;
+		xsysd->xdevs[xsysd->xdev_count++] = ht_left;
 	}
 	if (ht_right != NULL) {
-		usysd->base.xdevs[usysd->base.xdev_count++] = ht_right;
+		xsysd->xdevs[xsysd->xdev_count++] = ht_right;
 	}
 
-	usysd->base.roles.head = head;
-	if (left != NULL) {
-		usysd->base.roles.left = left;
-	} else {
-		usysd->base.roles.left = ht_left;
+	// Use hand tracking if no controllers.
+	if (left == NULL) {
+		left = ht_left;
 	}
-	if (right != NULL) {
-		usysd->base.roles.right = right;
-	} else {
-		usysd->base.roles.right = ht_right;
+	if (right == NULL) {
+		right = ht_right;
 	}
 
-	// Find hand tracking devices.
-	usysd->base.roles.hand_tracking.left =
-	    u_system_devices_get_ht_device(usysd, XRT_INPUT_GENERIC_HAND_TRACKING_LEFT);
-	usysd->base.roles.hand_tracking.right =
-	    u_system_devices_get_ht_device(usysd, XRT_INPUT_GENERIC_HAND_TRACKING_RIGHT);
+
+	// Assign to role(s).
+	xsysd->static_roles.head = head;
+	xsysd->static_roles.hand_tracking.left = ht_left;
+	xsysd->static_roles.hand_tracking.right = ht_right;
+
+	u_system_devices_static_finalize( //
+	    usysds,                       // usysds
+	    left,                         // left
+	    right);                       // right
 
 	// Create space overseer last once all devices set.
 	struct xrt_space_overseer *xso = NULL;
-	u_builder_create_space_overseer(&usysd->base, &xso);
+	u_builder_create_space_overseer_legacy( //
+	    head,                               // head
+	    left,                               // left
+	    right,                              // right
+	    xsysd->xdevs,                       // xdevs
+	    xsysd->xdev_count,                  // xdev_count
+	    &xso);                              // out_xso
 	assert(xso != NULL);
 
 
@@ -315,7 +323,7 @@ wmr_open_system(struct xrt_builder *xb,
 	 * Output.
 	 */
 
-	*out_xsysd = &usysd->base;
+	*out_xsysd = xsysd;
 	*out_xso = xso;
 
 	return XRT_SUCCESS;

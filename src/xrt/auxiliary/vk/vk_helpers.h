@@ -439,6 +439,72 @@ struct vk_buffer
 
 /*
  *
+ * Helper defines.
+ *
+ */
+
+/*!
+ * This define will error if `RET` is not `VK_SUCCESS`, printing out that the
+ * @p FUNC_STR string has failed, then returns @p RET. The implicit argument
+ * @p vk will be used for the @ref vk_print_result call.
+ *
+ * @param RET      The @p VkResult to check.
+ * @param FUNC_STR String literal with the function name, used for logging.
+ *
+ * @ingroup aux_vk
+ */
+#define VK_CHK_AND_RET(RET, FUNC_STR)                                                                                  \
+	do {                                                                                                           \
+		VkResult _ret = RET;                                                                                   \
+		if (_ret != VK_SUCCESS) {                                                                              \
+			vk_print_result(vk, _ret, FUNC_STR, __FILE__, __LINE__);                                       \
+			return _ret;                                                                                   \
+		}                                                                                                      \
+	} while (false)
+
+/*!
+ * This define will error if @p RET is not @p VK_SUCCESS, printing out that the
+ * @p FUNC_STR string has failed, then returns false. The implicit argument
+ * @p vk will be used for the @ref vk_print_result call.
+ *
+ * @param RET      The @p VkResult to check.
+ * @param FUNC_STR String literal with the function name, used for logging.
+ * @param TO_RET   Value to return, upon error
+ *
+ * @ingroup aux_vk
+ */
+#define VK_CHK_WITH_RET(RET, FUNC_STR, TO_RET)                                                                         \
+	do {                                                                                                           \
+		VkResult _ret = RET;                                                                                   \
+		if (_ret != VK_SUCCESS) {                                                                              \
+			vk_print_result(vk, _ret, FUNC_STR, __FILE__, __LINE__);                                       \
+			return TO_RET;                                                                                 \
+		}                                                                                                      \
+	} while (false)
+
+/*!
+ * This define will error if @p RET is not @p VK_SUCCESS, printing out that the
+ * @p FUNC_STR string has failed, then goto @p GOTO. The implicit argument @p vk
+ * will be used for the @ref vk_print_result call.
+ *
+ * @param RET      The @p VkResult to check.
+ * @param FUNC_STR String literal with the function name, used for logging.
+ * @param GOTO     Label to jump to, upon error
+ *
+ * @ingroup aux_vk
+ */
+#define VK_CHK_WITH_GOTO(RET, FUNC_STR, GOTO)                                                                          \
+	do {                                                                                                           \
+		VkResult _ret = RET;                                                                                   \
+		if (_ret != VK_SUCCESS) {                                                                              \
+			vk_print_result(vk, _ret, FUNC_STR, __FILE__, __LINE__);                                       \
+			goto GOTO;                                                                                     \
+		}                                                                                                      \
+	} while (false)
+
+
+/*
+ *
  * String helper functions.
  *
  */
@@ -528,60 +594,6 @@ xrt_swapchain_usage_flag_string(enum xrt_swapchain_usage_bits bits, bool null_on
 #define VK_WARN(d, ...) U_LOG_IFL_W(d->log_level, __VA_ARGS__)
 #define VK_ERROR(d, ...) U_LOG_IFL_E(d->log_level, __VA_ARGS__)
 
-/*!
- * @brief Check a Vulkan VkResult, writing an error to the log and returning true if not VK_SUCCESS
- *
- * @param fun a string literal with the name of the Vulkan function, for logging purposes.
- * @param res a VkResult from that function.
- * @param file a string literal with the source code filename, such as from __FILE__
- * @param line a source code line number, such as from __LINE__
- *
- * @see vk_check_error, vk_check_error_with_free which wrap this for easier usage.
- *
- * @ingroup aux_vk
- */
-XRT_CHECK_RESULT bool
-vk_has_error(VkResult res, const char *fun, const char *file, int line);
-
-/*!
- * @def vk_check_error
- * @brief Perform checking of a Vulkan result, returning in case it is not VK_SUCCESS.
- *
- * @param fun A string literal with the name of the Vulkan function, for logging purposes.
- * @param res a VkResult from that function.
- * @param ret value to return, if any, upon error
- *
- * @see vk_has_error which is wrapped by this macro
- *
- * @ingroup aux_vk
- */
-#define vk_check_error(fun, res, ret)                                                                                  \
-	do {                                                                                                           \
-		if (vk_has_error(res, fun, __FILE__, __LINE__))                                                        \
-			return ret;                                                                                    \
-	} while (0)
-
-/*!
- * @def vk_check_error_with_free
- * @brief Perform checking of a Vulkan result, freeing an allocation and returning in case it is not VK_SUCCESS.
- *
- * @param fun A string literal with the name of the Vulkan function, for logging purposes.
- * @param res a VkResult from that function.
- * @param ret value to return, if any, upon error
- * @param to_free expression to pass to `free()` upon error
- *
- * @see vk_has_error which is wrapped by this macro
- *
- * @ingroup aux_vk
- */
-#define vk_check_error_with_free(fun, res, ret, to_free)                                                               \
-	do {                                                                                                           \
-		if (vk_has_error(res, fun, __FILE__, __LINE__)) {                                                      \
-			free(to_free);                                                                                 \
-			return ret;                                                                                    \
-		}                                                                                                      \
-	} while (0)
-
 
 /*
  *
@@ -623,6 +635,15 @@ vk_name_object(struct vk_bundle *vk, VkDebugReportObjectTypeEXT object_type, uin
  * Printing helpers, in the vk_print.c file.
  *
  */
+
+/*!
+ * Print the result of a function, info level if ret == `VK_SUCCESS` and error
+ * level otherwise. Also prints file and line.
+ *
+ * @ingroup aux_vk
+ */
+void
+vk_print_result(struct vk_bundle *vk, VkResult ret, const char *fun, const char *file, int line);
 
 /*!
  * Print device information to the logger at the given logging level,
@@ -836,6 +857,7 @@ vk_select_physical_device(struct vk_bundle *vk, int forced_index);
  */
 struct vk_device_features
 {
+	bool shader_image_gather_extended;
 	bool shader_storage_image_write_without_format;
 	bool null_descriptor;
 	bool timeline_semaphore;

@@ -99,9 +99,12 @@ legacy_estimate_system(struct xrt_builder *xb,
                        struct xrt_prober *xp,
                        struct xrt_builder_estimate *estimate)
 {
-	estimate->maybe.head = true;
-	estimate->maybe.left = true;
-	estimate->maybe.right = true;
+	// If no driver is enabled, there is no way to create a HMD
+	bool may_create_hmd = xb->driver_identifier_count > 0;
+
+	estimate->maybe.head = may_create_hmd;
+	estimate->maybe.left = may_create_hmd;
+	estimate->maybe.right = may_create_hmd;
 	estimate->priority = -20;
 
 	return XRT_SUCCESS;
@@ -114,7 +117,6 @@ legacy_open_system(struct xrt_builder *xb,
                    struct xrt_system_devices **out_xsysd,
                    struct xrt_space_overseer **out_xso)
 {
-	struct u_system_devices *usysd = u_system_devices_allocate();
 	xrt_result_t xret;
 	int ret;
 
@@ -131,18 +133,23 @@ legacy_open_system(struct xrt_builder *xb,
 		return xret;
 	}
 
-	ret = xrt_prober_select(xp, usysd->base.xdevs, ARRAY_SIZE(usysd->base.xdevs));
+	// Use the static system devices helper, no dynamic roles.
+	struct u_system_devices_static *usysds = u_system_devices_static_allocate();
+	struct xrt_system_devices *xsysd = &usysds->base.base;
+
+	ret = xrt_prober_select(xp, xsysd->xdevs, ARRAY_SIZE(xsysd->xdevs));
 	if (ret < 0) {
-		u_system_devices_destroy(&usysd);
+		xrt_system_devices_destroy(&xsysd);
+		return XRT_ERROR_DEVICE_CREATION_FAILED;
 	}
 
 	// Count the xdevs.
-	for (uint32_t i = 0; i < ARRAY_SIZE(usysd->base.xdevs); i++) {
-		if (usysd->base.xdevs[i] == NULL) {
+	for (uint32_t i = 0; i < ARRAY_SIZE(xsysd->xdevs); i++) {
+		if (xsysd->xdevs[i] == NULL) {
 			break;
 		}
 
-		usysd->base.xdev_count++;
+		xsysd->xdev_count++;
 	}
 
 
@@ -150,32 +157,50 @@ legacy_open_system(struct xrt_builder *xb,
 	 * Setup the roles.
 	 */
 
-	int head, left, right;
-	u_device_assign_xdev_roles(usysd->base.xdevs, usysd->base.xdev_count, &head, &left, &right);
+	int head_idx, left_idx, right_idx;
+	u_device_assign_xdev_roles(xsysd->xdevs, xsysd->xdev_count, &head_idx, &left_idx, &right_idx);
 
-	if (head >= 0) {
-		usysd->base.roles.head = usysd->base.xdevs[head];
+	struct xrt_device *head = NULL;
+	struct xrt_device *left = NULL, *right = NULL;
+	struct xrt_device *left_ht = NULL, *right_ht = NULL;
+
+	if (head_idx >= 0) {
+		head = xsysd->xdevs[head_idx];
 	}
-	if (left >= 0) {
-		usysd->base.roles.left = usysd->base.xdevs[left];
+	if (left_idx >= 0) {
+		left = xsysd->xdevs[left_idx];
 	}
-	if (right >= 0) {
-		usysd->base.roles.right = usysd->base.xdevs[right];
+	if (right_idx >= 0) {
+		right = xsysd->xdevs[right_idx];
 	}
 
 	// Find hand tracking devices.
-	usysd->base.roles.hand_tracking.left =
-	    u_system_devices_get_ht_device(usysd, XRT_INPUT_GENERIC_HAND_TRACKING_LEFT);
-	usysd->base.roles.hand_tracking.right =
-	    u_system_devices_get_ht_device(usysd, XRT_INPUT_GENERIC_HAND_TRACKING_RIGHT);
+	left_ht = u_system_devices_get_ht_device_left(xsysd);
+	right_ht = u_system_devices_get_ht_device_right(xsysd);
+
+	// Assign to role(s).
+	xsysd->static_roles.head = head;
+	xsysd->static_roles.hand_tracking.left = left_ht;
+	xsysd->static_roles.hand_tracking.right = right_ht;
+
+	u_system_devices_static_finalize( //
+	    usysds,                       // usysds
+	    left,                         // left
+	    right);                       // right
 
 
 	/*
 	 * Done.
 	 */
 
-	*out_xsysd = &usysd->base;
-	u_builder_create_space_overseer(&usysd->base, out_xso);
+	*out_xsysd = xsysd;
+	u_builder_create_space_overseer_legacy( //
+	    head,                               // head
+	    left,                               // left
+	    right,                              // right
+	    xsysd->xdevs,                       // xdevs
+	    xsysd->xdev_count,                  // xdev_count
+	    out_xso);                           // out_xso
 
 	return XRT_SUCCESS;
 }

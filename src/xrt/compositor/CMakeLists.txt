@@ -93,16 +93,14 @@ if(XRT_HAVE_VULKAN)
 	    shaders/layer.comp
 	    shaders/mesh.frag
 	    shaders/mesh.vert
-	    shaders/layer.frag
-	    shaders/layer.vert
-	    shaders/equirect1.vert
-	    shaders/equirect1.frag
-	    shaders/equirect2.vert
-	    shaders/equirect2.frag
+	    shaders/layer_cylinder.frag
+	    shaders/layer_cylinder.vert
+	    shaders/layer_equirect2.frag
+	    shaders/layer_equirect2.vert
+	    shaders/layer_projection.vert
+	    shaders/layer_quad.vert
+	    shaders/layer_shared.frag
 		)
-	if(XRT_FEATURE_OPENXR_LAYER_CUBE)
-		list(APPEND SHADERS shaders/cube.vert shaders/cube.frag)
-	endif()
 
 	spirv_shaders(
 		SHADER_HEADERS
@@ -122,14 +120,17 @@ if(XRT_HAVE_VULKAN)
 		render/render_interface.h
 		render/render_resources.c
 		render/render_shaders.c
+		render/render_sub_alloc.c
 		render/render_util.c
 		)
+	# The aux_vk library needs to be public to include Vulkan.
 	target_link_libraries(
 		comp_render
-		PUBLIC xrt-interfaces
-		PRIVATE aux_util aux_os aux_vk
+		PUBLIC xrt-interfaces aux_vk
+		PRIVATE aux_util aux_os
 		)
-	target_include_directories(comp_render PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+	# So it can be used without any other compositor libraries.
+	target_include_directories(comp_render PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 	# Shaders - marked SYSTEM so we get no warnings
 	target_include_directories(comp_render SYSTEM PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 
@@ -145,8 +146,10 @@ if(XRT_HAVE_VULKAN)
 		comp_util STATIC
 		util/comp_base.h
 		util/comp_base.c
-		util/comp_render.c
 		util/comp_render.h
+		util/comp_render_cs.c
+		util/comp_render_gfx.c
+		util/comp_render_helpers.h
 		util/comp_semaphore.h
 		util/comp_semaphore.c
 		util/comp_swapchain.h
@@ -183,10 +186,6 @@ if(XRT_MODULE_COMPOSITOR_MAIN)
 		main/comp_target_swapchain.c
 		main/comp_target_swapchain.h
 		main/comp_window.h
-		main/comp_layer.h
-		main/comp_layer.c
-		main/comp_layer_renderer.h
-		main/comp_layer_renderer.c
 		main/comp_mirror_to_debug_gui.c
 		main/comp_mirror_to_debug_gui.h
 		)

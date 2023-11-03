@@ -192,7 +192,6 @@ svr_open_system(struct xrt_builder *xb,
                 struct xrt_space_overseer **out_xso)
 {
 	struct simula_builder *sb = (struct simula_builder *)xb;
-	struct u_system_devices *usysd = u_system_devices_allocate();
 	xrt_result_t result = XRT_SUCCESS;
 
 	if (out_xsysd == NULL || *out_xsysd != NULL) {
@@ -211,17 +210,34 @@ svr_open_system(struct xrt_builder *xb,
 	struct xrt_device *head_device = multi_create_tracking_override(
 	    XRT_TRACKING_OVERRIDE_ATTACHED, svr_dev, t265_dev, XRT_INPUT_GENERIC_TRACKER_POSE, &ident);
 
-	usysd->base.roles.head = head_device;
-	usysd->base.xdevs[0] = usysd->base.roles.head;
-	usysd->base.xdev_count = 1;
+	// Use the static system devices helper, no dynamic roles.
+	struct u_system_devices_static *usysds = u_system_devices_static_allocate();
+	struct xrt_system_devices *xsysd = &usysds->base.base;
+
+	// Add to device list.
+	xsysd->xdevs[xsysd->xdev_count++] = head_device;
+
+	// Assign to role(s).
+	xsysd->static_roles.head = head_device;
 
 
 end:
 	if (result == XRT_SUCCESS) {
-		*out_xsysd = &usysd->base;
-		u_builder_create_space_overseer(&usysd->base, out_xso);
+		u_system_devices_static_finalize( //
+		    usysds,                       // usysds
+		    NULL,                         // left
+		    NULL);                        // right
+
+		*out_xsysd = xsysd;
+		u_builder_create_space_overseer_legacy( //
+		    head_device,                        // head
+		    NULL,                               // left
+		    NULL,                               // right
+		    xsysd->xdevs,                       // xdevs
+		    xsysd->xdev_count,                  // xdev_count
+		    out_xso);                           // out_xso
 	} else {
-		u_system_devices_destroy(&usysd);
+		xrt_system_devices_destroy(&xsysd);
 	}
 
 	return result;

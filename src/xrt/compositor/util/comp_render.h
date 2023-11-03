@@ -23,6 +23,45 @@ struct comp_layer;
 
 
 /*!
+ * Helper function that takes a set of layers, new device poses, a scratch
+ * images with associated @ref render_gfx_target_resources and writes the needed
+ * commands to the @ref render_gfx to do a full composition with distortion.
+ * The scratch images are optionally used to squash layers should it not be
+ * possible to do a @p fast_path. Will use the render passes of the targets
+ * which set the layout.
+ *
+ * The render passes of @p rsi_rtrs must be created with a final_layout of
+ * VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL or there will be validation errors.
+ *
+ * Expected layouts:
+ * * Layer images: VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+ * * Scratch images: Any (as per the @ref render_gfx_render_pass)
+ * * Target image: Any (as per the @ref render_gfx_render_pass)
+ *
+ * After call layouts:
+ * * Layer images: VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+ * * Scratch images: VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+ * * Target image: What the render pass of @p rtr specifies.
+ *
+ * @ingroup comp_util
+ */
+void
+comp_render_gfx_dispatch(struct render_gfx *rr,
+                         struct render_scratch_images *rsi,
+                         struct render_gfx_target_resources rsi_rtrs[2],
+                         const struct comp_layer *layers,
+                         const uint32_t layer_count,
+                         struct xrt_pose world_poses[2],
+                         struct xrt_pose eye_poses[2],
+                         struct xrt_fov fovs[2],
+                         struct xrt_matrix_2x2 vertex_rots[2],
+                         struct render_gfx_target_resources *rtr,
+                         const struct render_viewport_data viewport_datas[2],
+                         bool fast_path,
+                         bool do_timewarp);
+
+
+/*!
  * Helper to dispatch the layer squasher for a single view.
  *
  * All source layer images and target image needs to be in the correct image
@@ -35,17 +74,17 @@ struct comp_layer;
  * * Target images: VK_IMAGE_LAYOUT_GENERAL
  */
 void
-comp_render_layer(struct render_compute *crc,
-                  uint32_t view_index,
-                  const struct comp_layer *layers,
-                  const uint32_t layer_count,
-                  const struct xrt_normalized_rect *pre_transform,
-                  const struct xrt_pose *world_pose,
-                  const struct xrt_pose *eye_pose,
-                  const VkImage target_image,
-                  const VkImageView target_image_view,
-                  const struct render_viewport_data *target_view,
-                  bool do_timewarp);
+comp_render_cs_layer(struct render_compute *crc,
+                     uint32_t view_index,
+                     const struct comp_layer *layers,
+                     const uint32_t layer_count,
+                     const struct xrt_normalized_rect *pre_transform,
+                     const struct xrt_pose *world_pose,
+                     const struct xrt_pose *eye_pose,
+                     const VkImage target_image,
+                     const VkImageView target_image_view,
+                     const struct render_viewport_data *target_view,
+                     bool do_timewarp);
 
 /*!
  * Helper function to dispatch the layer squasher, designed for stereo views.
@@ -65,17 +104,17 @@ comp_render_layer(struct render_compute *crc,
  * @ingroup comp_util
  */
 void
-comp_render_stereo_layers(struct render_compute *crc,
-                          const struct comp_layer *layers,
-                          const uint32_t layer_count,
-                          const struct xrt_normalized_rect pre_transforms[2],
-                          const struct xrt_pose world_poses[2],
-                          const struct xrt_pose eye_poses[2],
-                          const VkImage target_images[2],
-                          const VkImageView target_image_views[2],
-                          const struct render_viewport_data target_views[2],
-                          VkImageLayout transition_to,
-                          bool do_timewarp);
+comp_render_cs_stereo_layers(struct render_compute *crc,
+                             const struct comp_layer *layers,
+                             const uint32_t layer_count,
+                             const struct xrt_normalized_rect pre_transforms[2],
+                             const struct xrt_pose world_poses[2],
+                             const struct xrt_pose eye_poses[2],
+                             const VkImage target_images[2],
+                             const VkImageView target_image_views[2],
+                             const struct render_viewport_data target_views[2],
+                             VkImageLayout transition_to,
+                             bool do_timewarp);
 
 /*!
  * Helper function that takes a set of layers, new device poses, a scratch
@@ -94,15 +133,15 @@ comp_render_stereo_layers(struct render_compute *crc,
  * @ingroup comp_util
  */
 void
-comp_render_stereo_layers_to_scratch(struct render_compute *crc,
-                                     const struct xrt_normalized_rect pre_transforms[2],
-                                     struct xrt_pose world_poses[2],
-                                     struct xrt_pose eye_poses[2],
-                                     const struct comp_layer *layers,
-                                     const uint32_t layer_count,
-                                     struct render_scratch_images *rsi,
-                                     VkImageLayout transition_to,
-                                     bool do_timewarp);
+comp_render_cs_stereo_layers_to_scratch(struct render_compute *crc,
+                                        const struct xrt_normalized_rect pre_transforms[2],
+                                        struct xrt_pose world_poses[2],
+                                        struct xrt_pose eye_poses[2],
+                                        const struct comp_layer *layers,
+                                        const uint32_t layer_count,
+                                        struct render_scratch_images *rsi,
+                                        VkImageLayout transition_to,
+                                        bool do_timewarp);
 
 /*!
  * Helper function that takes a set of layers, new device poses, a scratch
@@ -124,17 +163,17 @@ comp_render_stereo_layers_to_scratch(struct render_compute *crc,
  * @ingroup comp_util
  */
 void
-comp_render_dispatch_compute(struct render_compute *crc,
-                             struct render_scratch_images *rsi,
-                             struct xrt_pose world_poses[2],
-                             struct xrt_pose eye_poses[2],
-                             const struct comp_layer *layers,
-                             const uint32_t layer_count,
-                             VkImage target_image,
-                             VkImageView target_image_view,
-                             const struct render_viewport_data views[2],
-                             bool fast_path,
-                             bool do_timewarp);
+comp_render_cs_dispatch(struct render_compute *crc,
+                        struct render_scratch_images *rsi,
+                        struct xrt_pose world_poses[2],
+                        struct xrt_pose eye_poses[2],
+                        const struct comp_layer *layers,
+                        const uint32_t layer_count,
+                        VkImage target_image,
+                        VkImageView target_image_view,
+                        const struct render_viewport_data views[2],
+                        bool fast_path,
+                        bool do_timewarp);
 
 
 #ifdef __cplusplus

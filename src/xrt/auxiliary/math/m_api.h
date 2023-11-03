@@ -155,15 +155,6 @@ void
 math_vec3_cross(const struct xrt_vec3 *l, const struct xrt_vec3 *r, struct xrt_vec3 *result);
 
 /*!
- * Cross product of a vector.
- *
- * @relates xrt_vec3
- * @ingroup aux_math
- */
-void
-math_vec3_f64_cross(const struct xrt_vec3_f64 *l, const struct xrt_vec3_f64 *r, struct xrt_vec3_f64 *result);
-
-/*!
  * Get translation vector from isometry matrix (col-major).
  *
  * @relates xrt_vec3
@@ -181,14 +172,31 @@ math_vec3_translation_from_isometry(const struct xrt_matrix_4x4 *isometry, struc
 void
 math_vec3_normalize(struct xrt_vec3 *in);
 
+
+/*
+ *
+ * 64 bit vector functions.
+ *
+ */
+
+/*!
+ * Cross product of a vec3_f64.
+ *
+ * @relates xrt_vec3_f64
+ * @ingroup aux_math
+ */
+void
+math_vec3_f64_cross(const struct xrt_vec3_f64 *l, const struct xrt_vec3_f64 *r, struct xrt_vec3_f64 *result);
+
 /*!
  * Normalize a vec3_f64 in place.
  *
- * @relates xrt_vec3
+ * @relates xrt_vec3_f64
  * @ingroup aux_math
  */
 void
 math_vec3_f64_normalize(struct xrt_vec3_f64 *in);
+
 
 /*
  *
@@ -646,6 +654,19 @@ void
 math_matrix_4x4_inverse_view_projection(const struct xrt_matrix_4x4 *view,
                                         const struct xrt_matrix_4x4 *projection,
                                         struct xrt_matrix_4x4 *result);
+
+/*!
+ * Compute a projection matrix with settings for Vulkan, it will also have it's
+ * far plane at infinite and the NDC depth will be reversed.
+ *
+ * @relates xrt_matrix_4x4
+ * @ingroup aux_math
+ */
+void
+math_matrix_4x4_projection_vulkan_infinite_reverse(const struct xrt_fov *fov,
+                                                   float near_plane,
+                                                   struct xrt_matrix_4x4 *result);
+
 
 /*
  *

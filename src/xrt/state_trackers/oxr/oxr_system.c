@@ -114,6 +114,7 @@ oxr_system_fill_in(struct oxr_logger *log, struct oxr_instance *inst, XrSystemId
 	sys->systemId = systemId;
 	sys->form_factor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
 	sys->view_config_type = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+	sys->dynamic_roles_cache = (struct xrt_system_roles)XRT_SYSTEM_ROLES_INIT;
 
 #ifdef XR_USE_GRAPHICS_API_VULKAN
 	sys->vulkan_enable2_instance = VK_NULL_HANDLE;
@@ -190,8 +191,8 @@ bool
 oxr_system_get_hand_tracking_support(struct oxr_logger *log, struct oxr_instance *inst)
 {
 	struct oxr_system *sys = &inst->system;
-	struct xrt_device *ht_left = GET_XDEV_BY_ROLE(sys, hand_tracking.left);
-	struct xrt_device *ht_right = GET_XDEV_BY_ROLE(sys, hand_tracking.right);
+	struct xrt_device *ht_left = GET_XDEV_BY_ROLE(sys, hand_tracking_left);
+	struct xrt_device *ht_right = GET_XDEV_BY_ROLE(sys, hand_tracking_right);
 
 	bool left_supported = ht_left && ht_left->hand_tracking_supported;
 	bool right_supported = ht_right && ht_right->hand_tracking_supported;
@@ -212,8 +213,8 @@ bool
 oxr_system_get_force_feedback_support(struct oxr_logger *log, struct oxr_instance *inst)
 {
 	struct oxr_system *sys = &inst->system;
-	struct xrt_device *ffb_left = GET_XDEV_BY_ROLE(sys, hand_tracking.left);
-	struct xrt_device *ffb_right = GET_XDEV_BY_ROLE(sys, hand_tracking.right);
+	struct xrt_device *ffb_left = GET_XDEV_BY_ROLE(sys, hand_tracking_left);
+	struct xrt_device *ffb_right = GET_XDEV_BY_ROLE(sys, hand_tracking_right);
 
 	bool left_supported = ffb_left && ffb_left->force_feedback_supported;
 	bool right_supported = ffb_right && ffb_right->force_feedback_supported;

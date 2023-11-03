@@ -87,21 +87,40 @@ qwerty_open_system(struct xrt_builder *xb,
 		return xret;
 	}
 
-	struct u_system_devices *usysd = u_system_devices_allocate();
-	usysd->base.roles.head = head;
-	usysd->base.roles.left = left;
-	usysd->base.roles.right = right;
+	// Use the static system devices helper, no dynamic roles.
+	struct u_system_devices_static *usysds = u_system_devices_static_allocate();
+	struct xrt_system_devices *xsysd = &usysds->base.base;
 
-	usysd->base.xdevs[usysd->base.xdev_count++] = head;
+	// Add to device list.
+	xsysd->xdevs[xsysd->xdev_count++] = head;
 	if (left != NULL) {
-		usysd->base.xdevs[usysd->base.xdev_count++] = left;
+		xsysd->xdevs[xsysd->xdev_count++] = left;
 	}
 	if (right != NULL) {
-		usysd->base.xdevs[usysd->base.xdev_count++] = right;
+		xsysd->xdevs[xsysd->xdev_count++] = right;
 	}
 
-	*out_xsysd = &usysd->base;
-	u_builder_create_space_overseer(&usysd->base, out_xso);
+	// Assign to role(s).
+	xsysd->static_roles.head = head;
+
+	u_system_devices_static_finalize( //
+	    usysds,                       // usysds
+	    left,                         // left
+	    right);                       // right
+
+
+	/*
+	 * Done.
+	 */
+
+	*out_xsysd = xsysd;
+	u_builder_create_space_overseer_legacy( //
+	    head,                               // head
+	    left,                               // left
+	    right,                              // right
+	    xsysd->xdevs,                       // xdevs
+	    xsysd->xdev_count,                  // xdev_count
+	    out_xso);                           // out_xso
 
 	return XRT_SUCCESS;
 }

@@ -852,6 +852,9 @@ struct xrt_compositor_info
 
 	//! Supported formats, never changes.
 	int64_t formats[XRT_MAX_SWAPCHAIN_FORMATS];
+
+	//! Max texture size that GPU supports, zero means any size.
+	uint32_t max_tetxure_size;
 };
 
 /*!
@@ -1942,6 +1945,12 @@ struct xrt_swapchain_native
 {
 	//! @public Base
 	struct xrt_swapchain base;
+
+	/*!
+	 * Unique id for the swapchain, only unique for the current process, is
+	 * not synchronized between service and any apps via the IPC layer.
+	 */
+	xrt_limited_unique_id_t limited_unique_id;
 
 	struct xrt_image_native images[XRT_MAX_SWAPCHAIN_IMAGES];
 };

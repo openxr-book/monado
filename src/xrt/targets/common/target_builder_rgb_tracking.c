@@ -290,7 +290,11 @@ rgb_open_system(struct xrt_builder *xb,
 	assert(out_xsysd != NULL);
 	assert(*out_xsysd == NULL);
 
-	struct u_system_devices *usysd = u_system_devices_allocate();
+	// Use the static system devices helper, no dynamic roles.
+	struct u_system_devices_static *usysds = u_system_devices_static_allocate();
+	struct xrt_tracking_origin *origin = &usysds->base.origin;
+	struct xrt_system_devices *xsysd = &usysds->base.base;
+	struct xrt_frame_context *xfctx = &usysds->base.xfctx;
 
 
 	/*
@@ -300,8 +304,8 @@ rgb_open_system(struct xrt_builder *xb,
 	struct build_state build = {0};
 	if (get_settings(config, &build.settings)) {
 #ifdef XRT_HAVE_OPENCV
-		build.xfctx = &usysd->xfctx;
-		build.origin = &usysd->origin;
+		build.xfctx = xfctx;
+		build.origin = origin;
 		build.origin->type = XRT_TRACKING_TYPE_RGB;
 		build.origin->offset.orientation.y = 1.0f;
 		build.origin->offset.position.z = -2.0f;
@@ -323,7 +327,7 @@ rgb_open_system(struct xrt_builder *xb,
 	// Lock the device list
 	xret = xrt_prober_lock_list(xp, &xpdevs, &xpdev_count);
 	if (xret != XRT_SUCCESS) {
-		u_system_devices_destroy(&usysd);
+		xrt_system_devices_destroy(&xsysd);
 		return xret;
 	}
 
@@ -383,31 +387,46 @@ rgb_open_system(struct xrt_builder *xb,
 	// Unlock the device list
 	xret = xrt_prober_unlock_list(xp, &xpdevs);
 	if (xret != XRT_SUCCESS) {
-		u_system_devices_destroy(&usysd);
+		xrt_system_devices_destroy(&xsysd);
 		return xret;
 	}
 
+	// Add to devices.
+	xsysd->xdevs[xsysd->xdev_count++] = head;
 
-	usysd->base.xdevs[usysd->base.xdev_count++] = head;
-	usysd->base.roles.head = head;
-
+	struct xrt_device *left = NULL, *right = NULL;
 	if (psmv_red != NULL) {
-		usysd->base.xdevs[usysd->base.xdev_count++] = psmv_red;
-		usysd->base.roles.right = psmv_red;
+		xsysd->xdevs[xsysd->xdev_count++] = psmv_red;
+		right = psmv_red; // Notice right.
 	}
 
 	if (psmv_purple != NULL) {
-		usysd->base.xdevs[usysd->base.xdev_count++] = psmv_purple;
-		usysd->base.roles.left = psmv_purple;
+		xsysd->xdevs[xsysd->xdev_count++] = psmv_purple;
+		left = psmv_purple; // Notice left.
 	}
+
+	// Assign to role(s).
+	xsysd->static_roles.head = head;
+
+	u_system_devices_static_finalize( //
+	    usysds,                       // usysds
+	    left,                         // left
+	    right);                       // right
 
 
 	/*
 	 * Done.
 	 */
 
-	*out_xsysd = &usysd->base;
-	u_builder_create_space_overseer(&usysd->base, out_xso);
+	*out_xsysd = xsysd;
+	u_builder_create_space_overseer_legacy( //
+	    head,                               // head
+	    left,                               // left
+	    right,                              // right
+	    xsysd->xdevs,                       // xdevs
+	    xsysd->xdev_count,                  // xdev_count
+	    out_xso);                           // out_xso
+
 
 	return XRT_SUCCESS;
 }

@@ -1,4 +1,5 @@
 // Copyright 2018-2023, Collabora, Ltd.
+// Copyright 2023, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -447,6 +448,10 @@ oxr_session_attach_action_sets(struct oxr_logger *log,
                                struct oxr_session *sess,
                                const XrSessionActionSetsAttachInfo *bindInfo);
 
+
+XrResult
+oxr_session_update_action_bindings(struct oxr_logger *log, struct oxr_session *sess);
+
 /*!
  * @public @memberof oxr_session
  */
@@ -555,9 +560,12 @@ oxr_hand_tracker_create(struct oxr_logger *log,
  */
 void
 oxr_find_profile_for_device(struct oxr_logger *log,
-                            struct oxr_instance *inst,
+                            struct oxr_session *sess,
                             struct xrt_device *xdev,
                             struct oxr_interaction_profile **out_p);
+
+struct oxr_interaction_profile *
+oxr_clone_profile(const struct oxr_interaction_profile *src_profile);
 
 /*!
  * Free all memory allocated by the binding system.
@@ -566,6 +574,14 @@ oxr_find_profile_for_device(struct oxr_logger *log,
  */
 void
 oxr_binding_destroy_all(struct oxr_logger *log, struct oxr_instance *inst);
+
+/*!
+ * Free all memory allocated by the binding system.
+ *
+ * @public @memberof oxr_instance
+ */
+void
+oxr_session_binding_destroy_all(struct oxr_logger *log, struct oxr_session *sess);
 
 /*!
  * Find all bindings that is the given action key is bound to.
@@ -1260,6 +1276,10 @@ struct oxr_system
 	uint32_t blend_mode_count;
 	XrEnvironmentBlendMode blend_modes[3];
 
+	//! Cache of the last known system roles, see @xrt_system_roles::generation_id
+	struct xrt_system_roles dynamic_roles_cache;
+	struct os_mutex sync_actions_mutex;
+
 #ifdef XR_USE_GRAPHICS_API_VULKAN
 	//! The instance/device we create when vulkan_enable2 is used
 	VkInstance vulkan_enable2_instance;
@@ -1283,7 +1303,43 @@ struct oxr_system
 #endif
 };
 
-#define GET_XDEV_BY_ROLE(SYS, ROLE) ((SYS)->xsysd->roles.ROLE)
+
+/*
+ * Device roles helpers.
+ */
+
+// static roles
+// clang-format off
+static inline struct xrt_device *get_role_head(struct oxr_system *sys) {return sys->xsysd->static_roles.head; }
+static inline struct xrt_device *get_role_eyes(struct oxr_system *sys) {return sys->xsysd->static_roles.eyes; }
+static inline struct xrt_device *get_role_hand_tracking_left(struct oxr_system* sys) { return sys->xsysd->static_roles.hand_tracking.left; }
+static inline struct xrt_device *get_role_hand_tracking_right(struct oxr_system* sys) { return sys->xsysd->static_roles.hand_tracking.right; }
+// clang-format on
+
+// dynamic roles
+#define MAKE_GET_DYN_ROLES_FN(ROLE)                                                                                    \
+	static inline struct xrt_device *get_role_##ROLE(struct oxr_system *sys)                                       \
+	{                                                                                                              \
+		const bool is_locked = 0 == os_mutex_trylock(&sys->sync_actions_mutex);                                \
+		const int32_t xdev_idx = sys->dynamic_roles_cache.ROLE;                                                \
+		if (is_locked) {                                                                                       \
+			os_mutex_unlock(&sys->sync_actions_mutex);                                                     \
+		}                                                                                                      \
+		if (xdev_idx < 0 || xdev_idx >= (int32_t)ARRAY_SIZE(sys->xsysd->xdevs))                                \
+			return NULL;                                                                                   \
+		return sys->xsysd->xdevs[xdev_idx];                                                                    \
+	}
+MAKE_GET_DYN_ROLES_FN(left)
+MAKE_GET_DYN_ROLES_FN(right)
+MAKE_GET_DYN_ROLES_FN(gamepad)
+#undef MAKE_GET_DYN_ROLES_FN
+
+#define GET_XDEV_BY_ROLE(SYS, ROLE) (get_role_##ROLE((SYS)))
+
+
+/*
+ * Extensions helpers.
+ */
 
 #define MAKE_EXT_STATUS(mixed_case, all_caps) bool mixed_case;
 /*!
@@ -1501,6 +1557,12 @@ struct oxr_session
 	 */
 	struct u_hashmap_int *act_attachments_by_key;
 
+	/*!
+	 * Clone of all suggested binding profiles at the point of action set/session attachment.
+	 * ref to @oxr_session_attach_action_sets
+	 */
+	size_t profiles_on_attachment_size;
+	struct oxr_interaction_profile **profiles_on_attachment;
 
 	/*!
 	 * Currently bound interaction profile.

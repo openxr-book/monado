@@ -17,6 +17,8 @@
 #define XRT_LAYER_EQUIRECT1 5
 #define XRT_LAYER_EQUIRECT2 6
 
+const float PI = acos(-1);
+
 // Should we do timewarp.
 layout(constant_id = 1) const bool do_timewarp = false;
 layout(constant_id = 2) const bool do_color_correction = true;
@@ -32,6 +34,7 @@ layout(set = 0, binding = 3, std140) uniform restrict Config
 {
 	ivec4 view;
 	ivec4 layer_count;
+
 	vec4 pre_transform;
 	vec4 post_transform[RENDER_MAX_LAYERS];
 
@@ -40,6 +43,18 @@ layout(set = 0, binding = 3, std140) uniform restrict Config
 
 	// which image/sampler(s) correspond to each layer
 	ivec2 images_samplers[RENDER_MAX_LAYERS];
+
+	// shared between cylinder and equirect2
+	mat4 mv_inverse[RENDER_MAX_LAYERS];
+
+
+	// for cylinder layer
+	vec4 cylinder_data[RENDER_MAX_LAYERS];
+
+
+	// for equirect2 layer
+	vec4 eq2_data[RENDER_MAX_LAYERS];
+
 
 	// for projection layers
 
@@ -81,7 +96,7 @@ vec2 transform_uv_subimage(vec2 uv, uint layer)
 	vec2 values = uv;
 
 	// To deal with OpenGL flip and sub image view.
-	values.xy = values.xy * ubo.post_transform[layer].zw + ubo.post_transform[layer].xy;
+	values.xy = fma(values.xy, ubo.post_transform[layer].zw, ubo.post_transform[layer].xy);
 
 	// Ready to be used.
 	return values.xy;
@@ -92,7 +107,7 @@ vec2 transform_uv_timewarp(vec2 uv, uint layer)
 	vec4 values = vec4(uv, -1, 1);
 
 	// From uv to tan angle (tangent space).
-	values.xy = values.xy * ubo.pre_transform.zw + ubo.pre_transform.xy;
+	values.xy = fma(values.xy, ubo.pre_transform.zw, ubo.pre_transform.xy);
 	values.y = -values.y; // Flip to OpenXR coordinate system.
 
 	// Timewarp.
@@ -103,7 +118,7 @@ vec2 transform_uv_timewarp(vec2 uv, uint layer)
 	values.xy = values.xy * 0.5 + 0.5;
 
 	// To deal with OpenGL flip and sub image view.
-	values.xy = values.xy * ubo.post_transform[layer].zw + ubo.post_transform[layer].xy;
+	values.xy = fma(values.xy, ubo.post_transform[layer].zw, ubo.post_transform[layer].xy);
 
 	// Done.
 	return values.xy;
@@ -116,6 +131,210 @@ vec2 transform_uv(vec2 uv, uint layer)
 	} else {
 		return transform_uv_subimage(uv, layer);
 	}
+}
+
+vec4 do_cylinder(vec2 view_uv, uint layer)
+{
+	// Get ray position in model space.
+	const vec3 ray_origin = (ubo.mv_inverse[layer] * vec4(0, 0, 0, 1)).xyz;
+
+	// [0 .. 1] to tangent lengths (at unit Z).
+	const vec2 uv = fma(view_uv, ubo.pre_transform.zw, ubo.pre_transform.xy);
+
+	// With Z at the unit plane and flip y for OpenXR coordinate system,
+	// transform the ray into model space.
+	const vec3 ray_dir = normalize((ubo.mv_inverse[layer] * vec4(uv.x, -uv.y, -1, 0)).xyz);
+
+	const float radius = ubo.cylinder_data[layer].x;
+	const float central_angle = ubo.cylinder_data[layer].y;
+	const float aspect_ratio = ubo.cylinder_data[layer].z;
+
+	vec3 dir_from_cyl;
+	// CPU code will set +INFINITY to zero.
+	if (radius == 0) {
+		dir_from_cyl = ray_dir;
+	} else {
+		// Find if the cylinder intersects with the ray direction
+		// Inspired by Inigo Quilez
+		// https://iquilezles.org/articles/intersectors/
+
+		const vec3 axis = vec3(0.f, 1.f, 0.f);
+
+		float card = dot(axis, ray_dir);
+		float caoc = dot(axis, ray_origin);
+		float a = 1.f - card * card;
+		float b = dot(ray_origin, ray_dir) - caoc * card;
+		float c = dot(ray_origin, ray_origin) - caoc * caoc - radius * radius;
+		float h = b * b - a * c;
+		if(h < 0.f) {
+			// no intersection
+			return vec4(0.f);
+		}
+
+		h = sqrt(h);
+		vec2 distances = vec2(-b - h, -b + h) / a;
+
+		if (distances.y < 0) {
+			return vec4(0.f);
+		}
+
+		dir_from_cyl = normalize(ray_origin + (ray_dir * distances.y));
+	}
+
+	const float lon = atan(dir_from_cyl.x, -dir_from_cyl.z) / (2 * PI) + 0.5; // => [0, 1]
+	// float lat = -asin(dir_from_cyl.y); // => [-π/2, π/2]
+	// float y = tan(lat); // => [-inf, inf]
+	// simplified: -y/sqrt(1 - y^2)
+	const float y = -dir_from_cyl.y / sqrt(1 - (dir_from_cyl.y * dir_from_cyl.y)); // => [-inf, inf]
+
+	vec4 out_color = vec4(0.f);
+
+#ifdef DEBUG
+	const int lon_int = int(lon * 1000.f);
+	const int y_int = int(y * 1000.f);
+
+	if (lon < 0.001 && lon > -0.001) {
+		out_color = vec4(1, 0, 0, 1);
+	} else if (lon_int % 50 == 0) {
+		out_color = vec4(1, 1, 1, 1);
+	} else if (y_int % 50 == 0) {
+		out_color = vec4(1, 1, 1, 1);
+	} else {
+		out_color = vec4(lon, y, 0, 1);
+	}
+#endif
+
+	const float chan = central_angle / (PI * 2.f);
+
+	// height in radii, radius only matters for determining intersection
+	const float height = central_angle * aspect_ratio;
+
+	// Normalize [0, 2π] to [0, 1]
+	const float uhan = 0.5 + chan / 2.f;
+	const float lhan = 0.5 - chan / 2.f;
+
+	const float ymin = -height / 2;
+	const float ymax = height / 2;
+
+	if (y < ymax && y > ymin && lon < uhan && lon > lhan) {
+		// map configured display region to whole texture
+		vec2 offset = vec2(lhan, ymin);
+		vec2 extent = vec2(uhan - lhan, ymax - ymin);
+		vec2 sample_point = (vec2(lon, y) - offset) / extent;
+
+		vec2 uv_sub = fma(sample_point, ubo.post_transform[layer].zw, ubo.post_transform[layer].xy);
+
+		uint index = ubo.images_samplers[layer].x;
+#ifdef DEBUG
+		out_color += texture(source[index], uv_sub) / 2.f;
+#else
+
+		out_color = texture(source[index], uv_sub);
+#endif
+	} else {
+		out_color += vec4(0.f);
+	}
+
+	return out_color;
+}
+
+vec4 do_equirect2(vec2 view_uv, uint layer)
+{
+	// Get ray position in model space.
+	const vec3 ray_origin = (ubo.mv_inverse[layer] * vec4(0, 0, 0, 1)).xyz;
+
+	// [0 .. 1] to tangent lengths (at unit Z).
+	const vec2 uv = fma(view_uv, ubo.pre_transform.zw, ubo.pre_transform.xy);
+
+	// With Z at the unit plane and flip y for OpenXR coordinate system,
+	// transform the ray into model space.
+	const vec3 ray_dir = normalize((ubo.mv_inverse[layer] * vec4(uv.x, -uv.y, -1, 0)).xyz);
+
+	const float radius = ubo.eq2_data[layer].x;
+	const float central_horizontal_angle = ubo.eq2_data[layer].y;
+	const float upper_vertical_angle = ubo.eq2_data[layer].z;
+	const float lower_vertical_angle = ubo.eq2_data[layer].w;
+
+	vec3 dir_from_sph;
+	// CPU code will set +INFINITY to zero.
+	if (radius == 0) {
+		dir_from_sph = ray_dir;
+	} else {
+		// Find if the sphere intersects with the ray using Pythagoras'
+		// theroem with a triangle formed by QC, H and the radius.
+		// Inspired by Inigo Quilez
+		// https://iquilezles.org/articles/intersectors/
+
+		const float B = dot(ray_origin, ray_dir);
+		// QC is the point where the ray passes closest
+		const vec3 QC = ray_origin - B * ray_dir;
+		// If the distance is father than the radius, no hit
+		float H = radius * radius - dot(QC, QC);
+		if (H < 0.0) {
+			// no intersection
+			return vec4(0.f);
+		}
+
+		H = sqrt(H);
+
+		vec2 distances = vec2(-B - H, -B + H);
+		if (distances.y < 0) {
+			return vec4(0.f);
+		}
+
+		dir_from_sph = normalize(ray_origin + (ray_dir * distances.y));
+	}
+
+	const float lon = atan(dir_from_sph.x, -dir_from_sph.z) / (2 * PI) + 0.5;
+	const float lat = acos(dir_from_sph.y) / PI;
+
+	vec4 out_color = vec4(0.f);
+
+#ifdef DEBUG
+	const int lon_int = int(lon * 1000.f);
+	const int lat_int = int(lat * 1000.f);
+
+	if (lon < 0.001 && lon > -0.001) {
+		out_color = vec4(1, 0, 0, 1);
+	} else if (lon_int % 50 == 0) {
+		out_color = vec4(1, 1, 1, 1);
+	} else if (lat_int % 50 == 0) {
+		out_color = vec4(1, 1, 1, 1);
+	} else {
+		out_color = vec4(lon, lat, 0, 1);
+	}
+#endif
+
+	const float chan = central_horizontal_angle / (PI * 2.0f);
+
+	// Normalize [0, 2π] to [0, 1]
+	const float uhan = 0.5 + chan / 2.0f;
+	const float lhan = 0.5 - chan / 2.0f;
+
+	// Normalize [-π/2, π/2] to [0, 1]
+	const float uvan = upper_vertical_angle / PI + 0.5f;
+	const float lvan = lower_vertical_angle / PI + 0.5f;
+
+	if (lat < uvan && lat > lvan && lon < uhan && lon > lhan) {
+		// map configured display region to whole texture
+		vec2 ll_offset = vec2(lhan, lvan);
+		vec2 ll_extent = vec2(uhan - lhan, uvan - lvan);
+		vec2 sample_point = (vec2(lon, lat) - ll_offset) / ll_extent;
+
+		vec2 uv_sub = fma(sample_point, ubo.post_transform[layer].zw, ubo.post_transform[layer].xy);
+
+		uint index = ubo.images_samplers[layer].x;
+#ifdef DEBUG
+		out_color += texture(source[index], uv_sub) / 2.0;
+#else
+
+		out_color = texture(source[index], uv_sub);
+#endif
+	} else {
+		out_color += vec4(0.f);
+	}
+
+	return out_color;
 }
 
 vec4 do_projection(vec2 view_uv, uint layer)
@@ -137,7 +356,7 @@ vec3 get_direction(vec2 uv)
 	vec4 values = vec4(uv, -1, 1);
 
 	// From uv to tan angle (tangent space).
-	values.xy = values.xy * ubo.pre_transform.zw + ubo.pre_transform.xy;
+	values.xy = fma(values.xy, ubo.pre_transform.zw, ubo.pre_transform.xy);
 	values.y = -values.y; // Flip to OpenXR coordinate system.
 
 	// This works because values.xy are now in tangent space, that is the
@@ -213,7 +432,7 @@ vec4 do_quad(vec2 view_uv, uint layer)
 			vec2 plane_uv = (intersection_ps.xy + ubo.quad_extent[layer] / 2.) / ubo.quad_extent[layer];
 
 			// sample on the desired subimage, not the entire texture
-			plane_uv = plane_uv * ubo.post_transform[layer].zw + ubo.post_transform[layer].xy;
+			plane_uv = fma(plane_uv, ubo.post_transform[layer].zw, ubo.post_transform[layer].xy);
 
 			colour = texture(source[source_image_index], plane_uv);
 		} else {
@@ -239,6 +458,12 @@ vec4 do_layers(vec2 view_uv)
 		vec4 rgba = vec4(0, 0, 0, 0);
 
 		switch (ubo.layer_type_and_unpremultiplied[layer].x) {
+		case XRT_LAYER_CYLINDER:
+			rgba = do_cylinder(view_uv, layer);
+			break;
+		case XRT_LAYER_EQUIRECT2:
+			rgba = do_equirect2(view_uv, layer);
+			break;
 		case XRT_LAYER_STEREO_PROJECTION:
 		case XRT_LAYER_STEREO_PROJECTION_DEPTH:
 			rgba = do_projection(view_uv, layer);
@@ -256,7 +481,7 @@ vec4 do_layers(vec2 view_uv)
 			// Premultiplied blend factor of 1.
 			accum.rgb = (accum.rgb * (1 - rgba.a)) + rgba.rgb;
 		}
-		accum.a = rgba.a + accum.a * (1.0 - rgba.a);
+		accum.a = fma((1.f - rgba.a), accum.a, rgba.a);
 	}
 
 	return accum;

@@ -30,7 +30,6 @@
 
 #include "util/comp_render.h"
 
-#include "main/comp_layer_renderer.h"
 #include "main/comp_frame.h"
 #include "main/comp_mirror_to_debug_gui.h"
 
@@ -89,6 +88,13 @@ struct comp_renderer
 
 	//! Scratch images used for layer squasher.
 	struct render_scratch_images scratch;
+
+	//! Render pass for graphics pipeline rendering to the scratch buffer.
+	struct render_gfx_render_pass scratch_render_pass;
+
+	//! Targets for rendering to the scratch buffer.
+	struct render_gfx_target_resources scratch_targets[2];
+
 	//! @}
 
 	//! @name Image-dependent members
@@ -99,6 +105,12 @@ struct comp_renderer
 
 	//! Which buffer was last submitted and has a fence pending.
 	int32_t fenced_buffer;
+
+	/*!
+	 * The render pass used to render to the target, it depends on the
+	 * target's format so will be recreated each time the target changes.
+	 */
+	struct render_gfx_render_pass target_render_pass;
 
 	/*!
 	 * Array of "rendering" target resources equal in size to the number of
@@ -117,12 +129,6 @@ struct comp_renderer
 	 */
 	uint32_t buffer_count;
 
-	/*!
-	 * @brief The layer renderer, which actually knows how to composite layers.
-	 *
-	 * Depends on the target extents.
-	 */
-	struct comp_layer_renderer *lr;
 	//! @}
 };
 
@@ -202,6 +208,88 @@ calc_viewport_data(struct comp_renderer *r,
 	*out_r_viewport_data = r_viewport_data;
 }
 
+static void
+calc_vertex_rot_data(struct comp_renderer *r, struct xrt_matrix_2x2 out_vertex_rots[2])
+{
+	bool pre_rotate = false;
+	if (r->c->target->surface_transform & VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR ||
+	    r->c->target->surface_transform & VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR) {
+		COMP_SPEW(r->c, "Swapping width and height, since we are pre rotating");
+		pre_rotate = true;
+	}
+
+	const struct xrt_matrix_2x2 rotation_90_cw = {{
+	    .vecs =
+	        {
+	            {0, 1},
+	            {-1, 0},
+	        },
+	}};
+
+	for (uint32_t i = 0; i < 2; i++) {
+		// Get the view.
+		struct xrt_view *v = &r->c->xdev->hmd->views[i];
+
+		// Copy data.
+		struct xrt_matrix_2x2 rot = v->rot;
+
+		// Should we rotate.
+		if (pre_rotate) {
+			m_mat2x2_multiply(&rot, &rotation_90_cw, &rot);
+		}
+
+		out_vertex_rots[i] = rot;
+	}
+}
+
+static void
+calc_pose_data(struct comp_renderer *r,
+               struct xrt_fov out_fovs[2],
+               struct xrt_pose out_world[2],
+               struct xrt_pose out_eye[2])
+{
+	COMP_TRACE_MARKER();
+
+	struct xrt_vec3 default_eye_relation = {
+	    0.063000f, /*! @todo get actual ipd_meters */
+	    0.0f,
+	    0.0f,
+	};
+
+	struct xrt_space_relation head_relation = XRT_SPACE_RELATION_ZERO;
+	struct xrt_fov fovs[2] = XRT_STRUCT_INIT;
+	struct xrt_pose poses[2] = XRT_STRUCT_INIT;
+
+	xrt_device_get_view_poses(                           //
+	    r->c->xdev,                                      // xdev
+	    &default_eye_relation,                           // default_eye_relation
+	    r->c->frame.rendering.predicted_display_time_ns, // at_timestamp_ns
+	    2,                                               // view_count
+	    &head_relation,                                  // out_head_relation
+	    fovs,                                            // out_fovs
+	    poses);                                          // out_poses
+
+	for (uint32_t i = 0; i < 2; i++) {
+		const struct xrt_fov fov = fovs[i];
+		const struct xrt_pose eye_pose = poses[i];
+
+		struct xrt_space_relation result = {0};
+		struct xrt_relation_chain xrc = {0};
+		m_relation_chain_push_pose_if_not_identity(&xrc, &eye_pose);
+		m_relation_chain_push_relation(&xrc, &head_relation);
+		m_relation_chain_resolve(&xrc, &result);
+
+		// Results to callers.
+		out_fovs[i] = fov;
+		out_world[i] = result.pose;
+		out_eye[i] = eye_pose;
+
+		// For remote rendering targets.
+		r->c->base.slot.fovs[i] = fov;
+		r->c->base.slot.poses[i] = result.pose;
+	}
+}
+
 //! @pre comp_target_has_images(r->c->target)
 static void
 renderer_build_rendering_target_resources(struct comp_renderer *r,
@@ -212,147 +300,15 @@ renderer_build_rendering_target_resources(struct comp_renderer *r,
 
 	struct comp_compositor *c = r->c;
 
-	struct render_gfx_target_data data;
-	data.format = r->c->target->format;
-	data.is_external = true;
-	data.width = r->c->target->width;
-	data.height = r->c->target->height;
+	VkImageView image_view = r->c->target->images[index].view;
+	VkExtent2D extent = {r->c->target->width, r->c->target->height};
 
-	render_gfx_target_resources_init(rtr, &c->nr, r->c->target->images[index].view, &data);
-}
-
-/*!
- * @pre render_gfx_init(rr, &c->nr)
- * @pre comp_target_has_images(r->c->target)
- */
-static void
-renderer_build_rendering(struct comp_renderer *r,
-                         struct render_gfx *rr,
-                         struct render_gfx_target_resources *rtr,
-                         VkSampler src_samplers[2],
-                         VkImageView src_image_views[2],
-                         struct xrt_normalized_rect src_norm_rects[2])
-{
-	COMP_TRACE_MARKER();
-
-	struct comp_compositor *c = r->c;
-
-
-	/*
-	 * Rendering
-	 */
-
-	bool pre_rotate = false;
-	if (r->c->target->surface_transform & VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR ||
-	    r->c->target->surface_transform & VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR) {
-		COMP_SPEW(c, "Swapping width and height, since we are pre rotating");
-		pre_rotate = true;
-	}
-
-	struct render_viewport_data l_viewport_data;
-	struct render_viewport_data r_viewport_data;
-
-	calc_viewport_data(r, &l_viewport_data, &r_viewport_data);
-
-	struct xrt_view *l_v = &r->c->xdev->hmd->views[0];
-	struct xrt_view *r_v = &r->c->xdev->hmd->views[1];
-
-
-	/*
-	 * Begin
-	 */
-
-	render_gfx_begin(rr);
-
-
-	/*
-	 * Update
-	 */
-
-	struct render_gfx_mesh_ubo_data distortion_data[2] = {
-	    {
-	        .vertex_rot = l_v->rot,
-	        .post_transform = src_norm_rects[0],
-	    },
-	    {
-	        .vertex_rot = r_v->rot,
-	        .post_transform = src_norm_rects[1],
-	    },
-	};
-
-	const struct xrt_matrix_2x2 rotation_90_cw = {{
-	    .vecs =
-	        {
-	            {0, 1},
-	            {-1, 0},
-	        },
-	}};
-
-	if (pre_rotate) {
-		m_mat2x2_multiply(&distortion_data[0].vertex_rot,  //
-		                  &rotation_90_cw,                 //
-		                  &distortion_data[0].vertex_rot); //
-		m_mat2x2_multiply(&distortion_data[1].vertex_rot,  //
-		                  &rotation_90_cw,                 //
-		                  &distortion_data[1].vertex_rot); //
-	}
-
-	render_gfx_update_distortion(rr,                   //
-	                             0,                    // view_index
-	                             src_samplers[0],      //
-	                             src_image_views[0],   //
-	                             &distortion_data[0]); //
-
-	render_gfx_update_distortion(rr,                   //
-	                             1,                    // view_index
-	                             src_samplers[1],      //
-	                             src_image_views[1],   //
-	                             &distortion_data[1]); //
-
-
-	/*
-	 * Target
-	 */
-
-	render_gfx_begin_target( //
-	    rr,                  //
-	    rtr);                //
-
-
-	/*
-	 * Viewport one
-	 */
-
-	render_gfx_begin_view(rr,                //
-	                      0,                 // view_index
-	                      &l_viewport_data); // viewport_data
-
-	render_gfx_distortion(rr);
-
-	render_gfx_end_view(rr);
-
-
-	/*
-	 * Viewport two
-	 */
-
-	render_gfx_begin_view(rr,                //
-	                      1,                 // view_index
-	                      &r_viewport_data); // viewport_data
-
-	render_gfx_distortion(rr);
-
-	render_gfx_end_view(rr);
-
-
-	/*
-	 * End
-	 */
-
-	render_gfx_end_target(rr);
-
-	// Make the command buffer usable.
-	render_gfx_end(rr);
+	render_gfx_target_resources_init( //
+	    rtr,                          //
+	    &c->nr,                       //
+	    &r->target_render_pass,       //
+	    image_view,                   //
+	    extent);                      //
 }
 
 /*!
@@ -375,6 +331,13 @@ renderer_create_renderings_and_fences(struct comp_renderer *r)
 	bool use_compute = r->settings->use_compute;
 	if (!use_compute) {
 		r->rtr_array = U_TYPED_ARRAY_CALLOC(struct render_gfx_target_resources, r->buffer_count);
+
+		render_gfx_render_pass_init(          //
+		    &r->target_render_pass,           // rgrp
+		    &r->c->nr,                        // r
+		    r->c->target->format,             // format
+		    VK_ATTACHMENT_LOAD_OP_CLEAR,      // load_op
+		    VK_IMAGE_LAYOUT_PRESENT_SRC_KHR); // final_layout
 
 		for (uint32_t i = 0; i < r->buffer_count; ++i) {
 			renderer_build_rendering_target_resources(r, &r->rtr_array[i], i);
@@ -414,6 +377,9 @@ renderer_close_renderings_and_fences(struct comp_renderer *r)
 			render_gfx_target_resources_close(&r->rtr_array[i]);
 		}
 
+		// Close the render pass used for rendering to the target.
+		render_gfx_render_pass_close(&r->target_render_pass);
+
 		free(r->rtr_array);
 		r->rtr_array = NULL;
 	}
@@ -431,34 +397,6 @@ renderer_close_renderings_and_fences(struct comp_renderer *r)
 	r->buffer_count = 0;
 	r->acquired_buffer = -1;
 	r->fenced_buffer = -1;
-}
-
-//! @pre comp_target_check_ready(r->c->target)
-static void
-renderer_create_layer_renderer(struct comp_renderer *r)
-{
-	struct vk_bundle *vk = &r->c->base.vk;
-
-	assert(comp_target_check_ready(r->c->target));
-
-	uint32_t layer_count = 0;
-	if (r->lr != NULL) {
-		// if we already had one, re-populate it after recreation.
-		layer_count = r->lr->layer_count;
-		comp_layer_renderer_destroy(&r->lr);
-	}
-
-	VkExtent2D extent;
-
-	extent = (VkExtent2D){
-	    .width = r->c->view_extents.width,
-	    .height = r->c->view_extents.height,
-	};
-
-	r->lr = comp_layer_renderer_create(vk, &r->c->shaders, extent, VK_FORMAT_B8G8R8A8_SRGB);
-	if (layer_count != 0) {
-		comp_layer_renderer_allocate_layers(r->lr, layer_count);
-	}
 }
 
 /*!
@@ -534,7 +472,6 @@ renderer_ensure_images_and_renderings(struct comp_renderer *r, bool force_recrea
 
 	r->buffer_count = r->c->target->image_count;
 
-	renderer_create_layer_renderer(r);
 	renderer_create_renderings_and_fences(r);
 
 	assert(r->buffer_count != 0);
@@ -544,7 +481,7 @@ renderer_ensure_images_and_renderings(struct comp_renderer *r, bool force_recrea
 
 //! Create renderer and initialize non-image-dependent members
 static void
-renderer_init(struct comp_renderer *r, struct comp_compositor *c)
+renderer_init(struct comp_renderer *r, struct comp_compositor *c, VkExtent2D scratch_extent)
 {
 	r->c = c;
 	r->settings = &c->settings;
@@ -553,12 +490,38 @@ renderer_init(struct comp_renderer *r, struct comp_compositor *c)
 	r->fenced_buffer = -1;
 	r->rtr_array = NULL;
 
+	bool bret = render_scratch_images_ensure(&c->nr, &r->scratch, scratch_extent);
+	if (!bret) {
+		COMP_ERROR(c, "render_scratch_images_ensure: false");
+		assert(false && "Whelp, can't return an error. But should never really fail.");
+	}
+
+	render_gfx_render_pass_init(                   //
+	    &r->scratch_render_pass,                   // rgrp
+	    &r->c->nr,                                 // r
+	    VK_FORMAT_R8G8B8A8_SRGB,                   // format
+	    VK_ATTACHMENT_LOAD_OP_CLEAR,               // load_op
+	    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL); // final_layout
+
+	for (uint32_t i = 0; i < ARRAY_SIZE(r->scratch_targets); i++) {
+		render_gfx_target_resources_init(  //
+		    &r->scratch_targets[i],        //
+		    &r->c->nr,                     //
+		    &r->scratch_render_pass,       //
+		    r->scratch.color[i].srgb_view, //
+		    scratch_extent);               //
+	}
+
 	// Try to early-allocate these, in case we can.
 	renderer_ensure_images_and_renderings(r, false);
 
 	struct vk_bundle *vk = &r->c->base.vk;
 
-	VkResult ret = comp_mirror_init(&r->mirror_to_debug_gui, vk, &c->shaders, r->lr->extent);
+	VkResult ret = comp_mirror_init( //
+	    &r->mirror_to_debug_gui,     //
+	    vk,                          //
+	    &c->shaders,                 //
+	    r->scratch.extent);          //
 	if (ret != VK_SUCCESS) {
 		COMP_ERROR(c, "comp_mirror_init: %s", vk_result_string(ret));
 		assert(false && "Whelp, can't return a error. But should never really fail.");
@@ -679,49 +642,6 @@ renderer_submit_queue(struct comp_renderer *r, VkCommandBuffer cmd, VkPipelineSt
 }
 
 static void
-renderer_get_view_projection(struct comp_renderer *r)
-{
-	COMP_TRACE_MARKER();
-
-	struct xrt_vec3 default_eye_relation = {
-	    0.063000f, /*! @todo get actual ipd_meters */
-	    0.0f,
-	    0.0f,
-	};
-
-	struct xrt_space_relation head_relation = XRT_SPACE_RELATION_ZERO;
-	struct xrt_pose poses[2] = {0};
-
-	xrt_device_get_view_poses(                           //
-	    r->c->xdev,                                      //
-	    &default_eye_relation,                           //
-	    r->c->frame.rendering.predicted_display_time_ns, //
-	    2,                                               //
-	    &head_relation,                                  //
-	    r->c->base.slot.fovs,                            //
-	    poses);                                          //
-
-	struct xrt_pose base_space_pose = XRT_POSE_IDENTITY;
-
-	for (uint32_t i = 0; i < 2; i++) {
-		const struct xrt_fov fov = r->c->base.slot.fovs[i];
-		const struct xrt_pose eye_pose = poses[i];
-
-		comp_layer_renderer_set_fov(r->lr, &fov, i);
-
-		struct xrt_space_relation result = {0};
-		struct xrt_relation_chain xrc = {0};
-		m_relation_chain_push_pose_if_not_identity(&xrc, &eye_pose);
-		m_relation_chain_push_relation(&xrc, &head_relation);
-		m_relation_chain_push_pose_if_not_identity(&xrc, &base_space_pose);
-		m_relation_chain_resolve(&xrc, &result);
-
-		r->c->base.slot.poses[i] = result.pose;
-		comp_layer_renderer_set_pose(r->lr, &eye_pose, &result.pose, i);
-	}
-}
-
-static void
 renderer_acquire_swapchain_image(struct comp_renderer *r)
 {
 	COMP_TRACE_MARKER();
@@ -812,61 +732,24 @@ renderer_fini(struct comp_renderer *r)
 	// Do before layer render just in case it holds any references.
 	comp_mirror_fini(&r->mirror_to_debug_gui, vk);
 
-	// Do this after the mirror struct.
-	comp_layer_renderer_destroy(&(r->lr));
+	// Do this after the layer renderer.
+	for (uint32_t i = 0; i < ARRAY_SIZE(r->scratch_targets); i++) {
+		render_gfx_target_resources_close(&r->scratch_targets[i]);
+	}
+
+	// Do this after the layer renderer and targert resources.
+	render_gfx_render_pass_close(&r->scratch_render_pass);
 
 	// Destroy any scratch images created.
 	render_scratch_images_close(&r->c->nr, &r->scratch);
 }
 
-static VkImageView
-get_image_view(const struct comp_swapchain_image *image, enum xrt_layer_composition_flags flags, uint32_t array_index)
-{
-	if (flags & XRT_LAYER_COMPOSITION_BLEND_TEXTURE_SOURCE_ALPHA_BIT) {
-		return image->views.alpha[array_index];
-	}
 
-	return image->views.no_alpha[array_index];
-}
-
-/*!
- * @pre render_gfx_init(rr, &c->nr)
+/*
+ *
+ * Graphics
+ *
  */
-static void
-do_gfx_mesh_and_proj(struct comp_renderer *r,
-                     struct render_gfx *rr,
-                     struct render_gfx_target_resources *rts,
-                     const struct comp_layer *layer,
-                     const struct xrt_layer_projection_view_data *lvd,
-                     const struct xrt_layer_projection_view_data *rvd)
-{
-	const struct xrt_layer_data *data = &layer->data;
-	const uint32_t left_array_index = lvd->sub.array_index;
-	const uint32_t right_array_index = rvd->sub.array_index;
-	const struct comp_swapchain_image *left = &layer->sc_array[0]->images[lvd->sub.image_index];
-	const struct comp_swapchain_image *right = &layer->sc_array[1]->images[rvd->sub.image_index];
-
-	struct xrt_normalized_rect src_norm_rects[2] = {lvd->sub.norm_rect, rvd->sub.norm_rect};
-	if (data->flip_y) {
-		src_norm_rects[0].h = -src_norm_rects[0].h;
-		src_norm_rects[0].y = 1 + src_norm_rects[0].y;
-		src_norm_rects[1].h = -src_norm_rects[1].h;
-		src_norm_rects[1].y = 1 + src_norm_rects[1].y;
-	}
-
-	VkSampler clamp_to_border_black = rr->r->samplers.clamp_to_border_black;
-	VkSampler src_samplers[2] = {
-	    clamp_to_border_black,
-	    clamp_to_border_black,
-	};
-
-	VkImageView src_image_views[2] = {
-	    get_image_view(left, data->flags, left_array_index),
-	    get_image_view(right, data->flags, right_array_index),
-	};
-
-	renderer_build_rendering(r, rr, rts, src_samplers, src_image_views, src_norm_rects);
-}
 
 /*!
  * @pre render_gfx_init(rr, &c->nr)
@@ -880,88 +763,60 @@ dispatch_graphics(struct comp_renderer *r, struct render_gfx *rr)
 	struct comp_target *ct = c->target;
 
 	struct render_gfx_target_resources *rtr = &r->rtr_array[r->acquired_buffer];
-	bool one_projection_layer_fast_path = c->base.slot.one_projection_layer_fast_path;
+	bool fast_path = c->base.slot.one_projection_layer_fast_path;
+	bool do_timewarp = !c->debug.atw_off;
 
-	// No fast path, standard layer renderer path.
-	if (!one_projection_layer_fast_path) {
-		// We mark here to include the layer rendering in the GPU time.
-		comp_target_mark_submit(ct, c->frame.rendering.id, os_monotonic_get_ns());
+	// Sanity check.
+	assert(!fast_path || c->base.slot.layer_count >= 1);
 
-		renderer_get_view_projection(r);
-		comp_layer_renderer_draw(r->lr);
+	// Viewport information.
+	struct render_viewport_data viewport_datas[2];
+	calc_viewport_data(r, &viewport_datas[0], &viewport_datas[1]);
 
-		VkSampler clamp_to_border_black = r->c->nr.samplers.clamp_to_border_black;
-		VkSampler src_samplers[2] = {
-		    clamp_to_border_black,
-		    clamp_to_border_black,
-		};
-		VkImageView src_image_views[2] = {
-		    r->lr->framebuffers[0].view,
-		    r->lr->framebuffers[1].view,
-		};
+	// Vertex rotation information.
+	struct xrt_matrix_2x2 vertex_rots[2];
+	calc_vertex_rot_data(r, vertex_rots);
 
-		struct xrt_normalized_rect src_norm_rects[2] = {
-		    {.x = 0, .y = 0, .w = 1, .h = 1},
-		    {.x = 0, .y = 0, .w = 1, .h = 1},
-		};
+	// Device view information.
+	struct xrt_fov fovs[2];
+	struct xrt_pose world_poses[2];
+	struct xrt_pose eye_poses[2];
+	calc_pose_data(r, fovs, world_poses, eye_poses);
 
-		renderer_build_rendering(r, rr, rtr, src_samplers, src_image_views, src_norm_rects);
+	// We are rendering for distortion, use their fov values.
+	struct xrt_fov target_fovs[2] = {
+	    r->c->xdev->hmd->distortion.fov[0],
+	    r->c->xdev->hmd->distortion.fov[1],
+	};
 
-		renderer_submit_queue(r, rr->r->cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
-
-		return;
-	}
+	// Need to be begin for all paths.
+	render_gfx_begin(rr);
 
 
-	/*
-	 * Fast path.
-	 */
+	comp_render_gfx_dispatch(     //
+	    rr,                       // rr
+	    &r->scratch,              // rsi
+	    r->scratch_targets,       // rsi_rtrs
+	    c->base.slot.layers,      // layers
+	    c->base.slot.layer_count, // layer_count
+	    world_poses,              // world_poses
+	    eye_poses,                // eye_poses
+	    target_fovs,              // fovs
+	    vertex_rots,              // vertex_rots
+	    rtr,                      // rtr
+	    viewport_datas,           // viewport_datas
+	    fast_path,                // fast_path
+	    do_timewarp);             // do_timewarp
 
-	XRT_MAYBE_UNUSED const uint32_t layer_count = c->base.slot.layer_count;
-	assert(layer_count >= 1);
 
-	int i = 0;
-	const struct comp_layer *layer = &c->base.slot.layers[i];
+	// Make the command buffer submittable.
+	render_gfx_end(rr);
 
-	switch (layer->data.type) {
-	case XRT_LAYER_STEREO_PROJECTION: {
-		const struct xrt_layer_stereo_projection_data *stereo = &layer->data.stereo;
-		const struct xrt_layer_projection_view_data *lvd = &stereo->l;
-		const struct xrt_layer_projection_view_data *rvd = &stereo->r;
+	// Everything is ready, submit to the queue.
+	renderer_submit_queue(r, rr->r->cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
 
-		c->base.slot.poses[0] = lvd->pose;
-		c->base.slot.poses[1] = rvd->pose;
-		c->base.slot.fovs[0] = lvd->fov;
-		c->base.slot.fovs[1] = rvd->fov;
-
-		do_gfx_mesh_and_proj(r, rr, rtr, layer, lvd, rvd);
-
-		renderer_submit_queue(r, rr->r->cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
-
-		// We mark afterwards to not include CPU time spent.
-		comp_target_mark_submit(ct, c->frame.rendering.id, os_monotonic_get_ns());
-	} break;
-
-	case XRT_LAYER_STEREO_PROJECTION_DEPTH: {
-		const struct xrt_layer_stereo_projection_depth_data *stereo = &layer->data.stereo_depth;
-		const struct xrt_layer_projection_view_data *lvd = &stereo->l;
-		const struct xrt_layer_projection_view_data *rvd = &stereo->r;
-
-		c->base.slot.poses[0] = lvd->pose;
-		c->base.slot.poses[1] = rvd->pose;
-		c->base.slot.fovs[0] = lvd->fov;
-		c->base.slot.fovs[1] = rvd->fov;
-
-		do_gfx_mesh_and_proj(r, rr, rtr, layer, lvd, rvd);
-
-		renderer_submit_queue(r, rr->r->cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
-
-		// We mark afterwards to not include CPU time spent.
-		comp_target_mark_submit(ct, c->frame.rendering.id, os_monotonic_get_ns());
-	} break;
-
-	default: COMP_ERROR(c, "Unhandled case: '%u'", layer->data.type); assert(false);
-	}
+	// We mark afterwards to not include CPU time spent.
+	comp_target_mark_submit(ct, c->frame.rendering.id, os_monotonic_get_ns());
 }
 
 
@@ -970,69 +825,6 @@ dispatch_graphics(struct comp_renderer *r, struct render_gfx *rr)
  * Compute
  *
  */
-
-static void
-get_view_poses(struct comp_renderer *r, struct xrt_pose out_world[2], struct xrt_pose out_eye[2])
-{
-	COMP_TRACE_MARKER();
-
-	struct xrt_vec3 default_eye_relation = {
-	    0.063000f, /*! @todo get actual ipd_meters */
-	    0.0f,
-	    0.0f,
-	};
-
-	struct xrt_space_relation head_relation = XRT_SPACE_RELATION_ZERO;
-	struct xrt_pose poses[2] = {0};
-
-	xrt_device_get_view_poses(                           //
-	    r->c->xdev,                                      //
-	    &default_eye_relation,                           //
-	    r->c->frame.rendering.predicted_display_time_ns, //
-	    2,                                               //
-	    &head_relation,                                  //
-	    r->c->base.slot.fovs,                            //
-	    poses);                                          //
-
-	for (uint32_t i = 0; i < 2; i++) {
-		const struct xrt_fov fov = r->c->base.slot.fovs[i];
-		const struct xrt_pose eye_pose = poses[i];
-
-		comp_layer_renderer_set_fov(r->lr, &fov, i);
-
-		struct xrt_space_relation result = {0};
-		struct xrt_relation_chain xrc = {0};
-		m_relation_chain_push_pose_if_not_identity(&xrc, &eye_pose);
-		m_relation_chain_push_relation(&xrc, &head_relation);
-		m_relation_chain_resolve(&xrc, &result);
-
-		out_eye[i] = eye_pose;
-		out_world[i] = result.pose;
-		r->c->base.slot.poses[i] = result.pose;
-	}
-}
-
-static void
-ensure_scratch_image(struct comp_renderer *r)
-{
-	struct xrt_view *l_v = &r->c->xdev->hmd->views[0];
-	struct xrt_view *r_v = &r->c->xdev->hmd->views[1];
-
-	uint32_t w = MAX(l_v->viewport.w_pixels, r_v->viewport.w_pixels);
-	uint32_t h = MAX(l_v->viewport.h_pixels, r_v->viewport.h_pixels);
-
-	// Adjust size to be bigger, 140%, to match default recommended viewport size.
-	//! @todo Make this match fully, or even match app provided layers.
-	w = (uint32_t)(w * 1.4f);
-	h = (uint32_t)(h * 1.4f);
-
-	VkExtent2D extent = {w, h};
-
-	if (!render_scratch_images_ensure(&r->c->nr, &r->scratch, extent)) {
-		U_LOG_E("Failed to create scratch image!");
-		assert(false);
-	}
-}
 
 /*!
  * @pre render_compute_init(crc, &c->nr)
@@ -1045,9 +837,6 @@ dispatch_compute(struct comp_renderer *r, struct render_compute *crc)
 	struct comp_compositor *c = r->c;
 	struct comp_target *ct = c->target;
 
-	// In case the scratch images are needed, make sure they are created.
-	ensure_scratch_image(r);
-
 	// Basics
 	const struct comp_layer *layers = c->base.slot.layers;
 	uint32_t layer_count = c->base.slot.layer_count;
@@ -1055,9 +844,10 @@ dispatch_compute(struct comp_renderer *r, struct render_compute *crc)
 	bool do_timewarp = !c->debug.atw_off;
 
 	// Device view information.
+	struct xrt_fov fovs[2]; // Unused
 	struct xrt_pose world_poses[2];
 	struct xrt_pose eye_poses[2]; // New eye poses, unused.
-	get_view_poses(r, world_poses, eye_poses);
+	calc_pose_data(r, fovs, world_poses, eye_poses);
 
 	// Target Vulkan resources..
 	VkImage target_image = r->c->target->images[r->acquired_buffer].handle;
@@ -1070,18 +860,18 @@ dispatch_compute(struct comp_renderer *r, struct render_compute *crc)
 	// Start the compute pipeline.
 	render_compute_begin(crc);
 
-	comp_render_dispatch_compute( //
-	    crc,                      // crc
-	    &r->scratch,              // rsi
-	    world_poses,              // world_poses
-	    eye_poses,                // eye_poses
-	    layers,                   // layers
-	    layer_count,              // layer_count
-	    target_image,             // target_image
-	    target_image_view,        // target_image_view
-	    views,                    // views
-	    fast_path,                // fast_path
-	    do_timewarp);             // do_timewarp
+	comp_render_cs_dispatch( //
+	    crc,                 // crc
+	    &r->scratch,         // rsi
+	    world_poses,         // world_poses
+	    eye_poses,           // eye_poses
+	    layers,              // layers
+	    layer_count,         // layer_count
+	    target_image,        // target_image
+	    target_image_view,   // target_image_view
+	    views,               // views
+	    fast_path,           // fast_path
+	    do_timewarp);        // do_timewarp
 
 	render_compute_end(crc);
 
@@ -1096,267 +886,6 @@ dispatch_compute(struct comp_renderer *r, struct render_compute *crc)
  * Interface functions.
  *
  */
-
-void
-comp_renderer_set_quad_layer(struct comp_renderer *r,
-                             uint32_t layer,
-                             struct comp_swapchain_image *image,
-                             struct xrt_layer_data *data)
-{
-	struct comp_render_layer *l = r->lr->layers[layer];
-
-	l->transformation_ubo_binding = r->lr->transformation_ubo_binding;
-	l->texture_binding = r->lr->texture_binding;
-
-	VkSampler clamp_to_edge = r->c->nr.samplers.clamp_to_edge;
-	VkImageView image_view = get_image_view( //
-	    image,                               //
-	    data->flags,                         //
-	    data->quad.sub.array_index);         //
-
-	comp_layer_update_descriptors( //
-	    l,                         //
-	    clamp_to_edge,             //
-	    image_view);               //
-
-	struct xrt_vec3 s = {data->quad.size.x, data->quad.size.y, 1.0f};
-	struct xrt_matrix_4x4 model_matrix;
-	math_matrix_4x4_model(&data->quad.pose, &s, &model_matrix);
-
-	comp_layer_set_model_matrix(r->lr->layers[layer], &model_matrix);
-
-	comp_layer_set_flip_y(r->lr->layers[layer], data->flip_y);
-
-	l->type = XRT_LAYER_QUAD;
-	l->visibility = data->quad.visibility;
-	l->flags = data->flags;
-	l->view_space = (data->flags & XRT_LAYER_COMPOSITION_VIEW_SPACE_BIT) != 0;
-
-	for (uint32_t i = 0; i < 2; i++) {
-		l->transformation[i].offset = data->quad.sub.rect.offset;
-		l->transformation[i].extent = data->quad.sub.rect.extent;
-	}
-}
-
-void
-comp_renderer_set_cylinder_layer(struct comp_renderer *r,
-                                 uint32_t layer,
-                                 struct comp_swapchain_image *image,
-                                 struct xrt_layer_data *data)
-{
-	struct comp_render_layer *l = r->lr->layers[layer];
-
-	l->transformation_ubo_binding = r->lr->transformation_ubo_binding;
-	l->texture_binding = r->lr->texture_binding;
-
-	l->type = XRT_LAYER_CYLINDER;
-	l->visibility = data->cylinder.visibility;
-	l->flags = data->flags;
-	l->view_space = (data->flags & XRT_LAYER_COMPOSITION_VIEW_SPACE_BIT) != 0;
-
-	// skip "infinite cylinder"
-	if (data->cylinder.radius == 0.f || data->cylinder.aspect_ratio == INFINITY) {
-		/* skipping the descriptor set update means the renderer must
-		 * entirely skip rendering of invisible layer */
-		l->visibility = XRT_LAYER_EYE_VISIBILITY_NONE;
-		return;
-	}
-
-	VkSampler clamp_to_edge = r->c->nr.samplers.clamp_to_edge;
-	VkImageView image_view = get_image_view( //
-	    image,                               //
-	    data->flags,                         //
-	    data->cylinder.sub.array_index);     //
-
-	comp_layer_update_descriptors( //
-	    r->lr->layers[layer],      //
-	    clamp_to_edge,             //
-	    image_view);               //
-
-	float height = (data->cylinder.radius * data->cylinder.central_angle) / data->cylinder.aspect_ratio;
-
-	// scale unit cylinder to diameter
-	float diameter = data->cylinder.radius * 2;
-	struct xrt_vec3 scale = {diameter, height, diameter};
-	struct xrt_matrix_4x4 model_matrix;
-	math_matrix_4x4_model(&data->cylinder.pose, &scale, &model_matrix);
-
-	comp_layer_set_model_matrix(r->lr->layers[layer], &model_matrix);
-
-	comp_layer_set_flip_y(r->lr->layers[layer], data->flip_y);
-
-	for (uint32_t i = 0; i < 2; i++) {
-		l->transformation[i].offset = data->cylinder.sub.rect.offset;
-		l->transformation[i].extent = data->cylinder.sub.rect.extent;
-	}
-
-	comp_layer_update_cylinder_vertex_buffer(l, data->cylinder.central_angle);
-}
-
-void
-comp_renderer_set_projection_layer(struct comp_renderer *r,
-                                   uint32_t layer,
-                                   struct comp_swapchain_image *left_image,
-                                   struct comp_swapchain_image *right_image,
-                                   struct xrt_layer_data *data)
-{
-	uint32_t left_array_index = data->stereo.l.sub.array_index;
-	uint32_t right_array_index = data->stereo.r.sub.array_index;
-
-	struct comp_render_layer *l = r->lr->layers[layer];
-
-	l->transformation_ubo_binding = r->lr->transformation_ubo_binding;
-	l->texture_binding = r->lr->texture_binding;
-
-	VkSampler clamp_to_border_black = r->c->nr.samplers.clamp_to_border_black;
-
-	VkImageView left_image_view = get_image_view( //
-	    left_image,                               //
-	    data->flags,                              //
-	    left_array_index);                        //
-
-	VkImageView right_image_view = get_image_view( //
-	    right_image,                               //
-	    data->flags,                               //
-	    right_array_index);                        //
-
-	comp_layer_update_stereo_descriptors( //
-	    l,                                //
-	    clamp_to_border_black,            //
-	    clamp_to_border_black,            //
-	    left_image_view,                  //
-	    right_image_view);                //
-
-	comp_layer_set_flip_y(l, data->flip_y);
-
-	l->type = XRT_LAYER_STEREO_PROJECTION;
-	l->flags = data->flags;
-	l->view_space = (data->flags & XRT_LAYER_COMPOSITION_VIEW_SPACE_BIT) != 0;
-
-	l->transformation[0].offset = data->stereo.l.sub.rect.offset;
-	l->transformation[0].extent = data->stereo.l.sub.rect.extent;
-	l->transformation[1].offset = data->stereo.r.sub.rect.offset;
-	l->transformation[1].extent = data->stereo.r.sub.rect.extent;
-}
-
-#ifdef XRT_FEATURE_OPENXR_LAYER_EQUIRECT1
-void
-comp_renderer_set_equirect1_layer(struct comp_renderer *r,
-                                  uint32_t layer,
-                                  struct comp_swapchain_image *image,
-                                  struct xrt_layer_data *data)
-{
-
-	struct xrt_vec3 s = {1.0f, 1.0f, 1.0f};
-	struct xrt_matrix_4x4 model_matrix;
-	math_matrix_4x4_model(&data->equirect1.pose, &s, &model_matrix);
-
-	comp_layer_set_flip_y(r->lr->layers[layer], data->flip_y);
-
-	struct comp_render_layer *l = r->lr->layers[layer];
-	l->type = XRT_LAYER_EQUIRECT1;
-	l->visibility = data->equirect1.visibility;
-	l->flags = data->flags;
-	l->view_space = (data->flags & XRT_LAYER_COMPOSITION_VIEW_SPACE_BIT) != 0;
-	l->transformation_ubo_binding = r->lr->transformation_ubo_binding;
-	l->texture_binding = r->lr->texture_binding;
-
-	VkSampler repeat = r->c->nr.samplers.repeat;
-	VkImageView image_view = get_image_view( //
-	    image,                               //
-	    data->flags,                         //
-	    data->equirect1.sub.array_index);    //
-
-	comp_layer_update_descriptors( //
-	    l,                         //
-	    repeat,                    //
-	    image_view);               //
-
-	comp_layer_update_equirect1_descriptor(l, &data->equirect1);
-
-	for (uint32_t i = 0; i < 2; i++) {
-		l->transformation[i].offset = data->equirect1.sub.rect.offset;
-		l->transformation[i].extent = data->equirect1.sub.rect.extent;
-	}
-}
-#endif
-
-#ifdef XRT_FEATURE_OPENXR_LAYER_EQUIRECT2
-void
-comp_renderer_set_equirect2_layer(struct comp_renderer *r,
-                                  uint32_t layer,
-                                  struct comp_swapchain_image *image,
-                                  struct xrt_layer_data *data)
-{
-
-	struct xrt_vec3 s = {1.0f, 1.0f, 1.0f};
-	struct xrt_matrix_4x4 model_matrix;
-	math_matrix_4x4_model(&data->equirect2.pose, &s, &model_matrix);
-
-	comp_layer_set_flip_y(r->lr->layers[layer], data->flip_y);
-
-	struct comp_render_layer *l = r->lr->layers[layer];
-	l->type = XRT_LAYER_EQUIRECT2;
-	l->visibility = data->equirect2.visibility;
-	l->flags = data->flags;
-	l->view_space = (data->flags & XRT_LAYER_COMPOSITION_VIEW_SPACE_BIT) != 0;
-	l->transformation_ubo_binding = r->lr->transformation_ubo_binding;
-	l->texture_binding = r->lr->texture_binding;
-
-	VkSampler repeat = r->c->nr.samplers.repeat;
-	VkImageView image_view = get_image_view( //
-	    image,                               //
-	    data->flags,                         //
-	    data->equirect2.sub.array_index);    //
-
-	comp_layer_update_descriptors( //
-	    l,                         //
-	    repeat,                    //
-	    image_view);               //
-
-	comp_layer_update_equirect2_descriptor(l, &data->equirect2);
-
-	for (uint32_t i = 0; i < 2; i++) {
-		l->transformation[i].offset = data->equirect2.sub.rect.offset;
-		l->transformation[i].extent = data->equirect2.sub.rect.extent;
-	}
-}
-#endif
-
-#ifdef XRT_FEATURE_OPENXR_LAYER_CUBE
-void
-comp_renderer_set_cube_layer(struct comp_renderer *r,
-                             uint32_t layer,
-                             struct comp_swapchain_image *image,
-                             struct xrt_layer_data *data)
-{
-
-	struct xrt_vec3 s = {1.0f, 1.0f, 1.0f};
-	struct xrt_matrix_4x4 model_matrix;
-	math_matrix_4x4_model(&data->cube.pose, &s, &model_matrix);
-
-	comp_layer_set_flip_y(r->lr->layers[layer], data->flip_y);
-
-	struct comp_render_layer *l = r->lr->layers[layer];
-	l->type = XRT_LAYER_CUBE;
-	l->visibility = data->cube.visibility;
-	l->flags = data->flags;
-	l->view_space = (data->flags & XRT_LAYER_COMPOSITION_VIEW_SPACE_BIT) != 0;
-	l->transformation_ubo_binding = r->lr->transformation_ubo_binding;
-	l->texture_binding = r->lr->texture_binding;
-
-	VkSampler repeat = r->c->nr.samplers.repeat;
-	VkImageView image_view = get_image_view( //
-	    image,                               //
-	    data->flags,                         //
-	    data->cube.sub.array_index);         //
-
-	comp_layer_update_descriptors( //
-	    l,                         //
-	    repeat,                    //
-	    image_view);               //
-}
-#endif
 
 void
 comp_renderer_draw(struct comp_renderer *r)
@@ -1413,12 +942,18 @@ comp_renderer_draw(struct comp_renderer *r)
 	if (c->peek) {
 		switch (comp_window_peek_get_eye(c->peek)) {
 		case COMP_WINDOW_PEEK_EYE_LEFT:
-			comp_window_peek_blit(c->peek, r->lr->framebuffers[0].image, r->lr->extent.width,
-			                      r->lr->extent.height);
+			comp_window_peek_blit(         //
+			    c->peek,                   //
+			    r->scratch.color[0].image, //
+			    r->scratch.extent.width,   //
+			    r->scratch.extent.height); //
 			break;
 		case COMP_WINDOW_PEEK_EYE_RIGHT:
-			comp_window_peek_blit(c->peek, r->lr->framebuffers[1].image, r->lr->extent.width,
-			                      r->lr->extent.height);
+			comp_window_peek_blit(         //
+			    c->peek,                   //
+			    r->scratch.color[1].image, //
+			    r->scratch.extent.width,   //
+			    r->scratch.extent.height); //
 			break;
 		case COMP_WINDOW_PEEK_EYE_BOTH:
 			/* TODO: display the undistorted image */
@@ -1446,35 +981,19 @@ comp_renderer_draw(struct comp_renderer *r)
 		// Used for both, want clamp to edge to no bring in black.
 		VkSampler clamp_to_edge = c->nr.samplers.clamp_to_edge;
 
-		if (use_compute) {
-			// Covers only the first half of the view.
-			struct xrt_normalized_rect rect = {0, 0, 1.0f, 1.0f};
+		// Covers the whole view.
+		struct xrt_normalized_rect rect = {0, 0, 1.0f, 1.0f};
 
-			comp_mirror_do_blit(               //
-			    &r->mirror_to_debug_gui,       //
-			    &c->base.vk,                   //
-			    frame_id,                      //
-			    predicted_display_time_ns,     //
-			    r->scratch.color[0].image,     //
-			    r->scratch.color[0].srgb_view, //
-			    clamp_to_edge,                 //
-			    r->scratch.extent,             //
-			    rect);                         //
-		} else {
-			// Covers the whole view.
-			struct xrt_normalized_rect rect = {0, 0, 1.0f, 1.0f};
-
-			comp_mirror_do_blit(              //
-			    &r->mirror_to_debug_gui,      //
-			    &c->base.vk,                  //
-			    frame_id,                     //
-			    predicted_display_time_ns,    //
-			    r->lr->framebuffers[0].image, //
-			    r->lr->framebuffers[0].view,  //
-			    clamp_to_edge,                //
-			    r->lr->extent,                //
-			    rect);                        //
-		}
+		comp_mirror_do_blit(               //
+		    &r->mirror_to_debug_gui,       //
+		    &c->base.vk,                   //
+		    frame_id,                      //
+		    predicted_display_time_ns,     //
+		    r->scratch.color[0].image,     //
+		    r->scratch.color[0].srgb_view, //
+		    clamp_to_edge,                 //
+		    r->scratch.extent,             //
+		    rect);                         //
 	}
 
 	/*
@@ -1541,28 +1060,12 @@ comp_renderer_draw(struct comp_renderer *r)
 	comp_target_update_timings(ct);
 }
 
-void
-comp_renderer_allocate_layers(struct comp_renderer *self, uint32_t layer_count)
-{
-	COMP_TRACE_MARKER();
-
-	comp_layer_renderer_allocate_layers(self->lr, layer_count);
-}
-
-void
-comp_renderer_destroy_layers(struct comp_renderer *self)
-{
-	COMP_TRACE_MARKER();
-
-	comp_layer_renderer_destroy_layers(self->lr);
-}
-
 struct comp_renderer *
-comp_renderer_create(struct comp_compositor *c)
+comp_renderer_create(struct comp_compositor *c, VkExtent2D scratch_extent)
 {
 	struct comp_renderer *r = U_TYPED_CALLOC(struct comp_renderer);
 
-	renderer_init(r, c);
+	renderer_init(r, c, scratch_extent);
 
 	return r;
 }

@@ -98,7 +98,10 @@ rift_s_open_system(struct xrt_builder *xb,
 	DRV_TRACE_MARKER();
 
 	rift_s_log_level = debug_get_log_option_rift_s_log();
-	struct u_system_devices *usysd = u_system_devices_allocate();
+
+	// Use the static system devices helper, no dynamic roles.
+	struct u_system_devices_static *usysds = u_system_devices_static_allocate();
+	struct xrt_system_devices *xsysd = &usysds->base.base;
 
 	xret = xrt_prober_lock_list(xp, &xpdevs, &xpdev_count);
 	if (xret != XRT_SUCCESS) {
@@ -154,17 +157,17 @@ rift_s_open_system(struct xrt_builder *xb,
 		goto fail;
 	}
 
+
+	// Create and add to list.
 	struct xrt_device *hmd_xdev = rift_s_system_get_hmd(sys);
-	usysd->base.xdevs[usysd->base.xdev_count++] = hmd_xdev;
-	usysd->base.roles.head = hmd_xdev;
+	xsysd->xdevs[xsysd->xdev_count++] = hmd_xdev;
 
-	struct xrt_device *xdev = rift_s_system_get_controller(sys, 0);
-	usysd->base.xdevs[usysd->base.xdev_count++] = xdev;
-	usysd->base.roles.left = xdev;
+	struct xrt_device *left_xdev = rift_s_system_get_controller(sys, 0);
+	xsysd->xdevs[xsysd->xdev_count++] = left_xdev;
 
-	xdev = rift_s_system_get_controller(sys, 1);
-	usysd->base.xdevs[usysd->base.xdev_count++] = xdev;
-	usysd->base.roles.right = xdev;
+	struct xrt_device *right_xdev = rift_s_system_get_controller(sys, 1);
+	xsysd->xdevs[xsysd->xdev_count++] = right_xdev;
+
 
 #ifdef XRT_BUILD_DRIVER_HANDTRACKING
 	struct xrt_device *ht_xdev = rift_s_system_get_hand_tracking_device(sys);
@@ -175,23 +178,43 @@ rift_s_open_system(struct xrt_builder *xb,
 		struct xrt_device *two_hands[2];
 		cemu_devices_create(hmd_xdev, ht_xdev, two_hands);
 
-		usysd->base.roles.hand_tracking.left = two_hands[0];
-		usysd->base.roles.hand_tracking.right = two_hands[1];
+		xsysd->static_roles.hand_tracking.left = two_hands[0];
+		xsysd->static_roles.hand_tracking.right = two_hands[1];
 
-		usysd->base.xdevs[usysd->base.xdev_count++] = two_hands[0];
-		usysd->base.xdevs[usysd->base.xdev_count++] = two_hands[1];
+		xsysd->xdevs[xsysd->xdev_count++] = two_hands[0];
+		xsysd->xdevs[xsysd->xdev_count++] = two_hands[1];
 
 		if (debug_get_bool_option_rift_s_hand_tracking_as_controller()) {
-			usysd->base.roles.left = two_hands[0];
-			usysd->base.roles.right = two_hands[1];
+			left_xdev = two_hands[0];
+			right_xdev = two_hands[1];
 		}
 	}
 #endif
 
-	*out_xsysd = &usysd->base;
-	u_builder_create_space_overseer(&usysd->base, out_xso);
+	// Assign to role(s).
+	xsysd->static_roles.head = hmd_xdev;
+
+	u_system_devices_static_finalize( //
+	    usysds,                       // usysds
+	    left_xdev,                    // left
+	    right_xdev);                  // right
+
+
+	/*
+	 * Done.
+	 */
+
+	*out_xsysd = xsysd;
+	u_builder_create_space_overseer_legacy( //
+	    hmd_xdev,                           // head
+	    left_xdev,                          // left
+	    right_xdev,                         // right
+	    xsysd->xdevs,                       // xdevs
+	    xsysd->xdev_count,                  // xdev_count
+	    out_xso);                           // out_xso
 
 	return XRT_SUCCESS;
+
 
 unlock_and_fail:
 	xret = xrt_prober_unlock_list(xp, &xpdevs);
@@ -201,7 +224,7 @@ unlock_and_fail:
 
 	/* Fallthrough */
 fail:
-	u_system_devices_destroy(&usysd);
+	xrt_system_devices_destroy(&xsysd);
 	return XRT_ERROR_DEVICE_CREATION_FAILED;
 }
 

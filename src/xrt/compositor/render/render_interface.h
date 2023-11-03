@@ -41,6 +41,17 @@ extern "C" {
  */
 
 /*!
+ * The value `minUniformBufferOffsetAlignment` is defined by the Vulkan spec as
+ * having a max value of 256. Use this value to safely figure out sizes and
+ * alignment of UBO sub-allocation. It is also the max for 'nonCoherentAtomSize`
+ * which if we need to do flushing is what we need to align UBOs to.
+ *
+ * https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/VkPhysicalDeviceLimits.html
+ * https://registry.khronos.org/vulkan/specs/1.3-extensions/html/vkspec.html#limits-minmax
+ */
+#define RENDER_ALWAYS_SAFE_UBO_ALIGNMENT (256)
+
+/*!
  * Max number of layers for layer squasher, can be different from
  * @ref COMP_MAX_LAYERS as the render module is separate from the compositor.
  */
@@ -67,6 +78,12 @@ extern "C" {
 //! How many distortion images we have, one for each channel (3 rgb) and per view, total 6.
 #define RENDER_DISTORTION_NUM_IMAGES (6)
 
+//! Which binding does the layer projection and quad shader has it's UBO on.
+#define RENDER_BINDING_LAYER_SHARED_UBO 0
+
+//! Which binding does the shared layer fragment shader has it's source on.
+#define RENDER_BINDING_LAYER_SHARED_SRC 1
+
 
 /*
  *
@@ -83,6 +100,24 @@ render_calc_time_warp_matrix(const struct xrt_pose *src_pose,
                              const struct xrt_fov *src_fov,
                              const struct xrt_pose *new_pose,
                              struct xrt_matrix_4x4 *matrix);
+
+/*!
+ * This function constructs a transformation in the form of a normalized rect
+ * that lets you go from a UV coordinate on a projection plane to the a point on
+ * the tangent plane. An example is that the UV coordinate `(0, 0)` would be
+ * transformed to `(tan(angle_left), tan(fov.angle_up))`. The tangent plane (aka
+ * tangent space) is really the tangent of the angle, aka length at unit distance.
+ *
+ * For the trivial case of an fov with 45 degrees angles, that is where the
+ * tangent length are `1` (aka `tan(45)`), the transformation would go from
+ * `[0 .. 1]` to `[-1 .. 1]` the expected returns are `x = -1`, `y = -1`,
+ * `w = 2` and `h = 2`.
+ *
+ * param      fov      The fov of the projection image.
+ * param[out] out_rect Transformation from UV to tangent lengths.
+ */
+void
+render_calc_uv_to_tangent_lengths_rect(const struct xrt_fov *fov, struct xrt_normalized_rect *out_rect);
 
 
 /*
@@ -104,17 +139,20 @@ struct render_shaders
 	VkShaderModule mesh_vert;
 	VkShaderModule mesh_frag;
 
-	VkShaderModule equirect1_vert;
-	VkShaderModule equirect1_frag;
 
-	VkShaderModule equirect2_vert;
-	VkShaderModule equirect2_frag;
+	/*
+	 * New layer renderer.
+	 */
 
-	VkShaderModule cube_vert;
-	VkShaderModule cube_frag;
+	VkShaderModule layer_cylinder_vert;
+	VkShaderModule layer_cylinder_frag;
 
-	VkShaderModule layer_vert;
-	VkShaderModule layer_frag;
+	VkShaderModule layer_equirect2_vert;
+	VkShaderModule layer_equirect2_frag;
+
+	VkShaderModule layer_projection_vert;
+	VkShaderModule layer_quad_vert;
+	VkShaderModule layer_shared_frag;
 };
 
 /*!
@@ -212,6 +250,94 @@ render_buffer_write(struct vk_bundle *vk, struct render_buffer *buffer, void *da
 
 /*
  *
+ * Sub-alloc.
+ *
+ */
+
+/*!
+ * Per frame sub-allocation into a buffer, used to reduce the number of UBO
+ * objects we need to create. There is no way to free a sub-allocation, this is
+ * done implicitly at the end of the frame when @ref render_sub_alloc_tracker is
+ * zeroed out.
+ *
+ * @see render_sub_alloc_tracker
+ */
+struct render_sub_alloc
+{
+	/*!
+	 * The buffer this is allocated from, it's the callers responsibility
+	 * to keep it alive for as long as the sub-allocation is used.
+	 */
+	VkBuffer buffer;
+
+	//! Size of sub-allocation.
+	VkDeviceSize size;
+
+	//! Offset into buffer.
+	VkDeviceSize offset;
+};
+
+/*!
+ * A per frame tracker of sub-allocation out of a buffer, used to reduce the
+ * number of UBO objects we need to create. This code is designed with one
+ * constraint in mind, that the lifetime of a sub-allocation is only for one
+ * frame and is discarded at the end of it, but also alive for the entire frame.
+ * This removes the need to free indivudial sub-allocation, or even track them
+ * beyond filling the UBO data and descriptor sets.
+ *
+ * @see render_sub_alloc
+ */
+struct render_sub_alloc_tracker
+{
+	/*!
+	 * The buffer to allocate from, it's the callers responsibility to keep
+	 * it alive for as long as the sub-allocations are in used.
+	 */
+	VkBuffer buffer;
+
+	//! Start of memory, if buffer was mapped with initialised.
+	void *mapped;
+
+	//! Total size of buffer.
+	VkDeviceSize total_size;
+
+	//! Currently used memory.
+	VkDeviceSize used;
+};
+
+/*!
+ * Init a @ref render_sub_alloc_tracker struct from a @ref render_buffer, the
+ * caller is responsible for keeping @p buffer alive while the sub allocator
+ * is being used.
+ */
+void
+render_sub_alloc_tracker_init(struct render_sub_alloc_tracker *rsat, struct render_buffer *buffer);
+
+/*!
+ * Allocate enough memory (with constraints of UBOs) of @p size, return the
+ * pointer to the mapped memory or null if the buffer wasn't allocated.
+ */
+XRT_CHECK_RESULT VkResult
+render_sub_alloc_ubo_alloc_and_get_ptr(struct vk_bundle *vk,
+                                       struct render_sub_alloc_tracker *rsat,
+                                       VkDeviceSize size,
+                                       void **out_ptr,
+                                       struct render_sub_alloc *out_rsa);
+
+/*!
+ * Allocate enough memory (with constraints of UBOs) to hold the memory in @ptr
+ * and copy that memory to the buffer using the CPU.
+ */
+XRT_CHECK_RESULT VkResult
+render_sub_alloc_ubo_alloc_and_write(struct vk_bundle *vk,
+                                     struct render_sub_alloc_tracker *rsat,
+                                     const void *ptr,
+                                     VkDeviceSize size,
+                                     struct render_sub_alloc *out_rsa);
+
+
+/*
+ *
  * Resources
  *
  */
@@ -271,6 +397,33 @@ struct render_resources
 
 	struct
 	{
+		//! Pool for shaders that uses one ubo and sampler.
+		VkDescriptorPool ubo_and_src_descriptor_pool;
+
+		/*!
+		 * Shared UBO buffer that we sub-allocate out of, this is to
+		 * have fewer buffers that the kernel needs to validate on
+		 * command submission time.
+		 *
+		 * https://registry.khronos.org/vulkan/site/guide/latest/memory_allocation.html
+		 */
+		struct render_buffer shared_ubo;
+
+		struct
+		{
+			struct
+			{
+				//! For projection and quad layer.
+				VkDescriptorSetLayout descriptor_set_layout;
+
+				//! For projection and quad layer.
+				VkPipelineLayout pipeline_layout;
+			} shared;
+		} layer;
+	} gfx;
+
+	struct
+	{
 		//! The binding index for the source texture.
 		uint32_t src_binding;
 
@@ -291,9 +444,6 @@ struct render_resources
 		uint32_t stride;
 		uint32_t index_offsets[2];
 		uint32_t index_count_total;
-
-		//! Descriptor pool for mesh shaders.
-		VkDescriptorPool descriptor_pool;
 
 		//! Info ubos, only supports two views currently.
 		struct render_buffer ubos[2];
@@ -526,60 +676,107 @@ struct render_viewport_data
 
 /*
  *
+ * Render pass
+ *
+ */
+
+/*!
+ * A render pass while not depending on a @p VkFramebuffer does depend on the
+ * format of the target image(s), and other options for the render pass. These
+ * are used to create a @p VkRenderPass, all @p VkFramebuffer(s) and
+ * @p VkPipeline depends on the @p VkRenderPass so hang off this struct.
+ */
+struct render_gfx_render_pass
+{
+	struct render_resources *r;
+
+	//! The format of the image(s) we are rendering to.
+	VkFormat format;
+
+	//! Sample count for this render pass.
+	VkSampleCountFlagBits sample_count;
+
+	//! Load op used on the attachment(s).
+	VkAttachmentLoadOp load_op;
+
+	//! Final layout of the target image(s).
+	VkImageLayout final_layout;
+
+	//! Render pass used for rendering.
+	VkRenderPass render_pass;
+
+	struct
+	{
+		//! Pipeline layout used for mesh, without timewarp.
+		VkPipeline pipeline;
+
+		//! Pipeline layout used for mesh, with timewarp.
+		VkPipeline pipeline_timewarp;
+	} mesh;
+
+	struct
+	{
+		VkPipeline cylinder_premultiplied_alpha;
+		VkPipeline cylinder_unpremultiplied_alpha;
+
+		VkPipeline equirect2_premultiplied_alpha;
+		VkPipeline equirect2_unpremultiplied_alpha;
+
+		VkPipeline proj_premultiplied_alpha;
+		VkPipeline proj_unpremultiplied_alpha;
+
+		VkPipeline quad_premultiplied_alpha;
+		VkPipeline quad_unpremultiplied_alpha;
+	} layer;
+};
+
+/*!
+ * Creates all resources held by the render pass, does not free the struct itself.
+ *
+ * @public @memberof render_gfx_render_pass
+ */
+bool
+render_gfx_render_pass_init(struct render_gfx_render_pass *rgrp,
+                            struct render_resources *r,
+                            VkFormat format,
+                            VkAttachmentLoadOp load_op,
+                            VkImageLayout final_layout);
+
+/*!
+ * Frees all resources held by the render pass, does not free the struct itself.
+ *
+ * @public @memberof render_gfx_render_pass
+ */
+void
+render_gfx_render_pass_close(struct render_gfx_render_pass *rgrp);
+
+
+/*
+ *
  * Rendering target
  *
  */
 
 /*!
  * Each rendering (@ref render_gfx) render to one or more targets
- * (@ref render_gfx_target_resources), each target can have one or more
- * views (@ref render_gfx_view), this struct holds all the data that is
- * specific to the target.
- */
-struct render_gfx_target_data
-{
-	// The format that should be used to read from the target.
-	VkFormat format;
-
-	// Is this target a external target.
-	bool is_external;
-
-	//! Total height and width of the target.
-	uint32_t width, height;
-};
-
-/*!
- * Each rendering (@ref render_gfx) render to one or more targets
- * (@ref render_gfx_target_resources), each target can have one or more
- * views (@ref render_gfx_view), this struct holds all the vulkan resources
- * that is specific to the target.
- *
- * Technically the framebuffer could be moved out of this struct and all of this
- * state be turned into a CSO object that depends only only the format and
- * external status of the target, but is combined to reduce the number of
- * objects needed to render.
+ * (@ref render_gfx_target_resources), the target points to one render pass and
+ * it's pipelines (@ref render_gfx_render_pass). It is up to the code using
+ * these to do reuse of render passes and ensure they match.
  */
 struct render_gfx_target_resources
 {
 	//! Collections of static resources.
 	struct render_resources *r;
 
-	//! The data for this target.
-	struct render_gfx_target_data data;
+	//! Render pass.
+	struct render_gfx_render_pass *rgrp;
 
-	//! Render pass used for rendering, does not depend on framebuffer.
-	VkRenderPass render_pass;
-
-	struct
-	{
-		//! Pipeline layout used for mesh, does not depend on framebuffer.
-		VkPipeline pipeline;
-	} mesh;
+	// The extent of the framebuffer.
+	VkExtent2D extent;
 
 	//! Framebuffer for this target, depends on given VkImageView.
 	VkFramebuffer framebuffer;
 };
-
 
 /*!
  * Init a target resource struct, caller has to keep target alive until closed.
@@ -589,8 +786,9 @@ struct render_gfx_target_resources
 bool
 render_gfx_target_resources_init(struct render_gfx_target_resources *rtr,
                                  struct render_resources *r,
+                                 struct render_gfx_render_pass *rgrp,
                                  VkImageView target,
-                                 struct render_gfx_target_data *data);
+                                 VkExtent2D extent);
 
 /*!
  * Frees all resources held by the target, does not free the struct itself.
@@ -608,20 +806,6 @@ render_gfx_target_resources_close(struct render_gfx_target_resources *rtr);
  */
 
 /*!
- * Each rendering (@ref render_gfx) render to one or more targets
- * (@ref render_gfx_target_resources), each target can have one or more
- * views (@ref render_gfx_view), this struct holds all the vulkan resources
- * that is specific to the view.
- */
-struct render_gfx_view
-{
-	struct
-	{
-		VkDescriptorSet descriptor_set;
-	} mesh;
-};
-
-/*!
  * A rendering is used to create command buffers needed to do one frame of
  * compositor rendering, it holds onto resources used by the command buffer.
  */
@@ -630,14 +814,11 @@ struct render_gfx
 	//! Resources that we are based on.
 	struct render_resources *r;
 
+	//! Shared buffer that we sub-allocate UBOs from.
+	struct render_sub_alloc_tracker ubo_tracker;
+
 	//! The current target we are rendering too, can change during command building.
 	struct render_gfx_target_resources *rtr;
-
-	//! Holds per view data.
-	struct render_gfx_view views[2];
-
-	//! The current view we are rendering to.
-	uint32_t current_view;
 };
 
 /*!
@@ -686,9 +867,62 @@ render_gfx_close(struct render_gfx *rr);
 struct render_gfx_mesh_ubo_data
 {
 	struct xrt_matrix_2x2 vertex_rot;
-
 	struct xrt_normalized_rect post_transform;
+
+	// Only used for timewarp.
+	struct xrt_normalized_rect pre_transform;
+	struct xrt_matrix_4x4 transform;
 };
+
+/*!
+ * UBO data that is sent to the layer cylinder shader.
+ */
+struct render_gfx_layer_cylinder_data
+{
+	struct xrt_normalized_rect post_transform;
+	struct xrt_matrix_4x4 mvp;
+	float radius;
+	float central_angle;
+	float aspect_ratio;
+	float _pad;
+};
+
+/*!
+ * UBO data that is sent to the layer equirect2 shader.
+ */
+struct render_gfx_layer_equirect2_data
+{
+	struct xrt_normalized_rect post_transform;
+	struct xrt_matrix_4x4 mv_inverse;
+
+	//! See @ref render_calc_uv_to_tangent_lengths_rect.
+	struct xrt_normalized_rect to_tangent;
+
+	float radius;
+	float central_horizontal_angle;
+	float upper_vertical_angle;
+	float lower_vertical_angle;
+};
+
+/*!
+ * UBO data that is sent to the layer projection shader.
+ */
+struct render_gfx_layer_projection_data
+{
+	struct xrt_normalized_rect post_transform;
+	struct xrt_normalized_rect to_tanget;
+	struct xrt_matrix_4x4 mvp;
+};
+
+/*!
+ * UBO data that is sent to the layer quad shader.
+ */
+struct render_gfx_layer_quad_data
+{
+	struct xrt_normalized_rect post_transform;
+	struct xrt_matrix_4x4 mvp;
+};
+
 
 /*!
  * @name Drawing functions
@@ -703,7 +937,7 @@ struct render_gfx_mesh_ubo_data
  * @public @memberof render_gfx
  */
 bool
-render_gfx_begin_target(struct render_gfx *rr, struct render_gfx_target_resources *rtr);
+render_gfx_begin_target(struct render_gfx *rr, struct render_gfx_target_resources *rtr, const VkClearColorValue *color);
 
 /*!
  * @public @memberof render_gfx
@@ -715,7 +949,7 @@ render_gfx_end_target(struct render_gfx *rr);
  * @public @memberof render_gfx
  */
 void
-render_gfx_begin_view(struct render_gfx *rr, uint32_t view, struct render_viewport_data *viewport_data);
+render_gfx_begin_view(struct render_gfx *rr, uint32_t view, const struct render_viewport_data *viewport_data);
 
 /*!
  * @public @memberof render_gfx
@@ -724,35 +958,125 @@ void
 render_gfx_end_view(struct render_gfx *rr);
 
 /*!
+ * Allocate needed resources for one mesh shader dispatch, will also update the
+ * descriptor set, ubo will be filled out with the given @p data argument.
+ *
+ * Uses the @ref render_sub_alloc_tracker of the @ref render_gfx and the
+ * descriptor pool of @ref render_resources, both of which will be reset once
+ * closed, so don't save any reference to these objects beyond the frame.
+ *
+ * @public @memberof render_gfx
+ */
+XRT_CHECK_RESULT VkResult
+render_gfx_mesh_alloc_and_write(struct render_gfx *rr,
+                                const struct render_gfx_mesh_ubo_data *data,
+                                VkSampler src_sampler,
+                                VkImageView src_image_view,
+                                VkDescriptorSet *out_descriptor_set);
+
+/*!
+ * Dispatch one mesh shader instance, using the give @p mesh_index as source for
+ * mesh geometry, timewarp selectable via @p do_timewarp.
+ *
  * @public @memberof render_gfx
  */
 void
-render_gfx_distortion(struct render_gfx *rr);
+render_gfx_mesh_draw(struct render_gfx *rr, uint32_t mesh_index, VkDescriptorSet descriptor_set, bool do_timewarp);
+
+/*!
+ * Allocate and write a UBO and descriptor_set to be used for cylinder layer
+ * rendering, the content of @p data need to be valid at the time of the call.
+ *
+ * @public @memberof render_gfx
+ */
+XRT_CHECK_RESULT VkResult
+render_gfx_layer_cylinder_alloc_and_write(struct render_gfx *rr,
+                                          const struct render_gfx_layer_cylinder_data *data,
+                                          VkSampler src_sampler,
+                                          VkImageView src_image_view,
+                                          VkDescriptorSet *out_descriptor_set);
+
+/*!
+ * Allocate and write a UBO and descriptor_set to be used for equirect2 layer
+ * rendering, the content of @p data need to be valid at the time of the call.
+ *
+ * @public @memberof render_gfx
+ */
+XRT_CHECK_RESULT VkResult
+render_gfx_layer_equirect2_alloc_and_write(struct render_gfx *rr,
+                                           const struct render_gfx_layer_equirect2_data *data,
+                                           VkSampler src_sampler,
+                                           VkImageView src_image_view,
+                                           VkDescriptorSet *out_descriptor_set);
+
+/*!
+ * Allocate and write a UBO and descriptor_set to be used for projection layer
+ * rendering, the content of @p data need to be valid at the time of the call.
+ *
+ * @public @memberof render_gfx
+ */
+XRT_CHECK_RESULT VkResult
+render_gfx_layer_projection_alloc_and_write(struct render_gfx *rr,
+                                            const struct render_gfx_layer_projection_data *data,
+                                            VkSampler src_sampler,
+                                            VkImageView src_image_view,
+                                            VkDescriptorSet *out_descriptor_set);
+
+/*!
+ * Allocate and write a UBO and descriptor_set to be used for quad layer
+ * rendering, the content of @p data need to be valid at the time of the call.
+ *
+ * @public @memberof render_gfx
+ */
+XRT_CHECK_RESULT VkResult
+render_gfx_layer_quad_alloc_and_write(struct render_gfx *rr,
+                                      const struct render_gfx_layer_quad_data *data,
+                                      VkSampler src_sampler,
+                                      VkImageView src_image_view,
+                                      VkDescriptorSet *out_descriptor_set);
+
+/*!
+ * Dispatch a cylinder layer shader into the current target and view,
+ * allocate @p descriptor_set and ubo with
+ * @ref render_gfx_layer_cylinder_alloc_and_write.
+ *
+ * @public @memberof render_gfx
+ */
+void
+render_gfx_layer_cylinder(struct render_gfx *rr, bool premultiplied_alpha, VkDescriptorSet descriptor_set);
+
+/*!
+ * Dispatch a equirect2 layer shader into the current target and view,
+ * allocate @p descriptor_set and ubo with
+ * @ref render_gfx_layer_equirect2_alloc_and_write.
+ *
+ * @public @memberof render_gfx
+ */
+void
+render_gfx_layer_equirect2(struct render_gfx *rr, bool premultiplied_alpha, VkDescriptorSet descriptor_set);
+
+/*!
+ * Dispatch a projection layer shader into the current target and view,
+ * allocate @p descriptor_set and ubo with
+ * @ref render_gfx_layer_projection_alloc_and_write.
+ *
+ * @public @memberof render_gfx
+ */
+void
+render_gfx_layer_projection(struct render_gfx *rr, bool premultiplied_alpha, VkDescriptorSet descriptor_set);
+
+/*!
+ * Dispatch a quad layer shader into the current target and view, allocate
+ * @p descriptor_set and ubo with @ref render_gfx_layer_quad_alloc_and_write.
+ *
+ * @public @memberof render_gfx
+ */
+void
+render_gfx_layer_quad(struct render_gfx *rr, bool premultiplied_alpha, VkDescriptorSet descriptor_set);
 
 /*!
  * @}
  */
-
-/*
- *
- * Update functions.
- *
- */
-
-/*!
- * @name Update functions
- * @{
- */
-/*!
- * @public @memberof render_gfx
- */
-void
-render_gfx_update_distortion(struct render_gfx *rr,
-                             uint32_t view,
-                             VkSampler sampler,
-                             VkImageView image_view,
-                             struct render_gfx_mesh_ubo_data *data);
-//! @}
 
 
 /*
@@ -824,6 +1148,33 @@ struct render_compute_layer_ubo_data
 		//! @todo Implement separated samplers and images (and change to samplers[2])
 		uint32_t padding[2];
 	} images_samplers[RENDER_MAX_LAYERS];
+
+	//! Shared between cylinder and equirect2.
+	struct xrt_matrix_4x4 mv_inverse[RENDER_MAX_LAYERS];
+
+
+	/*!
+	 * For cylinder layer
+	 */
+	struct
+	{
+		float radius;
+		float central_angle;
+		float aspect_ratio;
+		float padding;
+	} cylinder_data[RENDER_MAX_LAYERS];
+
+
+	/*!
+	 * For equirect2 layers
+	 */
+	struct
+	{
+		float radius;
+		float central_horizontal_angle;
+		float upper_vertical_angle;
+		float lower_vertical_angle;
+	} eq2_data[RENDER_MAX_LAYERS];
 
 
 	/*!

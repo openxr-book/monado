@@ -359,13 +359,10 @@ init_shm(struct ipc_server *s)
 	s->ism->isdev_count = count;
 
 	// Assign all of the roles.
-	ism->roles.head = find_xdev_index(s, s->xsysd->roles.head);
-	ism->roles.left = find_xdev_index(s, s->xsysd->roles.left);
-	ism->roles.right = find_xdev_index(s, s->xsysd->roles.right);
-	ism->roles.gamepad = find_xdev_index(s, s->xsysd->roles.gamepad);
-	ism->roles.hand_tracking.left = find_xdev_index(s, s->xsysd->roles.hand_tracking.left);
-	ism->roles.hand_tracking.right = find_xdev_index(s, s->xsysd->roles.hand_tracking.right);
-	ism->roles.eyes = find_xdev_index(s, s->xsysd->roles.eyes);
+	ism->roles.head = find_xdev_index(s, s->xsysd->static_roles.head);
+	ism->roles.eyes = find_xdev_index(s, s->xsysd->static_roles.eyes);
+	ism->roles.hand_tracking.left = find_xdev_index(s, s->xsysd->static_roles.hand_tracking.left);
+	ism->roles.hand_tracking.right = find_xdev_index(s, s->xsysd->static_roles.hand_tracking.right);
 
 	// Fill out git version info.
 	snprintf(s->ism->u_git_tag, IPC_VERSION_NAME_LEN, "%s", u_git_tag);
@@ -687,13 +684,14 @@ update_server_state_locked(struct ipc_server *s)
 		}
 	}
 
-	// if our currently-set active primary application is not
+	// if there is a currently-set active primary application and it is not
 	// actually active/displayable, use the fallback application
 	// instead.
-	volatile struct ipc_client_state *ics = &s->threads[s->global_state.active_client_index].ics;
-	if (!(ics->client_state.session_overlay == false && s->global_state.active_client_index >= 0 &&
-	      ics->client_state.session_active)) {
-		s->global_state.active_client_index = fallback_active_application;
+	if (s->global_state.active_client_index >= 0) {
+		volatile struct ipc_client_state *ics = &s->threads[s->global_state.active_client_index].ics;
+		if (!(ics->client_state.session_overlay == false && ics->client_state.session_active)) {
+			s->global_state.active_client_index = fallback_active_application;
+		}
 	}
 
 
