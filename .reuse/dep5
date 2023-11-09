@@ -86,13 +86,13 @@ Comment: SPDX-License-Identifier missing.
 
 Files: src/external/glad/include/glad/*
 Copyright: 2013-2023, David Herberth
-License: (WTFPL or CC0-1.0) and Apache-2.0
+License: CC0-1.0 and Apache-2.0
 Comment: This is generated from Khronos's XML (https://github.com/KhronosGroup/EGL-Registry/blob/main/api/egl.xml)
  which is under the Apache-2.0 license.
 
 Files:  src/external/glad/src/*
 Copyright: 2013-2023, David Herberth
-License: (WTFPL or CC0-1.0) and Apache-2.0
+License: CC0-1.0 and Apache-2.0
 Comment: This is generated from Khronos's XML (https://github.com/KhronosGroup/EGL-Registry/blob/main/api/egl.xml)
  which is under the Apache-2.0 license.
 
