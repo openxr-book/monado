@@ -26,6 +26,7 @@
 #include <string.h>
 #include <linux/input.h>
 
+#define WINDOW_TITLE "Monado"
 
 /*
  *
@@ -88,8 +89,8 @@ static struct ANativeWindow *
 _create_android_window(struct comp_window_android *cwa)
 {
 	// 0 means default display
-	cwa->custom_surface =
-	    android_custom_surface_async_start(android_globals_get_vm(), android_globals_get_context(), 0);
+	cwa->custom_surface = android_custom_surface_async_start(android_globals_get_vm(),
+	                                                         android_globals_get_context(), 0, WINDOW_TITLE);
 	if (cwa->custom_surface == NULL) {
 		COMP_ERROR(cwa->base.base.c,
 		           "comp_window_android_create_surface: could not "
@@ -103,7 +104,7 @@ _create_android_window(struct comp_window_android *cwa)
 static VkResult
 comp_window_android_create_surface(struct comp_window_android *cwa,
                                    struct ANativeWindow *window,
-                                   VkSurfaceKHR *vk_surface)
+                                   VkSurfaceKHR *out_surface)
 {
 	struct vk_bundle *vk = get_vk(cwa);
 	VkResult ret;
@@ -114,15 +115,19 @@ comp_window_android_create_surface(struct comp_window_android *cwa,
 	    .window = window,
 	};
 
+	VkSurfaceKHR surface = VK_NULL_HANDLE;
 	ret = vk->vkCreateAndroidSurfaceKHR( //
 	    vk->instance,                    //
 	    &surface_info,                   //
 	    NULL,                            //
-	    vk_surface);                     //
+	    &surface);                       //
 	if (ret != VK_SUCCESS) {
 		COMP_ERROR(cwa->base.base.c, "vkCreateAndroidSurfaceKHR: %s", vk_result_string(ret));
 		return ret;
 	}
+
+	VK_NAME_SURFACE(vk, surface, "comp_window_android surface");
+	*out_surface = surface;
 
 	return VK_SUCCESS;
 }

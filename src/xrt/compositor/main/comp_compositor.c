@@ -468,6 +468,9 @@ static const char *optional_instance_extensions[] = {
 #ifdef VK_EXT_display_surface_counter
     VK_EXT_DISPLAY_SURFACE_COUNTER_EXTENSION_NAME,
 #endif
+#if defined VK_EXT_debug_utils && !defined NDEBUG
+    VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
+#endif
 };
 
 // Note: Keep synchronized with comp_vk_glue - we should have everything they
@@ -538,9 +541,6 @@ static const char *optional_device_extensions[] = {
 #endif
 #ifdef VK_KHR_timeline_semaphore
     VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME,
-#endif
-#if defined VK_EXT_debug_marker && !defined NDEBUG
-    VK_EXT_DEBUG_MARKER_EXTENSION_NAME,
 #endif
 #ifdef VK_EXT_calibrated_timestamps
     VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME,

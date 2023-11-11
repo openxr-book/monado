@@ -33,6 +33,7 @@
 #define IPC_MAX_LAYERS 16
 #define IPC_MAX_SLOTS 128
 #define IPC_MAX_CLIENTS 8
+#define IPC_MAX_RAW_VIEWS 32 // Max views that we can get, artificial limit.
 #define IPC_EVENT_QUEUE_SIZE 32
 
 #define IPC_SHARED_MAX_INPUTS 1024
@@ -222,9 +223,6 @@ struct ipc_shared_memory
 	struct
 	{
 		int32_t head;
-		int32_t left;
-		int32_t right;
-		int32_t gamepad;
 		int32_t eyes;
 
 		struct

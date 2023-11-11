@@ -43,6 +43,7 @@ oxr_session_populate_egl(struct oxr_logger *log,
                          struct oxr_session *sess)
 {
 	EGLint egl_client_type = -1;
+	bool renderdoc_enabled = false;
 
 	PFNEGLQUERYCONTEXTPROC eglQueryContext = (PFNEGLQUERYCONTEXTPROC)next->getProcAddress("eglQueryContext");
 	if (!eglQueryContext) {
@@ -67,6 +68,7 @@ oxr_session_populate_egl(struct oxr_logger *log,
 	    next->config,                                   //
 	    next->context,                                  //
 	    next->getProcAddress,                           //
+	    renderdoc_enabled,                              // renderdoc_enabled
 	    &xcgl);                                         //
 
 	if (xret == XRT_ERROR_EGL_CONFIG_MISSING) {

@@ -184,6 +184,8 @@ ensure_scratch(struct comp_mirror_to_debug_gui *m, struct vk_bundle *vk)
 		return false;
 	}
 
+	VK_NAME_IMAGE_VIEW(vk, m->bounce.unorm_view, "comp_mirror_debug_to_gui image view bounce.unorm_view");
+
 	return true;
 }
 
@@ -297,6 +299,8 @@ comp_mirror_init(struct comp_mirror_to_debug_gui *m,
 		return ret;
 	}
 
+	VK_NAME_COMMAND_POOL(vk, m->cmd_pool.pool, "comp_mirror_to_debug_gui command pool");
+
 	struct vk_descriptor_pool_info blit_pool_info = {
 	    .uniform_per_descriptor_count = 0,
 	    .sampler_per_descriptor_count = 1,
@@ -311,15 +315,23 @@ comp_mirror_init(struct comp_mirror_to_debug_gui *m,
 	    &blit_pool_info,            // info
 	    &m->blit.descriptor_pool)); // out_descriptor_pool
 
+	VK_NAME_DESCRIPTOR_POOL(vk, m->blit.descriptor_pool, "comp_mirror_to_debug_ui blit descriptor pool");
 
 	C(vk_create_pipeline_cache(vk, &m->blit.pipeline_cache));
 
+	VK_NAME_PIPELINE_CACHE(vk, m->blit.pipeline_cache, "comp_mirror_to_debug_ui blit pipeline cache");
+
 	C(create_blit_descriptor_set_layout(vk, &m->blit.descriptor_set_layout));
+
+	VK_NAME_DESCRIPTOR_SET_LAYOUT(vk, m->blit.descriptor_set_layout,
+	                              "comp_mirror_to_debug_ui blit descriptor set layout");
 
 	C(create_blit_pipeline_layout(     //
 	    vk,                            // vk_bundle
 	    m->blit.descriptor_set_layout, // descriptor_set_layout
 	    &m->blit.pipeline_layout));    // out_pipeline_layout
+
+	VK_NAME_PIPELINE_LAYOUT(vk, m->blit.pipeline_layout, "comp_mirror_to_debug_ui blit pipeline layout");
 
 	C(vk_create_compute_pipeline( //
 	    vk,                       // vk_bundle
@@ -328,6 +340,8 @@ comp_mirror_init(struct comp_mirror_to_debug_gui *m,
 	    m->blit.pipeline_layout,  // pipeline_layout
 	    NULL,                     // specialization_info
 	    &m->blit.pipeline));      // out_compute_pipeline
+
+	VK_NAME_PIPELINE(vk, m->blit.pipeline, "comp_mirror_to_debug_ui blit pipeline");
 
 	return VK_SUCCESS;
 }
@@ -432,6 +446,8 @@ comp_mirror_do_blit(struct comp_mirror_to_debug_gui *m,
 		return;
 	}
 
+	VK_NAME_DESCRIPTOR_SET(vk, descriptor_set, "comp_mirror_to_debug_ui blit descriptor set");
+
 	struct vk_cmd_pool *pool = &m->cmd_pool;
 
 	// For writing and submitting commands.
@@ -444,6 +460,8 @@ comp_mirror_do_blit(struct comp_mirror_to_debug_gui *m,
 		vk_cmd_pool_unlock(pool);
 		return;
 	}
+
+	VK_NAME_COMMAND_BUFFER(vk, cmd, "comp_mirror_to_debug_ui command buffer");
 
 	// Barrier arguments.
 	VkImageSubresourceRange first_color_level_subresource_range = {

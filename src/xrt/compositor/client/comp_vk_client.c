@@ -119,6 +119,8 @@ setup_semaphore(struct client_vk_compositor *c)
 		return XRT_ERROR_VULKAN;
 	}
 
+	VK_NAME_SEMAPHORE(vk, semaphore, "timeline semaphore");
+
 	c->sync.semaphore = semaphore;
 	c->sync.xcsem = xcsem; // No need to reference.
 
@@ -592,6 +594,15 @@ client_vk_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_h
 
 	struct client_vk_compositor *c = client_vk_compositor(xc);
 
+	if (c->renderdoc_enabled) {
+		struct vk_bundle *vk = &c->vk;
+		VkResult ret = vk_cmd_pool_submit_cmd_buffer(vk, &c->pool, c->dcb);
+		if (ret != VK_SUCCESS) {
+			VK_ERROR(vk, "vk_cmd_pool_submit_cmd_buffer: %s %u", vk_result_string(ret), ret);
+			return XRT_ERROR_FAILED_TO_SUBMIT_VULKAN_COMMANDS;
+		}
+	}
+
 	xrt_result_t xret = XRT_SUCCESS;
 	if (submit_handle(c, sync_handle, &xret)) {
 		return xret;
@@ -669,6 +680,9 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 		if (ret != VK_SUCCESS) {
 			return XRT_ERROR_VULKAN;
 		}
+
+		VK_NAME_IMAGE(vk, sc->base.images[i], "vk_image_collection image");
+		VK_NAME_DEVICE_MEMORY(vk, sc->mems[i], "vk_image_collection device_memory");
 	}
 
 	vk_cmd_pool_lock(&c->pool);
@@ -681,11 +695,13 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 			vk_cmd_pool_unlock(&c->pool);
 			return XRT_ERROR_VULKAN;
 		}
+		VK_NAME_COMMAND_BUFFER(vk, sc->acquire[i], "client_vk_swapchain acquire command buffer");
 		ret = vk_cmd_pool_create_and_begin_cmd_buffer_locked(vk, &c->pool, flags, &sc->release[i]);
 		if (ret != VK_SUCCESS) {
 			vk_cmd_pool_unlock(&c->pool);
 			return XRT_ERROR_VULKAN;
 		}
+		VK_NAME_COMMAND_BUFFER(vk, sc->release[i], "client_vk_swapchain release command buffer");
 
 		VkImageSubresourceRange subresource_range = {
 		    .aspectMask = barrier_aspect_mask,
@@ -774,6 +790,8 @@ client_vk_compositor_create(struct xrt_compositor_native *xcn,
                             bool external_fence_fd_enabled,
                             bool external_semaphore_fd_enabled,
                             bool timeline_semaphore_enabled,
+                            bool debug_utils_enabled,
+                            bool renderdoc_enabled,
                             uint32_t queueFamilyIndex,
                             uint32_t queueIndex)
 {
@@ -809,6 +827,7 @@ client_vk_compositor_create(struct xrt_compositor_native *xcn,
 	}
 
 	c->base.base.info.format_count = xcn->base.info.format_count;
+	c->renderdoc_enabled = renderdoc_enabled;
 
 	// Default to info.
 	enum u_logging_level log_level = debug_get_log_option_vulkan_log();
@@ -824,6 +843,7 @@ client_vk_compositor_create(struct xrt_compositor_native *xcn,
 	    external_fence_fd_enabled,     // external_fence_fd_enabled
 	    external_semaphore_fd_enabled, // external_semaphore_fd_enabled
 	    timeline_semaphore_enabled,    // timeline_semaphore_enabled
+	    debug_utils_enabled,           // debug_utils_enabled
 	    log_level);                    // log_level
 	if (ret != VK_SUCCESS) {
 		goto err_free;
@@ -838,6 +858,8 @@ client_vk_compositor_create(struct xrt_compositor_native *xcn,
 	if (ret != VK_SUCCESS) {
 		goto err_mutex;
 	}
+
+	VK_NAME_COMMAND_POOL(&c->vk, c->pool.pool, "client_vk_compositor command pool");
 
 #ifdef VK_KHR_timeline_semaphore
 	if (vk_can_import_and_export_timeline_semaphore(&c->vk)) {
@@ -854,6 +876,25 @@ client_vk_compositor_create(struct xrt_compositor_native *xcn,
 		VkPhysicalDeviceProperties pdp;
 		vk->vkGetPhysicalDeviceProperties(vk->physical_device, &pdp);
 		c->base.base.info.max_tetxure_size = pdp.limits.maxImageDimension2D;
+	}
+
+	if (!c->renderdoc_enabled) {
+		return c;
+	}
+
+	struct vk_bundle *vk = &c->vk;
+	if (!vk->has_EXT_debug_utils) {
+		c->renderdoc_enabled = false;
+		return c;
+	}
+
+	// Create a dummy VkCommandBuffer and submit it to the VkQueue, just for inserting a debug label into
+	// RenderDoc for triggering the capture.
+	ret = vk_cmd_pool_create_begin_insert_label_and_end_cmd_buffer_locked(
+	    vk, &c->pool, "vr-marker,frame_end,type,application", &c->dcb);
+	if (ret != VK_SUCCESS) {
+		VK_ERROR(vk, "vk_cmd_pool_create_insert_debug_label_and_end_cmd_buffer: %s", vk_result_string(ret));
+		goto err_pool;
 	}
 
 	return c;

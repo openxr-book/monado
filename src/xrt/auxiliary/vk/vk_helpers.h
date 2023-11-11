@@ -116,6 +116,7 @@ struct vk_bundle
 	// beginning of GENERATED instance extension code - do not modify - used by scripts
 	bool has_EXT_display_surface_counter;
 	bool has_EXT_swapchain_colorspace;
+	bool has_EXT_debug_utils;
 	// end of GENERATED instance extension code - do not modify - used by scripts
 
 	// beginning of GENERATED device extension code - do not modify - used by scripts
@@ -130,7 +131,6 @@ struct vk_bundle
 	bool has_KHR_maintenance4;
 	bool has_KHR_timeline_semaphore;
 	bool has_EXT_calibrated_timestamps;
-	bool has_EXT_debug_marker;
 	bool has_EXT_display_control;
 	bool has_EXT_external_memory_dma_buf;
 	bool has_EXT_global_priority;
@@ -250,7 +250,14 @@ struct vk_bundle
 
 #if defined(VK_EXT_display_surface_counter)
 	PFN_vkGetPhysicalDeviceSurfaceCapabilities2EXT vkGetPhysicalDeviceSurfaceCapabilities2EXT;
+
 #endif // defined(VK_EXT_display_surface_counter)
+
+#if defined(VK_EXT_debug_utils)
+	PFN_vkCreateDebugUtilsMessengerEXT vkCreateDebugUtilsMessengerEXT;
+	PFN_vkSubmitDebugUtilsMessageEXT vkSubmitDebugUtilsMessageEXT;
+	PFN_vkDestroyDebugUtilsMessengerEXT vkDestroyDebugUtilsMessengerEXT;
+#endif // defined(VK_EXT_debug_utils)
 
 	// end of GENERATED instance loader code - do not modify - used by scripts
 
@@ -417,13 +424,16 @@ struct vk_bundle
 
 #endif // defined(VK_EXT_image_drm_format_modifier)
 
-#if defined(VK_EXT_debug_marker)
-	PFN_vkCmdDebugMarkerBeginEXT vkCmdDebugMarkerBeginEXT;
-	PFN_vkCmdDebugMarkerEndEXT vkCmdDebugMarkerEndEXT;
-	PFN_vkCmdDebugMarkerInsertEXT vkCmdDebugMarkerInsertEXT;
-	PFN_vkDebugMarkerSetObjectNameEXT vkDebugMarkerSetObjectNameEXT;
-	PFN_vkDebugMarkerSetObjectTagEXT vkDebugMarkerSetObjectTagEXT;
-#endif // defined(VK_EXT_debug_marker)
+#if defined(VK_EXT_debug_utils)
+	PFN_vkCmdBeginDebugUtilsLabelEXT vkCmdBeginDebugUtilsLabelEXT;
+	PFN_vkCmdEndDebugUtilsLabelEXT vkCmdEndDebugUtilsLabelEXT;
+	PFN_vkCmdInsertDebugUtilsLabelEXT vkCmdInsertDebugUtilsLabelEXT;
+	PFN_vkQueueBeginDebugUtilsLabelEXT vkQueueBeginDebugUtilsLabelEXT;
+	PFN_vkQueueEndDebugUtilsLabelEXT vkQueueEndDebugUtilsLabelEXT;
+	PFN_vkQueueInsertDebugUtilsLabelEXT vkQueueInsertDebugUtilsLabelEXT;
+	PFN_vkSetDebugUtilsObjectNameEXT vkSetDebugUtilsObjectNameEXT;
+	PFN_vkSetDebugUtilsObjectTagEXT vkSetDebugUtilsObjectTagEXT;
+#endif // defined(VK_EXT_debug_utils)
 
 	// end of GENERATED device loader code - do not modify - used by scripts
 };
@@ -511,6 +521,9 @@ struct vk_buffer
 
 XRT_CHECK_RESULT const char *
 vk_result_string(VkResult code);
+
+XRT_CHECK_RESULT const char *
+vk_object_type_string(VkObjectType type);
 
 XRT_CHECK_RESULT const char *
 vk_physical_device_type_string(VkPhysicalDeviceType device_type);
@@ -601,15 +614,15 @@ xrt_swapchain_usage_flag_string(enum xrt_swapchain_usage_bits bits, bool null_on
  *
  */
 
-#if defined(VK_EXT_debug_marker) || defined(XRT_DOXYGEN)
+#if defined(VK_EXT_debug_utils) || defined(XRT_DOXYGEN)
 
 /*!
- * Uses VK_EXT_debug_marker to name objects for easier debugging.
+ * Uses VK_EXT_debug_utils to set a name for an object, for easier debugging.
  *
  * @ingroup aux_vk
  */
 void
-vk_name_object(struct vk_bundle *vk, VkDebugReportObjectTypeEXT object_type, uint64_t object, const char *name);
+vk_name_object(struct vk_bundle *vk, VkObjectType type, uint64_t object, const char *name);
 
 /*!
  * Small helper for @ref vk_name_object that makes use of pre-process to avoid
@@ -617,18 +630,73 @@ vk_name_object(struct vk_bundle *vk, VkDebugReportObjectTypeEXT object_type, uin
  *
  * @ingroup aux_vk
  */
-#define VK_NAME_OBJECT(vk, TYPE, obj, name)                                                                            \
-	if (vk->has_EXT_debug_marker) {                                                                                \
-		vk_name_object(vk, VK_DEBUG_REPORT_OBJECT_TYPE_##TYPE##_EXT, (uint64_t)obj, name);                     \
-	}
+#define VK_NAME_OBJ(VK, TYPE, SUFFIX, OBJ, NAME)                                                                       \
+	do {                                                                                                           \
+		if ((VK)->has_EXT_debug_utils) {                                                                       \
+			TYPE _thing = OBJ;                                                                             \
+			vk_name_object(VK, VK_OBJECT_TYPE_##SUFFIX, (uint64_t)_thing, NAME);                           \
+		}                                                                                                      \
+	} while (false)
+
 
 #else
 
-#define VK_NAME_OBJECT(vk, TYPE, obj name)                                                                             \
-	do {                                                                                                           \
-	} while (false)
+#define VK_NAME_OBJ(VK, TYPE, SUFFIX, OBJ, NAME) VK_NAME_OBJ_DISABLED(VK, TYPE, OBJ)
 
 #endif
+
+/*!
+ * Some combinations of Vulkan implementation and types are broken, we still
+ * want type safety so we have this define. Examples of broken combinations:
+ *
+ * 1. Both Mesa and the Vulkan loader didn't support setting names on the
+ *    VkInstance, loader got support in 1.3.261 and Mesa hasn't as of writing.
+ * 2. For Mesa drivers we can not name VkSurfaceKHR objects on some systems as
+ *    it causes memory corruption, asserts, crashes or functions failing. This
+ *    is as of writing broken on the 23.2.1 release, fixed in main and scheduled
+ *    for the 23.2.2 release.
+ * 3. Mesa RADV leaks the name strings for VkDescriptorSet objects for pools
+ *    that we use the reset function.
+ *
+ * @ingroup aux_vk
+ */
+#define VK_NAME_OBJ_DISABLED(VK, TYPE, OBJ)                                                                            \
+	do {                                                                                                           \
+		XRT_MAYBE_UNUSED TYPE _thing = OBJ;                                                                    \
+	} while (false)
+
+
+// clang-format off
+#define VK_NAME_INSTANCE(VK, OBJ, NAME) VK_NAME_OBJ_DISABLED(VK, VkInstance, OBJ)
+#define VK_NAME_PHYSICAL_DEVICE(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkPhysicalDevice, PHYSICAL_DEVICE, OBJ, NAME)
+#define VK_NAME_DEVICE(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkDevice, DEVICE, OBJ, NAME)
+#define VK_NAME_QUEUE(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkQueue, QUEUE, OBJ, NAME)
+#define VK_NAME_SEMAPHORE(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkSemaphore, SEMAPHORE, OBJ, NAME)
+#define VK_NAME_COMMAND_BUFFER(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkCommandBuffer, COMMAND_BUFFER, OBJ, NAME)
+#define VK_NAME_FENCE(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkFence, FENCE, OBJ, NAME)
+#define VK_NAME_DEVICE_MEMORY(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkDeviceMemory, DEVICE_MEMORY, OBJ, NAME)
+#define VK_NAME_BUFFER(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkBuffer, BUFFER, OBJ, NAME)
+#define VK_NAME_IMAGE(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkImage, IMAGE, OBJ, NAME)
+#define VK_NAME_EVENT(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkEvent, EVENT, OBJ, NAME)
+#define VK_NAME_QUERY_POOL(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkQueryPool, QUERY_POOL, OBJ, NAME)
+#define VK_NAME_BUFFER_VIEW(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkBufferView, BUFFER_VIEW, OBJ, NAME)
+#define VK_NAME_IMAGE_VIEW(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkImageView, IMAGE_VIEW, OBJ, NAME)
+#define VK_NAME_SHADER_MODULE(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkShaderModule, SHADER_MODULE, OBJ, NAME)
+#define VK_NAME_PIPELINE_CACHE(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkPipelineCache, PIPELINE_CACHE, OBJ, NAME)
+#define VK_NAME_PIPELINE_LAYOUT(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkPipelineLayout, PIPELINE_LAYOUT, OBJ, NAME)
+#define VK_NAME_RENDER_PASS(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkRenderPass, RENDER_PASS, OBJ, NAME)
+#define VK_NAME_PIPELINE(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkPipeline, PIPELINE, OBJ, NAME)
+#define VK_NAME_DESCRIPTOR_SET_LAYOUT(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkDescriptorSetLayout, DESCRIPTOR_SET_LAYOUT, OBJ, NAME)
+#define VK_NAME_SAMPLER(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkSampler, SAMPLER, OBJ, NAME)
+#define VK_NAME_DESCRIPTOR_POOL(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkDescriptorPool, DESCRIPTOR_POOL, OBJ, NAME)
+#define VK_NAME_DESCRIPTOR_SET(VK, OBJ, NAME) VK_NAME_OBJ_DISABLED(VK, VkDescriptorSet, OBJ)
+#define VK_NAME_FRAMEBUFFER(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkFramebuffer, FRAMEBUFFER, OBJ, NAME)
+#define VK_NAME_COMMAND_POOL(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkCommandPool, COMMAND_POOL, OBJ, NAME)
+
+#define VK_NAME_SURFACE(VK, OBJ, NAME) VK_NAME_OBJ_DISABLED(VK, VkSurfaceKHR, OBJ)
+#define VK_NAME_SWAPCHAIN(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkSwapchainKHR, SWAPCHAIN_KHR, OBJ, NAME)
+// clang-format on
+
 
 /*
  *
@@ -912,6 +980,7 @@ vk_init_from_given(struct vk_bundle *vk,
                    bool external_fence_fd_enabled,
                    bool external_semaphore_fd_enabled,
                    bool timeline_semaphore_enabled,
+                   bool debug_utils_enabled,
                    enum u_logging_level log_level);
 
 
@@ -1189,6 +1258,18 @@ vk_cmd_image_barrier_gpu_locked(struct vk_bundle *vk,
                                 VkImageLayout old_layout,
                                 VkImageLayout new_layout,
                                 VkImageSubresourceRange subresource_range);
+
+#if defined(VK_EXT_debug_utils) || defined(XRT_DOXYGEN)
+/*!
+ * Uses VK_EXT_debug_utils to insert debug label into a VkCommandBuffer.
+ *
+ * In the vk_debug.c file.
+ *
+ * @ingroup aux_vk
+ */
+void
+vk_cmd_insert_label(struct vk_bundle *vk, VkCommandBuffer cmd_buffer, const char *name);
+#endif
 
 
 /*

@@ -171,11 +171,14 @@ def get_device_cmds():
         None,
         Cmd("vkGetImageDrmFormatModifierPropertiesEXT", requires=("VK_EXT_image_drm_format_modifier",)),
         None,
-        Cmd("vkCmdDebugMarkerBeginEXT", requires=("VK_EXT_debug_marker",)),
-        Cmd("vkCmdDebugMarkerEndEXT", requires=("VK_EXT_debug_marker",)),
-        Cmd("vkCmdDebugMarkerInsertEXT", requires=("VK_EXT_debug_marker",)),
-        Cmd("vkDebugMarkerSetObjectNameEXT", requires=("VK_EXT_debug_marker",)),
-        Cmd("vkDebugMarkerSetObjectTagEXT", requires=("VK_EXT_debug_marker",)),
+        Cmd("vkCmdBeginDebugUtilsLabelEXT", requires=("VK_EXT_debug_utils",)),
+        Cmd("vkCmdEndDebugUtilsLabelEXT", requires=("VK_EXT_debug_utils",)),
+        Cmd("vkCmdInsertDebugUtilsLabelEXT", requires=("VK_EXT_debug_utils",)),
+        Cmd("vkQueueBeginDebugUtilsLabelEXT", requires=("VK_EXT_debug_utils",)),
+        Cmd("vkQueueEndDebugUtilsLabelEXT", requires=("VK_EXT_debug_utils",)),
+        Cmd("vkQueueInsertDebugUtilsLabelEXT", requires=("VK_EXT_debug_utils",)),
+        Cmd("vkSetDebugUtilsObjectNameEXT", requires=("VK_EXT_debug_utils",)),
+        Cmd("vkSetDebugUtilsObjectTagEXT", requires=("VK_EXT_debug_utils",)),
     ]
 
 
@@ -254,6 +257,10 @@ def get_instance_cmds():
         Cmd("vkCreateWin32SurfaceKHR", requires=("VK_USE_PLATFORM_WIN32_KHR",)),
         None,
         Cmd("vkGetPhysicalDeviceSurfaceCapabilities2EXT", requires=("VK_EXT_display_surface_counter",)),
+        None,
+        Cmd("vkCreateDebugUtilsMessengerEXT", requires=("VK_EXT_debug_utils",)),
+        Cmd("vkSubmitDebugUtilsMessageEXT", requires=("VK_EXT_debug_utils",)),
+        Cmd("vkDestroyDebugUtilsMessengerEXT", requires=("VK_EXT_debug_utils",)),
     ]
 
 
@@ -261,6 +268,7 @@ def get_instance_cmds():
 INSTANCE_EXTENSIONS_TO_CHECK = [
     "VK_EXT_display_surface_counter",
     "VK_EXT_swapchain_colorspace",
+    "VK_EXT_debug_utils",
 ]
 # Sorted KHR, EXT, Vendor, interally alphabetically
 DEVICE_EXTENSIONS_TO_CHECK = [
@@ -275,7 +283,6 @@ DEVICE_EXTENSIONS_TO_CHECK = [
     "VK_KHR_maintenance4",
     "VK_KHR_timeline_semaphore",
     "VK_EXT_calibrated_timestamps",
-    "VK_EXT_debug_marker",
     "VK_EXT_display_control",
     "VK_EXT_external_memory_dma_buf",
     "VK_EXT_global_priority",

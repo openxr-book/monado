@@ -108,6 +108,7 @@ init_mesh_vertex_buffers(struct vk_bundle *vk,
 	    memory_property_flags, // memory_property_flags
 	    vbo_size);             // size
 	VK_CHK_WITH_RET(ret, "render_buffer_init", false);
+	VK_NAME_BUFFER(vk, vbo->buffer, "mesh vbo");
 
 	ret = render_buffer_write( //
 	    vk,                    // vk_bundle
@@ -129,6 +130,7 @@ init_mesh_vertex_buffers(struct vk_bundle *vk,
 	    memory_property_flags, // memory_property_flags
 	    ibo_size);             // size
 	VK_CHK_WITH_RET(ret, "render_buffer_init", false);
+	VK_NAME_BUFFER(vk, ibo->buffer, "mesh ibo");
 
 	ret = render_buffer_write( //
 	    vk,                    // vk_bundle
@@ -159,6 +161,7 @@ init_mesh_ubo_buffers(struct vk_bundle *vk, struct render_buffer *l_ubo, struct 
 	                         memory_property_flags, //
 	                         ubo_size);             // size
 	VK_CHK_WITH_RET(ret, "render_buffer_init", false);
+	VK_NAME_BUFFER(vk, l_ubo->buffer, "mesh l_ubo");
 
 	ret = render_buffer_map(vk, l_ubo);
 	VK_CHK_WITH_RET(ret, "render_buffer_map", false);
@@ -169,6 +172,7 @@ init_mesh_ubo_buffers(struct vk_bundle *vk, struct render_buffer *l_ubo, struct 
 	                         memory_property_flags, //
 	                         ubo_size);             // size
 	VK_CHK_WITH_RET(ret, "render_buffer_init", false);
+	VK_NAME_BUFFER(vk, r_ubo->buffer, "mesh r_ubo");
 
 	ret = render_buffer_map(vk, r_ubo);
 	VK_CHK_WITH_RET(ret, "render_buffer_map", false);
@@ -448,6 +452,9 @@ create_scratch_image_and_view(struct vk_bundle *vk, VkExtent2D extent, struct re
 	    &image);                        // out_image
 	VK_CHK_WITH_RET(ret, "vk_create_image_mutable_rgba", false);
 
+	VK_NAME_DEVICE_MEMORY(vk, device_memory, "render_scratch_color_image device_memory");
+	VK_NAME_IMAGE(vk, image, "render_scratch_color_image image");
+
 	VkImageSubresourceRange subresource_range = {
 	    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
 	    .baseMipLevel = 0,
@@ -466,6 +473,8 @@ create_scratch_image_and_view(struct vk_bundle *vk, VkExtent2D extent, struct re
 	    &srgb_view);            // out_image_view
 	VK_CHK_WITH_RET(ret, "vk_create_view_usage", false);
 
+	VK_NAME_IMAGE_VIEW(vk, srgb_view, "render_scratch_color_image image view srgb");
+
 	ret = vk_create_view_usage( //
 	    vk,                     // vk_bundle
 	    image,                  // image
@@ -475,6 +484,8 @@ create_scratch_image_and_view(struct vk_bundle *vk, VkExtent2D extent, struct re
 	    subresource_range,      // subresource_range
 	    &unorm_view);           // out_image_view
 	VK_CHK_WITH_RET(ret, "vk_create_view_usage", false);
+
+	VK_NAME_IMAGE_VIEW(vk, unorm_view, "render_scratch_color_image image view unorm");
 
 	rsci->device_memory = device_memory;
 	rsci->image = image;
@@ -553,11 +564,15 @@ render_resources_init(struct render_resources *r,
 	    &r->samplers.mock);                    // out_sampler
 	VK_CHK_WITH_RET(ret, "vk_create_sampler", false);
 
+	VK_NAME_SAMPLER(vk, r->samplers.mock, "render_resources sampler mock");
+
 	ret = vk_create_sampler(            //
 	    vk,                             // vk_bundle
 	    VK_SAMPLER_ADDRESS_MODE_REPEAT, // clamp_mode
 	    &r->samplers.repeat);           // out_sampler
 	VK_CHK_WITH_RET(ret, "vk_create_sampler", false);
+
+	VK_NAME_SAMPLER(vk, r->samplers.repeat, "render_resources sampler repeat");
 
 	ret = vk_create_sampler(                   //
 	    vk,                                    // vk_bundle
@@ -565,11 +580,15 @@ render_resources_init(struct render_resources *r,
 	    &r->samplers.clamp_to_edge);           // out_sampler
 	VK_CHK_WITH_RET(ret, "vk_create_sampler", false);
 
+	VK_NAME_SAMPLER(vk, r->samplers.clamp_to_edge, "render_resources sampler clamp_to_edge");
+
 	ret = vk_create_sampler(                     //
 	    vk,                                      // vk_bundle
 	    VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER, // clamp_mode
 	    &r->samplers.clamp_to_border_black);     // out_sampler
 	VK_CHK_WITH_RET(ret, "vk_create_sampler", false);
+
+	VK_NAME_SAMPLER(vk, r->samplers.clamp_to_border_black, "render_resources sampler clamp_to_border_black");
 
 
 	/*
@@ -579,6 +598,8 @@ render_resources_init(struct render_resources *r,
 	ret = vk_cmd_pool_init(vk, &r->distortion_pool, VK_COMMAND_POOL_CREATE_TRANSIENT_BIT);
 	VK_CHK_WITH_RET(ret, "vk_cmd_pool_init", false);
 
+	VK_NAME_COMMAND_POOL(vk, r->distortion_pool.pool, "render_resources distortion command pool");
+
 	VkCommandPoolCreateInfo command_pool_info = {
 	    .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
 	    .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
@@ -587,6 +608,8 @@ render_resources_init(struct render_resources *r,
 
 	ret = vk->vkCreateCommandPool(vk->device, &command_pool_info, NULL, &r->cmd_pool);
 	VK_CHK_WITH_RET(ret, "vkCreateCommandPool", false);
+
+	VK_NAME_COMMAND_POOL(vk, r->cmd_pool, "render_resources command pool");
 
 
 	/*
@@ -615,6 +638,9 @@ render_resources_init(struct render_resources *r,
 		    &r->mock.color.image);    // out_image
 		VK_CHK_WITH_RET(ret, "vk_create_image_simple", false);
 
+		VK_NAME_DEVICE_MEMORY(vk, r->mock.color.memory, "render_resources mock color device memory");
+		VK_NAME_IMAGE(vk, r->mock.color.image, "render_resources mock color image");
+
 		ret = vk_create_view(           //
 		    vk,                         // vk_bundle
 		    r->mock.color.image,        // image
@@ -624,10 +650,14 @@ render_resources_init(struct render_resources *r,
 		    &r->mock.color.image_view); // out_view
 		VK_CHK_WITH_RET(ret, "vk_create_view", false);
 
+		VK_NAME_IMAGE_VIEW(vk, r->mock.color.image_view, "render_resources mock color image view");
+
 
 		VkCommandBuffer cmd = VK_NULL_HANDLE;
 		ret = vk_cmd_create_and_begin_cmd_buffer_locked(vk, r->cmd_pool, 0, &cmd);
 		VK_CHK_WITH_RET(ret, "vk_cmd_create_and_begin_cmd_buffer_locked", false);
+
+		VK_NAME_COMMAND_BUFFER(vk, cmd, "render_resources mock command buffer");
 
 		ret = prepare_mock_image_locked( //
 		    vk,                          // vk_bundle
@@ -649,6 +679,8 @@ render_resources_init(struct render_resources *r,
 	ret = vk_create_pipeline_cache(vk, &r->pipeline_cache);
 	VK_CHK_WITH_RET(ret, "vk_create_pipeline_cache", false);
 
+	VK_NAME_PIPELINE_CACHE(vk, r->pipeline_cache, "render_resources pipeline cache");
+
 	VkCommandBufferAllocateInfo cmd_buffer_info = {
 	    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
 	    .commandPool = r->cmd_pool,
@@ -661,6 +693,8 @@ render_resources_init(struct render_resources *r,
 	    &cmd_buffer_info,               // pAllocateInfo
 	    &r->cmd);                       // pCommandBuffers
 	VK_CHK_WITH_RET(ret, "vkAllocateCommandBuffers", false);
+
+	VK_NAME_COMMAND_BUFFER(vk, r->cmd, "render_resources command buffer");
 
 
 	/*
@@ -689,6 +723,9 @@ render_resources_init(struct render_resources *r,
 		    &r->gfx.ubo_and_src_descriptor_pool); // out_descriptor_pool
 		VK_CHK_WITH_RET(ret, "vk_create_descriptor_pool", false);
 
+		VK_NAME_DESCRIPTOR_POOL(vk, r->gfx.ubo_and_src_descriptor_pool,
+		                        "render_resources ubo and src descriptor pool");
+
 		VkBufferUsageFlags usage_flags = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
 		VkMemoryPropertyFlags memory_property_flags = //
 		    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT |    //
@@ -715,6 +752,7 @@ render_resources_init(struct render_resources *r,
 		    memory_property_flags, // memory_property_flags
 		    size);                 // size
 		VK_CHK_WITH_RET(ret, "render_buffer_init", false);
+		VK_NAME_BUFFER(vk, r->gfx.shared_ubo.buffer, "render_resources gfx shared ubo");
 
 		ret = render_buffer_map( //
 		    vk,                  // vk_bundle
@@ -734,11 +772,17 @@ render_resources_init(struct render_resources *r,
 	    &r->gfx.layer.shared.descriptor_set_layout);    // out_descriptor_set_layout
 	VK_CHK_WITH_RET(ret, "create_gfx_ubo_and_src_descriptor_set_layout", false);
 
+	VK_NAME_DESCRIPTOR_SET_LAYOUT(vk, r->gfx.layer.shared.descriptor_set_layout,
+	                              "render_resources gfx layer shared descriptor set layout");
+
 	ret = vk_create_pipeline_layout(               //
 	    vk,                                        // vk_bundle
 	    r->gfx.layer.shared.descriptor_set_layout, // descriptor_set_layout
 	    &r->gfx.layer.shared.pipeline_layout);     // out_pipeline_layout
 	VK_CHK_WITH_RET(ret, "vk_create_pipeline_layout", false);
+
+	VK_NAME_PIPELINE_LAYOUT(vk, r->gfx.layer.shared.pipeline_layout,
+	                        "render_resources gfx layer shared pipeline layout");
 
 
 	/*
@@ -752,11 +796,15 @@ render_resources_init(struct render_resources *r,
 	    &r->mesh.descriptor_set_layout);                // out_mesh_descriptor_set_layout
 	VK_CHK_WITH_RET(ret, "create_gfx_ubo_and_src_descriptor_set_layout", false);
 
+	VK_NAME_DESCRIPTOR_SET_LAYOUT(vk, r->mesh.descriptor_set_layout, "render_resources mesh descriptor set layout");
+
 	ret = vk_create_pipeline_layout(   //
 	    vk,                            // vk_bundle
 	    r->mesh.descriptor_set_layout, // descriptor_set_layout
 	    &r->mesh.pipeline_layout);     // out_pipeline_layout
 	VK_CHK_WITH_RET(ret, "vk_create_pipeline_layout", false);
+
+	VK_NAME_PIPELINE_LAYOUT(vk, r->mesh.pipeline_layout, "render_resources mesh pipeline layout");
 
 	bret = init_mesh_vertex_buffers(     //
 	    vk,                              //
@@ -808,6 +856,7 @@ render_resources_init(struct render_resources *r,
 	    &r->compute.descriptor_pool); // out_descriptor_pool
 	VK_CHK_WITH_RET(ret, "vk_create_descriptor_pool", false);
 
+	VK_NAME_DESCRIPTOR_POOL(vk, r->compute.descriptor_pool, "render_resources compute descriptor pool");
 
 	/*
 	 * Layer pipeline
@@ -822,11 +871,16 @@ render_resources_init(struct render_resources *r,
 	    &r->compute.layer.descriptor_set_layout);     // out_descriptor_set_layout
 	VK_CHK_WITH_RET(ret, "create_compute_layer_descriptor_set_layout", false);
 
+	VK_NAME_DESCRIPTOR_SET_LAYOUT(vk, r->compute.layer.descriptor_set_layout,
+	                              "render_resources compute layer descriptor set layout");
+
 	ret = vk_create_pipeline_layout(            //
 	    vk,                                     // vk_bundle
 	    r->compute.layer.descriptor_set_layout, // descriptor_set_layout
 	    &r->compute.layer.pipeline_layout);     // out_pipeline_layout
 	VK_CHK_WITH_RET(ret, "vk_create_pipeline_layout", false);
+
+	VK_NAME_PIPELINE_LAYOUT(vk, r->compute.layer.pipeline_layout, "render_resources compute layer pipeline layout");
 
 	struct compute_layer_params layer_params = {
 	    .do_timewarp = false,
@@ -844,6 +898,9 @@ render_resources_init(struct render_resources *r,
 	    &r->compute.layer.non_timewarp_pipeline); // out_compute_pipeline
 	VK_CHK_WITH_RET(ret, "create_compute_layer_pipeline", false);
 
+	VK_NAME_PIPELINE(vk, r->compute.layer.non_timewarp_pipeline,
+	                 "render_resources compute layer non timewarp pipeline");
+
 	struct compute_layer_params layer_timewarp_params = {
 	    .do_timewarp = true,
 	    .do_color_correction = true,
@@ -860,6 +917,8 @@ render_resources_init(struct render_resources *r,
 	    &r->compute.layer.timewarp_pipeline); // out_compute_pipeline
 	VK_CHK_WITH_RET(ret, "create_compute_layer_pipeline", false);
 
+	VK_NAME_PIPELINE(vk, r->compute.layer.timewarp_pipeline, "render_resources compute layer timewarp pipeline");
+
 	size_t layer_ubo_size = sizeof(struct render_compute_layer_ubo_data);
 
 	for (uint32_t i = 0; i < ARRAY_SIZE(r->compute.layer.ubos); i++) {
@@ -870,6 +929,7 @@ render_resources_init(struct render_resources *r,
 		    memory_property_flags,     // memory_property_flags
 		    layer_ubo_size);           // size
 		VK_CHK_WITH_RET(ret, "render_buffer_init", false);
+		VK_NAME_BUFFER(vk, r->compute.layer.ubos[i].buffer, "render_resources compute layer ubo");
 
 		ret = render_buffer_map(        //
 		    vk,                         // vk_bundle
@@ -891,11 +951,17 @@ render_resources_init(struct render_resources *r,
 	    &r->compute.distortion.descriptor_set_layout);     // out_descriptor_set_layout
 	VK_CHK_WITH_RET(ret, "create_compute_distortion_descriptor_set_layout", false);
 
+	VK_NAME_DESCRIPTOR_SET_LAYOUT(vk, r->compute.distortion.descriptor_set_layout,
+	                              "render_resources compute distortion descriptor set layout");
+
 	ret = vk_create_pipeline_layout(                 //
 	    vk,                                          // vk_bundle
 	    r->compute.distortion.descriptor_set_layout, // descriptor_set_layout
 	    &r->compute.distortion.pipeline_layout);     // out_pipeline_layout
 	VK_CHK_WITH_RET(ret, "vk_create_pipeline_layout", false);
+
+	VK_NAME_PIPELINE_LAYOUT(vk, r->compute.distortion.pipeline_layout,
+	                        "render_resources compute distortion pipeline layout");
 
 	struct compute_distortion_params distortion_params = {
 	    .distortion_texel_count = RENDER_DISTORTION_IMAGE_DIMENSIONS,
@@ -911,6 +977,8 @@ render_resources_init(struct render_resources *r,
 	    &r->compute.distortion.pipeline);      // out_compute_pipeline
 	VK_CHK_WITH_RET(ret, "create_compute_distortion_pipeline", false);
 
+	VK_NAME_PIPELINE(vk, r->compute.distortion.pipeline, "render_resources compute distortion pipeline");
+
 	struct compute_distortion_params distortion_timewarp_params = {
 	    .distortion_texel_count = RENDER_DISTORTION_IMAGE_DIMENSIONS,
 	    .do_timewarp = true,
@@ -925,6 +993,9 @@ render_resources_init(struct render_resources *r,
 	    &r->compute.distortion.timewarp_pipeline); // out_compute_pipeline
 	VK_CHK_WITH_RET(ret, "create_compute_distortion_pipeline", false);
 
+	VK_NAME_PIPELINE(vk, r->compute.distortion.timewarp_pipeline,
+	                 "render_resources compute distortion timewarp pipeline");
+
 	size_t distortion_ubo_size = sizeof(struct render_compute_distortion_ubo_data);
 
 	ret = render_buffer_init(       //
@@ -934,6 +1005,7 @@ render_resources_init(struct render_resources *r,
 	    memory_property_flags,      // memory_property_flags
 	    distortion_ubo_size);       // size
 	VK_CHK_WITH_RET(ret, "render_buffer_init", false);
+	VK_NAME_BUFFER(vk, r->compute.distortion.ubo.buffer, "render_resources compute distortion ubo");
 	ret = render_buffer_map(         //
 	    vk,                          // vk_bundle
 	    &r->compute.distortion.ubo); // buffer
@@ -953,6 +1025,8 @@ render_resources_init(struct render_resources *r,
 	    &r->compute.clear.pipeline);           // out_compute_pipeline
 	VK_CHK_WITH_RET(ret, "vk_create_compute_pipeline", false);
 
+	VK_NAME_PIPELINE(vk, r->compute.clear.pipeline, "render_resources compute clear pipeline");
+
 	size_t clear_ubo_size = sizeof(struct render_compute_distortion_ubo_data);
 
 	ret = render_buffer_init(  //
@@ -962,6 +1036,7 @@ render_resources_init(struct render_resources *r,
 	    memory_property_flags, // memory_property_flags
 	    clear_ubo_size);       // size
 	VK_CHK_WITH_RET(ret, "render_buffer_init", false);
+	VK_NAME_BUFFER(vk, r->compute.clear.ubo.buffer, "render_resources compute clear ubo");
 
 	ret = render_buffer_map(    //
 	    vk,                     // vk_bundle
@@ -1003,6 +1078,7 @@ render_resources_init(struct render_resources *r,
 	    NULL,              // pAllocator
 	    &r->query_pool);   // pQueryPool
 
+	VK_NAME_QUERY_POOL(vk, r->query_pool, "render_resources query pool");
 
 	/*
 	 * Done

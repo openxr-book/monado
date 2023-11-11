@@ -189,6 +189,7 @@ vk_fill_in_has_instance_extensions(struct vk_bundle *vk, struct u_string_list *e
 	// Reset before filling out.
 	vk->has_EXT_display_surface_counter = false;
 	vk->has_EXT_swapchain_colorspace = false;
+	vk->has_EXT_debug_utils = false;
 
 	const char *const *exts = u_string_list_get_data(ext_list);
 	uint32_t ext_count = u_string_list_get_size(ext_list);
@@ -209,6 +210,13 @@ vk_fill_in_has_instance_extensions(struct vk_bundle *vk, struct u_string_list *e
 			continue;
 		}
 #endif // defined(VK_EXT_swapchain_colorspace)
+
+#if defined(VK_EXT_debug_utils)
+		if (strcmp(ext, VK_EXT_DEBUG_UTILS_EXTENSION_NAME) == 0) {
+			vk->has_EXT_debug_utils = true;
+			continue;
+		}
+#endif // defined(VK_EXT_debug_utils)
 	}
 	// end of GENERATED instance extension code - do not modify - used by scripts
 }
@@ -742,7 +750,6 @@ fill_in_has_device_extensions(struct vk_bundle *vk, struct u_string_list *ext_li
 	vk->has_KHR_maintenance4 = false;
 	vk->has_KHR_timeline_semaphore = false;
 	vk->has_EXT_calibrated_timestamps = false;
-	vk->has_EXT_debug_marker = false;
 	vk->has_EXT_display_control = false;
 	vk->has_EXT_external_memory_dma_buf = false;
 	vk->has_EXT_global_priority = false;
@@ -832,13 +839,6 @@ fill_in_has_device_extensions(struct vk_bundle *vk, struct u_string_list *ext_li
 			continue;
 		}
 #endif // defined(VK_EXT_calibrated_timestamps)
-
-#if defined(VK_EXT_debug_marker)
-		if (strcmp(ext, VK_EXT_DEBUG_MARKER_EXTENSION_NAME) == 0) {
-			vk->has_EXT_debug_marker = true;
-			continue;
-		}
-#endif // defined(VK_EXT_debug_marker)
 
 #if defined(VK_EXT_display_control)
 		if (strcmp(ext, VK_EXT_DISPLAY_CONTROL_EXTENSION_NAME) == 0) {
@@ -1238,6 +1238,10 @@ vk_create_device(struct vk_bundle *vk,
 	}
 	vk->vkGetDeviceQueue(vk->device, vk->queue_family_index, 0, &vk->queue);
 
+	// Need to do this after functions have been gotten.
+	VK_NAME_INSTANCE(vk, vk->instance, "vk_bundle instance");
+	VK_NAME_DEVICE(vk, vk->device, "vk_bundle device");
+
 	return ret;
 
 err_destroy:
@@ -1281,6 +1285,7 @@ vk_init_from_given(struct vk_bundle *vk,
                    bool external_fence_fd_enabled,
                    bool external_semaphore_fd_enabled,
                    bool timeline_semaphore_enabled,
+                   bool debug_utils_enabled,
                    enum u_logging_level log_level)
 {
 	VkResult ret;
@@ -1328,6 +1333,12 @@ vk_init_from_given(struct vk_bundle *vk,
 	if (timeline_semaphore_enabled) {
 		vk->has_KHR_timeline_semaphore = true;
 		vk->features.timeline_semaphore = true;
+	}
+#endif
+
+#ifdef VK_EXT_debug_utils
+	if (debug_utils_enabled) {
+		vk->has_EXT_debug_utils = true;
 	}
 #endif
 

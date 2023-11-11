@@ -209,6 +209,7 @@ add_library(
 	drv_xvisio STATIC
 	xvisio/xv_xr50.cpp
 	xvisio/xv_prober.c
+<<<<<<< HEAD
 	xvisio/xv_util.cpp
 	xvisio/xv_util.h
 	xvisio/xv_interface.h
@@ -221,6 +222,16 @@ target_link_libraries(
 	aux_util
 	${xvsdk_LIBRARIES}
 	xrt-external-tinyceres
+=======
+	xvisio/xv_interface.h
+)
+
+target_link_libraries(
+	drv_xvisio PRIVATE 
+	xrt-interfaces
+	aux_util
+	${xvsdk_LIBRARIES}
+>>>>>>> 73f47bcc2b0cf51ff78e4bfd2ec4be71166cc47f
 )
 
 include_directories(
