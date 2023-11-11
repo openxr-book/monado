@@ -23,8 +23,11 @@ xvisio_create_auto_prober(void);
 struct xrt_device *
 xvisio_xr50_create(void);
 
-// struct xrt_fs *
-// sl_frameserver_create(struct xrt_frame_context *xfctx);
+struct xrt_fs *
+xvisio_frameserver_create(struct xrt_frame_context *);
+
+bool
+xvisio_frameserver_get_stereo_calibration(struct xrt_fs *, struct t_stereo_camera_calibration **);
 
 #ifdef __cplusplus
 }
