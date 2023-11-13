@@ -17,6 +17,7 @@
 
 #include "util/u_logging.h"
 
+#include "os/os_autorunner.h"
 #include "os/os_threading.h"
 
 #include "shared/ipc_protocol.h"
@@ -329,6 +330,9 @@ struct ipc_server
 	xrt_shmem_handle_t ism_handle;
 
 	struct ipc_server_mainloop ml;
+
+	// Autorunner info
+	struct xrt_autorunner autorunner;
 
 	// Is the mainloop supposed to run.
 	volatile bool running;

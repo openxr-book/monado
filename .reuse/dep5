@@ -45,6 +45,11 @@ Copyright: 2016, mcximing
 License: BSD-2-Clause
 Comment: SPDX-License-Identifier missing.
 
+Files: src/external/libbsd/reallocarray.c
+Copyright: 2008, Otto Moerbeek <otto@drijf.net>
+License: ISC
+Comment: SPDX-License-Identifier missing.
+
 Files: src/external/openvr_includes/*
 Copyright: 2015-2020, Valve Corporation
 License: BSD-3-Clause

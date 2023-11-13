@@ -109,6 +109,7 @@ target_link_libraries(
 	PUBLIC
 		xrt-external-nanopb
 		aux-includes
+		xrt-pthreads
 		aux_generated_bindings
 		aux_os
 		aux_math
@@ -130,6 +131,11 @@ if(XRT_HAVE_SYSTEM_CJSON)
 	target_compile_definitions(aux_util PRIVATE XRT_HAVE_SYSTEM_CJSON)
 else()
 	target_link_libraries(aux_util PUBLIC xrt-external-cjson)
+endif()
+
+# Used by u_autorunner_load_from_json() in u_config_json.c
+if(NOT XRT_HAVE_SYSTEM_REALLOCARRAY)
+	target_link_libraries(aux_util PUBLIC xrt-external-reallocarray)
 endif()
 
 # Is basically used everywhere, only used in debugging.

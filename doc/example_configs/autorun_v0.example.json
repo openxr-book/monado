@@ -1,0 +1,9 @@
+{
+    "$schema": "https://monado.pages.freedesktop.org/monado/autorun_v0.schema.json",
+    "autoruns": [
+	{
+	    "exec": "hello_xr",
+	    "args": [ "-g", "Vulkan2" ]
+	}
+    ]
+}

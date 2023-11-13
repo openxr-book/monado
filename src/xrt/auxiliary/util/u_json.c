@@ -19,6 +19,7 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <string.h>
 
 #ifndef XRT_HAVE_SYSTEM_CJSON
 #if defined(_MSC_VER) && !defined(_CRT_SECURE_NO_WARNINGS)
@@ -66,6 +67,16 @@ u_json_get_string_into_array(const cJSON *json, char *out_str, size_t max_size)
 	}
 	U_LOG_E("String size %d is bigger than available %zu", ret, max_size);
 	return false;
+}
+
+char *
+u_json_get_allocate_string(const cJSON *json)
+{
+	if (!cJSON_IsString(json)) {
+		return NULL;
+	}
+
+	return strdup(json->valuestring);
 }
 
 bool

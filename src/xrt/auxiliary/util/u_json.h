@@ -38,6 +38,15 @@ bool
 u_json_get_string_into_array(const cJSON *json, char *out, size_t max_size);
 
 /*!
+ * @brief Duplicate a string from a JSON object
+ *        into a heap-allocated char array.
+ *
+ * @return heap-allocated array containing data of string
+ */
+char *
+u_json_get_allocate_string(const cJSON *json);
+
+/*!
  * @brief Parse an bool from a JSON object.
  *
  * @return true if successful, false if not.
