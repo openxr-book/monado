@@ -98,6 +98,12 @@ get_xrt_space_action(struct oxr_logger *log, struct oxr_space *spc, struct xrt_s
 		if (xret != XRT_SUCCESS) {
 			oxr_warn(log, "Failed to create pose space");
 		} else {
+			struct xrt_system_devices *xsysd = spc->sess->sys->xsysd;
+			if (xdev == xsysd->static_roles.eyes) {
+				// eye tracking is being used
+				xrt_system_devices_begin_feature(xsysd, XRT_DEVICE_FEATURE_EYE_TRACKING);
+			}
+
 			spc->action.xdev = xdev;
 			spc->action.name = name;
 		}
@@ -149,6 +155,12 @@ oxr_space_destroy(struct oxr_logger *log, struct oxr_handle_base *hb)
 	xrt_space_reference(&spc->action.xs, NULL);
 	spc->action.xdev = NULL;
 	spc->action.name = 0;
+
+	struct xrt_system_devices *xsysd = spc->sess->sys->xsysd;
+	if (spc->action.xdev && spc->action.xdev == xsysd->static_roles.eyes) {
+		// eye tracking isn't being used anymore
+		xrt_system_devices_end_feature(xsysd, XRT_DEVICE_FEATURE_EYE_TRACKING);
+	}
 
 	free(spc);
 
