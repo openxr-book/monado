@@ -1499,6 +1499,30 @@ ipc_handle_device_get_view_poses(volatile struct ipc_client_state *ics,
 }
 
 xrt_result_t
+ipc_handle_device_begin_feature(volatile struct ipc_client_state *ics, uint32_t id)
+{
+	// To make the code a bit more readable.
+	uint32_t device_id = id;
+	struct xrt_device *xdev = get_xdev(ics, device_id);
+
+	xrt_device_begin_feature(xdev);
+
+	return XRT_SUCCESS;
+}
+
+xrt_result_t
+ipc_handle_device_end_feature(volatile struct ipc_client_state *ics, uint32_t id)
+{
+	// To make the code a bit more readable.
+	uint32_t device_id = id;
+	struct xrt_device *xdev = get_xdev(ics, device_id);
+
+	xrt_device_end_feature(xdev);
+
+	return XRT_SUCCESS;
+}
+
+xrt_result_t
 ipc_handle_device_get_view_poses_2(volatile struct ipc_client_state *ics,
                                    uint32_t id,
                                    const struct xrt_vec3 *default_eye_relation,

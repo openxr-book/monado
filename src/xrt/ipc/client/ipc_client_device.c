@@ -131,6 +131,28 @@ ipc_client_device_get_view_poses(struct xrt_device *xdev,
 }
 
 static void
+ipc_client_device_begin_feature(struct xrt_device *xdev)
+{
+	ipc_client_device_t *icd = ipc_client_device(xdev);
+
+	xrt_result_t r = ipc_call_device_begin_feature(icd->ipc_c, icd->device_id);
+	if (r != XRT_SUCCESS) {
+		IPC_ERROR(icd->ipc_c, "Error sending begin feature!");
+	}
+}
+
+static void
+ipc_client_device_end_feature(struct xrt_device *xdev)
+{
+	ipc_client_device_t *icd = ipc_client_device(xdev);
+
+	xrt_result_t r = ipc_call_device_end_feature(icd->ipc_c, icd->device_id);
+	if (r != XRT_SUCCESS) {
+		IPC_ERROR(icd->ipc_c, "Error sending end feature!");
+	}
+}
+
+static void
 ipc_client_device_set_output(struct xrt_device *xdev, enum xrt_output_name name, const union xrt_output_value *value)
 {
 	ipc_client_device_t *icd = ipc_client_device(xdev);
@@ -159,6 +181,8 @@ ipc_client_device_create(struct ipc_connection *ipc_c, struct xrt_tracking_origi
 	icd->base.get_view_poses = ipc_client_device_get_view_poses;
 	icd->base.set_output = ipc_client_device_set_output;
 	icd->base.destroy = ipc_client_device_destroy;
+	icd->base.begin_feature = ipc_client_device_begin_feature;
+	icd->base.end_feature = ipc_client_device_end_feature;
 
 	// Start copying the information from the isdev.
 	icd->base.tracking_origin = xtrack;
