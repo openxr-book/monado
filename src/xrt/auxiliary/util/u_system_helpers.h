@@ -111,6 +111,9 @@ struct u_system_devices_static
 
 	//! Is automatically returned.
 	struct xrt_system_roles cached;
+
+	//! Reference count of @ref enum xrt_device_feature.
+	size_t feature_ref_counts[XRT_DEVICE_FEATURE_MAX_ENUM];
 };
 
 /*!
