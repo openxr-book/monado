@@ -870,6 +870,11 @@ multi_compositor_poll_events(struct xrt_compositor *xc, union xrt_compositor_eve
 
 	struct multi_compositor *mc = multi_compositor(xc);
 
+	xrt_result_t xret = mc->msc->process_native_events(mc->msc);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
+
 	pop_event(mc, out_xce);
 
 	return XRT_SUCCESS;

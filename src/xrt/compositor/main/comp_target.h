@@ -21,6 +21,16 @@
 extern "C" {
 #endif
 
+/*!
+ * The state of a target.
+ */
+enum comp_target_state
+{
+	COMP_TARGET_STATE_INITIALIZING = 0,
+	COMP_TARGET_STATE_NEEDS_IMAGES,
+	COMP_TARGET_STATE_READY,
+	COMP_TARGET_STATE_DISCONNECTED,
+};
 
 /*!
  * For marking timepoints on a frame's lifetime, not a async event.
@@ -131,6 +141,13 @@ struct comp_target
 	 * call @ref create_images after calling this function.
 	 */
 	bool (*init_post_vulkan)(struct comp_target *ct, uint32_t preferred_width, uint32_t preferred_height);
+
+	/*!
+	 * Poll the state of the target.
+	 *
+	 * Intended to replace @ref check_ready and @ref has_images
+	 */
+	enum comp_target_state (*poll_state)(struct comp_target *ct);
 
 	/*!
 	 * Is this target ready for image creation?

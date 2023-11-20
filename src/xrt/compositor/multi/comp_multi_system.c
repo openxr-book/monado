@@ -631,6 +631,35 @@ system_compositor_notify_lost(struct xrt_system_compositor *xsc, struct xrt_comp
 	return XRT_SUCCESS;
 }
 
+static xrt_result_t
+system_compositor_process_native_events(struct multi_system_compositor *msc)
+{
+	struct xrt_compositor *native = &msc->xcn->base;
+	union xrt_compositor_event xce = {0};
+
+	xrt_result_t xret = XRT_SUCCESS;
+
+	os_mutex_lock(&msc->wrapped_compositor_event_mutex);
+	while (1) {
+		xret = xrt_comp_poll_events(native, &xce);
+
+		if (xret != XRT_SUCCESS) {
+			break;
+		}
+		if (xce.type == XRT_COMPOSITOR_EVENT_NONE) {
+			break;
+		}
+		for (int i = 0; i < MULTI_MAX_CLIENTS; i++) {
+			if (msc->clients[i] != NULL) {
+				multi_compositor_push_event(msc->clients[i], &xce);
+			}
+		}
+	}
+	os_mutex_unlock(&msc->wrapped_compositor_event_mutex);
+
+	return xret;
+}
+
 
 /*
  *
@@ -661,6 +690,7 @@ system_compositor_destroy(struct xrt_system_compositor *xsc)
 	xrt_comp_native_destroy(&msc->xcn);
 
 	os_mutex_destroy(&msc->list_and_timing_lock);
+	os_mutex_destroy(&msc->wrapped_compositor_event_mutex);
 
 	free(msc);
 }
@@ -699,6 +729,8 @@ comp_multi_create_system_compositor(struct xrt_compositor_native *xcn,
                                     struct xrt_system_compositor **out_xsysc)
 {
 	struct multi_system_compositor *msc = U_TYPED_CALLOC(struct multi_system_compositor);
+
+	msc->process_native_events = system_compositor_process_native_events;
 	msc->base.create_native_compositor = system_compositor_create_native_compositor;
 	msc->base.destroy = system_compositor_destroy;
 	msc->xmcc.set_state = system_compositor_set_state;
@@ -713,6 +745,7 @@ comp_multi_create_system_compositor(struct xrt_compositor_native *xcn,
 	msc->sessions.active_count = 0;
 	msc->sessions.state = do_warm_start ? MULTI_SYSTEM_STATE_INIT_WARM_START : MULTI_SYSTEM_STATE_STOPPED;
 
+	os_mutex_init(&msc->wrapped_compositor_event_mutex);
 	os_mutex_init(&msc->list_and_timing_lock);
 
 	//! @todo Make the clients not go from IDLE to READY before we have completed a first frame.

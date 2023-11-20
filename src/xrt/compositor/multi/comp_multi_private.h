@@ -329,6 +329,14 @@ struct multi_system_compositor
 		uint64_t active_count;
 	} sessions;
 
+	//! Keeps us from asking the real compositor for events from more than one thread.
+	struct os_mutex wrapped_compositor_event_mutex;
+
+	/*!
+	 * Poll the real native compositor for events and push them to clients if applicable.
+	 */
+	xrt_result_t (*process_native_events)(struct multi_system_compositor *msc);
+
 	/*!
 	 * This mutex protects the list of client compositor
 	 * and the rendering timings on it.

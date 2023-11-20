@@ -1000,6 +1000,30 @@ comp_target_swapchain_info_gpu(
 }
 
 
+// Default implementation, may override.
+enum comp_target_state
+comp_target_swapchain_poll_state(struct comp_target *ct)
+{
+	struct comp_target_swapchain *cts = (struct comp_target_swapchain *)ct;
+
+	if (ct->has_images(ct)) {
+		cts->ever_had_images = true;
+		return COMP_TARGET_STATE_READY;
+	}
+
+	bool is_ready_for_images = ct->check_ready(ct);
+	if (is_ready_for_images) {
+		return COMP_TARGET_STATE_NEEDS_IMAGES;
+	}
+
+	if (cts->ever_had_images) {
+		// if we're no longer ok to render to, we must  have errored.
+		return COMP_TARGET_STATE_DISCONNECTED;
+	}
+
+	return COMP_TARGET_STATE_INITIALIZING;
+}
+
 /*
  *
  * 'Exported' functions.

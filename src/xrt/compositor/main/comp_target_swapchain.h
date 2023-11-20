@@ -47,6 +47,8 @@ struct comp_target_swapchain
 	//! Also works as a frame index.
 	int64_t current_frame_id;
 
+	bool ever_had_images;
+
 	struct
 	{
 		VkSwapchainKHR handle;

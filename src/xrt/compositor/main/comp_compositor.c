@@ -326,6 +326,22 @@ compositor_poll_events(struct xrt_compositor *xc, union xrt_compositor_event *ou
 
 	U_ZERO(out_xce);
 
+	if (c->state == COMP_STATE_LOSS_PENDING) {
+		//! @todo a loss pending code?
+		return XRT_SUCCESS;
+	}
+	enum comp_target_state target_state = c->target->poll_state(c->target);
+	if (target_state == COMP_TARGET_STATE_DISCONNECTED) {
+		COMP_DEBUG(c, "any -> LOSS_PENDING");
+		out_xce->state.type = XRT_COMPOSITOR_EVENT_STATE_CHANGE;
+		out_xce->state.loss_pending = true;
+		c->state = COMP_STATE_LOSS_PENDING;
+		//! @todo a loss pending code?
+		return XRT_SUCCESS;
+	}
+
+	//! @todo this state machine only moves toward focused, never the other way...
+
 	switch (c->state) {
 	case COMP_STATE_UNINITIALIZED:
 		COMP_ERROR(c, "Polled uninitialized compositor");
