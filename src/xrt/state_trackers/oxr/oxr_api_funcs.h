@@ -570,6 +570,7 @@ oxr_xrGetDisplayRefreshRateFB(XrSession session, float *displayRefreshRate);
 XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrRequestDisplayRefreshRateFB(XrSession session, float displayRefreshRate);
 
+#ifdef OXR_HAVE_EXT_plane_detection
 XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrCreatePlaneDetectorEXT(XrSession session,
                              const XrPlaneDetectorCreateInfoEXT *createInfo,
@@ -594,7 +595,7 @@ oxr_xrGetPlanePolygonBufferEXT(XrPlaneDetectorEXT planeDetector,
                                uint64_t planeId,
                                uint32_t polygonBufferIndex,
                                XrPlaneDetectorPolygonBufferEXT *polygonBuffer);
-
+#endif // OXR_HAVE_EXT_plane_detection
 
 /*!
  * @}
