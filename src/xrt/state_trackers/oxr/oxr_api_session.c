@@ -667,7 +667,7 @@ oxr_xrSetAndroidApplicationThreadKHR(XrSession session, XrAndroidThreadTypeKHR t
 
 #endif
 
-#ifdef XR_EXT_plane_detection
+#ifdef OXR_HAVE_EXT_plane_detection
 
 static XrResult
 oxr_plane_detector_destroy_cb(struct oxr_logger *log, struct oxr_handle_base *hb)
@@ -1039,4 +1039,4 @@ oxr_xrGetPlanePolygonBufferEXT(XrPlaneDetectorEXT planeDetector,
 	                    polygonBuffer->vertices, vertex_count, polygon_vertices, XR_SUCCESS);
 }
 
-#endif // XR_EXT_plane_detection
+#endif // OXR_HAVE_EXT_plane_detection
