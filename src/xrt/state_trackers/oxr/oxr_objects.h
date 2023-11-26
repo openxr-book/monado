@@ -372,6 +372,7 @@ oxr_hand_tracker_to_openxr(struct oxr_hand_tracker *hand_tracker)
 	return XRT_CAST_PTR_TO_OXR_HANDLE(XrHandTrackerEXT, hand_tracker);
 }
 
+#ifdef OXR_HAVE_EXT_plane_detection
 /*!
  * To go back to a OpenXR object.
  *
@@ -382,6 +383,7 @@ oxr_plane_detector_to_openxr(struct oxr_plane_detector_ext *plane_detector)
 {
 	return XRT_CAST_PTR_TO_OXR_HANDLE(XrPlaneDetectorEXT, plane_detector);
 }
+#endif // OXR_HAVE_EXT_plane_detection
 
 /*!
  * To go back to a OpenXR object.
