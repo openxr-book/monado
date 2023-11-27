@@ -158,4 +158,9 @@ typedef enum xrt_result
 	 * Some D3D12 error
 	 */
 	XRT_ERROR_D3D12 = -25,
+
+	/*!
+	 * Some Android surface swapchain error
+	 */
+	XRT_ERROR_ANDROID_SURFACE_SWAPCHAIN = -28,
 } xrt_result_t;

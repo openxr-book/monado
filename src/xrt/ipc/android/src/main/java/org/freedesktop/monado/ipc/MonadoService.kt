@@ -29,13 +29,15 @@ class MonadoService : Service(), Watchdog.ShutdownListener {
     private lateinit var binder: MonadoImpl
 
     private lateinit var watchdog: Watchdog
+    private lateinit var surfaceSwapchainManager: SurfaceSwapchainManager
 
     @Inject lateinit var serviceNotification: IServiceNotification
 
     override fun onCreate() {
         super.onCreate()
 
-        binder = MonadoImpl(this)
+        surfaceSwapchainManager = SurfaceSwapchainManager()
+        binder = MonadoImpl(this, surfaceSwapchainManager)
         watchdog =
             Watchdog(
                 // If the surface comes from client, just stop the service when client disconnected
@@ -57,6 +59,7 @@ class MonadoService : Service(), Watchdog.ShutdownListener {
 
         binder.shutdown()
         watchdog.stopMonitor()
+        surfaceSwapchainManager.releaseAllAndroidSurface()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

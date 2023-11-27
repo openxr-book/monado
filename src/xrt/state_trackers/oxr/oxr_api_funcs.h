@@ -570,6 +570,14 @@ oxr_xrGetDisplayRefreshRateFB(XrSession session, float *displayRefreshRate);
 XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrRequestDisplayRefreshRateFB(XrSession session, float displayRefreshRate);
 
+#ifdef OXR_HAVE_KHR_android_surface_swapchain
+//! OpenXR API function @ep{xrCreateSwapchainAndroidSurfaceKHR}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrCreateSwapchainAndroidSurfaceKHR(XrSession session,
+                                       const XrSwapchainCreateInfo *info,
+                                       XrSwapchain *swapchain,
+                                       jobject *surface);
+#endif
 /*!
  * @}
  */

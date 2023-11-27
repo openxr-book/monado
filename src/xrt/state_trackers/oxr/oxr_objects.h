@@ -753,6 +753,18 @@ oxr_session_apply_force_feedback(struct oxr_logger *log,
                                  struct oxr_hand_tracker *hand_tracker,
                                  const XrForceFeedbackCurlApplyLocationsMNDX *locations);
 
+#if defined(OXR_HAVE_KHR_android_surface_swapchain)
+/*!
+ * Create swapchain android surface.
+ */
+XrResult
+oxr_create_swapchain_android_surface(struct oxr_logger *log,
+                                     struct oxr_session *sess,
+                                     const XrSwapchainCreateInfo *createInf,
+                                     struct oxr_swapchain **out_swapchain,
+                                     jobject *out_surface);
+#endif // XR_KHR_android_surface_swapchain
+
 #ifdef OXR_HAVE_KHR_android_thread_settings
 XrResult
 oxr_session_android_thread_settings(struct oxr_logger *log,

@@ -31,6 +31,16 @@
 #define OXR_EXTENSION_SUPPORT_KHR_android_create_instance(_)
 #endif
 
+/*
+ * XR_KHR_android_surface_swapchain
+ */
+#if defined(XR_KHR_android_surface_swapchain) && defined(XR_USE_PLATFORM_ANDROID)
+#define OXR_HAVE_KHR_android_surface_swapchain
+#define OXR_EXTENSION_SUPPORT_KHR_android_surface_swapchain(_)                                                         \
+	_(KHR_android_surface_swapchain, KHR_ANDROID_SURFACE_SWAPCHAIN)
+#else
+#define OXR_EXTENSION_SUPPORT_KHR_android_surface_swapchain(_)
+#endif
 
 /*
  * XR_KHR_android_thread_settings
@@ -542,6 +552,7 @@
 // clang-format off
 #define OXR_EXTENSION_SUPPORT_GENERATE(_) \
     OXR_EXTENSION_SUPPORT_KHR_android_create_instance(_) \
+    OXR_EXTENSION_SUPPORT_KHR_android_surface_swapchain(_) \
     OXR_EXTENSION_SUPPORT_KHR_android_thread_settings(_) \
     OXR_EXTENSION_SUPPORT_KHR_binding_modification(_) \
     OXR_EXTENSION_SUPPORT_KHR_composition_layer_cube(_) \

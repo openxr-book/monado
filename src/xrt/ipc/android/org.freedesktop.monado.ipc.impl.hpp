@@ -56,5 +56,29 @@ namespace org::freedesktop::monado::ipc {
 		assert(!isNull());
 		return object().call<void>(Meta::data().passAppSurface, surface.object());
 	}
+	inline jni::Object
+	Client::acquireSurface(int64_t identity, int32_t width, int32_t height)
+	{
+		assert(!isNull());
+		return object().call<jni::Object>(Meta::data().acquireSurface, (long long)identity, width, height);
+	}
+	inline void
+	Client::releaseSurface(int64_t identity)
+	{
+		assert(!isNull());
+		return object().call<void>(Meta::data().releaseSurface, (long long)identity);
+	}
+	inline void
+	SurfaceSwapchainManager::updateTexImage(int32_t textureId)
+	{
+		assert(!isNull());
+		return object().call<void>(Meta::data().updateTexImage, textureId);
+	}
+	inline int32_t
+	SurfaceSwapchainManager::getTextureId(int64_t identity)
+	{
+		assert(!isNull());
+		return object().call<int32_t>(Meta::data().getTextureId, (long long)identity);
+	}
 } // namespace org::freedesktop::monado::ipc
 } // namespace wrap

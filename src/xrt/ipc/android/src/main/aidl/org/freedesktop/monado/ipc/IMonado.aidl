@@ -27,4 +27,13 @@ interface IMonado {
      * Asking service whether it has the capbility to draw over other apps or not.
      */
     boolean canDrawOverOtherApps();
+    /*!
+     * Get surface from runtime server
+     */
+    Surface acquireSurface(long identity, int width,int height);
+
+    /*!
+     * Release surface in runtime server
+     */
+    void releaseSurface(long identity);
 }

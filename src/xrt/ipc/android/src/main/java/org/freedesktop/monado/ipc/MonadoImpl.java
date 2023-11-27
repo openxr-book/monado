@@ -40,9 +40,12 @@ public class MonadoImpl extends IMonado.Stub {
     }
 
     private final Context context;
+    private SurfaceSwapchainManager surfaceSwapchainManager;
 
-    public MonadoImpl(@NonNull Context context) {
+    public MonadoImpl(@NonNull Context context,
+                      @NonNull SurfaceSwapchainManager surfaceSwapchainManager) {
         this.context = context.getApplicationContext();
+        this.surfaceSwapchainManager = surfaceSwapchainManager;
         nativeStartServer(this.context);
     }
 
@@ -89,6 +92,14 @@ public class MonadoImpl extends IMonado.Stub {
     public void shutdown() {
         Log.i(TAG, "shutdown");
         nativeShutdownServer();
+    }
+
+    public Surface acquireSurface(long identity, int width, int height) throws RemoteException {
+        return surfaceSwapchainManager.acquireSurface(identity, width, height);
+    }
+
+    public void releaseSurface(long identity) throws RemoteException {
+        surfaceSwapchainManager.releaseSurface(identity);
     }
 
     /**

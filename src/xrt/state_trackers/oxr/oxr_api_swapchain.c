@@ -229,3 +229,58 @@ oxr_xrReleaseSwapchainImage(XrSwapchain swapchain, const XrSwapchainImageRelease
 
 	return sc->release_image(&log, sc, releaseInfo);
 }
+
+#if defined(XR_KHR_android_surface_swapchain)
+#if defined(XR_USE_PLATFORM_ANDROID)
+XrResult
+oxr_xrCreateSwapchainAndroidSurfaceKHR(XrSession session,
+                                       const XrSwapchainCreateInfo *createInfo,
+                                       XrSwapchain *out_swapchain,
+                                       jobject *surface)
+{
+	OXR_TRACE_MARKER();
+	XrResult ret;
+	struct oxr_session *sess;
+	struct oxr_swapchain *sc;
+	struct oxr_logger log;
+	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrCreateSwapchainAndroidSurfaceKHR");
+	if (sess->compositor == NULL) {
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE, "Is illegal in headless sessions");
+	}
+	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, createInfo, XR_TYPE_SWAPCHAIN_CREATE_INFO);
+	OXR_VERIFY_ARG_NOT_NULL(&log, out_swapchain);
+	// Save people from shooting themselves in the foot.
+	OXR_VERIFY_ARG_NOT_ZERO(&log, createInfo->width);
+	OXR_VERIFY_ARG_NOT_ZERO(&log, createInfo->height);
+
+	// Short hand.
+	struct oxr_instance *inst = sess->sys->inst;
+
+	XrSwapchainUsageFlags flags = 0;
+	flags |= XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
+	flags |= XR_SWAPCHAIN_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+	flags |= XR_SWAPCHAIN_USAGE_UNORDERED_ACCESS_BIT;
+	flags |= XR_SWAPCHAIN_USAGE_TRANSFER_SRC_BIT;
+	flags |= XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT;
+	flags |= XR_SWAPCHAIN_USAGE_SAMPLED_BIT;
+	flags |= XR_SWAPCHAIN_USAGE_MUTABLE_FORMAT_BIT;
+	if (inst->extensions.MND_swapchain_usage_input_attachment_bit ||
+	    inst->extensions.KHR_swapchain_usage_input_attachment_bit) {
+		flags |= XR_SWAPCHAIN_USAGE_INPUT_ATTACHMENT_BIT_KHR;
+	}
+	if ((createInfo->usageFlags & ~flags) != 0) {
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
+		                 "(createInfo->usageFlags == 0x%04" PRIx64 ") contains invalid flags",
+		                 createInfo->usageFlags);
+	}
+
+	ret = oxr_create_swapchain_android_surface(&log, sess, createInfo, &sc, surface);
+
+	if (ret != XR_SUCCESS) {
+		return ret;
+	}
+	*out_swapchain = oxr_swapchain_to_openxr(sc);
+	return oxr_session_success_result(sess);
+}
+#endif // XR_USE_PLATFORM_ANDROID
+#endif // XR_KHR_android_surface_swapchain

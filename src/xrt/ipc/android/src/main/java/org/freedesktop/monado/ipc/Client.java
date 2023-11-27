@@ -213,6 +213,38 @@ public class Client implements ServiceConnection {
     }
 
     /**
+     * Get surface for android surface swapchain from runtime server
+     * @param width , height size of request Surface
+     */
+    @Keep
+    public Surface acquireSurface(long identity, int width, int height) {
+        Surface surface = null;
+        Log.e(TAG, "acquireSurface identity = " + Long.toHexString(identity));
+        try {
+            surface = monado.acquireSurface(identity, width, height);
+        } catch (Exception e) {
+            Log.e(TAG, "fail to acquireSurface");
+            e.printStackTrace();
+        }
+        return surface;
+    }
+
+    /**
+     * Release Surface in runtime server
+     * @param textureId , texture id from runtime server
+     */
+    @Keep
+    public void releaseSurface(long identity) {
+        Log.i(TAG, "releaseSurface to server side :  textureId = " + identity);
+        try {
+            monado.releaseSurface(identity);
+        } catch (Exception e) {
+            Log.e(TAG, "fail to releaseSurface");
+            e.printStackTrace();
+        }
+    }
+
+    /**
      * Bind to the Monado IPC service - this asynchronously starts connecting (and launching the
      * service if it's not already running)
      *

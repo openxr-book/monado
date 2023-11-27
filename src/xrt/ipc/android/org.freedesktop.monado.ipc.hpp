@@ -24,6 +24,7 @@ namespace android::view {
 namespace org::freedesktop::monado::ipc {
 	class Client;
 	class IMonado;
+	class SurfaceSwapchainManager;
 } // namespace org::freedesktop::monado::ipc
 
 } // namespace wrap
@@ -110,6 +111,24 @@ namespace org::freedesktop::monado::ipc {
 		int32_t
 		blockingConnect(android::content::Context const &context, std::string const &packageName);
 
+		/**!
+		 *Wrapper for the getSurface method
+		 * Java prototype:
+		 * `public Surface getSurface(long identity, int width, int height);`
+		 *JNI signature: (JII)Landroid/view/Surface;
+		 */
+		jni::Object
+		acquireSurface(int64_t identity, int32_t width, int32_t height);
+
+		/*!
+		 * Wrapper for the releaseSurface method
+		 *
+		 * JNI signature: (J)V
+		 *
+		 */
+		void
+		releaseSurface(int64_t identity);
+
 		/*!
 		 * Initialize the static metadata of this wrapper with a known
 		 * (non-null) Java class.
@@ -130,6 +149,8 @@ namespace org::freedesktop::monado::ipc {
 			jni::method_t init;
 			jni::method_t markAsDiscardedByNative;
 			jni::method_t blockingConnect;
+			jni::method_t acquireSurface;
+			jni::method_t releaseSurface;
 
 			/*!
 			 * Singleton accessor
@@ -190,6 +211,44 @@ namespace org::freedesktop::monado::ipc {
 
 		private:
 			Meta(jni::jclass clazz = nullptr);
+		};
+	};
+
+	class SurfaceSwapchainManager : public ObjectWrapperBase
+	{
+	public:
+		using ObjectWrapperBase::ObjectWrapperBase;
+		static constexpr const char *
+		getTypeName() noexcept
+		{
+			return "org/freedesktop/monado/ipc/SurfaceSwapchainManager";
+		}
+
+		void
+		updateTexImage(int32_t textureId);
+
+		int32_t
+		getTextureId(int64_t identity);
+
+		/*!
+		 * Class metadata
+		 */
+		struct Meta : public MetaBaseDroppable
+		{
+			jni::method_t updateTexImage;
+			jni::method_t getTextureId;
+			/*!
+			 * Singleton accessor
+			 */
+			static Meta &
+			data()
+			{
+				static Meta instance{};
+				return instance;
+			}
+
+		private:
+			Meta();
 		};
 	};
 } // namespace org::freedesktop::monado::ipc

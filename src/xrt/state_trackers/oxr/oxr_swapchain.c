@@ -346,3 +346,70 @@ oxr_swapchain_common_create(struct oxr_logger *log,
 
 	return XR_SUCCESS;
 }
+
+
+#if defined(XR_KHR_android_surface_swapchain)
+XrResult
+oxr_destory_swapchain_android_surface(struct oxr_logger *log, struct oxr_swapchain *sc)
+{
+	struct xrt_swapchain *xsc = sc->swapchain;
+	xsc->destroy(xsc);
+	return XR_SUCCESS;
+}
+
+XrResult
+oxr_create_swapchain_android_surface(struct oxr_logger *log,
+                                     struct oxr_session *sess,
+                                     const XrSwapchainCreateInfo *createInfo, /*createInfo*/
+                                     struct oxr_swapchain **out_swapchain,
+                                     jobject *out_surface)
+{
+	xrt_result_t xret = XRT_SUCCESS;
+	struct xrt_swapchain_create_info info;
+	info.create = convert_create_flags(createInfo->createFlags);
+	info.bits = convert_usage_bits(createInfo->usageFlags);
+	info.format = createInfo->format;
+	info.sample_count = createInfo->sampleCount;
+	info.width = createInfo->width;
+	info.height = createInfo->height;
+	info.face_count = createInfo->faceCount;
+	info.array_size = createInfo->arraySize;
+	info.mip_count = createInfo->mipCount;
+
+	struct xrt_swapchain *xsc = NULL; // Has to be NULL.
+
+	xret = xrt_comp_create_swapchain_android_surface(&sess->xcn->base, &info, &xsc,out_surface);
+
+	if (xret == XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED) {
+		return oxr_error(log, XR_ERROR_FEATURE_UNSUPPORTED,
+		                 "Specified swapchain creation flag is valid, "
+		                 "but not supported");
+	}
+
+	if (xret == XRT_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED) {
+		return oxr_error(log, XR_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED,
+		                 "Specified swapchain format is not supported");
+	}
+
+	if (xret != XRT_SUCCESS) {
+		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Failed to create swapchain");
+	}
+
+	struct oxr_swapchain *sc = NULL;
+	OXR_ALLOCATE_HANDLE_OR_RETURN(log, sc, OXR_XR_DEBUG_SWAPCHAIN, destroy_handle, &sess->handle);
+
+	sc->sess = sess;
+	// in android surface flow the member of xrt_swapchain should be NULL
+	sc->swapchain = xsc;
+
+	sc->width = createInfo->width;
+	sc->height = createInfo->height;
+	sc->array_layer_count = createInfo->arraySize;
+	sc->face_count = createInfo->faceCount;
+
+	sc->destroy = oxr_destory_swapchain_android_surface;
+	*out_swapchain = sc;
+
+	return XR_SUCCESS;
+}
+#endif // XR_KHR_android_surface_swapchain

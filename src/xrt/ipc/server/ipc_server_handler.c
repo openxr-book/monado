@@ -666,9 +666,11 @@ _update_projection_layer(struct xrt_compositor *xc,
 	struct xrt_swapchain *lxcs = ics->xscs[lxsci];
 	struct xrt_swapchain *rxcs = ics->xscs[rxsci];
 
-	if (lxcs == NULL || rxcs == NULL) {
-		U_LOG_E("Invalid swap chain for projection layer!");
-		return false;
+	if (layer->data.client_sc_identity == NULL) {
+		if (lxcs == NULL || rxcs == NULL) {
+			U_LOG_E("Invalid swap chain for projection layer!");
+			return false;
+		}
 	}
 
 	if (xdev == NULL) {
@@ -707,9 +709,11 @@ _update_projection_layer_depth(struct xrt_compositor *xc,
 	struct xrt_swapchain *l_d_xcs = ics->xscs[l_d_xsci];
 	struct xrt_swapchain *r_d_xcs = ics->xscs[r_d_xsci];
 
-	if (l_xcs == NULL || r_xcs == NULL || l_d_xcs == NULL || r_d_xcs == NULL) {
-		U_LOG_E("Invalid swap chain for projection layer #%u!", i);
-		return false;
+	if (layer->data.client_sc_identity == NULL) {
+		if (l_xcs == NULL || r_xcs == NULL || l_d_xcs == NULL || r_d_xcs == NULL) {
+			U_LOG_E("Invalid swap chain for projection layer #%u!", i);
+			return false;
+		}
 	}
 
 	if (xdev == NULL) {
@@ -741,9 +745,11 @@ do_single(struct xrt_compositor *xc,
 	struct xrt_device *xdev = get_xdev(ics, device_id);
 	struct xrt_swapchain *xcs = ics->xscs[sci];
 
-	if (xcs == NULL) {
-		U_LOG_E("Invalid swapchain for layer #%u, '%s'!", i, name);
-		return false;
+	if (layer->data.client_sc_identity == NULL) {
+		if (xcs == NULL) {
+			U_LOG_E("Invalid swapchain for layer #%u, '%s'!", i, name);
+			return false;
+		}
 	}
 
 	if (xdev == NULL) {
