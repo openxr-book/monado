@@ -1657,8 +1657,8 @@ ipc_handle_device_begin_plane_detection_ext(volatile struct ipc_client_state *ic
 	uint64_t new_count = ics->plane_detection_count + 1;
 
 	if (new_count > ics->plane_detection_size) {
-		IPC_TRACE(ics->server, "Plane detections tracking size: %d -> %d", ics->plane_detection_count,
-		          new_count);
+		IPC_TRACE(ics->server, "Plane detections tracking size: %u -> %u", (uint32_t)ics->plane_detection_count,
+		          (uint32_t)new_count);
 
 		U_ARRAY_REALLOC_OR_FREE(ics->plane_detection_ids, uint64_t, new_count);
 		U_ARRAY_REALLOC_OR_FREE(ics->plane_detection_xdev, struct xrt_device *, new_count);
