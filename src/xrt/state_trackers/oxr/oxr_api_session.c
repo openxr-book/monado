@@ -684,7 +684,7 @@ oxr_plane_detector_destroy_cb(struct oxr_logger *log, struct oxr_handle_base *hb
 		}
 	}
 
-	xrt_clear_plane_detections_ext(&pd->detections);
+	xrt_plane_detections_ext_clear(&pd->detections);
 
 	free(pd);
 
@@ -865,7 +865,7 @@ oxr_xrBeginPlaneDetectionEXT(XrPlaneDetectorEXT planeDetector, const XrPlaneDete
 		                 xret);
 	}
 
-	xrt_clear_plane_detections_ext(&pd->detections);
+	xrt_plane_detections_ext_clear(&pd->detections);
 
 	// This makes sure a call to xrGetPlaneDetectionsEXT won't see a previous state, in particular a previous DONE.
 	pd->state = XR_PLANE_DETECTION_STATE_PENDING_EXT;

@@ -1760,7 +1760,7 @@ ipc_handle_device_get_plane_detections_ext(volatile struct ipc_client_state *ics
 	if (xret != XRT_SUCCESS) {
 		IPC_ERROR(ics->server, "xrt_device_get_plane_detections_ext error: %d", xret);
 		// probably nothing allocated on error, but make sure
-		xrt_clear_plane_detections_ext(&out);
+		xrt_plane_detections_ext_clear(&out);
 		return xret;
 	}
 
@@ -1810,7 +1810,7 @@ ipc_handle_device_get_plane_detections_ext(volatile struct ipc_client_state *ics
 	}
 
 out:
-	xrt_clear_plane_detections_ext(&out);
+	xrt_plane_detections_ext_clear(&out);
 	return xret;
 }
 

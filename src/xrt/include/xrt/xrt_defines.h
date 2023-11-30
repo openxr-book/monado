@@ -1319,7 +1319,7 @@ struct xrt_plane_detections_ext
 };
 
 static inline void
-xrt_clear_plane_detections_ext(struct xrt_plane_detections_ext *detections)
+xrt_plane_detections_ext_clear(struct xrt_plane_detections_ext *detections)
 {
 	free(detections->locations);
 	detections->locations = NULL; // set to NULL so that the next detection won't realloc an invalid pointer
