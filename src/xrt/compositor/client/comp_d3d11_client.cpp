@@ -736,10 +736,14 @@ client_d3d11_compositor_init_try_timeline_semaphores(struct client_d3d11_composi
 	}
 	D3D_INFO(c, "Native compositor created a timeline semaphore for us.");
 
+	// Because importFence throws on failure we use this ref.
 	unique_compositor_semaphore_ref timeline_semaphore{xcsem};
 
+	// unique_compositor_semaphore_ref now owns the handle.
+	HANDLE timeline_semaphore_handle_raw = timeline_semaphore_handle.release();
+
 	// try to import and signal
-	wil::com_ptr<ID3D11Fence> fence = import_fence(*(c->fence_device), timeline_semaphore_handle.get());
+	wil::com_ptr<ID3D11Fence> fence = import_fence(*(c->fence_device), timeline_semaphore_handle_raw);
 	HRESULT hr = c->fence_context->Signal(fence.get(), c->timeline_semaphore_value);
 	if (!SUCCEEDED(hr)) {
 		D3D_WARN(c,

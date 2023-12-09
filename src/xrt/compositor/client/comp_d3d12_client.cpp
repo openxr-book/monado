@@ -994,13 +994,13 @@ client_d3d12_compositor_init_try_timeline_semaphores(struct client_d3d12_composi
 	// Because importFence throws on failure we use this ref.
 	unique_compositor_semaphore_ref timeline_semaphore{xcsem};
 
+	// unique_compositor_semaphore_ref now owns the handle.
+	HANDLE timeline_semaphore_handle_raw = timeline_semaphore_handle.release();
+
 	// Try to import, importFence throws on failure.
 	wil::com_ptr<ID3D12Fence1> fence = xrt::auxiliary::d3d::d3d12::importFence( //
 	    *(c->device),                                                           //
-	    timeline_semaphore_handle.get());                                       //
-
-	// The fence now owns the handle., importFence throws on failure.
-	timeline_semaphore_handle.release();
+	    timeline_semaphore_handle_raw);                                         //
 
 	// Check flags.
 	D3D12_FENCE_FLAGS flags = fence->GetCreationFlags();
