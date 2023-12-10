@@ -951,7 +951,14 @@ struct xrt_compositor
 	                             struct xrt_compositor_fence **out_xcf);
 
 	/*!
-	 * Create a compositor semaphore, also returns a native handle.
+	 * Create a compositor semaphore, also returns a native handle of the
+	 * semaphore which is owned by the @ref xrt_compositor_semaphore struct.
+	 * The return values are always both valid, or on an error condition
+	 * encountered and error is returned, both not valid (untouched).
+	 *
+	 * @param[in]  xc         Compositor self pointer.
+	 * @param[out] out_handle Native handle owned by the samephore.
+	 * @param[out] out_handle Return of the created semahpore.
 	 */
 	xrt_result_t (*create_semaphore)(struct xrt_compositor *xc,
 	                                 xrt_graphics_sync_handle_t *out_handle,
