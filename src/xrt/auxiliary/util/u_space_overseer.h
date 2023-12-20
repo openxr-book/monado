@@ -16,8 +16,70 @@ extern "C" {
 #endif
 
 
-struct u_space_overseer;
 struct xrt_session_event_sink;
+
+
+/*
+ *
+ * Structs and defines.
+ *
+ */
+
+/*!
+ * Keeps track of what kind of space it is.
+ */
+enum u_space_type
+{
+	U_SPACE_TYPE_NULL,
+	U_SPACE_TYPE_POSE,
+	U_SPACE_TYPE_OFFSET,
+	U_SPACE_TYPE_ROOT,
+};
+
+/*!
+ * Representing a single space, can be several ones. There should only be one
+ * root space per overseer.
+ */
+struct u_space
+{
+	struct xrt_space base;
+
+	/*!
+	 * The space this space is in.
+	 */
+	struct u_space *next;
+
+	/*!
+	 * The type of the space.
+	 */
+	enum u_space_type type;
+
+	union {
+		struct
+		{
+			struct xrt_device *xdev;
+			enum xrt_input_name xname;
+		} pose;
+
+		struct
+		{
+			struct xrt_pose pose;
+		} offset;
+	};
+};
+
+
+/*
+ *
+ * Helper functions.
+ *
+ */
+
+static inline struct u_space *
+u_space(struct xrt_space *xs)
+{
+	return (struct u_space *)xs;
+}
 
 
 /*
