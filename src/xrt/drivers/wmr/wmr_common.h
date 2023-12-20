@@ -65,6 +65,8 @@ enum wmr_headset_type
 
 #define DELL_VID 0x413c
 #define VISOR_PID 0xb0d5
+#define DELL_VID_VARIANT 0x04b4
+#define VISOR_PID_VARIANT 0x6506
 
 #define SAMSUNG_VID 0x04e8
 #define ODYSSEY_PID 0x7310

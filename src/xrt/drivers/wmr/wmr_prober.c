@@ -118,9 +118,11 @@ check_and_get_interface(struct xrt_prober_device *device,
 		}
 
 	case DELL_VID:
+	case DELL_VID_VARIANT:
 		U_LOG_IFL_T(log_level, "DELL_VID");
 
 		switch (device->product_id) {
+		case VISOR_PID_VARIANT:
 		case VISOR_PID: *out_hmd_type = WMR_HEADSET_DELL_VISOR; return true;
 		default: U_LOG_IFL_T(log_level, "No matching PID!"); return false;
 		}
