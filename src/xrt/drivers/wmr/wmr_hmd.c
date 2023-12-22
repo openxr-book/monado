@@ -107,22 +107,33 @@ wmr_hmd_deactivate_odyssey_plus(struct wmr_hmd *wh);
 static void
 wmr_hmd_screen_enable_odyssey_plus(struct wmr_hmd *wh, bool enable);
 
+
 const struct wmr_headset_descriptor headset_map[] = {
-    {WMR_HEADSET_GENERIC, NULL, "Unknown WMR HMD", NULL, NULL, NULL}, /* Catch-all for unknown headsets */
-    {WMR_HEADSET_HP_VR1000, "HP Reverb VR Headset VR1000-1xxx", "HP VR1000", NULL, NULL, NULL}, /*! @todo init funcs */
-    {WMR_HEADSET_REVERB_G1, "HP Reverb VR Headset VR1000-2xxx", "HP Reverb", wmr_hmd_activate_reverb,
+    {WMR_HEADSET_GENERIC, NULL, 0, 0, "Unknown WMR HMD", NULL, NULL, NULL}, /* Catch-all for unknown headsets */
+    {WMR_HEADSET_HP_VR1000, "HP Reverb VR Headset VR1000-1xxx", 0x03f0, 0x0367, "HP VR1000", NULL, NULL, NULL}, /*! @todo init funcs */
+    {WMR_HEADSET_REVERB_G1, "HP Reverb VR Headset VR1000-2xxx", 0x03f0, 0x0c6a, "HP Reverb", wmr_hmd_activate_reverb,
      wmr_hmd_deactivate_reverb, wmr_hmd_screen_enable_reverb},
-    {WMR_HEADSET_REVERB_G2, "HP Reverb Virtual Reality Headset G2", "HP Reverb G2", wmr_hmd_activate_reverb,
+    {WMR_HEADSET_REVERB_G2, "HP Reverb Virtual Reality Headset G2", 0x03f0, 0x0580, "HP Reverb G2", wmr_hmd_activate_reverb,
      wmr_hmd_deactivate_reverb, wmr_hmd_screen_enable_reverb},
-    {WMR_HEADSET_SAMSUNG_XE700X3AI, "Samsung Windows Mixed Reality XE700X3AI", "Samsung Odyssey",
+    {WMR_HEADSET_SAMSUNG_XE700X3AI, "Samsung Windows Mixed Reality XE700X3AI", 0x04e8, 0x7310, "Samsung Odyssey",
      wmr_hmd_activate_odyssey_plus, wmr_hmd_deactivate_odyssey_plus, wmr_hmd_screen_enable_odyssey_plus},
-    {WMR_HEADSET_SAMSUNG_800ZAA, "Samsung Windows Mixed Reality 800ZAA", "Samsung Odyssey+",
+    {WMR_HEADSET_SAMSUNG_800ZAA, "Samsung Windows Mixed Reality 800ZAA", 0x04e8, 0x7312, "Samsung Odyssey+",
      wmr_hmd_activate_odyssey_plus, wmr_hmd_deactivate_odyssey_plus, wmr_hmd_screen_enable_odyssey_plus},
-    {WMR_HEADSET_LENOVO_EXPLORER, "Lenovo VR-2511N", "Lenovo Explorer", NULL, NULL, NULL},
-    {WMR_HEADSET_MEDION_ERAZER_X1000, "Medion Erazer X1000", "Medion Erazer", NULL, NULL, NULL},
-    {WMR_HEADSET_DELL_VISOR, "DELL VR118", "Dell Visor", NULL, NULL, NULL},
+    {WMR_HEADSET_LENOVO_EXPLORER, "Lenovo VR-2511N", 0x17ef, 0xb801, "Lenovo Explorer", NULL, NULL, NULL},
+    {WMR_HEADSET_MEDION_ERAZER_X1000, "Medion Erazer X1000", 0x17ef, 0xb801, "Medion Erazer", NULL, NULL, NULL},
+    {WMR_HEADSET_DELL_VISOR, "DELL VR118", 0x413c, 0xb0d5, "Dell Visor", NULL, NULL, NULL},
+    {WMR_HEADSET_DELL_VISOR, "DELL VR118", 0x04e8, 0x6506, "Dell Visor", NULL, NULL, NULL},
 };
 const int headset_map_n = sizeof(headset_map) / sizeof(headset_map[0]);
+
+const struct wmr_headset_descriptor*
+get_wmr_headset_map() {
+	return headset_map;
+}
+int
+get_wmr_headset_map_size() {
+	return headset_map_n;
+}
 
 
 /*
@@ -1917,7 +1928,7 @@ wmr_hmd_request_controller_status(struct wmr_hmd *wh)
 }
 
 void
-wmr_hmd_create(enum wmr_headset_type hmd_type,
+wmr_hmd_create(const struct wmr_headset_descriptor *hmd_descriptor,
                struct os_hid_device *hid_holo,
                struct os_hid_device *hid_ctrl,
                struct xrt_prober_device *dev_holo,
@@ -2019,24 +2030,18 @@ wmr_hmd_create(enum wmr_headset_type hmd_type,
 	};
 
 	/* Now that we have the config loaded, iterate the map of known headsets and see if we have
-	 * an entry for this specific headset (otherwise the generic entry will be used)
-	 */
-	for (i = 0; i < headset_map_n; i++) {
-		const struct wmr_headset_descriptor *cur = &headset_map[i];
-
-		if (hmd_type == cur->hmd_type) {
-			wh->hmd_desc = cur;
-			if (hmd_type != WMR_HEADSET_GENERIC)
-				break; /* Stop checking if we have a specific match, or keep going for the GENERIC
-				          catch-all type */
-		}
-
-		if (cur->dev_id_str && strncmp(wh->config_hdr.name, cur->dev_id_str, 64) == 0) {
-			hmd_type = cur->hmd_type;
-			wh->hmd_desc = cur;
-			break;
+-        * an entry for this specific headset with not matching vid/pid (otherwise the generic entry will be used)
+-        */
+	if(hmd_descriptor->hmd_type == WMR_HEADSET_GENERIC) {
+		for (i = 0; i < headset_map_n; i++) {
+			const struct wmr_headset_descriptor *cur = &headset_map[i];
+			if(cur->dev_id_str && strncmp(wh->config_hdr.name, cur->dev_id_str, 64) == 0) {
+				hmd_descriptor = cur;
+				break;
+			}
 		}
 	}
+	wh->hmd_desc = hmd_descriptor;
 	assert(wh->hmd_desc != NULL); /* Each supported device MUST have a manually created entry in our headset_map */
 
 	WMR_INFO(wh, "Found WMR headset type: %s", wh->hmd_desc->debug_name);

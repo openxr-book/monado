@@ -75,7 +75,7 @@ wmr_find_bt_controller_pair(struct xrt_prober *xp,
 struct wmr_companion_search_results
 {
 	struct xrt_prober_device *xpdev_companion;
-	enum wmr_headset_type type;
+	const struct wmr_headset_descriptor *hmd_descriptor;
 };
 
 /*!
@@ -101,7 +101,7 @@ struct wmr_headset_search_results
 {
 	struct xrt_prober_device *xpdev_holo;
 	struct xrt_prober_device *xpdev_companion;
-	enum wmr_headset_type type;
+	const struct wmr_headset_descriptor *hmd_descriptor;
 };
 
 /*!
@@ -132,7 +132,7 @@ xrt_result_t
 wmr_create_headset(struct xrt_prober *xp,
                    struct xrt_prober_device *xpdev_holo,
                    struct xrt_prober_device *xpdev_companion,
-                   enum wmr_headset_type type,
+                   const struct wmr_headset_descriptor *hmd_descriptor,
                    enum u_logging_level log_level,
                    struct xrt_device **out_hmd,
                    struct xrt_device **out_left,

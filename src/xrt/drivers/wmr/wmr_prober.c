@@ -76,59 +76,25 @@ classify_and_assign_controller(struct xrt_prober *xp,
 static bool
 check_and_get_interface(struct xrt_prober_device *device,
                         enum u_logging_level log_level,
-                        enum wmr_headset_type *out_hmd_type)
+                        const struct wmr_headset_descriptor **out_hmd_descriptor)
 {
-	switch (device->vendor_id) {
-	case HP_VID:
-		U_LOG_IFL_T(log_level, "HP_VID");
+        const struct wmr_headset_descriptor *headset_map = get_wmr_headset_map();
+	int headset_map_n = get_wmr_headset_map_size();
 
-		switch (device->product_id) {
-		case REVERB_G1_PID: *out_hmd_type = WMR_HEADSET_REVERB_G1; return true;
-		case REVERB_G2_PID: *out_hmd_type = WMR_HEADSET_REVERB_G2; return true;
-		case VR1000_PID: *out_hmd_type = WMR_HEADSET_HP_VR1000; return true;
-		default: U_LOG_IFL_T(log_level, "No matching PID!"); return false;
-		}
-
-	case LENOVO_VID:
-		U_LOG_IFL_T(log_level, "LENOVO_VID");
-
-		switch (device->product_id) {
-		case EXPLORER_PID: *out_hmd_type = WMR_HEADSET_LENOVO_EXPLORER; return true;
-		default: U_LOG_IFL_T(log_level, "No matching PID!"); return false;
-		}
-
-	case SAMSUNG_VID:
-		U_LOG_IFL_T(log_level, "SAMSUNG_VID");
-
-		switch (device->product_id) {
-		case ODYSSEY_PLUS_PID: *out_hmd_type = WMR_HEADSET_SAMSUNG_800ZAA; return true;
-		case ODYSSEY_PID:
-			U_LOG_IFL_W(log_level, "Original Odyssey may not be well-supported - continuing anyway.");
-			*out_hmd_type = WMR_HEADSET_SAMSUNG_XE700X3AI;
+	for (int i = 0; i < headset_map_n; i++) {
+		const struct wmr_headset_descriptor *cur = &headset_map[i];
+		if (device->vendor_id == cur->vid && device->product_id == cur->pid){
+			U_LOG_IFL_T(log_level, "Matched %s for vid %04X, pid %04X",
+					cur->debug_name, device->vendor_id, device->product_id);
+			*out_hmd_descriptor = cur;
 			return true;
-		default: U_LOG_IFL_T(log_level, "No matching PID!"); return false;
 		}
-
-	case QUANTA_VID:
-		U_LOG_IFL_T(log_level, "QUANTA_VID");
-
-		switch (device->product_id) {
-		case MEDION_ERAZER_X1000_PID: *out_hmd_type = WMR_HEADSET_MEDION_ERAZER_X1000; return true;
-		default: U_LOG_IFL_T(log_level, "No matching PID!"); return false;
-		}
-
-	case DELL_VID:
-	case DELL_VID_VARIANT:
-		U_LOG_IFL_T(log_level, "DELL_VID");
-
-		switch (device->product_id) {
-		case VISOR_PID_VARIANT:
-		case VISOR_PID: *out_hmd_type = WMR_HEADSET_DELL_VISOR; return true;
-		default: U_LOG_IFL_T(log_level, "No matching PID!"); return false;
-		}
-
-	default: return false;
 	}
+	//Didnt find the descriptor of this device, returning generic
+	*out_hmd_descriptor = &headset_map[0];
+	U_LOG_IFL_T(log_level, "Could not find descriptor for companion with vid %04X, pid %04X",
+			device->vendor_id, device->product_id);
+	return false;
 }
 
 static bool
@@ -136,7 +102,7 @@ find_companion_device(struct xrt_prober *xp,
                       struct xrt_prober_device **devices,
                       size_t device_count,
                       enum u_logging_level log_level,
-                      enum wmr_headset_type *out_hmd_type,
+                      const struct wmr_headset_descriptor **out_hmd_descriptor,
                       struct xrt_prober_device **out_device)
 {
 	struct xrt_prober_device *dev = NULL;
@@ -148,7 +114,7 @@ find_companion_device(struct xrt_prober *xp,
 			continue;
 		}
 
-		match = check_and_get_interface(devices[i], log_level, out_hmd_type);
+		match = check_and_get_interface(devices[i], log_level, out_hmd_descriptor);
 
 		if (!match) {
 			continue;
@@ -254,15 +220,17 @@ wmr_find_companion_device(struct xrt_prober *xp,
                           struct wmr_companion_search_results *out_wcsr)
 {
 	struct xrt_prober_device *xpdev_companion = NULL;
-	enum wmr_headset_type type = WMR_HEADSET_GENERIC;
+	//TODO REMOVER
+	//enum wmr_headset_type type = WMR_HEADSET_GENERIC;
+	const struct wmr_headset_descriptor *hmd_descriptor = NULL;
 
-	if (!find_companion_device(xp, xpdevs, xpdev_count, log_level, &type, &xpdev_companion)) {
+	if (!find_companion_device(xp, xpdevs, xpdev_count, log_level, &hmd_descriptor, &xpdev_companion)) {
 		U_LOG_IFL_E(log_level, "Did not find HoloLens Sensors' companion device");
 		return;
 	}
 
 	out_wcsr->xpdev_companion = xpdev_companion;
-	out_wcsr->type = type;
+	out_wcsr->hmd_descriptor = hmd_descriptor;
 }
 
 void
@@ -308,7 +276,7 @@ wmr_find_headset(struct xrt_prober *xp,
 	// Done now, output.
 	out_whsr->xpdev_holo = xpdev_holo;
 	out_whsr->xpdev_companion = wcsr.xpdev_companion;
-	out_whsr->type = wcsr.type;
+	out_whsr->hmd_descriptor = wcsr.hmd_descriptor;
 }
 
 
@@ -322,7 +290,7 @@ xrt_result_t
 wmr_create_headset(struct xrt_prober *xp,
                    struct xrt_prober_device *xpdev_holo,
                    struct xrt_prober_device *xpdev_companion,
-                   enum wmr_headset_type type,
+                   const struct wmr_headset_descriptor *hmd_descriptor,
                    enum u_logging_level log_level,
                    struct xrt_device **out_hmd,
                    struct xrt_device **out_left,
@@ -356,7 +324,7 @@ wmr_create_headset(struct xrt_prober *xp,
 	struct xrt_device *ht = NULL;
 	struct xrt_device *two_hands[2] = {NULL, NULL}; // Must initialize, always returned.
 	struct xrt_device *hmd_left_ctrl = NULL, *hmd_right_ctrl = NULL;
-	wmr_hmd_create(type, hid_holo, hid_companion, xpdev_holo, log_level, &hmd, &ht, &hmd_left_ctrl,
+	wmr_hmd_create(hmd_descriptor, hid_holo, hid_companion, xpdev_holo, log_level, &hmd, &ht, &hmd_left_ctrl,
 	               &hmd_right_ctrl);
 
 	if (hmd == NULL) {

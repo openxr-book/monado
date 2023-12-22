@@ -22,6 +22,7 @@
 #include "target_builder_interface.h"
 
 #include "wmr/wmr_common.h"
+#include "wmr/wmr_hmd.h"
 #include "wmr/wmr_interface.h"
 
 #include <assert.h>
@@ -133,7 +134,7 @@ wmr_estimate_system(struct xrt_builder *xb,
 		struct u_pp_sink_stack_only sink;
 		u_pp_delegate_t dg = u_pp_sink_stack_only_init(&sink);
 		u_pp(dg, "Found:");
-		print_hmd(dg, "head", whsr.type, whsr.xpdev_holo, whsr.xpdev_companion);
+		print_hmd(dg, "head", whsr.hmd_descriptor->hmd_type, whsr.xpdev_holo, whsr.xpdev_companion);
 		print_ctrl(dg, "left", ctrls.left);
 		print_ctrl(dg, "right", ctrls.right);
 
@@ -156,7 +157,7 @@ wmr_estimate_system(struct xrt_builder *xb,
 	if (whsr.xpdev_holo != NULL && whsr.xpdev_companion != NULL) {
 		estimate.certain.head = true;
 
-		if (whsr.type == WMR_HEADSET_REVERB_G2) {
+		if (whsr.hmd_descriptor->hmd_type == WMR_HEADSET_REVERB_G2) {
 			estimate.maybe.left = true;
 			estimate.maybe.right = true;
 		}
@@ -239,7 +240,7 @@ wmr_open_system_impl(struct xrt_builder *xb,
 	    xp,                    //
 	    whsr.xpdev_holo,       //
 	    whsr.xpdev_companion,  //
-	    whsr.type,             //
+	    whsr.hmd_descriptor,   //
 	    log_level,             //
 	    &head,                 //
 	    &left,                 //
