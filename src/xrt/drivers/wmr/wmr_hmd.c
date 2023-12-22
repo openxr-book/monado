@@ -120,7 +120,7 @@ const struct wmr_headset_descriptor headset_map[] = {
     {WMR_HEADSET_SAMSUNG_800ZAA, "Samsung Windows Mixed Reality 800ZAA", 0x04e8, 0x7312, "Samsung Odyssey+",
      wmr_hmd_activate_odyssey_plus, wmr_hmd_deactivate_odyssey_plus, wmr_hmd_screen_enable_odyssey_plus},
     {WMR_HEADSET_LENOVO_EXPLORER, "Lenovo VR-2511N", 0x17ef, 0xb801, "Lenovo Explorer", NULL, NULL, NULL},
-    {WMR_HEADSET_MEDION_ERAZER_X1000, "Medion Erazer X1000", 0x17ef, 0xb801, "Medion Erazer", NULL, NULL, NULL},
+    {WMR_HEADSET_MEDION_ERAZER_X1000, "Medion Erazer X1000", 0x0408, 0xb5d5, "Medion Erazer", NULL, NULL, NULL},
     {WMR_HEADSET_DELL_VISOR, "DELL VR118", 0x413c, 0xb0d5, "Dell Visor", NULL, NULL, NULL},
     {WMR_HEADSET_DELL_VISOR, "DELL VR118", 0x04e8, 0x6506, "Dell Visor", NULL, NULL, NULL},
 };
