@@ -1685,6 +1685,176 @@ ipc_handle_device_compute_distortion(volatile struct ipc_client_state *ics,
 }
 
 xrt_result_t
+ipc_handle_device_begin_plane_detection_ext(volatile struct ipc_client_state *ics,
+                                            uint32_t id,
+                                            uint64_t plane_detection_id,
+                                            uint64_t *out_plane_detection_id)
+{
+	// To make the code a bit more readable.
+	uint32_t device_id = id;
+	struct xrt_device *xdev = get_xdev(ics, device_id);
+
+	uint64_t new_count = ics->plane_detection_count + 1;
+
+	if (new_count > ics->plane_detection_size) {
+		IPC_TRACE(ics->server, "Plane detections tracking size: %u -> %u", (uint32_t)ics->plane_detection_count,
+		          (uint32_t)new_count);
+
+		U_ARRAY_REALLOC_OR_FREE(ics->plane_detection_ids, uint64_t, new_count);
+		U_ARRAY_REALLOC_OR_FREE(ics->plane_detection_xdev, struct xrt_device *, new_count);
+		ics->plane_detection_size = new_count;
+	}
+
+	struct xrt_plane_detector_begin_info_ext *begin_info = &ics->server->ism->plane_begin_info_ext;
+
+	enum xrt_result xret =
+	    xrt_device_begin_plane_detection_ext(xdev, begin_info, plane_detection_id, out_plane_detection_id);
+	if (xret != XRT_SUCCESS) {
+		IPC_TRACE(ics->server, "xrt_device_begin_plane_detection_ext error: %d", xret);
+		return xret;
+	}
+
+	if (*out_plane_detection_id != 0) {
+		uint64_t index = ics->plane_detection_count;
+		ics->plane_detection_ids[index] = *out_plane_detection_id;
+		ics->plane_detection_xdev[index] = xdev;
+		ics->plane_detection_count = new_count;
+	}
+
+	return XRT_SUCCESS;
+}
+
+xrt_result_t
+ipc_handle_device_destroy_plane_detection_ext(volatile struct ipc_client_state *ics,
+                                              uint32_t id,
+                                              uint64_t plane_detection_id)
+{
+	// To make the code a bit more readable.
+	uint32_t device_id = id;
+	struct xrt_device *xdev = get_xdev(ics, device_id);
+
+	enum xrt_result xret = xrt_device_destroy_plane_detection_ext(xdev, plane_detection_id);
+
+	// Iterate through plane detection ids. Once found, move every item one slot to the left.
+	bool compact_right = false;
+	for (uint32_t i = 0; i < ics->plane_detection_count; i++) {
+		if (ics->plane_detection_ids[i] == plane_detection_id) {
+			compact_right = true;
+		}
+		if (compact_right && i + 1 < ics->plane_detection_count) {
+			ics->plane_detection_ids[i] = ics->plane_detection_ids[i + 1];
+			ics->plane_detection_xdev[i] = ics->plane_detection_xdev[i + 1];
+		}
+	}
+	// if the plane detection was correctly tracked compact_right should always be true
+	if (compact_right) {
+		ics->plane_detection_count -= 1;
+	} else {
+		IPC_ERROR(ics->server, "Destroyed plane detection that was not tracked");
+	}
+
+	if (xret != XRT_SUCCESS) {
+		IPC_ERROR(ics->server, "xrt_device_destroy_plane_detection_ext error: %d", xret);
+		return xret;
+	}
+
+	return XRT_SUCCESS;
+}
+
+xrt_result_t
+ipc_handle_device_get_plane_detection_state_ext(volatile struct ipc_client_state *ics,
+                                                uint32_t id,
+                                                uint64_t plane_detection_id,
+                                                enum xrt_plane_detector_state_ext *out_state)
+{
+	// To make the code a bit more readable.
+	uint32_t device_id = id;
+	struct xrt_device *xdev = get_xdev(ics, device_id);
+
+	xrt_result_t xret = xrt_device_get_plane_detection_state_ext(xdev, plane_detection_id, out_state);
+	if (xret != XRT_SUCCESS) {
+		IPC_ERROR(ics->server, "xrt_device_get_plane_detection_state_ext error: %d", xret);
+		return xret;
+	}
+
+	return XRT_SUCCESS;
+}
+
+xrt_result_t
+ipc_handle_device_get_plane_detections_ext(volatile struct ipc_client_state *ics,
+                                           uint32_t id,
+                                           uint64_t plane_detection_id)
+
+{
+	struct ipc_message_channel *imc = (struct ipc_message_channel *)&ics->imc;
+	struct ipc_device_get_plane_detections_ext_reply reply = XRT_STRUCT_INIT;
+	struct ipc_server *s = ics->server;
+
+	// To make the code a bit more readable.
+	uint32_t device_id = id;
+	struct xrt_device *xdev = get_xdev(ics, device_id);
+
+	struct xrt_plane_detections_ext out = {0};
+
+	xrt_result_t xret = xrt_device_get_plane_detections_ext(xdev, plane_detection_id, &out);
+	if (xret != XRT_SUCCESS) {
+		IPC_ERROR(ics->server, "xrt_device_get_plane_detections_ext error: %d", xret);
+		// probably nothing allocated on error, but make sure
+		xrt_plane_detections_ext_clear(&out);
+		return xret;
+	}
+
+	reply.result = XRT_SUCCESS;
+	reply.location_size = out.location_count; // because we initialized to 0, now size == count
+	reply.polygon_size = out.polygon_info_size;
+	reply.vertex_size = out.vertex_size;
+
+	xret = ipc_send(imc, &reply, sizeof(reply));
+	if (xret != XRT_SUCCESS) {
+		IPC_ERROR(s, "Failed to send reply!");
+		goto out;
+	}
+
+	// send expected contents
+
+	if (out.location_count > 0) {
+		xret =
+		    ipc_send(imc, out.locations, sizeof(struct xrt_plane_detector_locations_ext) * out.location_count);
+		if (xret != XRT_SUCCESS) {
+			IPC_ERROR(s, "Failed to send locations!");
+			goto out;
+		}
+
+		xret = ipc_send(imc, out.polygon_info_start_index, sizeof(uint32_t) * out.location_count);
+		if (xret != XRT_SUCCESS) {
+			IPC_ERROR(s, "Failed to send locations!");
+			goto out;
+		}
+	}
+
+	if (out.polygon_info_size > 0) {
+		xret =
+		    ipc_send(imc, out.polygon_infos, sizeof(struct xrt_plane_polygon_info_ext) * out.polygon_info_size);
+		if (xret != XRT_SUCCESS) {
+			IPC_ERROR(s, "Failed to send polygon_infos!");
+			goto out;
+		}
+	}
+
+	if (out.vertex_size > 0) {
+		xret = ipc_send(imc, out.vertices, sizeof(struct xrt_vec2) * out.vertex_size);
+		if (xret != XRT_SUCCESS) {
+			IPC_ERROR(s, "Failed to send vertices!");
+			goto out;
+		}
+	}
+
+out:
+	xrt_plane_detections_ext_clear(&out);
+	return xret;
+}
+
+xrt_result_t
 ipc_handle_device_set_output(volatile struct ipc_client_state *ics,
                              uint32_t id,
                              enum xrt_output_name name,

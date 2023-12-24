@@ -12,6 +12,7 @@
 #include <string.h>
 #include <inttypes.h>
 
+#include "math/m_space.h"
 #include "xrt/xrt_compiler.h"
 
 #include "util/u_debug.h"
@@ -665,3 +666,377 @@ oxr_xrSetAndroidApplicationThreadKHR(XrSession session, XrAndroidThreadTypeKHR t
 }
 
 #endif
+
+#ifdef OXR_HAVE_EXT_plane_detection
+
+static XrResult
+oxr_plane_detector_destroy_cb(struct oxr_logger *log, struct oxr_handle_base *hb)
+{
+	struct oxr_plane_detector_ext *pd = (struct oxr_plane_detector_ext *)hb;
+
+	free(pd->xr_locations);
+
+	if (pd->detection_id > 0) {
+		enum xrt_result xret = xrt_device_destroy_plane_detection_ext(pd->xdev, pd->detection_id);
+		if (xret != XRT_SUCCESS) {
+			return oxr_error(log, XR_ERROR_RUNTIME_FAILURE,
+			                 "Internal error in xrDestroyPlaneDetectorEXT: %d", xret);
+		}
+	}
+
+	xrt_plane_detections_ext_clear(&pd->detections);
+
+	free(pd);
+
+	return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrCreatePlaneDetectorEXT(XrSession session,
+                             const XrPlaneDetectorCreateInfoEXT *createInfo,
+                             XrPlaneDetectorEXT *planeDetector)
+{
+	struct oxr_session *sess;
+	struct oxr_logger log;
+	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrCreatePlaneDetectorEXT");
+	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, createInfo, XR_TYPE_PLANE_DETECTOR_CREATE_INFO_EXT);
+	OXR_VERIFY_EXTENSION(&log, sess->sys->inst, EXT_plane_detection);
+
+	//! @todo support planes on other devices
+	struct xrt_device *xdev = GET_XDEV_BY_ROLE(sess->sys, head);
+	if (!xdev->planes_supported) {
+		return XR_ERROR_FEATURE_UNSUPPORTED;
+	}
+
+	if (createInfo->flags != 0 && createInfo->flags != XR_PLANE_DETECTOR_ENABLE_CONTOUR_BIT_EXT) {
+		//! @todo: Disabled to allow Monado forks with internal extensions to have more values.
+#if 0
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE, "Invalid plane detector creation flags: %lx",
+		                 createInfo->flags);
+#endif
+	}
+
+	struct oxr_plane_detector_ext *out_pd = NULL;
+	OXR_ALLOCATE_HANDLE_OR_RETURN(&log, out_pd, OXR_XR_DEBUG_PLANEDET, oxr_plane_detector_destroy_cb,
+	                              &sess->handle);
+
+	out_pd->sess = sess;
+	if ((createInfo->flags & XR_PLANE_DETECTOR_ENABLE_CONTOUR_BIT_EXT) != 0) {
+		out_pd->flags |= XRT_PLANE_DETECTOR_FLAGS_CONTOUR_EXT;
+	}
+
+	out_pd->xdev = xdev;
+
+	// no plane detection started on creation
+	out_pd->state = XR_PLANE_DETECTION_STATE_NONE_EXT;
+
+	out_pd->detection_id = 0;
+
+	out_pd->xr_locations = NULL;
+
+	*planeDetector = oxr_plane_detector_to_openxr(out_pd);
+
+	return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrDestroyPlaneDetectorEXT(XrPlaneDetectorEXT planeDetector)
+{
+	struct oxr_logger log;
+	struct oxr_plane_detector_ext *pd;
+
+	OXR_VERIFY_PLANE_DETECTOR_AND_INIT_LOG(&log, planeDetector, pd, "xrDestroyPlaneDetectorEXT");
+
+	return oxr_handle_destroy(&log, &pd->handle);
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrBeginPlaneDetectionEXT(XrPlaneDetectorEXT planeDetector, const XrPlaneDetectorBeginInfoEXT *beginInfo)
+{
+	struct oxr_logger log;
+	struct oxr_plane_detector_ext *pd;
+	struct oxr_space *spc;
+	XrResult ret;
+
+	OXR_VERIFY_PLANE_DETECTOR_AND_INIT_LOG(&log, planeDetector, pd, "xrBeginPlaneDetectionEXT");
+	OXR_VERIFY_SPACE_NOT_NULL(&log, beginInfo->baseSpace, spc);
+	OXR_VERIFY_ARG_NOT_ZERO(&log, beginInfo->maxPlanes);
+	OXR_VERIFY_POSE(&log, beginInfo->boundingBoxPose);
+	if (beginInfo->time < 1) {
+		return oxr_error(&log, XR_ERROR_TIME_INVALID, "Time %" PRId64 " invalid", beginInfo->time);
+	}
+
+	if (!pd->xdev->planes_supported) {
+		return XR_ERROR_FEATURE_UNSUPPORTED;
+	}
+
+	if (beginInfo->orientationCount > 0) {
+		OXR_VERIFY_ARG_NOT_NULL(&log, beginInfo->orientations);
+	}
+
+
+	// BoundingBox, pose is relative to baseSpace spc
+	struct xrt_pose T_base_bb = {
+	    .orientation =
+	        {
+	            .x = beginInfo->boundingBoxPose.orientation.x,
+	            .y = beginInfo->boundingBoxPose.orientation.y,
+	            .z = beginInfo->boundingBoxPose.orientation.z,
+	            .w = beginInfo->boundingBoxPose.orientation.w,
+	        },
+	    .position =
+	        {
+	            .x = beginInfo->boundingBoxPose.position.x,
+	            .y = beginInfo->boundingBoxPose.position.y,
+	            .z = beginInfo->boundingBoxPose.position.z,
+	        },
+	};
+
+	// Get plane tracker xdev relation in bounding box baseSpc too. The inverse of this relation is the transform
+	// from baseSpace spc to xdev space and can transform bounding box pose into xdev space.
+	struct xrt_space_relation T_base_xdev; // What we get, xdev in base space.
+	ret = oxr_space_locate_device(&log, pd->xdev, spc, beginInfo->time, &T_base_xdev);
+	if (T_base_xdev.relation_flags == 0) {
+		return oxr_error(&log, XR_ERROR_RUNTIME_FAILURE, "Could not transform bounds into requested space");
+	}
+
+	struct xrt_space_relation T_xdev_bb; // This is what we want, BoundingBox in xdev space.
+	struct xrt_relation_chain xrc = {0};
+	m_relation_chain_push_pose_if_not_identity(&xrc, &T_base_bb); // T_base_bb
+	m_relation_chain_push_inverted_relation(&xrc, &T_base_xdev);  // T_xdev_base
+	m_relation_chain_resolve(&xrc, &T_xdev_bb);
+
+	assert(T_xdev_bb.relation_flags != 0);
+
+	struct xrt_plane_detector_begin_info_ext query;
+	// the plane detector id is the raw handle (in our implementation: pointer to xrt_plane_detector)
+	query.detector_flags = pd->flags;
+
+	//! @todo be more graceful
+	if (beginInfo->orientationCount > XRT_MAX_PLANE_ORIENTATIONS_EXT) {
+		return oxr_error(&log, XR_ERROR_RUNTIME_FAILURE, "Too many plane orientations");
+	}
+
+	if (beginInfo->semanticTypeCount > XRT_MAX_PLANE_SEMANTIC_TYPE_EXT) {
+		return oxr_error(&log, XR_ERROR_RUNTIME_FAILURE, "Too many plane semantic types");
+	}
+
+	query.orientation_count = beginInfo->orientationCount;
+	for (uint32_t i = 0; i < beginInfo->orientationCount; i++) {
+		// 1:1 mapped
+		query.orientations[i] = (enum xrt_plane_detector_orientation_ext)beginInfo->orientations[i];
+	}
+
+	query.semantic_type_count = beginInfo->semanticTypeCount;
+	for (uint32_t i = 0; i < beginInfo->semanticTypeCount; i++) {
+		// 1:1 mapped
+		query.semantic_types[i] = (enum xrt_plane_detector_semantic_type_ext)beginInfo->semanticTypes[i];
+	}
+
+	query.max_planes = beginInfo->maxPlanes;
+	query.min_area = beginInfo->minArea;
+
+	// extents are invariant under pose transforms
+	query.bounding_box_extent.x = beginInfo->boundingBoxExtent.width;
+	query.bounding_box_extent.y = beginInfo->boundingBoxExtent.height;
+	query.bounding_box_extent.z = beginInfo->boundingBoxExtent.depth;
+
+	query.bounding_box_pose = T_xdev_bb.pose;
+
+
+	enum xrt_result xret;
+
+	// The xrt backend tracks plane detections to be able to clean up when the client dies.
+	// Because it tracks them as standalone objects, it can not know that this plane detection is replacing a
+	// previous one. Therefore we need to explicitly destroy the previous detection.
+	if (pd->detection_id > 0) {
+		xret = xrt_device_destroy_plane_detection_ext(pd->xdev, pd->detection_id);
+		if (xret != XRT_SUCCESS) {
+			return oxr_error(&log, XR_ERROR_RUNTIME_FAILURE,
+			                 "Internal error in xrBeginPlaneDetectionEXT: Failed to destroy previous plane "
+			                 "detection: %d",
+			                 xret);
+		}
+	}
+
+	xret = xrt_device_begin_plane_detection_ext(pd->xdev, &query, pd->detection_id, &pd->detection_id);
+	if (xret != XRT_SUCCESS) {
+		return oxr_error(&log, XR_ERROR_RUNTIME_FAILURE, "Internal error in xrBeginPlaneDetectionEXT: %d",
+		                 xret);
+	}
+
+	xrt_plane_detections_ext_clear(&pd->detections);
+
+	// This makes sure a call to xrGetPlaneDetectionsEXT won't see a previous state, in particular a previous DONE.
+	pd->state = XR_PLANE_DETECTION_STATE_PENDING_EXT;
+
+	return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrGetPlaneDetectionStateEXT(XrPlaneDetectorEXT planeDetector, XrPlaneDetectionStateEXT *state)
+{
+	struct oxr_logger log;
+	struct oxr_plane_detector_ext *pd;
+	struct oxr_space *spc;
+	XrResult ret;
+	enum xrt_result xret;
+
+	OXR_VERIFY_PLANE_DETECTOR_AND_INIT_LOG(&log, planeDetector, pd, "xrGetPlaneDetectionsEXT");
+
+	enum xrt_plane_detector_state_ext xstate = 0;
+
+	xret = xrt_device_get_plane_detection_state_ext(pd->xdev, pd->detection_id, &xstate);
+	if (xret != XRT_SUCCESS) {
+		return oxr_error(&log, XR_ERROR_RUNTIME_FAILURE, "Internal error in xrGetPlaneDetectionStateEXT: %d",
+		                 xret);
+	}
+
+	*state = (XrPlaneDetectionStateEXT)xstate; // 1:1 mapped
+
+	pd->state = *state;
+
+	return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrGetPlaneDetectionsEXT(XrPlaneDetectorEXT planeDetector,
+                            const XrPlaneDetectorGetInfoEXT *info,
+                            XrPlaneDetectorLocationsEXT *locations)
+{
+	struct oxr_logger log;
+	struct oxr_plane_detector_ext *pd;
+	struct oxr_space *spc;
+	XrResult ret;
+	enum xrt_result xret;
+
+	OXR_VERIFY_PLANE_DETECTOR_AND_INIT_LOG(&log, planeDetector, pd, "xrGetPlaneDetectionsEXT");
+	OXR_VERIFY_SPACE_NOT_NULL(&log, info->baseSpace, spc);
+	if (info->time < 1) {
+		return oxr_error(&log, XR_ERROR_TIME_INVALID, "Time %" PRId64 " invalid", info->time);
+	}
+
+	if (!pd->xdev->planes_supported) {
+		return XR_ERROR_FEATURE_UNSUPPORTED;
+	}
+
+	if (pd->state != XR_PLANE_DETECTION_STATE_DONE_EXT) {
+		locations->planeLocationCountOutput = 0;
+		return XR_ERROR_CALL_ORDER_INVALID;
+	}
+
+	xret = xrt_device_get_plane_detections_ext(pd->xdev, pd->detection_id, &pd->detections);
+	if (xret != XRT_SUCCESS) {
+		return oxr_error(&log, XR_ERROR_RUNTIME_FAILURE, "Internal error in xrGetPlaneDetectionsEXT: %d", xret);
+	}
+
+	struct xrt_space_relation T_base_xdev; // What we get, xdev in base space.
+	ret = oxr_space_locate_device(&log, pd->xdev, spc, info->time, &T_base_xdev);
+	if (T_base_xdev.relation_flags == 0) {
+		return oxr_error(&log, XR_ERROR_RUNTIME_FAILURE, "Could not get requested space transform");
+	}
+	if (T_base_xdev.relation_flags == 0) {
+		return XR_ERROR_SPACE_NOT_LOCATABLE_EXT;
+	}
+
+	// create dynamic array for two call idiom
+	U_ARRAY_REALLOC_OR_FREE(pd->xr_locations, XrPlaneDetectorLocationEXT, pd->detections.location_count);
+	if (pd->detections.location_count == 0) {
+		pd->xr_locations = NULL;
+	}
+
+	// populate pd->xr_locations from pd->detections.locations, also transform plane poses into baseSpace.
+	for (uint32_t i = 0; i < pd->detections.location_count; i++) {
+		pd->xr_locations[i].planeId = pd->detections.locations[i].planeId;
+		pd->xr_locations[i].extents.width = pd->detections.locations[i].extents.x;
+		pd->xr_locations[i].extents.height = pd->detections.locations[i].extents.y;
+		// 1:1 mapped
+		pd->xr_locations[i].orientation =
+		    (XrPlaneDetectorOrientationEXT)pd->detections.locations[i].orientation;
+		pd->xr_locations[i].semanticType =
+		    (XrPlaneDetectorSemanticTypeEXT)pd->detections.locations[i].semantic_type;
+		pd->xr_locations[i].polygonBufferCount = pd->detections.locations[i].polygon_buffer_count;
+
+
+		// The plane poses are returned in the xdev's space.
+		struct xrt_space_relation T_xdev_plane = pd->detections.locations[i].relation;
+
+		// Get the plane pose in the base space.
+		struct xrt_space_relation T_base_plane;
+		struct xrt_relation_chain xrc = {0};
+		m_relation_chain_push_relation(&xrc, &T_xdev_plane);
+		m_relation_chain_push_relation(&xrc, &T_base_xdev);
+		m_relation_chain_resolve(&xrc, &T_base_plane);
+
+		OXR_XRT_POSE_TO_XRPOSEF(T_base_plane.pose, pd->xr_locations[i].pose);
+
+		pd->xr_locations[i].locationFlags = 0;
+		if ((T_base_plane.relation_flags & XRT_SPACE_RELATION_ORIENTATION_VALID_BIT) != 0) {
+			pd->xr_locations[i].locationFlags |= XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
+		}
+		if ((T_base_plane.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) != 0) {
+			pd->xr_locations[i].locationFlags |= XR_SPACE_LOCATION_POSITION_VALID_BIT;
+		}
+		if ((T_base_plane.relation_flags & XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT) != 0) {
+			pd->xr_locations[i].locationFlags |= XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT;
+		}
+		if ((T_base_plane.relation_flags & XRT_SPACE_RELATION_POSITION_TRACKED_BIT) != 0) {
+			pd->xr_locations[i].locationFlags |= XR_SPACE_LOCATION_POSITION_TRACKED_BIT;
+		}
+	}
+
+
+	OXR_TWO_CALL_HELPER(&log, locations->planeLocationCapacityInput, &locations->planeLocationCountOutput,
+	                    locations->planeLocations, pd->detections.location_count, pd->xr_locations, XR_SUCCESS);
+
+	return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrGetPlanePolygonBufferEXT(XrPlaneDetectorEXT planeDetector,
+                               uint64_t planeId,
+                               uint32_t polygonBufferIndex,
+                               XrPlaneDetectorPolygonBufferEXT *polygonBuffer)
+{
+	struct oxr_logger log;
+	struct oxr_plane_detector_ext *pd;
+	OXR_VERIFY_PLANE_DETECTOR_AND_INIT_LOG(&log, planeDetector, pd, "xrGetPlaneDetectionsEXT");
+
+	//! @todo can't reasonably retrieve a polygon without having retrieved plane data first.
+	if (pd->state != XR_PLANE_DETECTION_STATE_DONE_EXT) {
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
+		                 "xrGetPlanePolygonBufferEXT called but plane detector state is %d", pd->state);
+	}
+
+	// find the index of the plane in both pd->locations and pd->polygons_ptr arrays.
+	uint32_t plane_index = UINT32_MAX;
+	for (uint32_t i = 0; i < pd->detections.location_count; i++) {
+		if (pd->detections.locations[i].planeId == planeId) {
+			plane_index = i;
+			break;
+		}
+	}
+
+	if (plane_index == UINT32_MAX) {
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE, "Invalid plane id %" PRId64, planeId);
+	}
+
+	if (polygonBufferIndex + 1 > pd->detections.locations[plane_index].polygon_buffer_count) {
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE, "Invalid polygon buffer index %u (> %u)",
+		                 polygonBufferIndex, pd->detections.locations[plane_index].polygon_buffer_count - 1);
+	}
+
+	uint32_t polygons_start_index = pd->detections.polygon_info_start_index[plane_index];
+	uint32_t polygon_index = polygons_start_index + polygonBufferIndex;
+
+	uint32_t vertices_start_index = pd->detections.polygon_infos[polygon_index].vertices_start_index;
+	// xrt_vec2 should mapped 1:1 to XrVector2f
+	XrVector2f *polygon_vertices = (XrVector2f *)&pd->detections.vertices[vertices_start_index];
+
+	uint32_t vertex_count = pd->detections.polygon_infos[polygon_index].vertex_count;
+
+	OXR_TWO_CALL_HELPER(&log, polygonBuffer->vertexCapacityInput, &polygonBuffer->vertexCountOutput,
+	                    polygonBuffer->vertices, vertex_count, polygon_vertices, XR_SUCCESS);
+}
+
+#endif // OXR_HAVE_EXT_plane_detection

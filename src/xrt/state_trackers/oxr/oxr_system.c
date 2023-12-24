@@ -331,6 +331,20 @@ oxr_system_get_properties(struct oxr_logger *log, struct oxr_system *sys, XrSyst
 	}
 #endif
 
+#ifdef OXR_HAVE_EXT_plane_detection
+	XrSystemPlaneDetectionPropertiesEXT *plane_detection_props = NULL;
+	if (sys->inst->extensions.EXT_plane_detection) {
+		plane_detection_props = OXR_GET_OUTPUT_FROM_CHAIN(
+		    properties, XR_TYPE_SYSTEM_PLANE_DETECTION_PROPERTIES_EXT, XrSystemPlaneDetectionPropertiesEXT);
+	}
+
+	if (plane_detection_props) {
+		// for now these are mapped 1:1
+		plane_detection_props->supportedFeatures =
+		    (XrPlaneDetectionCapabilityFlagsEXT)xdev->plane_capability_flags;
+	}
+#endif // OXR_HAVE_EXT_plane_detection
+
 	return XR_SUCCESS;
 }
 

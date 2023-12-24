@@ -408,6 +408,17 @@
 
 
 /*
+ * XR_EXT_plane_detection
+ */
+#if defined(XR_EXT_plane_detection)
+#define OXR_HAVE_EXT_plane_detection
+#define OXR_EXTENSION_SUPPORT_EXT_plane_detection(_) _(EXT_plane_detection, EXT_PLANE_DETECTION)
+#else
+#define OXR_EXTENSION_SUPPORT_EXT_plane_detection(_)
+#endif
+
+
+/*
  * XR_MND_headless
  */
 #if defined(XR_MND_headless) && defined(XRT_FEATURE_OPENXR_HEADLESS)
@@ -600,6 +611,7 @@
     OXR_EXTENSION_SUPPORT_FB_composition_layer_image_layout(_) \
     OXR_EXTENSION_SUPPORT_FB_display_refresh_rate(_) \
     OXR_EXTENSION_SUPPORT_ML_ml2_controller_interaction(_) \
+    OXR_EXTENSION_SUPPORT_EXT_plane_detection(_) \
     OXR_EXTENSION_SUPPORT_MND_headless(_) \
     OXR_EXTENSION_SUPPORT_MND_swapchain_usage_input_attachment_bit(_) \
     OXR_EXTENSION_SUPPORT_MSFT_hand_interaction(_) \

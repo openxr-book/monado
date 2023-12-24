@@ -128,6 +128,16 @@ struct ipc_client_state
 
 	struct ipc_app_state client_state;
 
+
+	uint64_t plane_detection_size;
+	uint64_t plane_detection_count;
+
+	//! Array of plane detection ids with plane_detection_size entries.
+	uint64_t *plane_detection_ids;
+
+	//! Array of xrt_devices with plane_detection_size entries.
+	struct xrt_device **plane_detection_xdev;
+
 	int server_thread_index;
 };
 

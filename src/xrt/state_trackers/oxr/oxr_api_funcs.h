@@ -570,6 +570,33 @@ oxr_xrGetDisplayRefreshRateFB(XrSession session, float *displayRefreshRate);
 XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrRequestDisplayRefreshRateFB(XrSession session, float displayRefreshRate);
 
+#ifdef OXR_HAVE_EXT_plane_detection
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrCreatePlaneDetectorEXT(XrSession session,
+                             const XrPlaneDetectorCreateInfoEXT *createInfo,
+                             XrPlaneDetectorEXT *planeDetector);
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrDestroyPlaneDetectorEXT(XrPlaneDetectorEXT planeDetector);
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrBeginPlaneDetectionEXT(XrPlaneDetectorEXT planeDetector, const XrPlaneDetectorBeginInfoEXT *beginInfo);
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrGetPlaneDetectionStateEXT(XrPlaneDetectorEXT planeDetector, XrPlaneDetectionStateEXT *state);
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrGetPlaneDetectionsEXT(XrPlaneDetectorEXT planeDetector,
+                            const XrPlaneDetectorGetInfoEXT *info,
+                            XrPlaneDetectorLocationsEXT *locations);
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrGetPlanePolygonBufferEXT(XrPlaneDetectorEXT planeDetector,
+                               uint64_t planeId,
+                               uint32_t polygonBufferIndex,
+                               XrPlaneDetectorPolygonBufferEXT *polygonBuffer);
+#endif // OXR_HAVE_EXT_plane_detection
+
 /*!
  * @}
  */

@@ -67,6 +67,7 @@ EXTENSIONS = (
     ['XR_FB_composition_layer_image_layout', 'XRT_FEATURE_OPENXR_LAYER_FB_LAYER_IMAGE_LAYOUT'],
     ['XR_FB_display_refresh_rate', 'XRT_FEATURE_OPENXR_DISPLAY_REFRESH_RATE'],
     ['XR_ML_ml2_controller_interaction', 'XRT_FEATURE_OPENXR_INTERACTION_ML2'],
+    ['XR_EXT_plane_detection', 'XRT_FEATURE_OPENXR_PLANE_DETECTION'],
     ['XR_MND_headless', 'XRT_FEATURE_OPENXR_HEADLESS'],
     ['XR_MND_swapchain_usage_input_attachment_bit'],
     ['XR_MSFT_hand_interaction', 'XRT_FEATURE_OPENXR_INTERACTION_MSFT_HAND'],

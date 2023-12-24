@@ -246,6 +246,15 @@ handle_non_null(struct oxr_instance *inst, struct oxr_logger *log, const char *n
 	ENTRY_IF_EXT(xrRequestDisplayRefreshRateFB, FB_display_refresh_rate);
 #endif
 
+#ifdef OXR_HAVE_EXT_plane_detection
+	ENTRY_IF_EXT(xrCreatePlaneDetectorEXT, EXT_plane_detection);
+	ENTRY_IF_EXT(xrDestroyPlaneDetectorEXT, EXT_plane_detection);
+	ENTRY_IF_EXT(xrBeginPlaneDetectionEXT, EXT_plane_detection);
+	ENTRY_IF_EXT(xrGetPlaneDetectionStateEXT, EXT_plane_detection);
+	ENTRY_IF_EXT(xrGetPlaneDetectionsEXT, EXT_plane_detection);
+	ENTRY_IF_EXT(xrGetPlanePolygonBufferEXT, EXT_plane_detection);
+#endif
+
 #ifdef OXR_HAVE_EXT_debug_utils
 	ENTRY_IF_EXT(xrSetDebugUtilsObjectNameEXT, EXT_debug_utils);
 	ENTRY_IF_EXT(xrCreateDebugUtilsMessengerEXT, EXT_debug_utils);

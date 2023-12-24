@@ -133,6 +133,8 @@ struct ipc_shared_device
 	bool eye_gaze_supported;
 	bool force_feedback_supported;
 	bool form_factor_check_supported;
+	bool planes_supported;
+	enum xrt_plane_detection_capability_flags_ext plane_capability_flags;
 };
 
 /*!
@@ -272,6 +274,7 @@ struct ipc_shared_memory
 	struct ipc_layer_slot slots[IPC_MAX_SLOTS];
 
 	uint64_t startup_timestamp;
+	struct xrt_plane_detector_begin_info_ext plane_begin_info_ext;
 };
 
 /*!
