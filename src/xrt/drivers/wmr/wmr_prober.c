@@ -78,25 +78,26 @@ check_and_get_interface(struct xrt_prober_device *device,
                         enum u_logging_level log_level,
                         enum wmr_headset_type *out_hmd_type)
 {
-        const struct wmr_headset_descriptor *headset_map = get_wmr_headset_map();
+	const struct wmr_headset_descriptor *headset_map = get_wmr_headset_map();
 	int headset_map_n = get_wmr_headset_map_size();
 
 	for (int i = 0; i < headset_map_n; i++) {
 		const struct wmr_headset_descriptor *cur = &headset_map[i];
-		if (device->vendor_id == cur->vid && device->product_id == cur->pid){
-			U_LOG_IFL_T(log_level, "Matched %s for vid %04X, pid %04X",
-					cur->debug_name, device->vendor_id, device->product_id);
-			if(!cur->is_well_supported) {
-				U_LOG_IFL_W(log_level, "%s may not be well-supported - continuing anyway.", cur->debug_name);
+		if (device->vendor_id == cur->vid && device->product_id == cur->pid) {
+			U_LOG_IFL_T(log_level, "Matched %s for vid %04X, pid %04X", cur->debug_name, device->vendor_id,
+			            device->product_id);
+			if (!cur->is_well_supported) {
+				U_LOG_IFL_W(log_level, "%s may not be well-supported - continuing anyway.",
+				            cur->debug_name);
 			}
 			*out_hmd_type = cur->hmd_type;
 			return true;
 		}
 	}
-	//Didnt find the descriptor of this device, returning generic
+	// Didn't find the descriptor of this device, returning generic
 	*out_hmd_type = WMR_HEADSET_GENERIC;
-	U_LOG_IFL_T(log_level, "Could not find descriptor for companion with vid %04X, pid %04X",
-			device->vendor_id, device->product_id);
+	U_LOG_IFL_T(log_level, "Could not find descriptor for companion with vid %04X, pid %04X", device->vendor_id,
+	            device->product_id);
 	return false;
 }
 
