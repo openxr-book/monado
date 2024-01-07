@@ -86,6 +86,9 @@ check_and_get_interface(struct xrt_prober_device *device,
 		if (device->vendor_id == cur->vid && device->product_id == cur->pid){
 			U_LOG_IFL_T(log_level, "Matched %s for vid %04X, pid %04X",
 					cur->debug_name, device->vendor_id, device->product_id);
+			if(!cur->is_well_supported) {
+				U_LOG_IFL_W(log_level, "%s may not be well-supported - continuing anyway.", cur->debug_name);
+			}
 			*out_hmd_descriptor = cur;
 			return true;
 		}

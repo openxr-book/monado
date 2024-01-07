@@ -48,6 +48,7 @@ struct wmr_headset_descriptor
 	const char *dev_id_str;
 	int vid;
 	int pid;
+	bool is_well_supported;
 	//! Friendly ID string for debug
 	const char *debug_name;
 

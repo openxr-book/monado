@@ -109,19 +109,19 @@ wmr_hmd_screen_enable_odyssey_plus(struct wmr_hmd *wh, bool enable);
 
 
 const struct wmr_headset_descriptor headset_map[] = {
-    {WMR_HEADSET_GENERIC, NULL, 0, 0, "Unknown WMR HMD", NULL, NULL, NULL}, /* Catch-all for unknown headsets */
-    {WMR_HEADSET_HP_VR1000, "HP Reverb VR Headset VR1000-1xxx", 0x03f0, 0x0367, "HP VR1000", NULL, NULL, NULL}, /*! @todo init funcs */
-    {WMR_HEADSET_REVERB_G1, "HP Reverb VR Headset VR1000-2xxx", 0x03f0, 0x0c6a, "HP Reverb", wmr_hmd_activate_reverb,
+    {WMR_HEADSET_GENERIC, NULL, 0, 0, false, "Unknown WMR HMD", NULL, NULL, NULL}, /* Catch-all for unknown headsets */
+    {WMR_HEADSET_HP_VR1000, "HP Reverb VR Headset VR1000-1xxx", 0x03f0, 0x0367, true, "HP VR1000", NULL, NULL, NULL}, /*! @todo init funcs */
+    {WMR_HEADSET_REVERB_G1, "HP Reverb VR Headset VR1000-2xxx", 0x03f0, 0x0c6a, true, "HP Reverb", wmr_hmd_activate_reverb,
      wmr_hmd_deactivate_reverb, wmr_hmd_screen_enable_reverb},
-    {WMR_HEADSET_REVERB_G2, "HP Reverb Virtual Reality Headset G2", 0x03f0, 0x0580, "HP Reverb G2", wmr_hmd_activate_reverb,
+    {WMR_HEADSET_REVERB_G2, "HP Reverb Virtual Reality Headset G2", 0x03f0, 0x0580, true, "HP Reverb G2", wmr_hmd_activate_reverb,
      wmr_hmd_deactivate_reverb, wmr_hmd_screen_enable_reverb},
-    {WMR_HEADSET_SAMSUNG_XE700X3AI, "Samsung Windows Mixed Reality XE700X3AI", 0x04e8, 0x7310, "Samsung Odyssey",
+    {WMR_HEADSET_SAMSUNG_XE700X3AI, "Samsung Windows Mixed Reality XE700X3AI", 0x04e8, 0x7310, false, "Samsung Odyssey",
      wmr_hmd_activate_odyssey_plus, wmr_hmd_deactivate_odyssey_plus, wmr_hmd_screen_enable_odyssey_plus},
-    {WMR_HEADSET_SAMSUNG_800ZAA, "Samsung Windows Mixed Reality 800ZAA", 0x04e8, 0x7312, "Samsung Odyssey+",
+    {WMR_HEADSET_SAMSUNG_800ZAA, "Samsung Windows Mixed Reality 800ZAA", 0x04e8, 0x7312, true, "Samsung Odyssey+",
      wmr_hmd_activate_odyssey_plus, wmr_hmd_deactivate_odyssey_plus, wmr_hmd_screen_enable_odyssey_plus},
-    {WMR_HEADSET_LENOVO_EXPLORER, "Lenovo VR-2511N", 0x17ef, 0xb801, "Lenovo Explorer", NULL, NULL, NULL},
-    {WMR_HEADSET_MEDION_ERAZER_X1000, "Medion Erazer X1000", 0x0408, 0xb5d5, "Medion Erazer", NULL, NULL, NULL},
-    {WMR_HEADSET_DELL_VISOR, "DELL VR118", 0x413c, 0xb0d5, "Dell Visor", NULL, NULL, NULL},
+    {WMR_HEADSET_LENOVO_EXPLORER, "Lenovo VR-2511N", 0x17ef, 0xb801, true, "Lenovo Explorer", NULL, NULL, NULL},
+    {WMR_HEADSET_MEDION_ERAZER_X1000, "Medion Erazer X1000", 0x0408, 0xb5d5, true, "Medion Erazer", NULL, NULL, NULL},
+    {WMR_HEADSET_DELL_VISOR, "DELL VR118", 0x413c, 0xb0d5, true, "Dell Visor", NULL, NULL, NULL},
 };
 const int headset_map_n = sizeof(headset_map) / sizeof(headset_map[0]);
 
@@ -2035,6 +2035,9 @@ wmr_hmd_create(const struct wmr_headset_descriptor *hmd_descriptor,
 		for (i = 0; i < headset_map_n; i++) {
 			const struct wmr_headset_descriptor *cur = &headset_map[i];
 			if(cur->dev_id_str && strncmp(wh->config_hdr.name, cur->dev_id_str, 64) == 0) {
+				if(!cur->is_well_supported) {
+					U_LOG_IFL_W(log_level, "%s may not be well-supported - continuing anyway.", cur->debug_name);
+				}
 				hmd_descriptor = cur;
 				break;
 			}
