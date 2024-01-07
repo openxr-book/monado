@@ -76,7 +76,7 @@ classify_and_assign_controller(struct xrt_prober *xp,
 static bool
 check_and_get_interface(struct xrt_prober_device *device,
                         enum u_logging_level log_level,
-                        const struct wmr_headset_descriptor **out_hmd_descriptor)
+                        enum wmr_headset_type *out_hmd_type)
 {
         const struct wmr_headset_descriptor *headset_map = get_wmr_headset_map();
 	int headset_map_n = get_wmr_headset_map_size();
@@ -89,12 +89,12 @@ check_and_get_interface(struct xrt_prober_device *device,
 			if(!cur->is_well_supported) {
 				U_LOG_IFL_W(log_level, "%s may not be well-supported - continuing anyway.", cur->debug_name);
 			}
-			*out_hmd_descriptor = cur;
+			*out_hmd_type = cur->hmd_type;
 			return true;
 		}
 	}
 	//Didnt find the descriptor of this device, returning generic
-	*out_hmd_descriptor = &headset_map[0];
+	*out_hmd_type = WMR_HEADSET_GENERIC;
 	U_LOG_IFL_T(log_level, "Could not find descriptor for companion with vid %04X, pid %04X",
 			device->vendor_id, device->product_id);
 	return false;
@@ -105,7 +105,7 @@ find_companion_device(struct xrt_prober *xp,
                       struct xrt_prober_device **devices,
                       size_t device_count,
                       enum u_logging_level log_level,
-                      const struct wmr_headset_descriptor **out_hmd_descriptor,
+                      enum wmr_headset_type *out_hmd_type,
                       struct xrt_prober_device **out_device)
 {
 	struct xrt_prober_device *dev = NULL;
@@ -117,7 +117,7 @@ find_companion_device(struct xrt_prober *xp,
 			continue;
 		}
 
-		match = check_and_get_interface(devices[i], log_level, out_hmd_descriptor);
+		match = check_and_get_interface(devices[i], log_level, out_hmd_type);
 
 		if (!match) {
 			continue;
@@ -223,17 +223,15 @@ wmr_find_companion_device(struct xrt_prober *xp,
                           struct wmr_companion_search_results *out_wcsr)
 {
 	struct xrt_prober_device *xpdev_companion = NULL;
-	//TODO REMOVER
-	//enum wmr_headset_type type = WMR_HEADSET_GENERIC;
-	const struct wmr_headset_descriptor *hmd_descriptor = NULL;
+	enum wmr_headset_type type = WMR_HEADSET_GENERIC;
 
-	if (!find_companion_device(xp, xpdevs, xpdev_count, log_level, &hmd_descriptor, &xpdev_companion)) {
+	if (!find_companion_device(xp, xpdevs, xpdev_count, log_level, &type, &xpdev_companion)) {
 		U_LOG_IFL_E(log_level, "Did not find HoloLens Sensors' companion device");
 		return;
 	}
 
 	out_wcsr->xpdev_companion = xpdev_companion;
-	out_wcsr->hmd_descriptor = hmd_descriptor;
+	out_wcsr->type = type;
 }
 
 void
@@ -279,7 +277,7 @@ wmr_find_headset(struct xrt_prober *xp,
 	// Done now, output.
 	out_whsr->xpdev_holo = xpdev_holo;
 	out_whsr->xpdev_companion = wcsr.xpdev_companion;
-	out_whsr->hmd_descriptor = wcsr.hmd_descriptor;
+	out_whsr->type = wcsr.type;
 }
 
 
@@ -293,7 +291,7 @@ xrt_result_t
 wmr_create_headset(struct xrt_prober *xp,
                    struct xrt_prober_device *xpdev_holo,
                    struct xrt_prober_device *xpdev_companion,
-                   const struct wmr_headset_descriptor *hmd_descriptor,
+                   enum wmr_headset_type type,
                    enum u_logging_level log_level,
                    struct xrt_device **out_hmd,
                    struct xrt_device **out_left,
@@ -327,7 +325,7 @@ wmr_create_headset(struct xrt_prober *xp,
 	struct xrt_device *ht = NULL;
 	struct xrt_device *two_hands[2] = {NULL, NULL}; // Must initialize, always returned.
 	struct xrt_device *hmd_left_ctrl = NULL, *hmd_right_ctrl = NULL;
-	wmr_hmd_create(hmd_descriptor, hid_holo, hid_companion, xpdev_holo, log_level, &hmd, &ht, &hmd_left_ctrl,
+	wmr_hmd_create(type, hid_holo, hid_companion, xpdev_holo, log_level, &hmd, &ht, &hmd_left_ctrl,
 	               &hmd_right_ctrl);
 
 	if (hmd == NULL) {

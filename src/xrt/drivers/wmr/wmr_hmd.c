@@ -1927,7 +1927,7 @@ wmr_hmd_request_controller_status(struct wmr_hmd *wh)
 }
 
 void
-wmr_hmd_create(const struct wmr_headset_descriptor *hmd_descriptor,
+wmr_hmd_create(enum wmr_headset_type hmd_type,
                struct os_hid_device *hid_holo,
                struct os_hid_device *hid_ctrl,
                struct xrt_prober_device *dev_holo,
@@ -2029,21 +2029,25 @@ wmr_hmd_create(const struct wmr_headset_descriptor *hmd_descriptor,
 	};
 
 	/* Now that we have the config loaded, iterate the map of known headsets and see if we have
--        * an entry for this specific headset with not matching vid/pid (otherwise the generic entry will be used)
--        */
-	if(hmd_descriptor->hmd_type == WMR_HEADSET_GENERIC) {
-		for (i = 0; i < headset_map_n; i++) {
-			const struct wmr_headset_descriptor *cur = &headset_map[i];
-			if(cur->dev_id_str && strncmp(wh->config_hdr.name, cur->dev_id_str, 64) == 0) {
-				if(!cur->is_well_supported) {
-					U_LOG_IFL_W(log_level, "%s may not be well-supported - continuing anyway.", cur->debug_name);
-				}
-				hmd_descriptor = cur;
-				break;
-			}
+	 * an entry for this specific headset (otherwise the generic entry will be used)
+	 */
+	for (i = 0; i < headset_map_n; i++) {
+		const struct wmr_headset_descriptor *cur = &headset_map[i];
+
+		if (hmd_type == cur->hmd_type) {
+			wh->hmd_desc = cur;
+			if (hmd_type != WMR_HEADSET_GENERIC)
+				break; /* Stop checking if we have a specific match, or keep going for the GENERIC
+				          catch-all type */
+		}
+
+		if (cur->dev_id_str && strncmp(wh->config_hdr.name, cur->dev_id_str, 64) == 0) {
+			hmd_type = cur->hmd_type;
+			wh->hmd_desc = cur;
+			break;
+
 		}
 	}
-	wh->hmd_desc = hmd_descriptor;
 	assert(wh->hmd_desc != NULL); /* Each supported device MUST have a manually created entry in our headset_map */
 
 	WMR_INFO(wh, "Found WMR headset type: %s", wh->hmd_desc->debug_name);

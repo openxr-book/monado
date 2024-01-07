@@ -208,7 +208,7 @@ wmr_hmd(struct xrt_device *p)
 }
 
 void
-wmr_hmd_create(const struct wmr_headset_descriptor *hmd_descriptor,
+wmr_hmd_create(enum wmr_headset_type hmd_type,
                struct os_hid_device *hid_holo,
                struct os_hid_device *hid_ctrl,
                struct xrt_prober_device *dev_holo,
