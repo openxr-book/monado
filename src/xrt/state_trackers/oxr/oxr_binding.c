@@ -81,7 +81,7 @@ interaction_profile_find_in_instance(struct oxr_logger *log,
 }
 
 static inline bool
-internaction_profile_find_in_session(struct oxr_logger *log,
+interaction_profile_find_in_session(struct oxr_logger *log,
                                      struct oxr_session *sess,
                                      XrPath path,
                                      struct oxr_interaction_profile **out_p)
@@ -353,7 +353,7 @@ get_profile_for_device_name(struct oxr_logger *log,
 	 * Map xrt_device_name to an interaction profile XrPath.
 	 * Set *out_p to an oxr_interaction_profile if bindings for that interaction profile XrPath have been suggested.
 	 */
-#define FIND_PROFILE(PATH) internaction_profile_find_in_session(log, sess, inst->path_cache.PATH, out_p)
+#define FIND_PROFILE(PATH) interaction_profile_find_in_session(log, sess, inst->path_cache.PATH, out_p)
 
 	switch (name) {
 	case XRT_DEVICE_PSMV: FIND_PROFILE(mndx_ball_on_a_stick_controller); return;
@@ -691,7 +691,7 @@ oxr_action_get_input_source_localized_name(struct oxr_logger *log,
 	// Find the interaction profile.
 	struct oxr_interaction_profile *oip = NULL;
 	//! @todo: If we ever rebind a profile that has not been suggested by the client, it will not be found.
-	internaction_profile_find_in_session(log, sess, path, &oip);
+	interaction_profile_find_in_session(log, sess, path, &oip);
 	if (oip == NULL) {
 		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "no interaction profile found");
 	}
