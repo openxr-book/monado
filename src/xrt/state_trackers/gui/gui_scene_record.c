@@ -34,6 +34,10 @@
 #include "depthai/depthai_interface.h"
 #endif
 
+#ifdef XRT_BUILD_DRIVER_STEREOLABS
+#include "stereolabs/sl_interface.h"
+#endif
+
 #include "gui_imgui.h"
 #include "gui_common.h"
 #include "gui_window_record.h"
@@ -64,6 +68,9 @@ struct camera_window
 
 		// Use ELP.
 		bool elp;
+
+		// Use ZED Mini camera
+		bool zed_mini;
 	} use;
 
 	struct
@@ -151,12 +158,13 @@ window_create(struct gui_program *p, const char *camera)
 	cw->use.depthai_stereo = camera == NULL ? false : strcmp(camera, "depthai_stereo") == 0;
 	cw->use.depthai_stereo = camera == NULL ? false : strcmp(camera, "depthai-stereo") == 0;
 	cw->use.elp = camera == NULL ? false : strcmp(camera, "elp") == 0;
+	cw->use.zed_mini = camera == NULL ? false : strcmp(camera, "zed_mini") == 0;
 
 	if (!cw->use.index &&             //
 	    !cw->use.leap_motion &&       //
 	    !cw->use.depthai_monocular && //
 	    !cw->use.depthai_stereo &&    //
-	    !cw->use.elp) {
+	    !cw->use.elp && !cw->use.zed_mini) {
 		U_LOG_W(
 		    "Can't recongnize camera name '%s', options are 'elp', 'depthai-[monocular|stereo]', index' & "
 		    "'leap_motion'.\n\tFalling back to 'index'.",
@@ -230,6 +238,40 @@ create_depthai_stereo(struct camera_window *cw)
 	xrt_fs_slam_stream_start(cw->camera.xfs, &sinks);
 }
 #endif /* XRT_BUILD_DRIVER_DEPTHAI */
+
+
+/*
+ *
+ * Stereolabs functions
+ *
+ */
+
+#ifdef XRT_BUILD_DRIVER_STEREOLABS
+static void
+create_stereolabs_stereo(struct camera_window *cw)
+{
+	// Should we be using a DepthAI camera?
+	if (!cw->use.zed_mini) {
+		return;
+	}
+
+	cw->camera.xfs = sl_frameserver_create(&cw->camera.xfctx);
+
+	if (cw->camera.xfs == NULL) {
+		U_LOG_W("Could not create depthai camera!");
+		return;
+	}
+
+	struct xrt_frame_sink *window_sink = &cw->base.sink;
+
+	struct xrt_slam_sinks sinks;
+	u_sink_combiner_create(&cw->camera.xfctx, window_sink, &sinks.cams[0], &sinks.cams[1]);
+
+	// start slam frameserver and stream into sinks
+	xrt_fs_slam_stream_start(cw->camera.xfs, &sinks);
+	// xrt_fs_stream_start(cw->camera.xfs, window_sink, XRT_FS_CAPTURE_TYPE_TRACKING, 0);
+}
+#endif /* XRT_BUILD_DRIVER_STEREOLABS */
 
 
 /*
@@ -427,6 +469,12 @@ gui_scene_record(struct gui_program *p, const char *camera)
 
 	if (!window_has_source(rs->window)) {
 		create_depthai_stereo(rs->window);
+	}
+#endif
+
+#ifdef XRT_BUILD_DRIVER_STEREOLABS
+	if (!window_has_source(rs->window)) {
+		create_stereolabs_stereo(rs->window);
 	}
 #endif
 

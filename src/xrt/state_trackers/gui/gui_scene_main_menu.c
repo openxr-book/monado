@@ -87,6 +87,11 @@ scene_render(struct gui_scene *scene, struct gui_program *p)
 		gui_scene_record_euroc(p);
 	}
 
+	if (igButton("Record (ZED Mini RGB Stereo)", button_dims)) {
+		gui_scene_delete_me(p, scene);
+		gui_scene_record(p, "zed_mini");
+	}
+
 	igSeparator();
 
 	if (igButton("Exit", button_dims)) {

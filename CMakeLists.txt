@@ -103,6 +103,7 @@ find_package(Libusb1 MODULE)
 find_package(JPEG MODULE)
 find_package(realsense2 CONFIG)
 find_package(depthai CONFIG)
+find_package(ZED 4 CONFIG)
 find_package(SDL2 CONFIG)
 find_package(ZLIB MODULE)
 find_package(cJSON MODULE)
@@ -320,6 +321,7 @@ option_with_deps(XRT_HAVE_JPEG "Enable jpeg code (used for some video drivers)" 
 option_with_deps(XRT_HAVE_LIBUSB "Enable libusb (used for most drivers)" DEPENDS LIBUSB1_FOUND)
 option_with_deps(XRT_HAVE_LIBUVC "Enable libuvc video driver" DEPENDS LIBUVC_FOUND XRT_HAVE_LIBUSB)
 option_with_deps(XRT_HAVE_REALSENSE "Enable RealSense support" DEPENDS realsense2_FOUND)
+option_with_deps(XRT_HAVE_STEREOLABS "Enable Stereolabs support" DEPENDS ZED_FOUND)
 option_with_deps(XRT_HAVE_OPENVR "Enable OpenVR support" DEPENDS OPENVR_FOUND)
 
 # Drivers to build (sorted)
@@ -342,6 +344,7 @@ option_with_deps(XRT_BUILD_DRIVER_PSSENSE "Enable PlayStation Sense driver" DEPE
 option_with_deps(XRT_BUILD_DRIVER_PSVR "Enable PSVR HMD driver" DEPENDS XRT_HAVE_HIDAPI)
 option_with_deps(XRT_BUILD_DRIVER_QWERTY "Enable Qwerty driver" DEPENDS XRT_HAVE_SDL2)
 option_with_deps(XRT_BUILD_DRIVER_REALSENSE "Enable RealSense device driver" DEPENDS XRT_HAVE_REALSENSE)
+option_with_deps(XRT_BUILD_DRIVER_STEREOLABS "Enable Stereolabs device driver" DEPENDS XRT_HAVE_STEREOLABS)
 option_with_deps(XRT_BUILD_DRIVER_REMOTE "Enable remote debugging driver" DEPENDS "XRT_HAVE_LINUX OR ANDROID OR WIN32")
 option_with_deps(XRT_BUILD_DRIVER_RIFT_S "Enable Oculus Rift S device driver" DEPENDS XRT_HAVE_HIDAPI XRT_HAVE_V4L2)
 option_with_deps(XRT_BUILD_DRIVER_ROKID "Enable Rokid driver" DEPENDS "XRT_HAVE_LIBUSB")
@@ -473,6 +476,7 @@ list(
 	"PSSENSE"
 	"PSVR"
 	"REALSENSE"
+	"STEREOLABS"
 	"REMOTE"
 	"RIFT_S"
 	"ROKID"
@@ -612,6 +616,7 @@ message(STATUS "#    OPENGLES:        ${XRT_HAVE_OPENGLES}")
 message(STATUS "#    OPENGL_GLX:      ${XRT_HAVE_OPENGL_GLX}")
 message(STATUS "#    PERCETTO:        ${XRT_HAVE_PERCETTO}")
 message(STATUS "#    REALSENSE:       ${XRT_HAVE_REALSENSE}")
+message(STATUS "#    STEREOLABS       ${XRT_HAVE_STEREOLABS}")
 message(STATUS "#    OPENVR:          ${XRT_HAVE_OPENVR}")
 message(STATUS "#    SDL2:            ${XRT_HAVE_SDL2}")
 message(STATUS "#    SYSTEM_CJSON:    ${XRT_HAVE_SYSTEM_CJSON}")
@@ -623,6 +628,12 @@ message(STATUS "#    WAYLAND_DIRECT:  ${XRT_HAVE_WAYLAND_DIRECT}")
 message(STATUS "#    XCB:             ${XRT_HAVE_XCB}")
 message(STATUS "#    XLIB:            ${XRT_HAVE_XLIB}")
 message(STATUS "#    XRANDR:          ${XRT_HAVE_XRANDR}")
+message(STATUS "#")
+# the real solution is a GUI to change each variable and have a drivers section to select the drivers
+# drivers that have missing dependencies are greyed out (with an actionable thing to install deps)
+# like a monado installer (only support on linux for now)
+message(STATUS "#    docs [BUILD_DOC]:       ${BUILD_DOC}")
+message(STATUS "#    testing [BUILD_TESTING]:   ${BUILD_TESTING}")
 message(STATUS "#")
 message(STATUS "#    MODULE_AUX_VIVE:             ${XRT_MODULE_AUX_VIVE}")
 message(STATUS "#    MODULE_COMPOSITOR:           ${XRT_MODULE_COMPOSITOR}")
@@ -691,6 +702,7 @@ message(STATUS "#    DRIVER_PSSENSE:              ${XRT_BUILD_DRIVER_PSSENSE}")
 message(STATUS "#    DRIVER_PSVR:                 ${XRT_BUILD_DRIVER_PSVR}")
 message(STATUS "#    DRIVER_QWERTY:               ${XRT_BUILD_DRIVER_QWERTY}")
 message(STATUS "#    DRIVER_REALSENSE:            ${XRT_BUILD_DRIVER_REALSENSE}")
+message(STATUS "#    DRIVER_STEREOLABS:           ${XRT_BUILD_DRIVER_STEREOLABS}")
 message(STATUS "#    DRIVER_REMOTE:               ${XRT_BUILD_DRIVER_REMOTE}")
 message(STATUS "#    DRIVER_RIFT_S:               ${XRT_BUILD_DRIVER_RIFT_S}")
 message(STATUS "#    DRIVER_ROKID:                ${XRT_BUILD_DRIVER_ROKID}")

@@ -68,6 +68,10 @@
 #include "realsense/rs_interface.h"
 #endif
 
+#ifdef XRT_BUILD_DRIVER_STEREOLABS
+#include "stereolabs/sl_interface.h"
+#endif
+
 #ifdef XRT_BUILD_DRIVER_ULV2
 #include "ultraleap_v2/ulv2_interface.h"
 #endif
@@ -243,6 +247,10 @@ xrt_auto_prober_create_func_t target_auto_list[] = {
 #ifdef XRT_BUILD_DRIVER_SIMULATED
     // Simulated headset driver last.
     simulated_create_auto_prober,
+#endif
+
+#ifdef XRT_BUILD_DRIVER_STEREOLABS
+    sl_create_auto_prober,
 #endif
 
     NULL, // Terminate
