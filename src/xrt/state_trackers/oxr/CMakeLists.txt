@@ -16,6 +16,7 @@ add_library(
 	oxr_api_swapchain.c
 	oxr_api_system.c
 	oxr_api_verify.h
+	oxr_automation.c
 	oxr_binding.c
 	oxr_chain.h
 	oxr_dpad.c

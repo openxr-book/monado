@@ -6,6 +6,7 @@
  * @brief  The objects representing OpenXR handles, and prototypes for internal functions used in the state tracker.
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @author Korcan Hussein <korcan.hussein@collabora.com>
+ * @author Simon Zeni <simon.zeni@collabora.com>
  * @ingroup oxr_main
  */
 
@@ -538,6 +539,44 @@ oxr_action_stop_haptic_feedback(struct oxr_logger *log,
                                 struct oxr_session *sess,
                                 uint32_t act_key,
                                 struct oxr_subaction_paths subaction_paths);
+
+bool
+oxr_automation_device_is_automated(struct xrt_device *xdev);
+
+XrResult
+oxr_automation_set_input_device_active(struct oxr_logger *log,
+                                       struct oxr_session *sess,
+                                       XrPath interactionProfile,
+                                       XrPath topLevelPath,
+                                       XrBool32 isActive);
+
+XrResult
+oxr_automation_set_input_device_state_boolean(
+    struct oxr_logger *log, struct oxr_session *sess, XrPath topLevelPath, XrPath inputSourcePath, XrBool32 state);
+
+XrResult
+oxr_automation_set_input_device_state_float(
+    struct oxr_logger *log, struct oxr_session *sess, XrPath topLevelPath, XrPath inputSourcePath, float state);
+
+XrResult
+oxr_automation_set_input_device_state_vec2(
+    struct oxr_logger *log, struct oxr_session *sess, XrPath topLevelPath, XrPath inputSourcePath, XrVector2f state);
+
+XrResult
+oxr_automation_set_input_device_location(struct oxr_logger *log,
+                                         struct oxr_session *sess,
+                                         XrPath topLevelPath,
+                                         XrPath inputSourcePath,
+                                         struct oxr_space *space,
+                                         struct xrt_pose pose);
+
+XrResult
+oxr_automation_locate_space(struct oxr_logger *log,
+                            struct oxr_space *space,
+                            struct oxr_space *base_space,
+                            uint64_t ts_ns,
+                            struct xrt_space_relation *out_relation);
+
 
 /*!
  * @public @memberof oxr_instance
