@@ -217,7 +217,10 @@ gstreamer_sink_create_with_pipeline(struct gstreamer_pipeline *gp,
 		format_str = "YUY2";
 		need_even_dims = true;
 		break;
-	case XRT_FORMAT_L8: format_str = "GRAY8"; break;
+	case XRT_FORMAT_L8:
+		format_str = "GRAY8";
+		need_even_dims = true;
+		break;
 	default: assert(false); break;
 	}
 
