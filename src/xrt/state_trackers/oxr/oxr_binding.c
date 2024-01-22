@@ -1,4 +1,4 @@
-// Copyright 2018-2020,2023 Collabora, Ltd.
+// Copyright 2018-2024 Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -82,9 +82,9 @@ interaction_profile_find_in_instance(struct oxr_logger *log,
 
 static inline bool
 interaction_profile_find_in_session(struct oxr_logger *log,
-                                     struct oxr_session *sess,
-                                     XrPath path,
-                                     struct oxr_interaction_profile **out_p)
+                                    struct oxr_session *sess,
+                                    XrPath path,
+                                    struct oxr_interaction_profile **out_p)
 {
 	return interaction_profile_find_in_array( //
 	    log,                                  //
@@ -100,14 +100,12 @@ get_subaction_path_from_path(struct oxr_logger *log,
                              XrPath path,
                              enum oxr_subaction_path *out_subaction_path);
 
-static bool
-interaction_profile_find_or_create_in_instance(struct oxr_logger *log,
-                                               struct oxr_instance *inst,
-                                               XrPath path,
-                                               struct oxr_interaction_profile **out_p)
+struct oxr_interaction_profile *
+oxr_profile_get_or_create(struct oxr_logger *log, struct oxr_instance *inst, XrPath path)
 {
-	if (interaction_profile_find_in_instance(log, inst, path, out_p)) {
-		return true;
+	struct oxr_interaction_profile *p = NULL;
+	if (interaction_profile_find_in_instance(log, inst, path, &p)) {
+		return p;
 	}
 
 	struct profile_template *templ = NULL;
@@ -124,11 +122,10 @@ interaction_profile_find_or_create_in_instance(struct oxr_logger *log,
 	}
 
 	if (templ == NULL) {
-		*out_p = NULL;
-		return false;
+		return NULL;
 	}
 
-	struct oxr_interaction_profile *p = U_TYPED_CALLOC(struct oxr_interaction_profile);
+	p = U_TYPED_CALLOC(struct oxr_interaction_profile);
 
 	p->xname = templ->name;
 	p->binding_count = templ->binding_count;
@@ -184,9 +181,7 @@ interaction_profile_find_or_create_in_instance(struct oxr_logger *log,
 	U_ARRAY_REALLOC_OR_FREE(inst->profiles, struct oxr_interaction_profile *, (inst->profile_count + 1));
 	inst->profiles[inst->profile_count++] = p;
 
-	*out_p = p;
-
-	return true;
+	return p;
 }
 
 static void
@@ -601,11 +596,9 @@ oxr_action_suggest_interaction_profile_bindings(struct oxr_logger *log,
                                                 const XrInteractionProfileSuggestedBinding *suggestedBindings,
                                                 struct oxr_dpad_state *dpad_state)
 {
-	struct oxr_interaction_profile *p = NULL;
-
 	// Path already validated.
 	XrPath path = suggestedBindings->interactionProfile;
-	interaction_profile_find_or_create_in_instance(log, inst, path, &p);
+	struct oxr_interaction_profile *p = oxr_profile_get_or_create(log, inst, path);
 
 	// Valid path, but not used.
 	if (p == NULL) {

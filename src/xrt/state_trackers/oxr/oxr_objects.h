@@ -1,4 +1,4 @@
-// Copyright 2018-2023, Collabora, Ltd.
+// Copyright 2018-2024, Collabora, Ltd.
 // Copyright 2023, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
@@ -563,6 +563,15 @@ oxr_find_profile_for_device(struct oxr_logger *log,
                             struct oxr_session *sess,
                             struct xrt_device *xdev,
                             struct oxr_interaction_profile **out_p);
+
+/*!
+ * Find an interaction profile matching the given XrPath.
+ * If not found, a new interaction profile will be created
+ *
+ * @public @memberof oxr_instance
+ */
+struct oxr_interaction_profile *
+oxr_profile_get_or_create(struct oxr_logger *log, struct oxr_instance *inst, XrPath path);
 
 struct oxr_interaction_profile *
 oxr_clone_profile(const struct oxr_interaction_profile *src_profile);
