@@ -1,0 +1,5 @@
+implement XR_EXT_conformance_automation
+introduce oxr_automated_device
+add oxr_session_get_action_attachment to the public API of oxr_session
+add oxr_profile_get_or_create and oxr_get_subaction_path_from_path to the public API of oxr_instance
+add OXR_VERIFY_INSTANCE_PATH helper
