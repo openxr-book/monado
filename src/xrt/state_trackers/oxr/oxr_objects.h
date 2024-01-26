@@ -453,6 +453,17 @@ XrResult
 oxr_session_update_action_bindings(struct oxr_logger *log, struct oxr_session *sess);
 
 /*!
+ * Given an action act_key, look up the @ref oxr_action_attachment of the
+ * associated action in the given Session.
+ *
+ * @public @memberof oxr_session
+ */
+void
+oxr_session_get_action_attachment(struct oxr_session *sess,
+                                  uint32_t act_key,
+                                  struct oxr_action_attachment **out_act_attached);
+
+/*!
  * @public @memberof oxr_session
  */
 XrResult
