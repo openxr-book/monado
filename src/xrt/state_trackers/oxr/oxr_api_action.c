@@ -1,4 +1,4 @@
-// Copyright 2019-2023, Collabora, Ltd.
+// Copyright 2019-2024, Collabora, Ltd.
 // Copyright 2023, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
@@ -6,6 +6,7 @@
  * @brief  Action related API entrypoint functions.
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @author Korcan Hussein <korcan.hussein@collabora.com>
+ * @author Simon Zeni <simon.zeni@collabora.com>
  * @ingroup oxr_api
  */
 
@@ -967,3 +968,99 @@ oxr_xrStopHapticFeedback(XrSession session, const XrHapticActionInfo *hapticActi
 
 	return oxr_action_stop_haptic_feedback(&log, sess, act->act_key, subaction_paths);
 }
+
+#ifdef OXR_HAVE_EXT_conformance_automation
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrSetInputDeviceActiveEXT(XrSession session, XrPath interactionProfile, XrPath topLevelPath, XrBool32 isActive)
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_session *sess = NULL;
+	struct oxr_logger log;
+	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrSetInputDeviceActiveEXT");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
+
+	struct oxr_instance *inst = sess->sys->inst;
+	OXR_VERIFY_INSTANCE_PATH(log, inst, interactionProfile);
+	OXR_VERIFY_INSTANCE_PATH(log, inst, topLevelPath);
+
+	return oxr_automation_set_input_device_active(&log, sess, interactionProfile, topLevelPath, isActive);
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrSetInputDeviceStateBoolEXT(XrSession session, XrPath topLevelPath, XrPath inputSourcePath, XrBool32 state)
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_session *sess = NULL;
+	struct oxr_logger log;
+	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrSetInputDeviceStateBoolEXT");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
+
+	struct oxr_instance *inst = sess->sys->inst;
+	OXR_VERIFY_INSTANCE_PATH(log, inst, topLevelPath);
+	OXR_VERIFY_INSTANCE_PATH(log, inst, inputSourcePath);
+
+	return oxr_automation_set_input_device_state_boolean(&log, sess, topLevelPath, inputSourcePath, state);
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrSetInputDeviceStateFloatEXT(XrSession session, XrPath topLevelPath, XrPath inputSourcePath, float state)
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_session *sess = NULL;
+	struct oxr_logger log;
+	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrSetInputDeviceStateFloatEXT");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
+
+	struct oxr_instance *inst = sess->sys->inst;
+	OXR_VERIFY_INSTANCE_PATH(log, inst, topLevelPath);
+	OXR_VERIFY_INSTANCE_PATH(log, inst, inputSourcePath);
+
+	return oxr_automation_set_input_device_state_float(&log, sess, topLevelPath, inputSourcePath, state);
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrSetInputDeviceStateVector2fEXT(XrSession session, XrPath topLevelPath, XrPath inputSourcePath, XrVector2f state)
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_session *sess = NULL;
+	struct oxr_logger log;
+	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrSetInputDeviceStateVector2fEXT");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
+
+	struct oxr_instance *inst = sess->sys->inst;
+	OXR_VERIFY_INSTANCE_PATH(log, inst, topLevelPath);
+	OXR_VERIFY_INSTANCE_PATH(log, inst, inputSourcePath);
+
+	return oxr_automation_set_input_device_state_vec2(&log, sess, topLevelPath, inputSourcePath, state);
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrSetInputDeviceLocationEXT(
+    XrSession session, XrPath topLevelPath, XrPath inputSourcePath, XrSpace space, XrPosef pose)
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_logger log = {0};
+	struct oxr_session *sess = NULL;
+	struct oxr_space *spc;
+	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrSetInputDeviceLocationEXT");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
+	OXR_VERIFY_SPACE_NOT_NULL(&log, space, spc);
+
+	struct oxr_instance *inst = sess->sys->inst;
+	OXR_VERIFY_INSTANCE_PATH(log, inst, topLevelPath);
+	OXR_VERIFY_INSTANCE_PATH(log, inst, inputSourcePath);
+
+	// TODO: helper from XrPosef to xrt_pose would be nice, they have a matching layout
+	struct xrt_pose p = {0};
+	memcpy(&p, &pose, sizeof(p));
+
+	return oxr_automation_set_input_device_location(&log, sess, topLevelPath, inputSourcePath, spc, p);
+}
+
+#endif
