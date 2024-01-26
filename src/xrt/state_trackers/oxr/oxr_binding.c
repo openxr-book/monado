@@ -5,6 +5,7 @@
  * @brief  Holds binding related functions.
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @author Korcan Hussein <korcan.hussein@collabora.com>
+ * @author Simon Zeni <simon.zeni@collabora.com>
  * @ingroup oxr_main
  */
 
@@ -94,12 +95,6 @@ interaction_profile_find_in_session(struct oxr_logger *log,
 	    out_p);                               //
 }
 
-static bool
-get_subaction_path_from_path(struct oxr_logger *log,
-                             struct oxr_instance *inst,
-                             XrPath path,
-                             enum oxr_subaction_path *out_subaction_path);
-
 struct oxr_interaction_profile *
 oxr_profile_get_or_create(struct oxr_logger *log, struct oxr_instance *inst, XrPath path)
 {
@@ -146,7 +141,7 @@ oxr_profile_get_or_create(struct oxr_logger *log, struct oxr_instance *inst, XrP
 			oxr_log(log, "Couldn't get subaction path %s\n", t->subaction_path);
 		}
 
-		if (!get_subaction_path_from_path(log, inst, subaction_path, &b->subaction_path)) {
+		if (!oxr_get_subaction_path_from_path(log, inst, subaction_path, &b->subaction_path)) {
 			oxr_log(log, "Invalid subaction path %s\n", t->subaction_path);
 		}
 
@@ -168,7 +163,7 @@ oxr_profile_get_or_create(struct oxr_logger *log, struct oxr_instance *inst, XrP
 			oxr_log(log, "Couldn't get subaction path %s\n", t->subaction_path);
 		}
 
-		if (!get_subaction_path_from_path(log, inst, subaction_path, &d->subaction_path)) {
+		if (!oxr_get_subaction_path_from_path(log, inst, subaction_path, &d->subaction_path)) {
 			oxr_log(log, "Invalid subaction path %s\n", t->subaction_path);
 		}
 
@@ -242,11 +237,11 @@ add_string(char *temp, size_t max, ssize_t *current, const char *str)
 	}
 }
 
-static bool
-get_subaction_path_from_path(struct oxr_logger *log,
-                             struct oxr_instance *inst,
-                             XrPath path,
-                             enum oxr_subaction_path *out_subaction_path)
+bool
+oxr_get_subaction_path_from_path(struct oxr_logger *log,
+                                 struct oxr_instance *inst,
+                                 XrPath path,
+                                 enum oxr_subaction_path *out_subaction_path)
 {
 	const char *str = NULL;
 	size_t length = 0;
@@ -667,7 +662,7 @@ oxr_action_get_input_source_localized_name(struct oxr_logger *log,
 	ssize_t current = 0;
 	enum oxr_subaction_path subaction_path = 0;
 
-	if (!get_subaction_path_from_path(log, sess->sys->inst, getInfo->sourcePath, &subaction_path)) {
+	if (!oxr_get_subaction_path_from_path(log, sess->sys->inst, getInfo->sourcePath, &subaction_path)) {
 		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,
 		                 "(getInfo->sourcePath) doesn't start with a "
 		                 "valid subaction_path");

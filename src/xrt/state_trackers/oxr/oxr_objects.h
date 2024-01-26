@@ -549,6 +549,17 @@ oxr_hand_tracker_create(struct oxr_logger *log,
  */
 
 /*!
+ * Return a subaction_path from a given XrPath
+ *
+ * @public @memberof oxr_instance
+ */
+bool
+oxr_get_subaction_path_from_path(struct oxr_logger *log,
+                                 struct oxr_instance *inst,
+                                 XrPath path,
+                                 enum oxr_subaction_path *out_subaction_path);
+
+/*!
  * Find the best matching profile for the given @ref xrt_device.
  *
  * @param      log   Logger.
