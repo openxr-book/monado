@@ -235,19 +235,25 @@ oxr_space_locate(
 
 	// Only fill this out if the above succeeded.
 	struct xrt_space_relation result = XRT_SPACE_RELATION_ZERO;
+
 	if (xtarget != NULL && xbase != NULL) {
 		// Convert at_time to monotonic and give to device.
 		uint64_t at_timestamp_ns = time_state_ts_to_monotonic_ns(sys->inst->timekeeping, time);
 
-		// Ask the space overseer to locate the spaces.
-		xrt_space_overseer_locate_space( //
-		    sys->xso,                    //
-		    xbase,                       //
-		    &baseSpc->pose,              //
-		    at_timestamp_ns,             //
-		    xtarget,                     //
-		    &spc->pose,                  //
-		    &result);                    //
+		if (spc->space_type == OXR_SPACE_TYPE_ACTION && oxr_automation_device_is_automated(spc->action.xdev)) {
+
+			ret = oxr_automation_locate_space(log, spc, baseSpc, at_timestamp_ns, &result);
+		} else {
+			// Ask the space overseer to locate the spaces.
+			xrt_space_overseer_locate_space( //
+			    sys->xso,                    //
+			    xbase,                       //
+			    &baseSpc->pose,              //
+			    at_timestamp_ns,             //
+			    xtarget,                     //
+			    &spc->pose,                  //
+			    &result);                    //
+		}
 	}
 
 

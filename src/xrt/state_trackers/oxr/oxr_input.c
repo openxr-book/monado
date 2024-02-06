@@ -41,10 +41,6 @@ oxr_session_get_action_set_attachment(struct oxr_session *sess,
                                       struct oxr_action_set_attachment **act_set_attached,
                                       struct oxr_action_set **act_set);
 
-static void
-oxr_session_get_action_attachment(struct oxr_session *sess,
-                                  uint32_t act_key,
-                                  struct oxr_action_attachment **out_act_attached);
 
 static void
 oxr_action_cache_update(struct oxr_logger *log,
@@ -1543,13 +1539,7 @@ oxr_session_get_action_set_attachment(struct oxr_session *sess,
 	}
 }
 
-/*!
- * Given an action act_key, look up the @ref oxr_action_attachment of the
- * associated action in the given Session.
- *
- * @private @memberof oxr_session
- */
-static void
+void
 oxr_session_get_action_attachment(struct oxr_session *sess,
                                   uint32_t act_key,
                                   struct oxr_action_attachment **out_act_attached)

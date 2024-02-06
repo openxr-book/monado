@@ -1,10 +1,11 @@
-// Copyright 2018-2020,2023 Collabora, Ltd.
+// Copyright 2018-2024 Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Holds binding related functions.
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @author Korcan Hussein <korcan.hussein@collabora.com>
+ * @author Simon Zeni <simon.zeni@collabora.com>
  * @ingroup oxr_main
  */
 
@@ -81,10 +82,10 @@ interaction_profile_find_in_instance(struct oxr_logger *log,
 }
 
 static inline bool
-internaction_profile_find_in_session(struct oxr_logger *log,
-                                     struct oxr_session *sess,
-                                     XrPath path,
-                                     struct oxr_interaction_profile **out_p)
+interaction_profile_find_in_session(struct oxr_logger *log,
+                                    struct oxr_session *sess,
+                                    XrPath path,
+                                    struct oxr_interaction_profile **out_p)
 {
 	return interaction_profile_find_in_array( //
 	    log,                                  //
@@ -94,20 +95,12 @@ internaction_profile_find_in_session(struct oxr_logger *log,
 	    out_p);                               //
 }
 
-static bool
-get_subaction_path_from_path(struct oxr_logger *log,
-                             struct oxr_instance *inst,
-                             XrPath path,
-                             enum oxr_subaction_path *out_subaction_path);
-
-static bool
-interaction_profile_find_or_create_in_instance(struct oxr_logger *log,
-                                               struct oxr_instance *inst,
-                                               XrPath path,
-                                               struct oxr_interaction_profile **out_p)
+struct oxr_interaction_profile *
+oxr_profile_get_or_create(struct oxr_logger *log, struct oxr_instance *inst, XrPath path)
 {
-	if (interaction_profile_find_in_instance(log, inst, path, out_p)) {
-		return true;
+	struct oxr_interaction_profile *p = NULL;
+	if (interaction_profile_find_in_instance(log, inst, path, &p)) {
+		return p;
 	}
 
 	struct profile_template *templ = NULL;
@@ -124,11 +117,10 @@ interaction_profile_find_or_create_in_instance(struct oxr_logger *log,
 	}
 
 	if (templ == NULL) {
-		*out_p = NULL;
-		return false;
+		return NULL;
 	}
 
-	struct oxr_interaction_profile *p = U_TYPED_CALLOC(struct oxr_interaction_profile);
+	p = U_TYPED_CALLOC(struct oxr_interaction_profile);
 
 	p->xname = templ->name;
 	p->binding_count = templ->binding_count;
@@ -149,7 +141,7 @@ interaction_profile_find_or_create_in_instance(struct oxr_logger *log,
 			oxr_log(log, "Couldn't get subaction path %s\n", t->subaction_path);
 		}
 
-		if (!get_subaction_path_from_path(log, inst, subaction_path, &b->subaction_path)) {
+		if (!oxr_get_subaction_path_from_path(log, inst, subaction_path, &b->subaction_path)) {
 			oxr_log(log, "Invalid subaction path %s\n", t->subaction_path);
 		}
 
@@ -171,7 +163,7 @@ interaction_profile_find_or_create_in_instance(struct oxr_logger *log,
 			oxr_log(log, "Couldn't get subaction path %s\n", t->subaction_path);
 		}
 
-		if (!get_subaction_path_from_path(log, inst, subaction_path, &d->subaction_path)) {
+		if (!oxr_get_subaction_path_from_path(log, inst, subaction_path, &d->subaction_path)) {
 			oxr_log(log, "Invalid subaction path %s\n", t->subaction_path);
 		}
 
@@ -184,9 +176,7 @@ interaction_profile_find_or_create_in_instance(struct oxr_logger *log,
 	U_ARRAY_REALLOC_OR_FREE(inst->profiles, struct oxr_interaction_profile *, (inst->profile_count + 1));
 	inst->profiles[inst->profile_count++] = p;
 
-	*out_p = p;
-
-	return true;
+	return p;
 }
 
 static void
@@ -247,11 +237,11 @@ add_string(char *temp, size_t max, ssize_t *current, const char *str)
 	}
 }
 
-static bool
-get_subaction_path_from_path(struct oxr_logger *log,
-                             struct oxr_instance *inst,
-                             XrPath path,
-                             enum oxr_subaction_path *out_subaction_path)
+bool
+oxr_get_subaction_path_from_path(struct oxr_logger *log,
+                                 struct oxr_instance *inst,
+                                 XrPath path,
+                                 enum oxr_subaction_path *out_subaction_path)
 {
 	const char *str = NULL;
 	size_t length = 0;
@@ -353,7 +343,7 @@ get_profile_for_device_name(struct oxr_logger *log,
 	 * Map xrt_device_name to an interaction profile XrPath.
 	 * Set *out_p to an oxr_interaction_profile if bindings for that interaction profile XrPath have been suggested.
 	 */
-#define FIND_PROFILE(PATH) internaction_profile_find_in_session(log, sess, inst->path_cache.PATH, out_p)
+#define FIND_PROFILE(PATH) interaction_profile_find_in_session(log, sess, inst->path_cache.PATH, out_p)
 
 	switch (name) {
 	case XRT_DEVICE_PSMV: FIND_PROFILE(mndx_ball_on_a_stick_controller); return;
@@ -601,11 +591,9 @@ oxr_action_suggest_interaction_profile_bindings(struct oxr_logger *log,
                                                 const XrInteractionProfileSuggestedBinding *suggestedBindings,
                                                 struct oxr_dpad_state *dpad_state)
 {
-	struct oxr_interaction_profile *p = NULL;
-
 	// Path already validated.
 	XrPath path = suggestedBindings->interactionProfile;
-	interaction_profile_find_or_create_in_instance(log, inst, path, &p);
+	struct oxr_interaction_profile *p = oxr_profile_get_or_create(log, inst, path);
 
 	// Valid path, but not used.
 	if (p == NULL) {
@@ -674,7 +662,7 @@ oxr_action_get_input_source_localized_name(struct oxr_logger *log,
 	ssize_t current = 0;
 	enum oxr_subaction_path subaction_path = 0;
 
-	if (!get_subaction_path_from_path(log, sess->sys->inst, getInfo->sourcePath, &subaction_path)) {
+	if (!oxr_get_subaction_path_from_path(log, sess->sys->inst, getInfo->sourcePath, &subaction_path)) {
 		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,
 		                 "(getInfo->sourcePath) doesn't start with a "
 		                 "valid subaction_path");
@@ -691,7 +679,7 @@ oxr_action_get_input_source_localized_name(struct oxr_logger *log,
 	// Find the interaction profile.
 	struct oxr_interaction_profile *oip = NULL;
 	//! @todo: If we ever rebind a profile that has not been suggested by the client, it will not be found.
-	internaction_profile_find_in_session(log, sess, path, &oip);
+	interaction_profile_find_in_session(log, sess, path, &oip);
 	if (oip == NULL) {
 		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "no interaction profile found");
 	}

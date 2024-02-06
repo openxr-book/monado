@@ -570,6 +570,27 @@ oxr_xrGetDisplayRefreshRateFB(XrSession session, float *displayRefreshRate);
 XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrRequestDisplayRefreshRateFB(XrSession session, float displayRefreshRate);
 
+//! OpenXR API function @ep{xrSetInputDeviceActiveEXT}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrSetInputDeviceActiveEXT(XrSession session, XrPath interactionProfile, XrPath topLevelPath, XrBool32 isActive);
+
+//! OpenXR API function @ep{xrSetInputDeviceStateBoolEXT}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrSetInputDeviceStateBoolEXT(XrSession session, XrPath topLevelPath, XrPath inputSourcePath, XrBool32 state);
+
+//! OpenXR API function @ep{xrSetInputDeviceStateFloatEXT}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrSetInputDeviceStateFloatEXT(XrSession session, XrPath topLevelPath, XrPath inputSourcePath, float state);
+
+//! OpenXR API function @ep{xrSetInputDeviceStateVector2fEXT}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrSetInputDeviceStateVector2fEXT(XrSession session, XrPath topLevelPath, XrPath inputSourcePath, XrVector2f state);
+
+//! OpenXR API function @ep{xrSetInputDeviceLocationEXT}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrSetInputDeviceLocationEXT(
+    XrSession session, XrPath topLevelPath, XrPath inputSourcePath, XrSpace space, XrPosef pose);
+
 /*!
  * @}
  */
