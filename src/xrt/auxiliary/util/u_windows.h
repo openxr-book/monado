@@ -66,6 +66,17 @@ u_win_raise_cpu_priority(enum u_logging_level log_level);
 void
 u_win_try_privilege_or_priority_from_args(enum u_logging_level log_level, int argc, char *argv[]);
 
+/*!
+ * The entry point when launched as a windows service
+ *
+ * See ServiceMain:
+ * https://learn.microsoft.com/en-us/windows/win32/api/winsvc/nc-winsvc-lpservice_main_functiona
+ *
+ * @param dwNumServicesArgs   The number of arguments in the lpServiceArgVectors array.
+ * @param lpServiceArgVectors The null-terminated argument strings passed to the service.
+ */
+void WINAPI
+win32_service_main(DWORD dwNumServicesArgs, LPSTR *lpServiceArgVectors);
 
 #ifdef __cplusplus
 }

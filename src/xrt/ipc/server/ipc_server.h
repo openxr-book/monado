@@ -318,6 +318,9 @@ struct ipc_server
 	//! Handle for the current process, e.g. pidfile on linux
 	struct u_process *process;
 
+	//! Handle for the owner object, e.g. windows service on ms windows
+	void *outer;
+
 	struct u_debug_gui *debug_gui;
 
 	//! The @ref xrt_iface level system.
