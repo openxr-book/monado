@@ -328,6 +328,7 @@ option_with_deps(XRT_BUILD_DRIVER_VF "Build video frame driver (for video file s
 option_with_deps(XRT_BUILD_DRIVER_VIVE "Enable driver for HTC Vive, Vive Pro, Valve Index, and their controllers" DEPENDS ZLIB_FOUND XRT_HAVE_LINUX XRT_MODULE_AUX_VIVE)
 option_with_deps(XRT_BUILD_DRIVER_WMR "Enable Windows Mixed Reality driver" DEPENDS "NOT WIN32")
 option_with_deps(XRT_BUILD_DRIVER_XREAL_AIR "Enable Xreal Air HMD driver" DEPENDS XRT_HAVE_HIDAPI)
+option_with_deps(XRT_BUILD_DRIVER_XREAL_LIGHT "Enable XReal Light driver" DEPENDS XRT_HAVE_HIDAPI)
 option_with_deps(XRT_BUILD_DRIVER_SIMULAVR "Enable simula driver" DEPENDS XRT_HAVE_REALSENSE)
 option(XRT_BUILD_DRIVER_SIMULATED "Enable simulated driver" ON)
 
@@ -472,6 +473,7 @@ list(
 	"EUROC"
 	"SIMULAVR"
 	"TWRAP"
+	"XREAL_LIGHT"
 	"XREAL_AIR"
 	"STEAMVR_LIGHTHOUSE"
 	)
@@ -688,6 +690,7 @@ message(STATUS "#    DRIVER_VF:                   ${XRT_BUILD_DRIVER_VF}")
 message(STATUS "#    DRIVER_VIVE:                 ${XRT_BUILD_DRIVER_VIVE}")
 message(STATUS "#    DRIVER_WMR:                  ${XRT_BUILD_DRIVER_WMR}")
 message(STATUS "#    DRIVER_XREAL_AIR:            ${XRT_BUILD_DRIVER_XREAL_AIR}")
+message(STATUS "#    DRIVER_XREAL_LIGHT:          ${XRT_BUILD_DRIVER_XREAL_LIGHT}")
 message(STATUS "#    DRIVER_STEAMVR_LIGHTHOUSE:   ${XRT_BUILD_DRIVER_STEAMVR_LIGHTHOUSE}")
 message(STATUS "#####----- Config -----#####")
 # cmake-format: on

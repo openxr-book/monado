@@ -64,6 +64,11 @@ if(XRT_BUILD_DRIVER_XREAL_AIR)
 	target_link_libraries(target_lists PRIVATE drv_xreal_air)
 endif()
 
+if(XRT_BUILD_DRIVER_XREAL_LIGHT)
+	target_sources(target_lists PRIVATE target_builder_xreal_light.c)
+	target_link_libraries(target_lists PRIVATE drv_xreal_light)
+endif()
+
 ###
 # Drivers
 #
@@ -191,6 +196,10 @@ endif()
 
 if(XRT_BUILD_DRIVER_XREAL_AIR)
 	target_link_libraries(target_lists PRIVATE drv_xreal_air)
+endif()
+
+if(XRT_BUILD_DRIVER_XREAL_LIGHT)
+	target_link_libraries(target_lists PRIVATE drv_xreal_light)
 endif()
 
 if(XRT_BUILD_DRIVER_EUROC)

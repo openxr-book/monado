@@ -122,6 +122,17 @@ if(XRT_BUILD_DRIVER_XREAL_AIR)
 	list(APPEND ENABLED_HEADSET_DRIVERS xreal_air)
 endif()
 
+if(XRT_BUILD_DRIVER_XREAL_LIGHT)
+	add_library(
+		drv_xreal_light STATIC xreal_light/xreal_light_hmd.c xreal_light/xreal_light_interface.h
+		)
+	target_link_libraries(
+		drv_xreal_light PRIVATE xrt-interfaces HIDAPI::hidapi aux_util xrt-external-cjson
+		)
+	target_include_directories(drv_xreal_light PRIVATE ${HIDAPI_INCLUDE_DIRS})
+	list(APPEND ENABLED_HEADSET_DRIVERS xreal_light)
+endif()
+
 if(XRT_BUILD_DRIVER_ULV2)
 	add_library(drv_ulv2 STATIC ultraleap_v2/ulv2_driver.cpp ultraleap_v2/ulv2_interface.h)
 	target_link_libraries(drv_ulv2 PRIVATE xrt-interfaces aux_util aux_math LeapV2::LeapV2)
