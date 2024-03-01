@@ -96,15 +96,6 @@ vive_device_destroy(struct xrt_device *xdev)
 }
 
 static void
-vive_device_update_inputs(struct xrt_device *xdev)
-{
-	XRT_TRACE_MARKER();
-
-	struct vive_device *d = vive_device(xdev);
-	VIVE_TRACE(d, "ENTER!");
-}
-
-static void
 vive_device_get_3dof_tracked_pose(struct xrt_device *xdev,
                                   enum xrt_input_name name,
                                   uint64_t at_timestamp_ns,
@@ -1072,7 +1063,7 @@ vive_device_create(struct os_hid_device *mainboard_dev,
 	d->base.hmd->blend_modes[idx++] = XRT_BLEND_MODE_OPAQUE;
 	d->base.hmd->blend_mode_count = idx;
 
-	d->base.update_inputs = vive_device_update_inputs;
+	d->base.update_inputs = u_device_noop_update_inputs;
 	d->base.get_tracked_pose = vive_device_get_tracked_pose;
 	d->base.get_view_poses = vive_device_get_view_poses;
 	d->base.destroy = vive_device_destroy;

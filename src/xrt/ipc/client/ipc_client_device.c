@@ -72,13 +72,15 @@ ipc_client_device_destroy(struct xrt_device *xdev)
 	u_device_free(&icd->base);
 }
 
-static void
+static xrt_result_t
 ipc_client_device_update_inputs(struct xrt_device *xdev)
 {
 	ipc_client_device_t *icd = ipc_client_device(xdev);
 
 	xrt_result_t xret = ipc_call_device_update_input(icd->ipc_c, icd->device_id);
 	IPC_CHK_ONLY_PRINT(icd->ipc_c, xret, "ipc_call_device_update_input");
+
+	return xret;
 }
 
 static void

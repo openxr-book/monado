@@ -393,11 +393,12 @@ ControllerDevice::set_haptic_handle(vr::VRInputComponentHandle_t handle)
 	this->outputs = output.get();
 }
 
-void
+xrt_result_t
 Device::update_inputs()
 {
 	std::lock_guard<std::mutex> lock(frame_mutex);
 	ctx->maybe_run_frame(++current_frame);
+	return XRT_SUCCESS;
 }
 
 IndexFingerInput *
