@@ -6,23 +6,24 @@
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @author Moses Turner <mosesturner@protonmail.com>
  * @author Korcan Hussein <korcan.hussein@collabora.com>
+ * @author Simon Zeni <simon.zeni@collabora.com>
  * @ingroup xrt_iface
  */
 
 #pragma once
 
+#include "xrt/interfaces/device.h"
 #include "xrt/xrt_defines.h"
 #include "xrt/xrt_visibility_mask.h"
-
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+struct xrt_device;
 struct xrt_tracking;
 
 #define XRT_DEVICE_NAME_LEN 256
-
 
 /*!
  * A per-lens/display view information.
@@ -227,6 +228,9 @@ struct xrt_binding_profile
  */
 struct xrt_device
 {
+	//! Device interface implementation
+	const struct xrt_device_interface *impl;
+
 	//! Enum identifier of the device.
 	enum xrt_device_name name;
 	enum xrt_device_type device_type;
