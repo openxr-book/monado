@@ -439,19 +439,6 @@ u_device_get_view_poses(struct xrt_device *xdev,
 
 /*
  *
- * No-op implementation of functions.
- *
- */
-
-void
-u_device_noop_update_inputs(struct xrt_device *xdev)
-{
-	// Empty, should only be used from a device without any inputs.
-}
-
-
-/*
- *
  * Not implemented function helpers.
  *
  */

@@ -182,16 +182,6 @@ u_device_get_view_poses(struct xrt_device *xdev,
  *
  */
 
-/*!
- * Noop function for @ref xrt_device::update_inputs,
- * should only be used from a device with any inputs.
- *
- * @ingroup aux_util
- */
-void
-u_device_noop_update_inputs(struct xrt_device *xdev);
-
-
 /*
  *
  * Not implemented function helpers.
