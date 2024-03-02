@@ -1811,7 +1811,9 @@ ipc_handle_device_get_visibility_mask(volatile struct ipc_client_state *ics,
 	// @todo verify
 	struct xrt_device *xdev = get_xdev(ics, device_id);
 	struct xrt_visibility_mask *mask = NULL;
-	if (xdev->get_visibility_mask) {
+
+	// todo: must be in xrt_device_get_visibility_mask
+	if (xdev->impl->get_visibility_mask) {
 		xret = xrt_device_get_visibility_mask(xdev, type, view_index, &mask);
 		if (xret != XRT_SUCCESS) {
 			IPC_ERROR(s, "Failed to get visibility mask");
