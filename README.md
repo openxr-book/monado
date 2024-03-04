@@ -51,6 +51,7 @@ Dependencies include:
 Optional (but recommended) dependencies:
 
 * libxcb and xcb-xrandr development packages
+* libdrm
 * [OpenHMD][] 0.3.0 or newer (found using pkg-config)
 
 Truly optional dependencies, useful for some drivers, app support, etc.:
