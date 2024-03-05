@@ -278,7 +278,7 @@ struct xrt_device
 	 *
 	 * @param[in] xdev        The device.
 	 */
-	void (*update_inputs)(struct xrt_device *xdev);
+	xrt_result_t (*update_inputs)(struct xrt_device *xdev);
 
 	/*!
 	 * @brief Get relationship of a tracked device to the tracking origin
@@ -468,10 +468,14 @@ struct xrt_device
  *
  * @public @memberof xrt_device
  */
-static inline void
+static inline xrt_result_t
 xrt_device_update_inputs(struct xrt_device *xdev)
 {
-	xdev->update_inputs(xdev);
+	if (xdev->update_inputs) {
+		return xdev->update_inputs(xdev);
+	}
+
+	return XRT_ERROR_DEVICE_FUNCTION_NOT_IMPLEMENTED;
 }
 
 /*!

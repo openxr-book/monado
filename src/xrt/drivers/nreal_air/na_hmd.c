@@ -1025,7 +1025,7 @@ adjust_display_mode(struct na_hmd *hmd)
  *
  */
 
-static void
+static xrt_result_t
 na_hmd_update_inputs(struct xrt_device *xdev)
 {
 	struct na_hmd *hmd = na_hmd(xdev);
@@ -1039,6 +1039,8 @@ na_hmd_update_inputs(struct xrt_device *xdev)
 	adjust_display_mode(hmd);
 
 	os_mutex_unlock(&hmd->device_mutex);
+
+	return XRT_SUCCESS;
 }
 
 static void

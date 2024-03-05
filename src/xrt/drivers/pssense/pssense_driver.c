@@ -551,7 +551,7 @@ pssense_device_destroy(struct xrt_device *xdev)
 	free(pssense);
 }
 
-static void
+static xrt_result_t
 pssense_device_update_inputs(struct xrt_device *xdev)
 {
 	struct pssense_device *pssense = (struct pssense_device *)xdev;
@@ -586,6 +586,8 @@ pssense_device_update_inputs(struct xrt_device *xdev)
 
 	// Done now.
 	os_mutex_unlock(&pssense->lock);
+
+	return XRT_SUCCESS;
 }
 
 static void

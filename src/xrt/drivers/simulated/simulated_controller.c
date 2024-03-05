@@ -93,7 +93,7 @@ simulated_device_destroy(struct xrt_device *xdev)
 	u_device_free(&sd->base);
 }
 
-static void
+static xrt_result_t
 simulated_device_update_inputs(struct xrt_device *xdev)
 {
 	struct simulated_device *sd = simulated_device(xdev);
@@ -106,13 +106,15 @@ simulated_device_update_inputs(struct xrt_device *xdev)
 			xdev->inputs[i].timestamp = now;
 			U_ZERO(&xdev->inputs[i].value);
 		}
-		return;
+		return XRT_SUCCESS;
 	}
 
 	for (uint32_t i = 0; i < xdev->input_count; i++) {
 		xdev->inputs[i].active = true;
 		xdev->inputs[i].timestamp = now;
 	}
+
+	return XRT_SUCCESS;
 }
 
 static void
