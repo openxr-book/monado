@@ -25,6 +25,7 @@
 #ifdef XRT_OS_ANDROID
 #include "android/android_globals.h"
 #include "android/android_check_signature.h"
+#include "xrt/xrt_config_android.h"
 #include <sys/system_properties.h>
 #endif
 
