@@ -69,6 +69,7 @@ struct rs_ddev
 	struct rs_container rsc; //!< Container of realsense API related objects
 };
 
+static const struct xrt_device_interface impl;
 
 /*!
  * Helper to convert a xdev to a @ref rs_ddev.
@@ -76,6 +77,7 @@ struct rs_ddev
 static inline struct rs_ddev *
 rs_ddev(struct xrt_device *xdev)
 {
+	assert(xdev->impl == &impl);
 	return (struct rs_ddev *)xdev;
 }
 
@@ -432,6 +434,13 @@ rs_ddev_destroy(struct xrt_device *xdev)
 	free(rs);
 }
 
+static const struct xrt_device_interface impl = {
+    .name = "Real Sense device-SLAM tracker",
+    .destroy = rs_ddev_destroy,
+    .update_inputs = u_device_noop_update_inputs,
+    .get_tracked_pose = rs_ddev_get_tracked_pose,
+    .get_view_poses = rs_ddev_get_view_poses,
+};
 
 /*
  *
@@ -443,6 +452,8 @@ struct xrt_device *
 rs_ddev_create(int device_idx)
 {
 	struct rs_ddev *rs = U_DEVICE_ALLOCATE(struct rs_ddev, U_DEVICE_ALLOC_TRACKING_NONE, 1, 0);
+
+	u_device_init(&rs->base, &impl, XRT_DEVICE_TYPE_GENERIC_TRACKER);
 
 	m_relation_history_create(&rs->relation_hist);
 
@@ -460,10 +471,6 @@ rs_ddev_create(int device_idx)
 
 	U_LOG_D("Realsense opts are %i %i %i %i %i\n", rs->enable_mapping, rs->enable_pose_jumping,
 	        rs->enable_relocalization, rs->enable_pose_prediction, rs->enable_pose_filtering);
-	rs->base.update_inputs = u_device_noop_update_inputs;
-	rs->base.get_tracked_pose = rs_ddev_get_tracked_pose;
-	rs->base.get_view_poses = rs_ddev_get_view_poses;
-	rs->base.destroy = rs_ddev_destroy;
 	rs->base.name = XRT_DEVICE_REALSENSE;
 	rs->base.tracking_origin->type = XRT_TRACKING_TYPE_EXTERNAL_SLAM;
 	rs->base.tracking_origin->offset = (struct xrt_pose)XRT_POSE_IDENTITY;
@@ -501,7 +508,6 @@ rs_ddev_create(int device_idx)
 
 	rs->base.orientation_tracking_supported = true;
 	rs->base.position_tracking_supported = true;
-	rs->base.device_type = XRT_DEVICE_TYPE_GENERIC_TRACKER;
 
 	return &rs->base;
 }
