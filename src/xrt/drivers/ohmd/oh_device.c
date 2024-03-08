@@ -1,4 +1,4 @@
-// Copyright 2019-2023, Collabora, Ltd.
+// Copyright 2019-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -129,6 +129,7 @@ struct oh_device
 	struct xrt_device base;
 	ohmd_context *ctx;
 	ohmd_device *dev;
+	const char *prod;
 
 	bool skip_ang_vel;
 
@@ -166,9 +167,13 @@ struct oh_device
 	float last_control_state[256];
 };
 
+static const struct xrt_device_interface hmd_impl;
+static const struct xrt_device_interface controller_impl;
+
 static inline struct oh_device *
 oh_device(struct xrt_device *xdev)
 {
+	assert(xdev->impl == &hmd_impl || xdev->impl == &controller_impl);
 	return (struct oh_device *)xdev;
 }
 
@@ -692,17 +697,19 @@ u_compute_distortion_openhmd(struct openhmd_values *values, float u, float v, st
 }
 
 static bool
-compute_distortion_openhmd(struct xrt_device *xdev, uint32_t view, float u, float v, struct xrt_uv_triplet *result)
+oh_device_compute_distortion(struct xrt_device *xdev, uint32_t view, float u, float v, struct xrt_uv_triplet *result)
 {
 	struct oh_device *ohd = oh_device(xdev);
-	return u_compute_distortion_openhmd(&ohd->distortion.openhmd[view], u, v, result);
-}
 
-static bool
-compute_distortion_vive(struct xrt_device *xdev, uint32_t view, float u, float v, struct xrt_uv_triplet *result)
-{
-	struct oh_device *ohd = oh_device(xdev);
-	return u_compute_distortion_vive(&ohd->distortion.vive[view], u, v, result);
+	const struct device_info info = get_info(ohd->dev, ohd->prod);
+
+	if (info.quirks.video_distortion_none) {
+		return u_distortion_mesh_none(xdev, view, u, v, result);
+	} else if (info.quirks.video_distortion_vive) {
+		return u_compute_distortion_vive(&ohd->distortion.vive[view], u, v, result);
+	} else {
+		return u_compute_distortion_openhmd(&ohd->distortion.openhmd[view], u, v, result);
+	}
 }
 
 static inline void
@@ -713,6 +720,15 @@ swap(int *a, int *b)
 	*b = temp;
 }
 
+static const struct xrt_device_interface ohmd_hmd_impl = {
+    .name = "ohmd hmd",
+    .destroy = oh_device_destroy,
+    .update_inputs = oh_device_update_inputs,
+    .get_tracked_pose = oh_device_get_tracked_pose,
+    .get_view_poses = u_device_get_view_poses,
+    .compute_distortion = oh_device_compute_distortion,
+};
+
 static struct oh_device *
 create_hmd(ohmd_context *ctx, int device_idx, int device_flags)
 {
@@ -722,19 +738,18 @@ create_hmd(ohmd_context *ctx, int device_idx, int device_flags)
 		return NULL;
 	}
 
-
 	const struct device_info info = get_info(dev, prod);
 
 	enum u_device_alloc_flags flags = U_DEVICE_ALLOC_HMD;
 	struct oh_device *ohd = U_DEVICE_ALLOCATE(struct oh_device, flags, 1, 0);
-	ohd->base.update_inputs = oh_device_update_inputs;
-	ohd->base.get_tracked_pose = oh_device_get_tracked_pose;
-	ohd->base.get_view_poses = u_device_get_view_poses;
-	ohd->base.destroy = oh_device_destroy;
+
+	u_device_init(&ohd->base, &ohmd_hmd_impl, XRT_DEVICE_TYPE_HMD);
+
 	ohd->base.inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;
 	ohd->base.name = XRT_DEVICE_GENERIC_HMD;
 	ohd->ctx = ctx;
 	ohd->dev = dev;
+	ohd->prod = prod;
 	ohd->log_level = debug_get_log_option_ohmd_log();
 	ohd->enable_finite_difference = debug_get_bool_option_ohmd_finite_diff();
 	if (strcmp(prod, "Rift (CV1)") == 0 || strcmp(prod, "Rift S") == 0) {
@@ -825,7 +840,6 @@ create_hmd(ohmd_context *ctx, int device_idx, int device_flags)
 
 	ohd->base.hmd->distortion.models |= XRT_DISTORTION_MODEL_COMPUTE;
 	ohd->base.hmd->distortion.preferred = XRT_DISTORTION_MODEL_COMPUTE;
-	ohd->base.compute_distortion = compute_distortion_openhmd;
 
 	// Which blend modes does the device support.
 
@@ -897,8 +911,6 @@ create_hmd(ohmd_context *ctx, int device_idx, int device_flags)
 		ohd->distortion.vive[1].coefficients[2][2] = -0.0928909347763f;
 		ohd->distortion.vive[1].coefficients[2][3] = 0.0f;
 		// clang-format on
-
-		ohd->base.compute_distortion = compute_distortion_vive;
 	}
 
 	if (info.quirks.video_distortion_none) {
@@ -1007,7 +1019,6 @@ create_hmd(ohmd_context *ctx, int device_idx, int device_flags)
 
 	ohd->base.orientation_tracking_supported = (device_flags & OHMD_DEVICE_FLAGS_ROTATIONAL_TRACKING) != 0;
 	ohd->base.position_tracking_supported = (device_flags & OHMD_DEVICE_FLAGS_POSITIONAL_TRACKING) != 0;
-	ohd->base.device_type = XRT_DEVICE_TYPE_HMD;
 
 
 	if (ohd->log_level <= U_LOGGING_DEBUG) {
@@ -1016,6 +1027,15 @@ create_hmd(ohmd_context *ctx, int device_idx, int device_flags)
 
 	return ohd;
 }
+
+static const struct xrt_device_interface controller_impl = {
+    .name = "ohmd controller/tracker",
+    .destroy = oh_device_destroy,
+    .update_inputs = oh_device_update_inputs,
+    .set_output = oh_device_set_output,
+    .get_tracked_pose = oh_device_get_tracked_pose,
+    .get_view_poses = u_device_ni_get_view_poses,
+};
 
 static struct oh_device *
 create_controller(ohmd_context *ctx, int device_idx, int device_flags, enum xrt_device_type device_type)
@@ -1042,11 +1062,9 @@ create_controller(ohmd_context *ctx, int device_idx, int device_flags, enum xrt_
 
 	enum u_device_alloc_flags flags = 0;
 	struct oh_device *ohd = U_DEVICE_ALLOCATE(struct oh_device, flags, input_count, output_count);
-	ohd->base.update_inputs = oh_device_update_inputs;
-	ohd->base.set_output = oh_device_set_output;
-	ohd->base.get_tracked_pose = oh_device_get_tracked_pose;
-	ohd->base.get_view_poses = u_device_ni_get_view_poses;
-	ohd->base.destroy = oh_device_destroy;
+
+	u_device_init(&ohd->base, &controller_impl, device_type);
+
 	if (oculus_touch) {
 		ohd->ohmd_device_type = OPENHMD_OCULUS_RIFT_CONTROLLER;
 		ohd->base.name = XRT_DEVICE_TOUCH_CONTROLLER;
@@ -1134,7 +1152,6 @@ create_controller(ohmd_context *ctx, int device_idx, int device_flags, enum xrt_
 
 	ohd->base.orientation_tracking_supported = (device_flags & OHMD_DEVICE_FLAGS_ROTATIONAL_TRACKING) != 0;
 	ohd->base.position_tracking_supported = (device_flags & OHMD_DEVICE_FLAGS_POSITIONAL_TRACKING) != 0;
-	ohd->base.device_type = device_type;
 
 	ohmd_device_geti(ohd->dev, OHMD_CONTROLS_HINTS, ohd->controls_fn);
 	ohmd_device_geti(ohd->dev, OHMD_CONTROLS_TYPES, ohd->controls_types);
