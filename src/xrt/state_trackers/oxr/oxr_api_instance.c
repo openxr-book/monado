@@ -131,8 +131,7 @@ oxr_check_android_extensions(struct oxr_logger *log,
 	return XR_SUCCESS;
 }
 static XrResult
-oxr_check_android_signature(struct oxr_logger *log,
-                             const XrInstanceCreateInfo *createInfo)
+oxr_check_android_signature(struct oxr_logger *log, const XrInstanceCreateInfo *createInfo)
 {
 	XrInstanceCreateInfoAndroidKHR const *createInfoAndroid = OXR_GET_INPUT_FROM_CHAIN(
 	    createInfo, XR_TYPE_INSTANCE_CREATE_INFO_ANDROID_KHR, XrInstanceCreateInfoAndroidKHR);
@@ -147,7 +146,7 @@ oxr_check_android_signature(struct oxr_logger *log,
 		                 "(createInfo->next...->applicationActivity) "
 		                 "applicationActivity must be populated");
 	}
-	if(!android_check_signature(createInfoAndroid->applicationActivity, XRT_ANDROID_PACKAGE)){
+	if (!android_check_signature(createInfoAndroid->applicationActivity, XRT_ANDROID_PACKAGE)) {
 		return XR_ERROR_VALIDATION_FAILURE;
 	}
 	return XR_SUCCESS;
@@ -225,17 +224,16 @@ oxr_xrCreateInstance(const XrInstanceCreateInfo *createInfo, XrInstance *out_ins
 	const char propName[] = "debug.openxr.runtime.checkOverlaySignature";
 	char propValue[PROP_VALUE_MAX] = {0};
 	const char propValueTrue[] = "true";
-    if((0 == __system_property_get(propName, propValue)) 
-            || (0 != strncmp(propValue, propValueTrue, strlen(propValueTrue)))){
-        oxr_log(&log, "skip checkOverlaySignature, prop name: %s, prop value: %s", propName, propValue);
-    }
-	else{
-		for(int i = 0; i < createInfo->enabledExtensionCount; ++i){
-			if(!strncmp(createInfo->enabledExtensionNames[i], XR_EXTX_OVERLAY_EXTENSION_NAME, 
-					sizeof(XR_EXTX_OVERLAY_EXTENSION_NAME)/sizeof(char))){
-				if(oxr_check_android_signature(&log, createInfo)){
-					return oxr_error(&log, XR_ERROR_RUNTIME_UNAVAILABLE, 
-						"XR_EXTX_OVERLAY_EXTENSION_NAME signature check failed");
+	if ((0 == __system_property_get(propName, propValue)) ||
+	    (0 != strncmp(propValue, propValueTrue, strlen(propValueTrue)))) {
+		oxr_log(&log, "skip checkOverlaySignature, prop name: %s, prop value: %s", propName, propValue);
+	} else {
+		for (int i = 0; i < createInfo->enabledExtensionCount; ++i) {
+			if (!strncmp(createInfo->enabledExtensionNames[i], XR_EXTX_OVERLAY_EXTENSION_NAME,
+			             sizeof(XR_EXTX_OVERLAY_EXTENSION_NAME) / sizeof(char))) {
+				if (oxr_check_android_signature(&log, createInfo)) {
+					return oxr_error(&log, XR_ERROR_RUNTIME_UNAVAILABLE,
+					                 "XR_EXTX_OVERLAY_EXTENSION_NAME signature check failed");
 				}
 				break;
 			}
