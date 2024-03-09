@@ -429,5 +429,17 @@
 		"out": [
 			{"name": "available", "type": "bool"}
 		]
-	}
+	},
+
+    "device_begin_feature": {
+        "in": [
+            {"name": "id", "type": "uint32_t"}
+        ]
+    },
+
+    "device_end_feature": {
+        "in": [
+            {"name": "id", "type": "uint32_t"}
+        ]
+    }
 }
