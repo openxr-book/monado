@@ -32,11 +32,13 @@ struct xrt_device_interface
 	void (*destroy)(struct xrt_device *xdev);
 
 	/*!
-	 * Update any attached inputs.
+	 * Update any attached inputs. Returns `false` on failure.
+	 *
+	 * Optional function for all type of device
 	 *
 	 * @param[in] xdev        The device.
 	 */
-	void (*update_inputs)(struct xrt_device *xdev);
+	bool (*update_inputs)(struct xrt_device *xdev);
 
 	/*!
 	 * @brief Get relationship of a tracked device to the tracking origin

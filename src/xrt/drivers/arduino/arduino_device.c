@@ -309,7 +309,7 @@ arduino_device_destroy(struct xrt_device *xdev)
 	free(ad);
 }
 
-static void
+static bool
 arduino_device_update_inputs(struct xrt_device *xdev)
 {
 	struct arduino_device *ad = arduino_device(xdev);
@@ -330,6 +330,8 @@ arduino_device_update_inputs(struct xrt_device *xdev)
 
 	// Done now.
 	os_mutex_unlock(&ad->lock);
+
+	return true;
 }
 
 static void

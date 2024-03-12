@@ -177,7 +177,6 @@ simulated_ref_space_usage(struct xrt_device *xdev,
 static const struct xrt_device_interface impl = {
     .name = "Simulated hmd",
     .destroy = simulated_hmd_destroy,
-    .update_inputs = u_device_noop_update_inputs,
     .get_tracked_pose = simulated_hmd_get_tracked_pose,
     .get_view_poses = u_device_get_view_poses,
     .ref_space_usage = simulated_ref_space_usage,

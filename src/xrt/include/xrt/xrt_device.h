@@ -280,10 +280,14 @@ struct xrt_device
  *
  * @public @memberof xrt_device
  */
-static inline void
+static inline bool
 xrt_device_update_inputs(struct xrt_device *xdev)
 {
-	xdev->impl->update_inputs(xdev);
+	if (xdev->impl->update_inputs) {
+		return xdev->impl->update_inputs(xdev);
+	}
+
+	return true;
 }
 
 /*!

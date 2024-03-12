@@ -276,7 +276,7 @@ daydream_device_destroy(struct xrt_device *xdev)
 	free(daydream);
 }
 
-static void
+static bool
 daydream_device_update_inputs(struct xrt_device *xdev)
 {
 	struct daydream_device *daydream = daydream_device(xdev);
@@ -309,6 +309,8 @@ daydream_device_update_inputs(struct xrt_device *xdev)
 	// Done now.
 
 	os_mutex_unlock(&daydream->lock);
+
+	return true;
 }
 
 static void
