@@ -43,6 +43,14 @@
 
 #define DEG_TO_RAD(D) ((D)*M_PI / 180.)
 
+static const struct xrt_device_interface impl;
+
+static struct rift_s_hmd *
+get_device(struct xrt_device *xdev)
+{
+	assert(xdev->impl == &impl);
+	return (struct rift_s_hmd *)xdev;
+}
 
 static void
 rift_s_get_tracked_pose(struct xrt_device *xdev,
@@ -50,7 +58,7 @@ rift_s_get_tracked_pose(struct xrt_device *xdev,
                         uint64_t at_timestamp_ns,
                         struct xrt_space_relation *out_relation)
 {
-	struct rift_s_hmd *hmd = (struct rift_s_hmd *)(xdev);
+	struct rift_s_hmd *hmd = get_device(xdev);
 
 	if (name != XRT_INPUT_GENERIC_HEAD_POSE) {
 		RIFT_S_ERROR("Unknown input name");
@@ -154,7 +162,7 @@ rift_s_hmd_handle_report(struct rift_s_hmd *hmd, timepoint_ns local_ts, rift_s_h
 static bool
 rift_s_compute_distortion(struct xrt_device *xdev, uint32_t view, float u, float v, struct xrt_uv_triplet *result)
 {
-	struct rift_s_hmd *hmd = (struct rift_s_hmd *)(xdev);
+	struct rift_s_hmd *hmd = get_device(xdev);
 	return u_compute_distortion_panotools(&hmd->distortion_vals[view], u, v, result);
 }
 
@@ -177,7 +185,7 @@ dump_fw_block(struct os_hid_device *handle, uint8_t block_id) {
 static void
 rift_s_hmd_destroy(struct xrt_device *xdev)
 {
-	struct rift_s_hmd *hmd = (struct rift_s_hmd *)(xdev);
+	struct rift_s_hmd *hmd = get_device(xdev);
 
 	DRV_TRACE_MARKER();
 
@@ -192,6 +200,15 @@ rift_s_hmd_destroy(struct xrt_device *xdev)
 	u_device_free(&hmd->base);
 }
 
+static const struct xrt_device_interface impl = {
+    .name = "Rift S hmd",
+    .destroy = rift_s_hmd_destroy,
+    .update_inputs = u_device_noop_update_inputs,
+    .get_tracked_pose = rift_s_get_tracked_pose,
+    .get_view_poses = u_device_get_view_poses,
+    .compute_distortion = rift_s_compute_distortion,
+};
+
 struct rift_s_hmd *
 rift_s_hmd_create(struct rift_s_system *sys, const unsigned char *hmd_serial_no, struct rift_s_hmd_config *config)
 {
@@ -205,6 +222,8 @@ rift_s_hmd_create(struct rift_s_system *sys, const unsigned char *hmd_serial_no,
 		return NULL;
 	}
 
+	u_device_init(&hmd->base, &impl, XRT_DEVICE_TYPE_HMD);
+
 	/* Take a reference to the rift_s_system */
 	rift_s_system_reference(&hmd->sys, sys);
 
@@ -212,12 +231,7 @@ rift_s_hmd_create(struct rift_s_system *sys, const unsigned char *hmd_serial_no,
 
 	hmd->base.tracking_origin = &sys->base;
 
-	hmd->base.update_inputs = u_device_noop_update_inputs;
-	hmd->base.get_tracked_pose = rift_s_get_tracked_pose;
-	hmd->base.get_view_poses = u_device_get_view_poses;
-	hmd->base.destroy = rift_s_hmd_destroy;
 	hmd->base.name = XRT_DEVICE_GENERIC_HMD;
-	hmd->base.device_type = XRT_DEVICE_TYPE_HMD;
 
 	hmd->tracker = rift_s_system_get_tracker(sys);
 
@@ -317,7 +331,6 @@ rift_s_hmd_create(struct rift_s_system *sys, const unsigned char *hmd_serial_no,
 
 	hmd->base.hmd->distortion.models = XRT_DISTORTION_MODEL_COMPUTE;
 	hmd->base.hmd->distortion.preferred = XRT_DISTORTION_MODEL_COMPUTE;
-	hmd->base.compute_distortion = rift_s_compute_distortion;
 	u_distortion_mesh_fill_in_compute(&hmd->base);
 
 	/* Set Opaque blend mode */
