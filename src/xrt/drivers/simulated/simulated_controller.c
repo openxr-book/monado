@@ -51,6 +51,7 @@ struct simulated_device
 		}                                                                                                      \
 	} while (false)
 
+static const struct xrt_device_interface impl;
 
 /*
  *
@@ -61,6 +62,7 @@ struct simulated_device
 static inline struct simulated_device *
 simulated_device(struct xrt_device *xdev)
 {
+	assert(xdev->impl == &impl);
 	return (struct simulated_device *)xdev;
 }
 
@@ -311,6 +313,15 @@ static struct xrt_binding_profile ml2_binding_profiles[2] = {
     },
 };
 
+static const struct xrt_device_interface impl = {
+    .name = "Simulated controller",
+    .destroy = simulated_device_destroy,
+    .update_inputs = simulated_device_update_inputs,
+    .get_tracked_pose = simulated_device_get_tracked_pose,
+    .get_hand_tracking = simulated_device_get_hand_tracking,
+    .get_view_poses = simulated_device_get_view_poses,
+    .set_output = simulated_device_set_output,
+};
 
 /*
  *
@@ -369,12 +380,9 @@ simulated_create_controller(enum xrt_device_name name,
 
 	// Allocate.
 	struct simulated_device *sd = U_DEVICE_ALLOCATE(struct simulated_device, flags, input_count, output_count);
-	sd->base.update_inputs = simulated_device_update_inputs;
-	sd->base.get_tracked_pose = simulated_device_get_tracked_pose;
-	sd->base.get_hand_tracking = simulated_device_get_hand_tracking;
-	sd->base.get_view_poses = simulated_device_get_view_poses;
-	sd->base.set_output = simulated_device_set_output;
-	sd->base.destroy = simulated_device_destroy;
+
+	u_device_init(&sd->base, &impl, type);
+
 	sd->base.tracking_origin = origin;
 	sd->base.orientation_tracking_supported = true;
 	sd->base.position_tracking_supported = true;
