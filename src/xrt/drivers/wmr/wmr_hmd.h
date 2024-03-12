@@ -198,12 +198,6 @@ struct wmr_hmd
 	struct wmr_hmd_controller_connection *controller[WMR_MAX_CONTROLLERS];
 };
 
-static inline struct wmr_hmd *
-wmr_hmd(struct xrt_device *p)
-{
-	return (struct wmr_hmd *)p;
-}
-
 void
 wmr_hmd_create(enum wmr_headset_type hmd_type,
                struct os_hid_device *hid_holo,

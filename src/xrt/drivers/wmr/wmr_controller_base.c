@@ -442,7 +442,7 @@ read_controller_config(struct wmr_controller_base *wcb)
 	return true;
 }
 
-static void
+void
 wmr_controller_base_get_tracked_pose(struct xrt_device *xdev,
                                      enum xrt_input_name name,
                                      uint64_t at_timestamp_ns,
@@ -541,10 +541,7 @@ wmr_controller_base_init(struct wmr_controller_base *wcb,
 		snprintf(wcb->base.serial, XRT_DEVICE_NAME_LEN, "Right Controller");
 	}
 
-	wcb->base.get_tracked_pose = wmr_controller_base_get_tracked_pose;
-
 	wcb->base.name = XRT_DEVICE_WMR_CONTROLLER;
-	wcb->base.device_type = controller_type;
 	wcb->base.orientation_tracking_supported = true;
 	wcb->base.position_tracking_supported = false;
 	wcb->base.hand_tracking_supported = false;

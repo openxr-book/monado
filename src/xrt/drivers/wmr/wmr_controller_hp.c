@@ -322,6 +322,14 @@ wmr_controller_hp_destroy(struct xrt_device *xdev)
 	free(wcb);
 }
 
+static const struct xrt_device_interface impl = {
+    .name = "Windows Mixed Reality HP Reverb G2 controller",
+    .update_inputs = wmr_controller_hp_update_inputs,
+    .get_tracked_pose = wmr_controller_base_get_tracked_pose,
+    .set_output = wmr_controller_hp_set_output,
+    .destroy = wmr_controller_hp_destroy,
+};
+
 struct wmr_controller_base *
 wmr_controller_hp_create(struct wmr_controller_connection *conn,
                          enum xrt_device_type controller_type,
@@ -333,6 +341,8 @@ wmr_controller_hp_create(struct wmr_controller_connection *conn,
 	struct wmr_controller_hp *ctrl =
 	    U_DEVICE_ALLOCATE(struct wmr_controller_hp, flags, WMR_CONTROLLER_INDEX_COUNT, 1);
 	struct wmr_controller_base *wcb = (struct wmr_controller_base *)(ctrl);
+
+	u_device_init(&wcb->base, &impl, controller_type);
 
 	if (!wmr_controller_base_init(wcb, conn, controller_type, log_level)) {
 		wmr_controller_hp_destroy(&wcb->base);
@@ -348,10 +358,6 @@ wmr_controller_hp_create(struct wmr_controller_connection *conn,
 	} else {
 		snprintf(wcb->base.str, ARRAY_SIZE(wcb->base.str), "HP Reverb G2 Right Controller");
 	}
-
-	wcb->base.destroy = wmr_controller_hp_destroy;
-	wcb->base.update_inputs = wmr_controller_hp_update_inputs;
-	wcb->base.set_output = wmr_controller_hp_set_output;
 
 	SET_INPUT(wcb, MENU_CLICK, MENU_CLICK);
 	SET_INPUT(wcb, HOME_CLICK, HOME_CLICK);

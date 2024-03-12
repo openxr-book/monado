@@ -335,6 +335,14 @@ wmr_controller_og_destroy(struct xrt_device *xdev)
 	free(wcb);
 }
 
+static const struct xrt_device_interface impl = {
+    .name = "Windows Mixed Reality Samsung Odyssey controller",
+    .update_inputs = wmr_controller_og_update_inputs,
+    .get_tracked_pose = wmr_controller_base_get_tracked_pose,
+    .set_output = wmr_controller_og_set_output,
+    .destroy = wmr_controller_og_destroy,
+};
+
 struct wmr_controller_base *
 wmr_controller_og_create(struct wmr_controller_connection *conn,
                          enum xrt_device_type controller_type,
@@ -346,6 +354,8 @@ wmr_controller_og_create(struct wmr_controller_connection *conn,
 	enum u_device_alloc_flags flags = U_DEVICE_ALLOC_TRACKING_NONE;
 	struct wmr_controller_og *ctrl = U_DEVICE_ALLOCATE(struct wmr_controller_og, flags, 11, 1);
 	struct wmr_controller_base *wcb = (struct wmr_controller_base *)(ctrl);
+
+	u_device_init(&wcb->base, &impl, controller_type);
 
 	if (!wmr_controller_base_init(wcb, conn, controller_type, log_level)) {
 		wmr_controller_og_destroy(&wcb->base);
@@ -359,9 +369,6 @@ wmr_controller_og_create(struct wmr_controller_connection *conn,
 	} else {
 		wcb->base.name = XRT_DEVICE_WMR_CONTROLLER;
 	}
-	wcb->base.destroy = wmr_controller_og_destroy;
-	wcb->base.update_inputs = wmr_controller_og_update_inputs;
-	wcb->base.set_output = wmr_controller_og_set_output;
 
 	if (pid == ODYSSEY_CONTROLLER_PID) {
 		SET_ODYSSEY_INPUT(wcb, MENU_CLICK);
