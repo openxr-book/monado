@@ -67,6 +67,7 @@ vk_get_instance_functions(struct vk_bundle *vk)
 	vk->vkDestroyDebugReportCallbackEXT                   = GET_INS_PROC(vk, vkDestroyDebugReportCallbackEXT);
 
 	vk->vkEnumeratePhysicalDevices                        = GET_INS_PROC(vk, vkEnumeratePhysicalDevices);
+	vk->vkEnumeratePhysicalDeviceGroups                   = GET_INS_PROC(vk, vkEnumeratePhysicalDeviceGroups);
 	vk->vkGetPhysicalDeviceProperties                     = GET_INS_PROC(vk, vkGetPhysicalDeviceProperties);
 	vk->vkGetPhysicalDeviceProperties2                    = GET_INS_PROC(vk, vkGetPhysicalDeviceProperties2);
 	vk->vkGetPhysicalDeviceFeatures2                      = GET_INS_PROC(vk, vkGetPhysicalDeviceFeatures2);

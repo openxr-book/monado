@@ -739,6 +739,7 @@ fill_in_has_device_extensions(struct vk_bundle *vk, struct u_string_list *ext_li
 {
 	// beginning of GENERATED device extension code - do not modify - used by scripts
 	// Reset before filling out.
+	vk->has_KHR_buffer_device_address = false;
 	vk->has_KHR_external_fence_fd = false;
 	vk->has_KHR_external_semaphore_fd = false;
 	vk->has_KHR_format_feature_flags2 = false;
@@ -763,6 +764,13 @@ fill_in_has_device_extensions(struct vk_bundle *vk, struct u_string_list *ext_li
 
 	for (uint32_t i = 0; i < ext_count; i++) {
 		const char *ext = exts[i];
+
+#if defined(VK_KHR_buffer_device_address)
+		if (strcmp(ext, VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME) == 0) {
+			vk->has_KHR_buffer_device_address = true;
+			continue;
+		}
+#endif // defined(VK_KHR_buffer_device_address)
 
 #if defined(VK_KHR_external_fence_fd)
 		if (strcmp(ext, VK_KHR_EXTERNAL_FENCE_FD_EXTENSION_NAME) == 0) {
