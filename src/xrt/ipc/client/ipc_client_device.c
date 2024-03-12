@@ -44,6 +44,7 @@
  */
 typedef struct ipc_client_xdev ipc_client_device_t;
 
+static const struct xrt_device_interface impl;
 
 /*
  *
@@ -54,6 +55,7 @@ typedef struct ipc_client_xdev ipc_client_device_t;
 static inline ipc_client_device_t *
 ipc_client_device(struct xrt_device *xdev)
 {
+	assert(xdev->impl == &impl);
 	return (ipc_client_device_t *)xdev;
 }
 
@@ -165,6 +167,18 @@ ipc_client_device_get_visibility_mask(struct xrt_device *xdev,
 	return XRT_ERROR_IPC_FAILURE;
 }
 
+static const struct xrt_device_interface impl = {
+    .name = "IPC client device",
+    .destroy = ipc_client_device_destroy,
+    .update_inputs = ipc_client_device_update_inputs,
+    .get_tracked_pose = ipc_client_device_get_tracked_pose,
+    .get_hand_tracking = ipc_client_device_get_hand_tracking,
+    .get_view_poses = ipc_client_device_get_view_poses,
+    .set_output = ipc_client_device_set_output,
+    .get_visibility_mask = ipc_client_device_get_visibility_mask,
+    .get_face_tracking = ipc_client_device_get_face_tracking,
+};
+
 /*!
  * @public @memberof ipc_client_device
  */
@@ -178,15 +192,10 @@ ipc_client_device_create(struct ipc_connection *ipc_c, struct xrt_tracking_origi
 	// Allocate and setup the basics.
 	enum u_device_alloc_flags flags = (enum u_device_alloc_flags)(U_DEVICE_ALLOC_HMD);
 	ipc_client_device_t *icd = U_DEVICE_ALLOCATE(ipc_client_device_t, flags, 0, 0);
+
+	u_device_init(&icd->base, &impl, isdev->device_type);
+
 	icd->ipc_c = ipc_c;
-	icd->base.update_inputs = ipc_client_device_update_inputs;
-	icd->base.get_tracked_pose = ipc_client_device_get_tracked_pose;
-	icd->base.get_hand_tracking = ipc_client_device_get_hand_tracking;
-	icd->base.get_face_tracking = ipc_client_device_get_face_tracking;
-	icd->base.get_view_poses = ipc_client_device_get_view_poses;
-	icd->base.set_output = ipc_client_device_set_output;
-	icd->base.get_visibility_mask = ipc_client_device_get_visibility_mask;
-	icd->base.destroy = ipc_client_device_destroy;
 
 	// Start copying the information from the isdev.
 	icd->base.tracking_origin = xtrack;
@@ -244,6 +253,5 @@ ipc_client_device_create(struct ipc_connection *ipc_c, struct xrt_tracking_origi
 	icd->base.force_feedback_supported = isdev->force_feedback_supported;
 	icd->base.stage_supported = isdev->stage_supported;
 
-	icd->base.device_type = isdev->device_type;
 	return &icd->base;
 }

@@ -47,6 +47,7 @@
  */
 typedef struct ipc_client_xdev ipc_client_hmd_t;
 
+static const struct xrt_device_interface impl;
 
 /*
  *
@@ -57,6 +58,7 @@ typedef struct ipc_client_xdev ipc_client_hmd_t;
 static inline ipc_client_hmd_t *
 ipc_client_hmd(struct xrt_device *xdev)
 {
+	assert(xdev->impl == &impl);
 	return (ipc_client_hmd_t *)xdev;
 }
 
@@ -294,6 +296,17 @@ err_mask_unlock:
 	return XRT_ERROR_IPC_FAILURE;
 }
 
+static const struct xrt_device_interface impl = {
+    .name = "IPC client hmd",
+    .destroy = ipc_client_hmd_destroy,
+    .update_inputs = ipc_client_hmd_update_inputs,
+    .get_tracked_pose = ipc_client_hmd_get_tracked_pose,
+    .get_view_poses = ipc_client_hmd_get_view_poses,
+    .compute_distortion = ipc_client_hmd_compute_distortion,
+    .is_form_factor_available = ipc_client_hmd_is_form_factor_available,
+    .get_visibility_mask = ipc_client_hmd_get_visibility_mask,
+};
+
 /*!
  * @public @memberof ipc_client_hmd
  */
@@ -303,19 +316,13 @@ ipc_client_hmd_create(struct ipc_connection *ipc_c, struct xrt_tracking_origin *
 	struct ipc_shared_memory *ism = ipc_c->ism;
 	struct ipc_shared_device *isdev = &ism->isdevs[device_id];
 
-
-
 	enum u_device_alloc_flags flags = (enum u_device_alloc_flags)(U_DEVICE_ALLOC_HMD);
 	ipc_client_hmd_t *ich = U_DEVICE_ALLOCATE(ipc_client_hmd_t, flags, 0, 0);
+
+	u_device_init(&ich->base, &impl, isdev->device_type);
+
 	ich->ipc_c = ipc_c;
 	ich->device_id = device_id;
-	ich->base.update_inputs = ipc_client_hmd_update_inputs;
-	ich->base.get_tracked_pose = ipc_client_hmd_get_tracked_pose;
-	ich->base.get_view_poses = ipc_client_hmd_get_view_poses;
-	ich->base.compute_distortion = ipc_client_hmd_compute_distortion;
-	ich->base.destroy = ipc_client_hmd_destroy;
-	ich->base.is_form_factor_available = ipc_client_hmd_is_form_factor_available;
-	ich->base.get_visibility_mask = ipc_client_hmd_get_visibility_mask;
 
 	// Start copying the information from the isdev.
 	ich->base.tracking_origin = xtrack;
@@ -368,7 +375,6 @@ ipc_client_hmd_create(struct ipc_connection *ipc_c, struct xrt_tracking_origin *
 
 	ich->base.orientation_tracking_supported = isdev->orientation_tracking_supported;
 	ich->base.position_tracking_supported = isdev->position_tracking_supported;
-	ich->base.device_type = isdev->device_type;
 	ich->base.hand_tracking_supported = isdev->hand_tracking_supported;
 	ich->base.eye_gaze_supported = isdev->eye_gaze_supported;
 	ich->base.face_tracking_supported = isdev->face_tracking_supported;
