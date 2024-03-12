@@ -20,7 +20,23 @@ struct silly_device
 
 	silly_device(bool &destroyed_) : destroyed(&destroyed_)
 	{
-		base.destroy = [](xrt_device *xdev) { delete reinterpret_cast<silly_device *>(xdev); };
+		static const struct xrt_device_interface silly_impl = {
+			"silly",
+			// destroy
+			[](xrt_device *xdev) { delete reinterpret_cast<silly_device *>(xdev); },
+			nullptr, // update_inputs
+			nullptr, // get_tracked_pose
+			nullptr, // get_hand_tracking
+			nullptr, // get_face_tracking
+			nullptr, // set_output
+			nullptr, // get_view_poses
+			nullptr, // compute_distortion
+			nullptr, // get_visibility_mask
+			nullptr, // ref_space_usage
+			nullptr, // is_form_factor_available
+		};
+
+		base.impl = &silly_impl;
 	}
 	~silly_device()
 	{

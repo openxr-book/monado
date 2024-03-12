@@ -57,6 +57,13 @@ sdl_hmd_destroy(struct xrt_device *xdev)
 	(void)sp; // We are apart of sdl_program, do not free.
 }
 
+static const struct xrt_device_interface sdl_impl = {
+	.name = "sdl hmd",
+	.update_inputs = u_device_noop_update_inputs,
+	.get_tracked_pose = sdl_hmd_get_tracked_pose,
+	.get_view_poses = u_device_get_view_poses,
+	.destroy = sdl_hmd_destroy,
+};
 
 /*
  *
@@ -69,15 +76,16 @@ sdl_device_init(struct sdl_program *sp)
 {
 	struct xrt_device *xdev = &sp->xdev_base;
 
+
+	// Name and interface.
+	xdev->name = XRT_DEVICE_GENERIC_HMD;
+	u_device_init(xdev, &sdl_impl, XRT_DEVICE_TYPE_HMD);
+
 	// Setup pointers.
 	xdev->inputs = sp->inputs;
 	xdev->input_count = ARRAY_SIZE(sp->inputs);
 	xdev->tracking_origin = &sp->origin;
 	xdev->hmd = &sp->hmd;
-
-	// Name and type.
-	xdev->name = XRT_DEVICE_GENERIC_HMD;
-	xdev->device_type = XRT_DEVICE_TYPE_HMD;
 
 	// Print name.
 	snprintf(xdev->str, XRT_DEVICE_NAME_LEN, "SDL HMD");
@@ -87,11 +95,6 @@ sdl_device_init(struct sdl_program *sp)
 	xdev->inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;
 	xdev->inputs[0].active = true;
 
-	// Function pointers.
-	xdev->update_inputs = u_device_noop_update_inputs;
-	xdev->get_tracked_pose = sdl_hmd_get_tracked_pose;
-	xdev->get_view_poses = u_device_get_view_poses;
-	xdev->destroy = sdl_hmd_destroy;
 
 	// Minimum needed stuff.
 	struct u_device_simple_info info;

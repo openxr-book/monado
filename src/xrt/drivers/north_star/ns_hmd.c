@@ -446,6 +446,15 @@ ns_mesh_calc(struct xrt_device *xdev, uint32_t view, float u, float v, struct xr
 	}
 }
 
+static const struct xrt_device_interface ns_impl = {
+	.name = "ns",
+	.compute_distortion = ns_mesh_calc,
+	.update_inputs = u_device_noop_update_inputs,
+	.get_tracked_pose = ns_hmd_get_tracked_pose,
+	.get_view_poses = ns_hmd_get_view_poses,
+	.destroy = ns_hmd_destroy,
+};
+
 /*
  *
  * Create function.
@@ -459,6 +468,8 @@ ns_hmd_create(const cJSON *config_json)
 	    (enum u_device_alloc_flags)(U_DEVICE_ALLOC_HMD | U_DEVICE_ALLOC_TRACKING_NONE);
 	struct ns_hmd *ns = U_DEVICE_ALLOCATE(struct ns_hmd, flags, 1, 0);
 
+	u_device_init(&ns->base, &ns_impl, XRT_DEVICE_TYPE_HMD);
+
 	ns->config_json = config_json;
 	ns_optical_config_parse(ns);
 
@@ -468,12 +479,6 @@ ns_hmd_create(const cJSON *config_json)
 	ns->base.hmd->distortion.fov[0] = ns->config.fov[0];
 	ns->base.hmd->distortion.fov[1] = ns->config.fov[1];
 
-
-	ns->base.compute_distortion = ns_mesh_calc;
-	ns->base.update_inputs = u_device_noop_update_inputs;
-	ns->base.get_tracked_pose = ns_hmd_get_tracked_pose;
-	ns->base.get_view_poses = ns_hmd_get_view_poses;
-	ns->base.destroy = ns_hmd_destroy;
 	ns->base.name = XRT_DEVICE_GENERIC_HMD;
 	math_pose_identity(&ns->no_tracker_relation.pose);
 	ns->no_tracker_relation.relation_flags = (enum xrt_space_relation_flags)(
@@ -483,7 +488,6 @@ ns_hmd_create(const cJSON *config_json)
 	// the debug gui
 	ns->base.orientation_tracking_supported = true;
 	ns->base.position_tracking_supported = true;
-	ns->base.device_type = XRT_DEVICE_TYPE_HMD;
 
 
 	// Print name.
@@ -511,7 +515,6 @@ ns_hmd_create(const cJSON *config_json)
 	u_var_add_root(ns, "North Star", true);
 	u_var_add_pose(ns, &ns->no_tracker_relation.pose, "pose");
 	ns->base.orientation_tracking_supported = true;
-	ns->base.device_type = XRT_DEVICE_TYPE_HMD;
 
 	size_t idx = 0;
 	// Preferred; almost all North Stars (as of early 2021) are see-through.

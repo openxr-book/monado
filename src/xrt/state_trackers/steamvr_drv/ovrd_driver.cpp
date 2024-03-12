@@ -907,7 +907,7 @@ public:
 	void
 	RunFrame()
 	{
-		m_xdev->update_inputs(m_xdev);
+		xrt_device_update_inputs(m_xdev);
 
 
 		for (const auto &in : m_input_controls) {
@@ -971,7 +971,7 @@ public:
 			struct xrt_hand_joint_set out_joint_set_value;
 			uint64_t out_timestamp_ns;
 
-			m_xdev->get_hand_tracking(m_xdev,
+			xrt_device_get_hand_tracking(m_xdev,
 			                          m_hand == XRT_HAND_LEFT ? XRT_INPUT_GENERIC_HAND_TRACKING_LEFT
 			                                                  : XRT_INPUT_GENERIC_HAND_TRACKING_RIGHT,
 			                          now_ns, &out_joint_set_value, &out_timestamp_ns);
@@ -1392,7 +1392,7 @@ CDeviceDriver_Monado::ComputeDistortion(vr::EVREye eEye, float fU, float fV)
 
 	struct xrt_uv_triplet d;
 
-	if (!m_xdev->compute_distortion(m_xdev, eEye, U, V, &d)) {
+	if (!xrt_device_compute_distortion(m_xdev, eEye, U, V, &d)) {
 		ovrd_log("Failed to compute distortion for view %d at %f,%f!\n", eEye, U, V);
 
 		vr::DistortionCoordinates_t coordinates;
@@ -1588,7 +1588,7 @@ CServerDriver_Monado::HandleHapticEvent(vr::VREvent_t *event)
 
 	enum xrt_output_name name = control->monado_output_name;
 	ovrd_log("Haptic vibration %s, %d\n", control->steamvr_control_path, name);
-	controller->m_xdev->set_output(controller->m_xdev, name, &out);
+	xrt_device_set_output(controller->m_xdev, name, &out);
 }
 
 void

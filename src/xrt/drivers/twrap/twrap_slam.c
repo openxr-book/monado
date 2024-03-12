@@ -16,6 +16,7 @@
 #include "xrt/xrt_tracking.h"
 #include "xrt/xrt_config_have.h"
 #include "xrt/xrt_config_build.h"
+#include "xrt/interfaces/device.h"
 
 #include "util/u_var.h"
 #include "util/u_misc.h"
@@ -140,6 +141,14 @@ twrap_slam_destroy(struct xrt_device *xdev)
 	u_device_free(&dx->base);
 }
 
+static const struct xrt_device_interface twrap_impl = {
+	.name = "twrap",
+	.update_inputs = u_device_noop_update_inputs,
+	.get_tracked_pose = twrap_slam_get_tracked_pose,
+	.get_view_poses = twrap_slam_get_view_poses,
+	.destroy = twrap_slam_destroy,
+};
+
 // Does _NOT_ take ownership or free the xfctx
 xrt_result_t
 twrap_slam_create_device(struct xrt_frame_context *xfctx,
@@ -149,24 +158,16 @@ twrap_slam_create_device(struct xrt_frame_context *xfctx,
 {
 	struct slam_device *dx = U_DEVICE_ALLOCATE(struct slam_device, U_DEVICE_ALLOC_TRACKING_NONE, 1, 0);
 
+	u_device_init(&dx->base, &twrap_impl, XRT_DEVICE_TYPE_GENERIC_TRACKER);
 
 	dx->log_level = debug_get_log_option_slam_log();
 
-
-
-	dx->base.update_inputs = u_device_noop_update_inputs;
-	dx->base.get_tracked_pose = twrap_slam_get_tracked_pose;
-	dx->base.get_view_poses = twrap_slam_get_view_poses;
-	dx->base.destroy = twrap_slam_destroy;
 	dx->base.name = name;
 	dx->base.tracking_origin->type = XRT_TRACKING_TYPE_OTHER;
 	dx->base.tracking_origin->offset = (struct xrt_pose)XRT_POSE_IDENTITY;
 	dx->base.inputs[0].name = XRT_INPUT_GENERIC_TRACKER_POSE;
 	dx->base.orientation_tracking_supported = true;
 	dx->base.position_tracking_supported = true;
-	dx->base.device_type = XRT_DEVICE_TYPE_GENERIC_TRACKER;
-
-
 
 	// Print name.
 	snprintf(dx->base.str, XRT_DEVICE_NAME_LEN, "Generic Inside-Out Head Tracker");

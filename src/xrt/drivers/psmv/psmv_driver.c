@@ -1030,6 +1030,14 @@ psmv_found(struct xrt_prober *xp,
 	return 1;
 }
 
+static const struct xrt_device_interface psmv_impl = {
+	.name = "psmv",
+	.update_inputs = psmv_device_update_inputs,
+	.get_tracked_pose = psmv_device_get_tracked_pose,
+	.set_output = psmv_device_set_output,
+	.destroy = psmv_device_destroy,
+};
+
 struct xrt_device *
 psmv_device_create(struct xrt_prober *xp, struct xrt_prober_device *xpdev, struct xrt_tracked_psmv *tracker)
 {
@@ -1043,10 +1051,9 @@ psmv_device_create(struct xrt_prober *xp, struct xrt_prober_device *xpdev, struc
 
 	enum u_device_alloc_flags flags = U_DEVICE_ALLOC_TRACKING_NONE;
 	struct psmv_device *psmv = U_DEVICE_ALLOCATE(struct psmv_device, flags, 13, 1);
-	psmv->base.destroy = psmv_device_destroy;
-	psmv->base.update_inputs = psmv_device_update_inputs;
-	psmv->base.get_tracked_pose = psmv_device_get_tracked_pose;
-	psmv->base.set_output = psmv_device_set_output;
+
+	u_device_init(&psmv->base, &psmv_impl, XRT_DEVICE_TYPE_ANY_HAND_CONTROLLER);
+
 	psmv->base.name = XRT_DEVICE_PSMV;
 	psmv->base.binding_profiles = binding_profiles;
 	psmv->base.binding_profile_count = ARRAY_SIZE(binding_profiles);
@@ -1239,7 +1246,6 @@ psmv_device_create(struct xrt_prober *xp, struct xrt_prober_device *xpdev, struc
 
 	psmv->base.orientation_tracking_supported = true;
 	psmv->base.position_tracking_supported = psmv->ball != NULL;
-	psmv->base.device_type = XRT_DEVICE_TYPE_ANY_HAND_CONTROLLER;
 
 	// And finally done
 	return &psmv->base;
