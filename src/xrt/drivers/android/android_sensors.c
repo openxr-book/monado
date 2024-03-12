@@ -28,9 +28,12 @@
 
 DEBUG_GET_ONCE_LOG_OPTION(android_log, "ANDROID_SENSORS_LOG", U_LOGGING_WARN)
 
+static const struct xrt_device_interface impl;
+
 static inline struct android_device *
 android_device(struct xrt_device *xdev)
 {
+	assert(xdev->impl == &impl);
 	return (struct android_device *)xdev;
 }
 
@@ -200,6 +203,14 @@ android_device_compute_distortion(
 	return u_compute_distortion_cardboard(&d->cardboard.values[view], u, v, result);
 }
 
+static const struct xrt_device_interface impl = {
+    .name = "Android Sensors hmd",
+    .destroy = android_device_destroy,
+    .update_inputs = u_device_noop_update_inputs,
+    .get_tracked_pose = android_device_get_tracked_pose,
+    .get_view_poses = u_device_get_view_poses,
+    .compute_distortion = android_device_compute_distortion,
+};
 
 struct android_device *
 android_device_create()
@@ -208,14 +219,10 @@ android_device_create()
 	    (enum u_device_alloc_flags)(U_DEVICE_ALLOC_HMD | U_DEVICE_ALLOC_TRACKING_NONE);
 	struct android_device *d = U_DEVICE_ALLOCATE(struct android_device, flags, 1, 0);
 
+	u_device_init(&d->base, &impl, XRT_DEVICE_TYPE_HMD);
+
 	d->base.name = XRT_DEVICE_GENERIC_HMD;
-	d->base.destroy = android_device_destroy;
-	d->base.update_inputs = u_device_noop_update_inputs;
-	d->base.get_tracked_pose = android_device_get_tracked_pose;
-	d->base.get_view_poses = u_device_get_view_poses;
-	d->base.compute_distortion = android_device_compute_distortion;
 	d->base.inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;
-	d->base.device_type = XRT_DEVICE_TYPE_HMD;
 	snprintf(d->base.str, XRT_DEVICE_NAME_LEN, "Android Sensors");
 	snprintf(d->base.serial, XRT_DEVICE_NAME_LEN, "Android Sensors");
 
