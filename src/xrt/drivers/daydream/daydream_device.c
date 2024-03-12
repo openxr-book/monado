@@ -60,9 +60,12 @@ struct daydream_input_packet
  *
  */
 
+static const struct xrt_device_interface impl;
+
 static inline struct daydream_device *
 daydream_device(struct xrt_device *xdev)
 {
+	assert(xdev->impl == &impl);
 	return (struct daydream_device *)xdev;
 }
 
@@ -344,6 +347,12 @@ static struct xrt_binding_profile binding_profiles[1] = {
     },
 };
 
+static const struct xrt_device_interface impl = {
+    .name = "Daydream controller",
+    .destroy = daydream_device_destroy,
+    .update_inputs = daydream_device_update_inputs,
+    .get_tracked_pose = daydream_device_get_tracked_pose,
+};
 
 /*
  *
@@ -357,10 +366,9 @@ daydream_device_create(struct os_ble_device *ble)
 	enum u_device_alloc_flags flags = (enum u_device_alloc_flags)(U_DEVICE_ALLOC_TRACKING_NONE);
 	struct daydream_device *dd = U_DEVICE_ALLOCATE(struct daydream_device, flags, 8, 0);
 
+	u_device_init(&dd->base, &impl, XRT_DEVICE_TYPE_ANY_HAND_CONTROLLER);
+
 	dd->base.name = XRT_DEVICE_DAYDREAM;
-	dd->base.destroy = daydream_device_destroy;
-	dd->base.update_inputs = daydream_device_update_inputs;
-	dd->base.get_tracked_pose = daydream_device_get_tracked_pose;
 	dd->base.inputs[0].name = XRT_INPUT_DAYDREAM_POSE;
 	dd->base.inputs[1].name = XRT_INPUT_DAYDREAM_TOUCHPAD_CLICK;
 	dd->base.inputs[2].name = XRT_INPUT_DAYDREAM_BAR_CLICK;
@@ -400,7 +408,6 @@ daydream_device_create(struct os_ble_device *ble)
 
 	dd->base.orientation_tracking_supported = true;
 	dd->base.position_tracking_supported = false;
-	dd->base.device_type = XRT_DEVICE_TYPE_ANY_HAND_CONTROLLER;
 
 	DAYDREAM_DEBUG(dd, "Created device!");
 
