@@ -14,7 +14,6 @@
 #include "jni.h"
 
 #include "util/u_logging.h"
-#include <string>
 
 using wrap::android::content::Context;
 using wrap::android::content::pm::PackageInfo;
@@ -22,57 +21,72 @@ using wrap::android::content::pm::PackageManager;
 using wrap::android::content::pm::Signature;
 
 
+std::string
+android_get_app_signature(void *application_context, const char *app_package_name)
+{
+	if (application_context == nullptr) {
+		U_LOG_E("%s: context is null", __func__);
+		return std::string();
+	}
+	if (app_package_name == nullptr) {
+		U_LOG_E("%s: app_package_name is null", __func__);
+		return std::string();
+	}
+	try {
+		auto context = Context{(jobject)application_context};
+		if (context.isNull()) {
+			U_LOG_E("%s: application_context was null", __func__);
+			return std::string();
+		}
+		auto packageManager = PackageManager{context.getPackageManager()};
+		if (packageManager.isNull()) {
+			U_LOG_E("%s: application_context.getPackageManager() returned null", __func__);
+			return std::string();
+		}
+		auto appPackageInfo = packageManager.getPackageInfo(std::string(app_package_name), 64);
+		if (appPackageInfo.isNull()) {
+			U_LOG_E("%s: packageManager.getPackageInfo() returned null", __func__);
+			return std::string();
+		}
+		auto appSignature = appPackageInfo.getSignature();
+		if (appSignature.isNull()) {
+			U_LOG_E("%s: appPackageInfo.getSignature() returned null", __func__);
+			return std::string();
+		}
+		return appSignature.toCharsString();
+	} catch (std::exception const &e) {
+		U_LOG_E("%s: jni exception info: %s", __func__, e.what());
+		return std::string();
+	}
+}
+
 bool
 android_check_signature(void *application_context, const char *runtime_package_name)
 {
 	if (runtime_package_name == nullptr) {
-		U_LOG_E("android_check_signature: runtime_package_name is null");
+		U_LOG_E("%s: runtime_package_name is null", __func__);
 		return false;
 	}
 	try {
 		auto context = Context{(jobject)application_context};
 
 		if (context.isNull()) {
-			U_LOG_E("android_check_signature: application_context was null");
+			U_LOG_E("%s: application_context was null", __func__);
 			return false;
 		}
 		std::string appPackageName = context.getPackageName();
-		U_LOG_I("android_check_signature: appPackageName: %s", appPackageName.c_str());
-		auto packageManager = PackageManager{context.getPackageManager()};
-		if (packageManager.isNull()) {
-			U_LOG_E("android_check_signature: application_context.getPackageManager() returned null");
-			return false;
-		}
+		U_LOG_I("%s: appPackageName: %s", __func__, appPackageName.c_str());
+		std::string appSig = android_get_app_signature(application_context, appPackageName.c_str());
+		U_LOG_I("%s: runtimePackageName: %s", __func__, runtime_package_name);
+		std::string runtimeSig = android_get_app_signature(application_context, runtime_package_name);
 
-		auto appPackageInfo = packageManager.getPackageInfo(appPackageName, 64);
-		if (appPackageInfo.isNull()) {
-			U_LOG_E("android_check_signature: packageManager.getPackageInfo() returned null");
+		if (runtimeSig.empty()) {
+			U_LOG_E("%s: runtime signature is empty", __func__);
 			return false;
 		}
-		auto appSignature = appPackageInfo.getSignature();
-		if (appSignature.isNull()) {
-			U_LOG_E("android_check_signature: appPackageInfo.getSignature() returned null");
-			return false;
-		}
-		std::string appSig = appSignature.toCharsString();
-
-		U_LOG_I("android_check_signature: runtimePackageName: %s", runtime_package_name);
-		auto runtimePackageInfo = packageManager.getPackageInfo(std::string(runtime_package_name), 64);
-
-		if (runtimePackageInfo.isNull()) {
-			U_LOG_E("android_check_signature: packageManager.getPackageInfo() returned null");
-			return false;
-		}
-
-		auto runtimeSignature = runtimePackageInfo.getSignature();
-		if (runtimeSignature.isNull()) {
-			U_LOG_E("android_check_signature: appPackageInfo.getSignature() returned null");
-			return false;
-		}
-		std::string runtimeSig = runtimeSignature.toCharsString();
 		return appSig == runtimeSig;
 	} catch (std::exception const &e) {
-		U_LOG_E("jni exception info: %s", e.what());
+		U_LOG_E("%s: jni exception info: %s", __func__, e.what());
 		return false;
 	}
 }

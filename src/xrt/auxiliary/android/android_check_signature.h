@@ -18,7 +18,7 @@ extern "C" {
 #endif
 
 /*!
- * Does the application have the same signture with runtime/spaces
+ * Check if the application has the same signture with runtime or not.
  */
 bool
 android_check_signature(void *application_context, const char *runtime_package_name);
