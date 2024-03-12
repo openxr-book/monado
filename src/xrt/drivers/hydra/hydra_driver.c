@@ -194,10 +194,12 @@ struct hydra_device
 static void
 hydra_device_parse_controller(struct hydra_device *hd, uint8_t *buf);
 
+static const struct xrt_device_interface impl;
+
 static inline struct hydra_device *
 hydra_device(struct xrt_device *xdev)
 {
-	assert(xdev);
+	assert(xdev->impl == &impl);
 	struct hydra_device *ret = (struct hydra_device *)xdev;
 	assert(ret->sys != NULL);
 	return ret;
@@ -557,6 +559,13 @@ hydra_device_destroy(struct xrt_device *xdev)
 	free(hd);
 }
 
+static const struct xrt_device_interface impl = {
+    .name = "Razer Hydra controller",
+    .destroy = hydra_device_destroy,
+    .update_inputs = hydra_device_update_inputs,
+    .get_tracked_pose = hydra_device_get_tracked_pose,
+};
+
 /*
  *
  * Prober functions.
@@ -619,10 +628,8 @@ hydra_found(struct xrt_prober *xp,
 	for (size_t i = 0; i < 2; ++i) {
 		struct hydra_device *hd = hs->devs[i];
 
-		hd->base.destroy = hydra_device_destroy;
-		hd->base.update_inputs = hydra_device_update_inputs;
-		hd->base.get_tracked_pose = hydra_device_get_tracked_pose;
-		// hs->base.set_output = hydra_device_set_output;
+		u_device_init(&hd->base, &impl, XRT_DEVICE_TYPE_ANY_HAND_CONTROLLER);
+
 		hd->base.name = XRT_DEVICE_HYDRA;
 		snprintf(hd->base.str, XRT_DEVICE_NAME_LEN, "%s %i", "Razer Hydra Controller", (int)(i + 1));
 		snprintf(hd->base.serial, XRT_DEVICE_NAME_LEN, "%s %i", "Razer Hydra Controller", (int)(i + 1));
@@ -643,9 +650,7 @@ hydra_found(struct xrt_prober *xp,
 	}
 
 	hs->devs[0]->base.orientation_tracking_supported = true;
-	hs->devs[0]->base.device_type = XRT_DEVICE_TYPE_ANY_HAND_CONTROLLER;
 	hs->devs[1]->base.position_tracking_supported = true;
-	hs->devs[1]->base.device_type = XRT_DEVICE_TYPE_ANY_HAND_CONTROLLER;
 
 	U_LOG_I("Opened razer hydra!");
 	return 2;
