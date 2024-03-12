@@ -22,6 +22,7 @@
 
 #include <stdio.h>
 
+static const struct xrt_device_interface impl;
 
 /*
  *
@@ -32,6 +33,7 @@
 static inline struct r_hmd *
 r_hmd(struct xrt_device *xdev)
 {
+	assert(xdev->impl == &impl);
 	return (struct r_hmd *)xdev;
 }
 
@@ -130,6 +132,16 @@ r_hmd_set_output(struct xrt_device *xdev, enum xrt_output_name name, const union
 	// Empty
 }
 
+static const struct xrt_device_interface impl = {
+    .name = "Remote hmd",
+    .destroy = r_hmd_destroy,
+    .update_inputs = u_device_noop_update_inputs,
+    .get_tracked_pose = r_hmd_get_tracked_pose,
+    .get_hand_tracking = r_hmd_get_hand_tracking,
+    .get_view_poses = r_hmd_get_view_poses,
+    .set_output = r_hmd_set_output,
+};
+
 /*!
  * @public @memberof r_hmd
  */
@@ -143,20 +155,15 @@ r_hmd_create(struct r_hub *r)
 	struct r_hmd *rh = U_DEVICE_ALLOCATE( //
 	    struct r_hmd, flags, input_count, output_count);
 
+	u_device_init(&rh->base, &impl, XRT_DEVICE_TYPE_HMD);
+
 	// Setup the basics.
-	rh->base.update_inputs = u_device_noop_update_inputs;
-	rh->base.get_tracked_pose = r_hmd_get_tracked_pose;
-	rh->base.get_hand_tracking = r_hmd_get_hand_tracking;
-	rh->base.get_view_poses = r_hmd_get_view_poses;
-	rh->base.set_output = r_hmd_set_output;
-	rh->base.destroy = r_hmd_destroy;
 	rh->base.tracking_origin = &r->origin;
 	rh->base.orientation_tracking_supported = true;
 	rh->base.position_tracking_supported = true;
 	rh->base.hand_tracking_supported = false;
 	rh->base.stage_supported = true;
 	rh->base.name = XRT_DEVICE_GENERIC_HMD;
-	rh->base.device_type = XRT_DEVICE_TYPE_HMD;
 	rh->base.inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;
 	rh->base.inputs[0].active = true;
 	rh->r = r;

@@ -24,6 +24,7 @@
 
 #include <stdio.h>
 
+static const struct xrt_device_interface impl;
 
 /*
  *
@@ -34,6 +35,7 @@
 static inline struct r_device *
 r_device(struct xrt_device *xdev)
 {
+	assert(xdev->impl == &impl);
 	return (struct r_device *)xdev;
 }
 
@@ -189,6 +191,16 @@ r_device_set_output(struct xrt_device *xdev, enum xrt_output_name name, const un
 	(void)rd;
 }
 
+static const struct xrt_device_interface impl = {
+    .name = "Remote controller",
+    .destroy = r_device_destroy,
+    .update_inputs = r_device_update_inputs,
+    .get_tracked_pose = r_device_get_tracked_pose,
+    .get_hand_tracking = r_device_get_hand_tracking,
+    .get_view_poses = r_device_get_view_poses,
+    .set_output = r_device_set_output,
+};
+
 /*!
  * @public @memberof r_device
  */
@@ -202,13 +214,10 @@ r_device_create(struct r_hub *r, bool is_left)
 	struct r_device *rd = U_DEVICE_ALLOCATE( //
 	    struct r_device, flags, input_count, output_count);
 
+	u_device_init(&rd->base, &impl,
+	              is_left ? XRT_DEVICE_TYPE_LEFT_HAND_CONTROLLER : XRT_DEVICE_TYPE_RIGHT_HAND_CONTROLLER);
+
 	// Setup the basics.
-	rd->base.update_inputs = r_device_update_inputs;
-	rd->base.get_tracked_pose = r_device_get_tracked_pose;
-	rd->base.get_hand_tracking = r_device_get_hand_tracking;
-	rd->base.get_view_poses = r_device_get_view_poses;
-	rd->base.set_output = r_device_set_output;
-	rd->base.destroy = r_device_destroy;
 	rd->base.tracking_origin = &r->origin;
 	rd->base.orientation_tracking_supported = true;
 	rd->base.position_tracking_supported = true;
@@ -251,12 +260,6 @@ r_device_create(struct r_hub *r, bool is_left)
 		rd->base.inputs[19].name = XRT_INPUT_GENERIC_HAND_TRACKING_RIGHT;
 	}
 	rd->base.outputs[0].name = XRT_OUTPUT_NAME_INDEX_HAPTIC;
-
-	if (is_left) {
-		rd->base.device_type = XRT_DEVICE_TYPE_LEFT_HAND_CONTROLLER;
-	} else {
-		rd->base.device_type = XRT_DEVICE_TYPE_RIGHT_HAND_CONTROLLER;
-	}
 
 	// Setup variable tracker.
 	u_var_add_root(rd, rd->base.str, true);
