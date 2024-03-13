@@ -46,6 +46,10 @@ struct comp_vulkan_arguments
 	//! Logging level to be set on the @ref vk_bundle.
 	enum u_logging_level log_level;
 
+	//! Should we enable the buffer device address feature
+	//! (enables memory allocation on multiple physical devices of a device group)
+	bool buffer_device_address;
+
 	//! Should we look for a queue with no graphics, only compute.
 	bool only_compute_queue;
 

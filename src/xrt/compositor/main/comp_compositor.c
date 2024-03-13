@@ -643,8 +643,9 @@ compositor_init_vulkan(struct comp_compositor *c)
 	    .only_compute_queue = c->settings.use_compute,
 	    .selected_gpu_index = c->settings.selected_gpu_index,
 	    .client_gpu_index = c->settings.client_gpu_index,
-	    .timeline_semaphore = true, // Flag is optional, not a hard requirement.
-	    .use_device_group = false,  // Not required
+	    .timeline_semaphore = true,     // Flag is optional, not a hard requirement.
+	    .use_device_group = false,      // Not required
+	    .buffer_device_address = false, // Not required
 	};
 
 	struct comp_vulkan_results vk_res = {0};

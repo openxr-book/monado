@@ -171,6 +171,9 @@ struct vk_bundle
 
 		//! Were device groups requested, available and enabled? (at least one group found)
 		bool use_device_group;
+
+		//! Were buffer device address feature requested, available and enabled?
+		bool buffer_device_address;
 	} features;
 
 	//! Is the GPU a tegra device.
@@ -1000,6 +1003,7 @@ struct vk_device_features
 	bool null_descriptor;
 	bool timeline_semaphore;
 	bool synchronization_2;
+	bool buffer_device_address;
 };
 
 /*!

@@ -118,6 +118,7 @@ TEST_CASE("client_compositor", "[.][needgpu]")
 	                           required_device_extension_list.get(),
 	                           optional_device_extension_list.get(),
 	                           U_LOGGING_TRACE,
+	                           false /* buffer_device_address */,
 	                           false /* only_compute_queue */,
 	                           true /*timeline_semaphore*/,
 	                           false /* use_device_group */,

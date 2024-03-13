@@ -274,13 +274,12 @@ create_device(struct vk_bundle *vk, const struct comp_vulkan_arguments *vk_args)
 
 	const bool only_compute_queue = vk_args->only_compute_queue;
 
-	struct vk_device_features device_features = {
-	    .shader_image_gather_extended = true,
-	    .shader_storage_image_write_without_format = true,
-	    .null_descriptor = only_compute_queue,
-	    .timeline_semaphore = vk_args->timeline_semaphore,
-	    .synchronization_2 = true,
-	};
+	struct vk_device_features device_features = {.shader_image_gather_extended = true,
+	                                             .shader_storage_image_write_without_format = true,
+	                                             .null_descriptor = only_compute_queue,
+	                                             .timeline_semaphore = vk_args->timeline_semaphore,
+	                                             .synchronization_2 = true,
+	                                             .buffer_device_address = vk_args->buffer_device_address};
 
 	// No other way then to try to see if realtime is available.
 	for (size_t i = 0; i < ARRAY_SIZE(prios); i++) {

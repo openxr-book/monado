@@ -173,11 +173,12 @@ compositor_init_vulkan(struct sdl_compositor *c, enum u_logging_level log_level)
 	    .required_device_extensions = required_device_extension_list,
 	    .optional_device_extensions = optional_device_extension_list,
 	    .log_level = log_level,
-	    .only_compute_queue = false, // Regular GFX
-	    .selected_gpu_index = -1,    // Auto
-	    .client_gpu_index = -1,      // Auto
-	    .timeline_semaphore = true,  // Flag is optional, not a hard requirement.
-	    .use_device_group = false,   // Not required
+	    .only_compute_queue = false,    // Regular GFX
+	    .selected_gpu_index = -1,       // Auto
+	    .client_gpu_index = -1,         // Auto
+	    .timeline_semaphore = true,     // Flag is optional, not a hard requirement.
+	    .use_device_group = false,      // Not required
+	    .buffer_device_address = false, // Not required
 	};
 
 	struct comp_vulkan_results vk_res = {0};
