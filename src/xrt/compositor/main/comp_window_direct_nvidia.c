@@ -430,7 +430,7 @@ check_vulkan_caps(struct comp_compositor *c, bool *out_detected)
 		return false;
 	}
 
-	ret = vk_select_physical_device(temp_vk, c->settings.selected_gpu_index);
+	ret = vk_select_physical_device(temp_vk, c->settings.selected_gpu_index, false);
 	if (ret != VK_SUCCESS) {
 		CVK_ERROR(c, "vk_select_physical_device", "Failed to select physical device.", ret);
 		return false;

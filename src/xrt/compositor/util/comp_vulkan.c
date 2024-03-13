@@ -288,6 +288,7 @@ create_device(struct vk_bundle *vk, const struct comp_vulkan_arguments *vk_args)
 		    vk,                                  //
 		    vk_args->selected_gpu_index,         //
 		    only_compute_queue,                  // compute_only
+		    vk_args->use_device_group,           // device groups
 		    prios[i],                            // global_priority
 		    vk_args->required_device_extensions, //
 		    vk_args->optional_device_extensions, //

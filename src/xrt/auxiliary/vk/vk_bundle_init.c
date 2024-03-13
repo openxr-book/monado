@@ -562,11 +562,59 @@ select_preferred_device(struct vk_bundle *vk, VkPhysicalDevice *devices, uint32_
 }
 
 static VkResult
-select_physical_device(struct vk_bundle *vk, int forced_index)
+select_physical_device(struct vk_bundle *vk, int forced_index, bool use_device_group)
 {
 	VkPhysicalDevice *physical_devices = NULL;
 	uint32_t gpu_count = 0;
 	VkResult ret;
+
+	vk->features.use_device_group = false;
+
+	if (use_device_group) {
+		VK_DEBUG(vk, "Vulkan device groups requested, checking for available groups...");
+		// Check if a device group exists
+		uint32_t device_group_count;
+		vk->vkEnumeratePhysicalDeviceGroups(vk->instance, &device_group_count, NULL);
+
+		// Only continue this path if count >= 1 (fallback to single physical device otherwise)
+		if (device_group_count >= 1) {
+			VkPhysicalDeviceGroupProperties *physical_device_group_properties;
+			physical_device_group_properties =
+			    U_TYPED_ARRAY_CALLOC(VkPhysicalDeviceGroupProperties, device_group_count);
+			for (size_t i = 0; i < device_group_count; ++i) {
+				physical_device_group_properties[i].sType =
+				    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GROUP_PROPERTIES;
+				physical_device_group_properties[i].pNext = NULL;
+			}
+
+			vk->vkEnumeratePhysicalDeviceGroups(vk->instance, &device_group_count,
+			                                    physical_device_group_properties);
+			VkPhysicalDeviceGroupProperties selected_physical_group = physical_device_group_properties[0];
+			VK_DEBUG(vk, "Device group found with a physical device count of %d.",
+			         selected_physical_group.physicalDeviceCount);
+			forced_index = 0;
+			vk->physical_device = selected_physical_group.physicalDevices[0];
+			vk->device_group_properties = selected_physical_group;
+
+			// Print info
+			for (size_t i = 0; i < selected_physical_group.physicalDeviceCount; i++) {
+				VkPhysicalDeviceProperties pdp;
+				vk->vkGetPhysicalDeviceProperties(selected_physical_group.physicalDevices[i], &pdp);
+
+				char title[41];
+				(void)snprintf(title, sizeof(title), "Device group physical device number %zu:\n", i);
+				vk_print_device_info(vk, U_LOGGING_INFO, &pdp, i, title);
+			}
+
+			// Fill out the device memory props as well.
+			vk->vkGetPhysicalDeviceMemoryProperties(vk->physical_device, &vk->device_memory_props);
+			vk->features.use_device_group = true;
+			return VK_SUCCESS;
+		} else {
+			VK_ERROR(vk,
+			         "Device group requested but no group was found, fallback to single physical device.");
+		}
+	}
 
 	ret = vk_enumerate_physical_devices( //
 	    vk,                              // vk_bundle
@@ -1117,15 +1165,16 @@ filter_device_features(struct vk_bundle *vk,
  */
 
 VkResult
-vk_select_physical_device(struct vk_bundle *vk, int forced_index)
+vk_select_physical_device(struct vk_bundle *vk, int forced_index, bool use_device_group)
 {
-	return select_physical_device(vk, forced_index);
+	return select_physical_device(vk, forced_index, use_device_group);
 }
 
 XRT_CHECK_RESULT VkResult
 vk_create_device(struct vk_bundle *vk,
                  int forced_index,
                  bool only_compute,
+                 bool use_device_group,
                  VkQueueGlobalPriorityEXT global_priority,
                  struct u_string_list *required_device_ext_list,
                  struct u_string_list *optional_device_ext_list,
@@ -1133,7 +1182,7 @@ vk_create_device(struct vk_bundle *vk,
 {
 	VkResult ret;
 
-	ret = select_physical_device(vk, forced_index);
+	ret = select_physical_device(vk, forced_index, use_device_group);
 	if (ret != VK_SUCCESS) {
 		return ret;
 	}
@@ -1284,6 +1333,16 @@ vk_create_device(struct vk_bundle *vk,
 		                      (VkBaseInStructure *)&synchronization_2_info);
 	}
 #endif
+
+	if (vk->features.use_device_group) {
+		VkDeviceGroupDeviceCreateInfo device_group_create_info;
+		device_group_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_GROUP_DEVICE_CREATE_INFO;
+		device_group_create_info.pNext = NULL;
+		device_group_create_info.physicalDeviceCount = vk->device_group_properties.physicalDeviceCount;
+		device_group_create_info.pPhysicalDevices = vk->device_group_properties.physicalDevices;
+		append_to_pnext_chain((VkBaseInStructure *)&device_create_info,
+		                      (VkBaseInStructure *)&device_group_create_info);
+	}
 
 	ret = vk->vkCreateDevice(vk->physical_device, &device_create_info, NULL, &vk->device);
 

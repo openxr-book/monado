@@ -52,6 +52,9 @@ struct comp_vulkan_arguments
 	//! Should we try to enable timeline semaphores if available
 	bool timeline_semaphore;
 
+	//! Should we use a device group (if available)
+	bool use_device_group;
+
 	//! Vulkan physical device to be selected, -1 for auto.
 	int selected_gpu_index;
 

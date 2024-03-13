@@ -135,6 +135,7 @@ vktest_init_bundle(struct vk_bundle *vk)
 	                           U_LOGGING_TRACE,
 	                           false /* only_compute_queue */,
 	                           true /*timeline_semaphore*/,
+	                           false /* use_device_group */,
 	                           -1,
 	                           -1};
 	comp_vulkan_results results{};
