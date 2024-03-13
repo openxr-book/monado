@@ -302,6 +302,22 @@ create_image(struct vk_bundle *vk, const struct xrt_swapchain_create_info *info,
 	    .handleTypes = memory_handle_type,
 	};
 
+	// Specify flags for allocation on multiple physical devices
+	if (vk->features.buffer_device_address) {
+		VkMemoryAllocateFlagsInfo allocate_flags_info = {
+		    .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
+		    .pNext = NULL,
+		    .flags = VK_MEMORY_ALLOCATE_DEVICE_MASK_BIT,
+		    .deviceMask = 0x0001,
+		};
+
+		if (use_dedicated_allocation) {
+			dedicated_memory_info.pNext = &allocate_flags_info;
+		} else {
+			export_alloc_info.pNext = &allocate_flags_info;
+		}
+	}
+
 	ret = vk_alloc_and_bind_image_memory(   //
 	    vk,                                 // vk_bundle
 	    image,                              // image

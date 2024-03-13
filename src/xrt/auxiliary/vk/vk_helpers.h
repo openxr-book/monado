@@ -1070,8 +1070,11 @@ vk_init_from_given(struct vk_bundle *vk,
  * @ingroup aux_vk
  */
 bool
-vk_get_memory_type(struct vk_bundle *vk, uint32_t type_bits, VkMemoryPropertyFlags memory_props, uint32_t *out_type_id);
-
+vk_get_memory_type(struct vk_bundle *vk,
+                   uint32_t type_bits,
+                   VkMemoryPropertyFlags memory_props,
+                   VkMemoryHeapFlags required_heap_flags,
+                   uint32_t *out_type_id);
 /*!
  * Allocate memory for an image and bind it to that image.
  *
