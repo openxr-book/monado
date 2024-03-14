@@ -64,6 +64,9 @@ public:
 	virtual void
 	get_tracked_pose(xrt_input_name name, uint64_t at_timestamp_ns, xrt_space_relation *out_relation) = 0;
 
+	void
+	deactivate();
+
 protected:
 	Device(const DeviceBuilder &builder);
 	std::shared_ptr<Context> ctx;

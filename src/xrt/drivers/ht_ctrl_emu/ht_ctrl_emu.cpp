@@ -106,12 +106,16 @@ wct_to_quat(float waggle, float curl, float twist)
 	return out;
 }
 
+namespace {
+extern const struct xrt_device_interface impl;
+}
+
 static inline struct cemu_device *
 cemu_device(struct xrt_device *xdev)
 {
+	assert(xdev->impl == &impl);
 	return (struct cemu_device *)xdev;
 }
-
 
 static void
 cemu_device_destroy(struct xrt_device *xdev)
@@ -332,15 +336,12 @@ cemu_device_get_tracked_pose(struct xrt_device *xdev,
 	static uint64_t hand_timestamp_ns;
 
 	struct xrt_hand_joint_set joint_set;
-	sys->in_hand->get_hand_tracking(sys->in_hand, dev->ht_input_name, at_timestamp_ns, &joint_set,
-	                                &hand_timestamp_ns);
+	xrt_device_get_hand_tracking(sys->in_hand, dev->ht_input_name, at_timestamp_ns, &joint_set, &hand_timestamp_ns);
 
 	if (joint_set.is_active == false) {
 		out_relation->relation_flags = XRT_SPACE_RELATION_BITMASK_NONE;
 		return;
 	}
-
-
 
 	switch (name) {
 	case XRT_INPUT_SIMPLE_GRIP_POSE: {
@@ -404,6 +405,34 @@ cemu_device_update_inputs(struct xrt_device *xdev)
 	xdev->inputs[CEMU_INDEX_MENU].value.boolean = false;
 }
 
+namespace {
+const struct xrt_device_interface impl = {
+    // name
+    "Hand-tracking emulated controller",
+    // destroy
+    cemu_device_destroy,
+    // update_inputs
+    cemu_device_update_inputs,
+    // get_tracked_pose
+    cemu_device_get_tracked_pose,
+    // get_hand_tracking
+    cemu_device_get_hand_tracking,
+    // get_face_tracking
+    nullptr,
+    // set_output
+    cemu_device_set_output, // TODO remove empty function
+    // get_view_poses
+    nullptr,
+    // compute_distortion
+    nullptr,
+    // get_visibility_mask
+    nullptr,
+    // ref_space_usage
+    nullptr,
+    // is_form_factor_available
+    nullptr,
+};
+}
 
 extern "C" int
 cemu_devices_create(struct xrt_device *head, struct xrt_device *hands, struct xrt_device **out_xdevs)
@@ -423,6 +452,9 @@ cemu_devices_create(struct xrt_device *head, struct xrt_device *hands, struct xr
 	for (int i = 0; i < 2; i++) {
 		cemud[i] = U_DEVICE_ALLOCATE(struct cemu_device, flags, CEMU_NUM_INPUTS, 0);
 
+		u_device_init(&cemud[i]->base, &impl,
+		              i ? XRT_DEVICE_TYPE_RIGHT_HAND_CONTROLLER : XRT_DEVICE_TYPE_LEFT_HAND_CONTROLLER);
+
 		cemud[i]->sys = system;
 
 		cemud[i]->base.tracking_origin = hands->tracking_origin;
@@ -439,15 +471,6 @@ cemu_devices_create(struct xrt_device *head, struct xrt_device *hands, struct xr
 		cemud[i]->base.inputs[CEMU_INDEX_MENU].name = XRT_INPUT_SIMPLE_MENU_CLICK;
 		cemud[i]->base.inputs[CEMU_INDEX_GRIP].name = XRT_INPUT_SIMPLE_GRIP_POSE;
 		cemud[i]->base.inputs[CEMU_INDEX_AIM].name = XRT_INPUT_SIMPLE_AIM_POSE;
-
-		cemud[i]->base.update_inputs = cemu_device_update_inputs;
-		cemud[i]->base.get_tracked_pose = cemu_device_get_tracked_pose;
-		cemud[i]->base.set_output = cemu_device_set_output;
-		cemud[i]->base.get_hand_tracking = cemu_device_get_hand_tracking;
-		cemud[i]->base.destroy = cemu_device_destroy;
-
-		cemud[i]->base.device_type =
-		    i ? XRT_DEVICE_TYPE_RIGHT_HAND_CONTROLLER : XRT_DEVICE_TYPE_LEFT_HAND_CONTROLLER;
 
 		int n =
 		    snprintf(cemud[i]->base.str, XRT_DEVICE_NAME_LEN, "%s %s Hand", i ? "Right" : "Left", hands->str);

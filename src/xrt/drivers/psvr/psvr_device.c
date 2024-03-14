@@ -1010,6 +1010,14 @@ psvr_compute_distortion(struct xrt_device *xdev, uint32_t view, float u, float v
 	return u_compute_distortion_panotools(&psvr->vals, u, v, result);
 }
 
+static const struct xrt_device_interface psvr_impl = {
+	.name = "psvr",
+	.update_inputs = psvr_device_update_inputs,
+	.get_tracked_pose = psvr_device_get_tracked_pose,
+	.get_view_poses = u_device_get_view_poses,
+	.compute_distortion = psvr_compute_distortion,
+	.destroy = psvr_device_destroy,
+};
 
 /*
  *
@@ -1026,14 +1034,12 @@ psvr_device_create_auto_prober(struct hid_device_info *sensor_hid_info,
 	enum u_device_alloc_flags flags =
 	    (enum u_device_alloc_flags)(U_DEVICE_ALLOC_HMD | U_DEVICE_ALLOC_TRACKING_NONE);
 	struct psvr_device *psvr = U_DEVICE_ALLOCATE(struct psvr_device, flags, 1, 0);
+
+	u_device_init(&psvr->base, &psvr_impl, XRT_DEVICE_TYPE_HMD);
+
 	int ret;
 
 	psvr->log_level = log_level;
-	psvr->base.update_inputs = psvr_device_update_inputs;
-	psvr->base.get_tracked_pose = psvr_device_get_tracked_pose;
-	psvr->base.get_view_poses = u_device_get_view_poses;
-	psvr->base.compute_distortion = psvr_compute_distortion;
-	psvr->base.destroy = psvr_device_destroy;
 	psvr->base.inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;
 	psvr->base.name = XRT_DEVICE_GENERIC_HMD;
 
@@ -1173,7 +1179,6 @@ psvr_device_create_auto_prober(struct hid_device_info *sensor_hid_info,
 
 	psvr->base.orientation_tracking_supported = true;
 	psvr->base.position_tracking_supported = psvr->tracker != NULL;
-	psvr->base.device_type = XRT_DEVICE_TYPE_HMD;
 
 	PSVR_DEBUG(psvr, "YES!");
 

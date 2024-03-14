@@ -16,6 +16,7 @@
 
 #include "multi.h"
 
+#include <assert.h>
 
 DEBUG_GET_ONCE_LOG_OPTION(multi_log, "MULTI_LOG", U_LOGGING_WARN)
 
@@ -40,6 +41,15 @@ struct multi_device
 
 	enum xrt_tracking_override_type override_type;
 };
+
+static const struct xrt_device_interface impl;
+
+static struct multi_device *
+get_device(struct xrt_device *xdev)
+{
+	assert(xdev->impl == &impl);
+	return (struct multi_device *)xdev;
+}
 
 static void
 direct_override(struct multi_device *d,
@@ -85,7 +95,7 @@ get_tracked_pose(struct xrt_device *xdev,
                  uint64_t at_timestamp_ns,
                  struct xrt_space_relation *out_relation)
 {
-	struct multi_device *d = (struct multi_device *)xdev;
+	struct multi_device *d = get_device(xdev);
 	struct xrt_device *tracker = d->tracking_override.tracker;
 	enum xrt_input_name tracker_input_name = d->tracking_override.input_name;
 
@@ -121,7 +131,7 @@ get_tracked_pose(struct xrt_device *xdev,
 static void
 destroy(struct xrt_device *xdev)
 {
-	struct multi_device *d = (struct multi_device *)xdev;
+	struct multi_device *d = get_device(xdev);
 
 	xrt_device_destroy(&d->tracking_override.target);
 
@@ -138,7 +148,7 @@ get_hand_tracking(struct xrt_device *xdev,
                   struct xrt_hand_joint_set *out_value,
                   uint64_t *out_timestamp_ns)
 {
-	struct multi_device *d = (struct multi_device *)xdev;
+	struct multi_device *d = get_device(xdev);
 	struct xrt_device *target = d->tracking_override.target;
 	xrt_device_get_hand_tracking(target, name, at_timestamp_ns, out_value, out_timestamp_ns);
 	if (!out_value->is_active) {
@@ -175,7 +185,7 @@ get_hand_tracking(struct xrt_device *xdev,
 static void
 set_output(struct xrt_device *xdev, enum xrt_output_name name, const union xrt_output_value *value)
 {
-	struct multi_device *d = (struct multi_device *)xdev;
+	struct multi_device *d = get_device(xdev);
 	struct xrt_device *target = d->tracking_override.target;
 	xrt_device_set_output(target, name, value);
 }
@@ -189,7 +199,7 @@ get_view_poses(struct xrt_device *xdev,
                struct xrt_fov *out_fovs,
                struct xrt_pose *out_poses)
 {
-	struct multi_device *d = (struct multi_device *)xdev;
+	struct multi_device *d = get_device(xdev);
 	struct xrt_device *target = d->tracking_override.target;
 	xrt_device_get_view_poses(target, default_eye_relation, at_timestamp_ns, view_count, out_head_relation,
 	                          out_fovs, out_poses);
@@ -204,19 +214,29 @@ get_view_poses(struct xrt_device *xdev,
 static bool
 compute_distortion(struct xrt_device *xdev, uint32_t view, float u, float v, struct xrt_uv_triplet *result)
 {
-	struct multi_device *d = (struct multi_device *)xdev;
+	struct multi_device *d = get_device(xdev);
 	struct xrt_device *target = d->tracking_override.target;
-	return target->compute_distortion(target, view, u, v, result);
+	return target->impl->compute_distortion(target, view, u, v, result);
 }
 
 static void
 update_inputs(struct xrt_device *xdev)
 {
-	struct multi_device *d = (struct multi_device *)xdev;
+	struct multi_device *d = get_device(xdev);
 	struct xrt_device *target = d->tracking_override.target;
 	xrt_device_update_inputs(target);
 }
 
+static const struct xrt_device_interface multi_impl = {
+    .name = "Multi device combination",
+    .destroy = destroy,
+    .update_inputs = update_inputs,
+    .get_tracked_pose = get_tracked_pose,
+    .get_hand_tracking = get_hand_tracking,
+    .set_output = set_output,
+    .compute_distortion = compute_distortion,
+    .get_view_poses = get_view_poses,
+};
 
 struct xrt_device *
 multi_create_tracking_override(enum xrt_tracking_override_type override_type,
@@ -230,6 +250,8 @@ multi_create_tracking_override(enum xrt_tracking_override_type override_type,
 	if (!d) {
 		return NULL;
 	}
+
+	u_device_init(&d->base, &multi_impl, tracking_override_target->device_type);
 
 	d->log_level = debug_get_log_option_multi_log();
 	d->override_type = override_type;
@@ -253,14 +275,6 @@ multi_create_tracking_override(enum xrt_tracking_override_type override_type,
 	d->tracking_override.target = tracking_override_target;
 	d->tracking_override.tracker = tracking_override_tracker;
 	d->tracking_override.input_name = tracking_override_input_name;
-
-	d->base.get_tracked_pose = get_tracked_pose;
-	d->base.destroy = destroy;
-	d->base.get_hand_tracking = get_hand_tracking;
-	d->base.set_output = set_output;
-	d->base.update_inputs = update_inputs;
-	d->base.compute_distortion = compute_distortion;
-	d->base.get_view_poses = get_view_poses;
 
 	return &d->base;
 }

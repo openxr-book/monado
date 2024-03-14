@@ -92,6 +92,18 @@ hdk_get_le_int16(uint8_t *&bufPtr)
 	return static_cast<int16_t>(hdk_get_le_uint16(bufPtr));
 }
 
+// Thanks C++
+namespace {
+extern const struct xrt_device_interface impl;
+}
+
+static inline struct hdk_device *
+hdk_device(struct xrt_device *xdev)
+{
+	assert(xdev->impl == &impl);
+	return (struct hdk_device *)xdev;
+}
+
 static void
 hdk_device_destroy(struct xrt_device *xdev)
 {
@@ -279,6 +291,36 @@ hdk_device_run_thread(void *ptr)
 #define HDK_DEBUG_MAT2X2(hd, name, rot)                                                                                \
 	HDK_DEBUG(hd, "\t%s = {%f, %f} {%f, %f}", name, rot.v[0], rot.v[1], rot.v[2], rot.v[3])
 
+// Thanks C++
+namespace {
+const struct xrt_device_interface impl = {
+    // name
+    "OSVR Hacker Dev Kit hmd",
+    // destroy
+    hdk_device_destroy,
+    // update_inputs
+    u_device_noop_update_inputs,
+    // get_tracked_pose
+    hdk_device_get_tracked_pose,
+    // get_hand_tracking
+    nullptr,
+    // get_face_tracking
+    nullptr,
+    // set_output
+    nullptr,
+    // get_view_poses
+    u_device_get_view_poses,
+    // compute_distortion
+    nullptr,
+    // get_visibility_mask
+    nullptr,
+    // ref_space_usage
+    nullptr,
+    // is_form_factor_available
+    nullptr,
+};
+}
+
 struct hdk_device *
 hdk_device_create(struct os_hid_device *dev, enum HDK_VARIANT variant)
 {
@@ -286,14 +328,12 @@ hdk_device_create(struct os_hid_device *dev, enum HDK_VARIANT variant)
 	    (enum u_device_alloc_flags)(U_DEVICE_ALLOC_HMD | U_DEVICE_ALLOC_TRACKING_NONE);
 	struct hdk_device *hd = U_DEVICE_ALLOCATE(struct hdk_device, flags, 1, 0);
 
+	u_device_init(&hd->base, &impl, XRT_DEVICE_TYPE_HMD);
+
 	size_t idx = 0;
 	hd->base.hmd->blend_modes[idx++] = XRT_BLEND_MODE_OPAQUE;
 	hd->base.hmd->blend_mode_count = idx;
 
-	hd->base.update_inputs = u_device_noop_update_inputs;
-	hd->base.get_tracked_pose = hdk_device_get_tracked_pose;
-	hd->base.get_view_poses = u_device_get_view_poses;
-	hd->base.destroy = hdk_device_destroy;
 	hd->base.inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;
 	hd->base.name = XRT_DEVICE_GENERIC_HMD;
 	hd->dev = dev;
@@ -490,7 +530,6 @@ hdk_device_create(struct os_hid_device *dev, enum HDK_VARIANT variant)
 
 	hd->base.orientation_tracking_supported = true;
 	hd->base.position_tracking_supported = false;
-	hd->base.device_type = XRT_DEVICE_TYPE_HMD;
 
 	return hd;
 }

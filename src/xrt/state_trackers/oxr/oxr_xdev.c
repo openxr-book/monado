@@ -19,28 +19,6 @@
 
 #include <assert.h>
 
-
-void
-oxr_xdev_destroy(struct xrt_device **xdev_ptr)
-{
-	struct xrt_device *xdev = *xdev_ptr;
-
-	if (xdev == NULL) {
-		return;
-	}
-
-	xdev->destroy(xdev);
-	*xdev_ptr = NULL;
-}
-
-void
-oxr_xdev_update(struct xrt_device *xdev)
-{
-	if (xdev != NULL) {
-		xrt_device_update_inputs(xdev);
-	}
-}
-
 bool
 oxr_xdev_find_input(struct xrt_device *xdev, enum xrt_input_name name, struct xrt_input **out_input)
 {

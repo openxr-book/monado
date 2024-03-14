@@ -7,17 +7,18 @@
  * @ingroup drv_euroc
  */
 
-#include "util/u_misc.h"
+#include "math/m_mathinclude.h"
+#include "math/m_space.h"
 #include "util/u_debug.h"
 #include "util/u_device.h"
 #include "util/u_distortion_mesh.h"
+#include "util/u_misc.h"
 #include "util/u_var.h"
-#include "math/m_space.h"
-#include "math/m_mathinclude.h"
+#include "xrt/interfaces/device.h"
+#include "xrt/xrt_config_build.h"
+#include "xrt/xrt_config_have.h"
 #include "xrt/xrt_prober.h"
 #include "xrt/xrt_tracking.h"
-#include "xrt/xrt_config_have.h"
-#include "xrt/xrt_config_build.h"
 
 #include "euroc_driver.h"
 
@@ -96,9 +97,13 @@ struct euroc_device
 	enum u_logging_level log_level;
 };
 
+static const struct xrt_device_interface hmd_impl;
+static const struct xrt_device_interface controller_impl;
+
 static inline struct euroc_device *
 euroc_device(struct xrt_device *xdev)
 {
+	assert(xdev->impl == &hmd_impl || xdev->impl == &controller_impl);
 	return (struct euroc_device *)xdev;
 }
 
@@ -138,6 +143,23 @@ euroc_device_destroy(struct xrt_device *xdev)
 	u_device_free(&ed->base);
 }
 
+static const struct xrt_device_interface hmd_impl = {
+    .name = "EuRoC hmd",
+    .destroy = euroc_device_destroy,
+    .update_inputs = u_device_noop_update_inputs,
+    .get_tracked_pose = euroc_device_get_tracked_pose,
+    .get_view_poses = u_device_get_view_poses,
+    .compute_distortion = u_distortion_mesh_none,
+};
+
+static const struct xrt_device_interface controller_impl = {
+    .name = "EuRoC controller",
+    .destroy = euroc_device_destroy,
+    .update_inputs = u_device_noop_update_inputs,
+    .get_tracked_pose = euroc_device_get_tracked_pose,
+    .get_view_poses = u_device_ni_get_view_poses,
+};
+
 struct xrt_device *
 euroc_device_create(struct xrt_prober *xp)
 {
@@ -164,20 +186,11 @@ euroc_device_create(struct xrt_prober *xp)
 
 	const char *dev_name;
 	if (is_hmd) {
+		u_device_init(xd, &hmd_impl, XRT_DEVICE_TYPE_HMD);
+
 		xd->name = XRT_DEVICE_GENERIC_HMD;
-		xd->device_type = XRT_DEVICE_TYPE_HMD;
 		dev_name = "Euroc HMD";
-	} else {
-		xd->name = XRT_DEVICE_SIMPLE_CONTROLLER;
-		xd->device_type = XRT_DEVICE_TYPE_ANY_HAND_CONTROLLER;
-		dev_name = "Euroc Controller";
-	}
 
-	snprintf(xd->str, XRT_DEVICE_NAME_LEN, "%s", dev_name);
-	snprintf(xd->serial, XRT_DEVICE_NAME_LEN, "%s", dev_name);
-
-	// Fill in xd->hmd
-	if (is_hmd) {
 		struct u_device_simple_info info;
 		info.display.w_pixels = 1280;
 		info.display.h_pixels = 720;
@@ -192,27 +205,24 @@ euroc_device_create(struct xrt_prober *xp)
 		EUROC_ASSERT(ret, "Failed to setup HMD properties");
 
 		u_distortion_mesh_set_none(xd);
+
+		xd->inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;
+	} else {
+		u_device_init(xd, &controller_impl, XRT_DEVICE_TYPE_ANY_HAND_CONTROLLER);
+
+		xd->name = XRT_DEVICE_SIMPLE_CONTROLLER;
+		dev_name = "Euroc Controller";
+
+		xd->inputs[0].name = XRT_INPUT_SIMPLE_GRIP_POSE;
 	}
+
+	snprintf(xd->str, XRT_DEVICE_NAME_LEN, "%s", dev_name);
+	snprintf(xd->serial, XRT_DEVICE_NAME_LEN, "%s", dev_name);
 
 	xd->tracking_origin = &ed->tracking_origin;
 	xd->tracking_origin->type = XRT_TRACKING_TYPE_EXTERNAL_SLAM;
 	xd->tracking_origin->offset.orientation.w = 1.0f;
 	snprintf(xd->tracking_origin->name, XRT_TRACKING_NAME_LEN, "%s %s", dev_name, "SLAM Tracker");
-
-	if (is_hmd) {
-		xd->inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;
-	} else {
-		xd->inputs[0].name = XRT_INPUT_SIMPLE_GRIP_POSE;
-	}
-
-	xd->update_inputs = u_device_noop_update_inputs;
-	xd->get_tracked_pose = euroc_device_get_tracked_pose;
-	xd->destroy = euroc_device_destroy;
-	if (is_hmd) {
-		xd->get_view_poses = u_device_get_view_poses;
-	} else {
-		xd->get_view_poses = u_device_ni_get_view_poses;
-	}
 
 	u_var_add_root(ed, dev_name, false);
 	u_var_add_pose(ed, &ed->pose, "pose");

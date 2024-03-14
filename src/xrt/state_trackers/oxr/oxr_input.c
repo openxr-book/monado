@@ -1811,7 +1811,10 @@ oxr_action_sync_data(struct oxr_logger *log,
 
 	// Loop over all xdev devices.
 	for (size_t i = 0; i < sess->sys->xsysd->xdev_count; i++) {
-		oxr_xdev_update(sess->sys->xsysd->xdevs[i]);
+		if (!xrt_device_update_inputs(sess->sys->xsysd->xdevs[i])) {
+			return oxr_error(log, XR_ERROR_RUNTIME_FAILURE,
+				"Failed to update %s", sess->sys->xsysd->xdevs[i]->str);
+		}
 	}
 
 	// Reset all action set attachments.

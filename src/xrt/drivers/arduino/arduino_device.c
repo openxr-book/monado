@@ -110,9 +110,12 @@ struct arduino_device
 #define ARDUINO_WARN(d, ...) U_LOG_XDEV_IFL_W(&d->base, d->log_level, __VA_ARGS__)
 #define ARDUINO_ERROR(d, ...) U_LOG_XDEV_IFL_E(&d->base, d->log_level, __VA_ARGS__)
 
+static const struct xrt_device_interface impl;
+
 static inline struct arduino_device *
 arduino_device(struct xrt_device *xdev)
 {
+	assert(xdev->impl == &impl);
 	return (struct arduino_device *)xdev;
 }
 
@@ -306,7 +309,7 @@ arduino_device_destroy(struct xrt_device *xdev)
 	free(ad);
 }
 
-static void
+static bool
 arduino_device_update_inputs(struct xrt_device *xdev)
 {
 	struct arduino_device *ad = arduino_device(xdev);
@@ -327,6 +330,8 @@ arduino_device_update_inputs(struct xrt_device *xdev)
 
 	// Done now.
 	os_mutex_unlock(&ad->lock);
+
+	return true;
 }
 
 static void
@@ -365,6 +370,12 @@ static struct xrt_binding_profile binding_profiles[1] = {
     },
 };
 
+static const struct xrt_device_interface impl = {
+    .name = "Arduino controller",
+    .destroy = arduino_device_destroy,
+    .update_inputs = arduino_device_update_inputs,
+    .get_tracked_pose = arduino_device_get_tracked_pose,
+};
 
 /*
  *
@@ -378,10 +389,9 @@ arduino_device_create(struct os_ble_device *ble)
 	enum u_device_alloc_flags flags = (enum u_device_alloc_flags)(U_DEVICE_ALLOC_TRACKING_NONE);
 	struct arduino_device *ad = U_DEVICE_ALLOCATE(struct arduino_device, flags, 8, 0);
 
+	u_device_init(&ad->base, &impl, XRT_DEVICE_TYPE_ANY_HAND_CONTROLLER);
+
 	ad->base.name = XRT_DEVICE_DAYDREAM;
-	ad->base.destroy = arduino_device_destroy;
-	ad->base.update_inputs = arduino_device_update_inputs;
-	ad->base.get_tracked_pose = arduino_device_get_tracked_pose;
 	ad->base.inputs[0].name = XRT_INPUT_DAYDREAM_POSE;
 	ad->base.inputs[1].name = XRT_INPUT_DAYDREAM_TOUCHPAD_CLICK;
 	ad->base.inputs[2].name = XRT_INPUT_DAYDREAM_BAR_CLICK;
@@ -428,7 +438,6 @@ arduino_device_create(struct os_ble_device *ble)
 
 	ad->base.orientation_tracking_supported = true;
 	ad->base.position_tracking_supported = false;
-	ad->base.device_type = XRT_DEVICE_TYPE_ANY_HAND_CONTROLLER;
 
 	ARDUINO_DEBUG(ad, "Created device!");
 

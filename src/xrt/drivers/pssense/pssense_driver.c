@@ -736,6 +736,14 @@ pssense_get_calibration_data(struct pssense_device *pssense)
 
 #define SET_INPUT(NAME) (pssense->base.inputs[PSSENSE_INDEX_##NAME].name = XRT_INPUT_PSSENSE_##NAME)
 
+static const struct xrt_device_interface pssense_impl = {
+	.name = "pssense",
+	.update_inputs = pssense_device_update_inputs,
+	.set_output = pssense_set_output,
+	.get_tracked_pose = pssense_get_tracked_pose,
+	.destroy = pssense_device_destroy,
+};
+
 int
 pssense_found(struct xrt_prober *xp,
               struct xrt_prober_device **devices,
@@ -764,16 +772,28 @@ pssense_found(struct xrt_prober *xp,
 		return -1;
 	}
 
+
 	enum u_device_alloc_flags flags = U_DEVICE_ALLOC_TRACKING_NONE;
 	struct pssense_device *pssense = U_DEVICE_ALLOCATE(struct pssense_device, flags, 23, 2);
 	PSSENSE_DEBUG(pssense, "PlayStation Sense controller found");
 
+	enum xrt_device_type device_type;
+	if (devices[index]->product_id == PSSENSE_PID_LEFT) {
+		device_type = XRT_DEVICE_TYPE_LEFT_HAND_CONTROLLER;
+		pssense->hand = PSSENSE_HAND_LEFT;
+	} else if (devices[index]->product_id == PSSENSE_PID_RIGHT) {
+		device_type = XRT_DEVICE_TYPE_RIGHT_HAND_CONTROLLER;
+		pssense->hand = PSSENSE_HAND_RIGHT;
+	} else {
+		PSSENSE_ERROR(pssense, "Unable to determine controller type");
+		pssense_device_destroy(&pssense->base);
+		return -1;
+	}
+
+	u_device_init(&pssense->base, &pssense_impl, device_type);
+
 	pssense->base.name = XRT_DEVICE_PSSENSE;
 	snprintf(pssense->base.str, XRT_DEVICE_NAME_LEN, "%s", product_name);
-	pssense->base.update_inputs = pssense_device_update_inputs;
-	pssense->base.set_output = pssense_set_output;
-	pssense->base.get_tracked_pose = pssense_get_tracked_pose;
-	pssense->base.destroy = pssense_device_destroy;
 	pssense->base.orientation_tracking_supported = true;
 
 	pssense->base.binding_profiles = binding_profiles_pssense;
@@ -783,18 +803,6 @@ pssense_found(struct xrt_prober *xp,
 
 	pssense->log_level = debug_get_log_option_pssense_log();
 	pssense->hid = hid;
-
-	if (devices[index]->product_id == PSSENSE_PID_LEFT) {
-		pssense->base.device_type = XRT_DEVICE_TYPE_LEFT_HAND_CONTROLLER;
-		pssense->hand = PSSENSE_HAND_LEFT;
-	} else if (devices[index]->product_id == PSSENSE_PID_RIGHT) {
-		pssense->base.device_type = XRT_DEVICE_TYPE_RIGHT_HAND_CONTROLLER;
-		pssense->hand = PSSENSE_HAND_RIGHT;
-	} else {
-		PSSENSE_ERROR(pssense, "Unable to determine controller type");
-		pssense_device_destroy(&pssense->base);
-		return -1;
-	}
 
 	SET_INPUT(PS_CLICK);
 	SET_INPUT(SHARE_CLICK);

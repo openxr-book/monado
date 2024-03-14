@@ -177,6 +177,16 @@ struct survive_system
 	struct os_mutex lock;
 };
 
+static const struct xrt_device_interface hmd_impl;
+static const struct xrt_device_interface controller_impl;
+
+static struct survive_device *
+get_device(struct xrt_device *xdev)
+{
+	assert(xdev->impl == &hmd_impl || xdev->impl == &controller_impl);
+	return (struct survive_device *)xdev;
+}
+
 static void
 survive_device_destroy(struct xrt_device *xdev)
 {
@@ -185,7 +195,7 @@ survive_device_destroy(struct xrt_device *xdev)
 	}
 
 	U_LOG_D("destroying survive device");
-	struct survive_device *survive = (struct survive_device *)xdev;
+	struct survive_device *survive = get_device(xdev);
 
 	if (survive == survive->sys->hmd) {
 		vive_config_teardown(&survive->hmd.config);
@@ -331,7 +341,7 @@ survive_device_get_tracked_pose(struct xrt_device *xdev,
                                 uint64_t at_timestamp_ns,
                                 struct xrt_space_relation *out_relation)
 {
-	struct survive_device *survive = (struct survive_device *)xdev;
+	struct survive_device *survive = get_device(xdev);
 	if (!verify_device_name(survive, name)) {
 		SURVIVE_ERROR(survive, "unknown input name");
 		return;
@@ -399,7 +409,7 @@ survive_controller_device_set_output(struct xrt_device *xdev,
                                      enum xrt_output_name name,
                                      const union xrt_output_value *value)
 {
-	struct survive_device *survive = (struct survive_device *)xdev;
+	struct survive_device *survive = get_device(xdev);
 
 	if (name != XRT_OUTPUT_NAME_VIVE_HAPTIC && name != XRT_OUTPUT_NAME_INDEX_HAPTIC) {
 		SURVIVE_ERROR(survive, "Unknown output");
@@ -453,7 +463,7 @@ survive_controller_get_hand_tracking(struct xrt_device *xdev,
                                      struct xrt_hand_joint_set *out_value,
                                      uint64_t *out_timestamp_ns)
 {
-	struct survive_device *survive = (struct survive_device *)xdev;
+	struct survive_device *survive = get_device(xdev);
 
 	if (name != XRT_INPUT_GENERIC_HAND_TRACKING_LEFT && name != XRT_INPUT_GENERIC_HAND_TRACKING_RIGHT) {
 		SURVIVE_ERROR(survive, "unknown input name for hand tracker");
@@ -525,7 +535,7 @@ survive_device_get_view_poses(struct xrt_device *xdev,
 	// Only supports two views.
 	assert(view_count <= 2);
 
-	struct survive_device *survive = (struct survive_device *)xdev;
+	struct survive_device *survive = get_device(xdev);
 
 	struct xrt_vec3 eye_relation = {0};
 
@@ -868,7 +878,7 @@ _process_event(struct survive_system *ss, struct SurviveSimpleEvent *event)
 static void
 survive_device_update_inputs(struct xrt_device *xdev)
 {
-	struct survive_device *survive = (struct survive_device *)xdev;
+	struct survive_device *survive = get_device(xdev);
 
 	os_mutex_lock(&survive->sys->lock);
 
@@ -882,7 +892,7 @@ survive_device_update_inputs(struct xrt_device *xdev)
 static bool
 compute_distortion(struct xrt_device *xdev, uint32_t view, float u, float v, struct xrt_uv_triplet *result)
 {
-	struct survive_device *d = (struct survive_device *)xdev;
+	struct survive_device *d = get_device(xdev);
 	bool status = u_compute_distortion_vive(&d->hmd.config.distortion.values[view], u, v, result);
 
 	if (d->hmd.config.variant == VIVE_VARIANT_PRO2) {
@@ -894,6 +904,15 @@ compute_distortion(struct xrt_device *xdev, uint32_t view, float u, float v, str
 	return status;
 }
 
+static const struct xrt_device_interface hmd_impl = {
+    .name = "survive hmd",
+    .update_inputs = survive_device_update_inputs,
+    .get_tracked_pose = survive_device_get_tracked_pose,
+    .get_view_poses = survive_device_get_view_poses,
+    .compute_distortion = compute_distortion,
+    .destroy = survive_device_destroy,
+};
+
 static bool
 _create_hmd_device(struct survive_system *sys, const struct SurviveSimpleObject *sso, char *conf_str)
 {
@@ -903,6 +922,8 @@ _create_hmd_device(struct survive_system *sys, const struct SurviveSimpleObject 
 	int outputs = 0;
 
 	struct survive_device *survive = U_DEVICE_ALLOCATE(struct survive_device, flags, inputs, outputs);
+
+	u_device_init(&survive->base, &hmd_impl, XRT_DEVICE_TYPE_HMD);
 
 	if (!vive_config_parse(&survive->hmd.config, conf_str, sys->log_level)) {
 		free(survive);
@@ -915,15 +936,10 @@ _create_hmd_device(struct survive_system *sys, const struct SurviveSimpleObject 
 	survive->device_type = DEVICE_TYPE_HMD;
 
 	survive->base.name = XRT_DEVICE_GENERIC_HMD;
-	survive->base.destroy = survive_device_destroy;
-	survive->base.update_inputs = survive_device_update_inputs;
-	survive->base.get_tracked_pose = survive_device_get_tracked_pose;
-	survive->base.get_view_poses = survive_device_get_view_poses;
 	survive->base.tracking_origin = &sys->base;
 
 	SURVIVE_INFO(survive, "survive HMD present");
 	m_relation_history_create(&survive->relation_hist);
-
 
 	size_t idx = 0;
 	survive->base.hmd->blend_modes[idx++] = XRT_BLEND_MODE_OPAQUE;
@@ -972,11 +988,9 @@ _create_hmd_device(struct survive_system *sys, const struct SurviveSimpleObject 
 	// Distortion params.
 	survive->base.hmd->distortion.models = XRT_DISTORTION_MODEL_COMPUTE;
 	survive->base.hmd->distortion.preferred = XRT_DISTORTION_MODEL_COMPUTE;
-	survive->base.compute_distortion = compute_distortion;
 
 	survive->base.orientation_tracking_supported = true;
 	survive->base.position_tracking_supported = true;
-	survive->base.device_type = XRT_DEVICE_TYPE_HMD;
 	survive->base.stage_supported = true;
 
 	survive->base.inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;
@@ -1015,6 +1029,15 @@ _create_hmd_device(struct survive_system *sys, const struct SurviveSimpleObject 
 	do {                                                                                                           \
 		(survive->base.inputs[VIVE_CONTROLLER_##NAME].name = XRT_INPUT_INDEX_##NAME2);                         \
 	} while (0)
+
+static const struct xrt_device_interface controller_impl = {
+    .name = "survive controller/tracker",
+    .destroy = survive_device_destroy,
+    .update_inputs = survive_device_update_inputs,
+    .get_tracked_pose = survive_device_get_tracked_pose,
+    .get_hand_tracking = survive_controller_get_hand_tracking,
+    .set_output = survive_controller_device_set_output,
+};
 
 static bool
 _create_controller_device(struct survive_system *sys,
@@ -1079,12 +1102,9 @@ _create_controller_device(struct survive_system *sys,
 
 	survive->base.tracking_origin = &sys->base;
 
-	survive->base.destroy = survive_device_destroy;
-	survive->base.update_inputs = survive_device_update_inputs;
-	survive->base.get_tracked_pose = survive_device_get_tracked_pose;
-	survive->base.set_output = survive_controller_device_set_output;
 	snprintf(survive->base.serial, XRT_DEVICE_NAME_LEN, "%s", survive->ctrl.config.firmware.device_serial_number);
 
+	enum xrt_device_type device_type;
 	if (variant == CONTROLLER_INDEX_LEFT || variant == CONTROLLER_INDEX_RIGHT) {
 		survive->base.name = XRT_DEVICE_INDEX_CONTROLLER;
 
@@ -1111,11 +1131,11 @@ _create_controller_device(struct survive_system *sys,
 		SET_INDEX_INPUT(GRIP_POSE, GRIP_POSE);
 
 		if (variant == CONTROLLER_INDEX_LEFT) {
-			survive->base.device_type = XRT_DEVICE_TYPE_LEFT_HAND_CONTROLLER;
+			device_type = XRT_DEVICE_TYPE_LEFT_HAND_CONTROLLER;
 			survive->base.inputs[VIVE_CONTROLLER_HAND_TRACKING].name = XRT_INPUT_GENERIC_HAND_TRACKING_LEFT;
 			snprintf(survive->base.str, XRT_DEVICE_NAME_LEN, "Valve Index Left Controller (libsurvive)");
 		} else if (variant == CONTROLLER_INDEX_RIGHT) {
-			survive->base.device_type = XRT_DEVICE_TYPE_RIGHT_HAND_CONTROLLER;
+			device_type = XRT_DEVICE_TYPE_RIGHT_HAND_CONTROLLER;
 			survive->base.inputs[VIVE_CONTROLLER_HAND_TRACKING].name =
 			    XRT_INPUT_GENERIC_HAND_TRACKING_RIGHT;
 			snprintf(survive->base.str, XRT_DEVICE_NAME_LEN, "Valve Index Right Controller (libsurvive)");
@@ -1126,7 +1146,6 @@ _create_controller_device(struct survive_system *sys,
 		survive->base.binding_profiles = vive_binding_profiles_index;
 		survive->base.binding_profile_count = vive_binding_profiles_index_count;
 
-		survive->base.get_hand_tracking = survive_controller_get_hand_tracking;
 		survive->base.hand_tracking_supported = !debug_get_bool_option_survive_disable_hand_emulation();
 
 	} else if (survive->ctrl.config.variant == CONTROLLER_VIVE_WAND) {
@@ -1150,7 +1169,7 @@ _create_controller_device(struct survive_system *sys,
 		survive->base.binding_profiles = vive_binding_profiles_wand;
 		survive->base.binding_profile_count = vive_binding_profiles_wand_count;
 
-		survive->base.device_type = XRT_DEVICE_TYPE_ANY_HAND_CONTROLLER;
+		device_type = XRT_DEVICE_TYPE_ANY_HAND_CONTROLLER;
 	} else if (survive->ctrl.config.variant == CONTROLLER_TRACKER_GEN1 ||
 	           survive->ctrl.config.variant == CONTROLLER_TRACKER_GEN2 ||
 	           survive->ctrl.config.variant == CONTROLLER_TRACKER_GEN3 ||
@@ -1169,10 +1188,13 @@ _create_controller_device(struct survive_system *sys,
 			snprintf(survive->base.str, XRT_DEVICE_NAME_LEN, "Tundra Tracker Gen3 (libsurvive)");
 		}
 
-		survive->base.device_type = XRT_DEVICE_TYPE_GENERIC_TRACKER;
+		device_type = XRT_DEVICE_TYPE_GENERIC_TRACKER;
 
 		survive->base.inputs[VIVE_TRACKER_POSE].name = XRT_INPUT_GENERIC_TRACKER_POSE;
 	}
+
+	// Init device after to get the device type
+	u_device_init(&survive->base, &controller_impl, device_type);
 
 	survive->base.orientation_tracking_supported = true;
 	survive->base.position_tracking_supported = true;

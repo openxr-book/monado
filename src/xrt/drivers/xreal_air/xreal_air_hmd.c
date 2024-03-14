@@ -115,9 +115,12 @@ struct xreal_air_hmd
  *
  */
 
+static const struct xrt_device_interface impl;
+
 static inline struct xreal_air_hmd *
 xreal_air_hmd(struct xrt_device *dev)
 {
+	assert(dev->impl == &impl);
 	return (struct xreal_air_hmd *)dev;
 }
 
@@ -1092,6 +1095,15 @@ xreal_air_hmd_compute_distortion(
 	return u_compute_distortion_none(u, v, result);
 }
 
+static const struct xrt_device_interface impl = {
+    .name = "Xreal Air hmd",
+    .destroy = xreal_air_hmd_destroy,
+    .update_inputs = xreal_air_hmd_update_inputs,
+    .get_tracked_pose = xreal_air_hmd_get_tracked_pose,
+    .get_view_poses = u_device_get_view_poses,
+    .compute_distortion = xreal_air_hmd_compute_distortion,
+};
+
 /*
  *
  * Exported functions.
@@ -1105,17 +1117,14 @@ xreal_air_hmd_create_device(struct os_hid_device *sensor_device,
 {
 	enum u_device_alloc_flags flags =
 	    (enum u_device_alloc_flags)(U_DEVICE_ALLOC_HMD | U_DEVICE_ALLOC_TRACKING_NONE);
+
 	struct xreal_air_hmd *hmd = U_DEVICE_ALLOCATE(struct xreal_air_hmd, flags, 1, 0);
+	u_device_init(&hmd->base, &impl, XRT_DEVICE_TYPE_HMD);
+
 	int ret;
 
 	hmd->log_level = log_level;
-	hmd->base.update_inputs = xreal_air_hmd_update_inputs;
-	hmd->base.get_tracked_pose = xreal_air_hmd_get_tracked_pose;
-	hmd->base.get_view_poses = u_device_get_view_poses;
-	hmd->base.compute_distortion = xreal_air_hmd_compute_distortion;
-	hmd->base.destroy = xreal_air_hmd_destroy;
 	hmd->base.name = XRT_DEVICE_GENERIC_HMD;
-	hmd->base.device_type = XRT_DEVICE_TYPE_HMD;
 	hmd->base.inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;
 	hmd->base.orientation_tracking_supported = true;
 	hmd->base.position_tracking_supported = false;

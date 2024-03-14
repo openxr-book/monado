@@ -268,6 +268,14 @@ opengloves_run_thread(void *ptr)
 	return 0;
 }
 
+static const struct xrt_device_interface opengloves_impl = {
+	.name = "opengloves hand tracking",
+	.update_inputs = opengloves_device_update_inputs,
+	.get_hand_tracking = opengloves_device_get_hand_tracking,
+	.set_output = opengloves_device_set_output,
+	.destroy = opengloves_device_destroy,
+};
+
 struct xrt_device *
 opengloves_device_create(struct opengloves_communication_device *ocd, enum xrt_hand hand)
 {
@@ -275,16 +283,15 @@ opengloves_device_create(struct opengloves_communication_device *ocd, enum xrt_h
 
 	struct opengloves_device *od = U_DEVICE_ALLOCATE(struct opengloves_device, flags, 8, 1);
 
+	u_device_init(&od->base, &opengloves_impl, XRT_DEVICE_TYPE_HAND_TRACKER);
+
 	od->base.name = XRT_DEVICE_HAND_TRACKER;
-	od->base.device_type = XRT_DEVICE_TYPE_HAND_TRACKER;
 	od->hand = hand;
 
 	od->ocd = ocd;
-	od->base.destroy = opengloves_device_destroy;
 	os_mutex_init(&od->lock);
 
 	// hand tracking
-	od->base.get_hand_tracking = opengloves_device_get_hand_tracking;
 	od->base.inputs[OPENGLOVES_INPUT_INDEX_HAND_TRACKING].name =
 	    od->hand == XRT_HAND_LEFT ? XRT_INPUT_GENERIC_HAND_TRACKING_LEFT : XRT_INPUT_GENERIC_HAND_TRACKING_RIGHT;
 
@@ -292,7 +299,6 @@ opengloves_device_create(struct opengloves_communication_device *ocd, enum xrt_h
 	od->base.force_feedback_supported = true;
 
 	// inputs
-	od->base.update_inputs = opengloves_device_update_inputs;
 	od->last_input = U_TYPED_CALLOC(struct opengloves_input);
 
 	od->base.inputs[OPENGLOVES_INPUT_INDEX_A_CLICK].name = XRT_INPUT_INDEX_A_CLICK;
@@ -307,7 +313,6 @@ opengloves_device_create(struct opengloves_communication_device *ocd, enum xrt_h
 	// outputs
 	od->base.outputs[0].name =
 	    od->hand == XRT_HAND_LEFT ? XRT_OUTPUT_NAME_FORCE_FEEDBACK_LEFT : XRT_OUTPUT_NAME_FORCE_FEEDBACK_RIGHT;
-	od->base.set_output = opengloves_device_set_output;
 
 	// startup thread
 	int ret = os_thread_helper_init(&od->oth);

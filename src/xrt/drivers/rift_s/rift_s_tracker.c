@@ -309,6 +309,11 @@ rift_s_tracker_add_debug_ui(struct rift_s_tracker *t, void *root)
 	u_var_add_ro_text(root, t->gui.hand_status, "Tracker status");
 }
 
+static const struct xrt_device_interface impl = {
+    .name = "Rift S tracker",
+    .get_tracked_pose = rift_s_tracker_get_tracked_pose_imu,
+};
+
 /*!
  * Procedure to setup trackers: 3dof, SLAM and hand tracking.
  *
@@ -329,8 +334,9 @@ rift_s_tracker_create(struct xrt_tracking_origin *origin,
 		return NULL;
 	}
 
+	u_device_init(&t->base, &impl, XRT_DEVICE_TYPE_GENERIC_TRACKER);
+
 	t->base.tracking_origin = origin;
-	t->base.get_tracked_pose = rift_s_tracker_get_tracked_pose_imu;
 
 	// Pose / state lock
 	int ret = os_mutex_init(&t->mutex);
@@ -609,13 +615,22 @@ rift_s_tracker_correct_pose_from_basalt(struct xrt_pose *pose)
 	math_quat_rotate_vec3(&q, &pose->position, &pose->position);
 }
 
+static const struct xrt_device_interface impl;
+
+static struct rift_s_tracker *
+get_device(struct xrt_device *xdev)
+{
+	assert(xdev->impl == &impl);
+	return (struct rift_s_tracker *)xdev;
+}
+
 static void
 rift_s_tracker_get_tracked_pose_imu(struct xrt_device *xdev,
                                     enum xrt_input_name name,
                                     uint64_t at_timestamp_ns,
                                     struct xrt_space_relation *out_relation)
 {
-	struct rift_s_tracker *tracker = (struct rift_s_tracker *)(xdev);
+	struct rift_s_tracker *tracker = get_device(xdev);
 	assert(name == XRT_INPUT_GENERIC_TRACKER_POSE);
 
 	rift_s_tracker_get_tracked_pose(tracker, RIFT_S_TRACKER_POSE_IMU, at_timestamp_ns, out_relation);

@@ -1072,6 +1072,15 @@ wmr_read_config(struct wmr_hmd *wh)
  *
  */
 
+static const struct xrt_device_interface impl;
+
+static inline struct wmr_hmd *
+wmr_hmd(struct xrt_device *p)
+{
+	assert(p->impl == &impl);
+	return (struct wmr_hmd *)p;
+}
+
 static void
 wmr_hmd_get_3dof_tracked_pose(struct xrt_device *xdev,
                               enum xrt_input_name name,
@@ -1916,6 +1925,15 @@ wmr_hmd_request_controller_status(struct wmr_hmd *wh)
 	return wmr_hmd_send_controller_packet(wh, cmd, sizeof(cmd));
 }
 
+static const struct xrt_device_interface impl = {
+    .name = "Windows Mixed Reality hmd",
+    .destroy = wmr_hmd_destroy,
+    .update_inputs = u_device_noop_update_inputs,
+    .get_tracked_pose = wmr_hmd_get_tracked_pose,
+    .get_view_poses = u_device_get_view_poses,
+    .compute_distortion = compute_distortion_wmr,
+};
+
 void
 wmr_hmd_create(enum wmr_headset_type hmd_type,
                struct os_hid_device *hid_holo,
@@ -1940,13 +1958,10 @@ wmr_hmd_create(enum wmr_headset_type hmd_type,
 		return;
 	}
 
+	u_device_init(&wh->base, &impl, XRT_DEVICE_TYPE_HMD);
+
 	// Populate the base members.
-	wh->base.update_inputs = u_device_noop_update_inputs;
-	wh->base.get_tracked_pose = wmr_hmd_get_tracked_pose;
-	wh->base.get_view_poses = u_device_get_view_poses;
-	wh->base.destroy = wmr_hmd_destroy;
 	wh->base.name = XRT_DEVICE_GENERIC_HMD;
-	wh->base.device_type = XRT_DEVICE_TYPE_HMD;
 	wh->log_level = log_level;
 
 	wh->left_view_y_offset = debug_get_num_option_left_view_y_offset();
@@ -2079,7 +2094,6 @@ wmr_hmd_create(enum wmr_headset_type hmd_type,
 
 	wh->base.hmd->distortion.models = XRT_DISTORTION_MODEL_COMPUTE;
 	wh->base.hmd->distortion.preferred = XRT_DISTORTION_MODEL_COMPUTE;
-	wh->base.compute_distortion = compute_distortion_wmr;
 	u_distortion_mesh_fill_in_compute(&wh->base);
 
 	// Set initial HMD screen power state.

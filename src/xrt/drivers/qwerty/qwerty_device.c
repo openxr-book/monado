@@ -214,6 +214,16 @@ qwerty_destroy(struct xrt_device *xd)
 	u_device_free(xd);
 }
 
+static const struct xrt_device_interface qwerty_hmd_impl = {
+	.name = "qwerty_hmd",
+
+	.update_inputs = qwerty_update_inputs,
+	.get_tracked_pose = qwerty_get_tracked_pose,
+	.get_view_poses = u_device_get_view_poses,
+	.compute_distortion = u_distortion_mesh_none,
+	.destroy = qwerty_destroy,
+};
+
 struct qwerty_hmd *
 qwerty_hmd_create(void)
 {
@@ -231,7 +241,8 @@ qwerty_hmd_create(void)
 
 	struct xrt_device *xd = &qd->base;
 	xd->name = XRT_DEVICE_GENERIC_HMD;
-	xd->device_type = XRT_DEVICE_TYPE_HMD;
+
+	u_device_init(xd, &qwerty_hmd_impl, XRT_DEVICE_TYPE_HMD);
 
 	snprintf(xd->str, XRT_DEVICE_NAME_LEN, QWERTY_HMD_STR);
 	snprintf(xd->serial, XRT_DEVICE_NAME_LEN, QWERTY_HMD_STR);
@@ -259,14 +270,18 @@ qwerty_hmd_create(void)
 
 	xd->inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;
 
-	xd->update_inputs = qwerty_update_inputs;
-	xd->get_tracked_pose = qwerty_get_tracked_pose;
-	xd->get_view_poses = u_device_get_view_poses;
-	xd->destroy = qwerty_destroy;
 	u_distortion_mesh_set_none(xd); // Fill in xd->compute_distortion()
 
 	return qh;
 }
+
+static const struct xrt_device_interface qwerty_controller_impl = {
+	.name = "qwerty_controller",
+	.update_inputs = qwerty_update_inputs,
+	.get_tracked_pose = qwerty_get_tracked_pose,
+	.set_output = qwerty_set_output,
+	.destroy = qwerty_destroy,
+};
 
 struct qwerty_controller *
 qwerty_controller_create(bool is_left, struct qwerty_hmd *qhmd)
@@ -285,8 +300,10 @@ qwerty_controller_create(bool is_left, struct qwerty_hmd *qhmd)
 
 	struct xrt_device *xd = &qd->base;
 
+	u_device_init(xd, &qwerty_controller_impl,
+		is_left ? XRT_DEVICE_TYPE_LEFT_HAND_CONTROLLER : XRT_DEVICE_TYPE_RIGHT_HAND_CONTROLLER);
+
 	xd->name = XRT_DEVICE_SIMPLE_CONTROLLER;
-	xd->device_type = is_left ? XRT_DEVICE_TYPE_LEFT_HAND_CONTROLLER : XRT_DEVICE_TYPE_RIGHT_HAND_CONTROLLER;
 
 	char *controller_name = is_left ? QWERTY_LEFT_STR : QWERTY_RIGHT_STR;
 	snprintf(xd->str, XRT_DEVICE_NAME_LEN, "%s", controller_name);
@@ -301,11 +318,6 @@ qwerty_controller_create(bool is_left, struct qwerty_hmd *qhmd)
 	xd->inputs[QWERTY_GRIP].name = XRT_INPUT_SIMPLE_GRIP_POSE;
 	xd->inputs[QWERTY_AIM].name = XRT_INPUT_SIMPLE_AIM_POSE; //!< @todo: aim input not implemented
 	xd->outputs[QWERTY_VIBRATION].name = XRT_OUTPUT_NAME_SIMPLE_VIBRATION;
-
-	xd->update_inputs = qwerty_update_inputs;
-	xd->get_tracked_pose = qwerty_get_tracked_pose;
-	xd->set_output = qwerty_set_output;
-	xd->destroy = qwerty_destroy;
 
 	return qc;
 }

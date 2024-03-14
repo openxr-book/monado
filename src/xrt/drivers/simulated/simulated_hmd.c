@@ -25,6 +25,7 @@
 
 #include "simulated_interface.h"
 
+#include <assert.h>
 #include <stdio.h>
 
 
@@ -53,6 +54,7 @@ struct simulated_hmd
 	enum simulated_movement movement;
 };
 
+static const struct xrt_device_interface impl;
 
 /*
  *
@@ -63,6 +65,7 @@ struct simulated_hmd
 static inline struct simulated_hmd *
 simulated_hmd(struct xrt_device *xdev)
 {
+	assert(xdev->impl == &impl);
 	return (struct simulated_hmd *)xdev;
 }
 
@@ -171,6 +174,14 @@ simulated_ref_space_usage(struct xrt_device *xdev,
 	return XRT_SUCCESS;
 }
 
+static const struct xrt_device_interface impl = {
+    .name = "Simulated hmd",
+    .destroy = simulated_hmd_destroy,
+    .get_tracked_pose = simulated_hmd_get_tracked_pose,
+    .get_view_poses = u_device_get_view_poses,
+    .ref_space_usage = simulated_ref_space_usage,
+    .compute_distortion = u_distortion_mesh_none,
+};
 
 /*
  *
@@ -190,13 +201,10 @@ simulated_hmd_create(enum simulated_movement movement, const struct xrt_pose *ce
 	enum u_device_alloc_flags flags =
 	    (enum u_device_alloc_flags)(U_DEVICE_ALLOC_HMD | U_DEVICE_ALLOC_TRACKING_NONE);
 	struct simulated_hmd *hmd = U_DEVICE_ALLOCATE(struct simulated_hmd, flags, 1, 0);
-	hmd->base.update_inputs = u_device_noop_update_inputs;
-	hmd->base.get_tracked_pose = simulated_hmd_get_tracked_pose;
-	hmd->base.get_view_poses = u_device_get_view_poses;
-	hmd->base.ref_space_usage = simulated_ref_space_usage;
-	hmd->base.destroy = simulated_hmd_destroy;
+
+	u_device_init(&hmd->base, &impl, XRT_DEVICE_TYPE_HMD);
+
 	hmd->base.name = XRT_DEVICE_GENERIC_HMD;
-	hmd->base.device_type = XRT_DEVICE_TYPE_HMD;
 	hmd->base.ref_space_usage_supported = true;
 	hmd->pose.orientation.w = 1.0f; // All other values set to zero.
 	hmd->center = *center;

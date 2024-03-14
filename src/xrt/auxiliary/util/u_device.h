@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include "xrt/interfaces/device.h"
 #include "xrt/xrt_compiler.h"
 #include "xrt/xrt_device.h"
 #include "xrt/xrt_tracking.h"
@@ -97,6 +98,15 @@ u_device_dump_config(struct xrt_device *xdev, const char *prefix, const char *pr
 #define U_DEVICE_ALLOCATE(type, flags, input_count, output_count)                                                      \
 	((type *)u_device_allocate(flags, sizeof(type), input_count, output_count))
 
+/*!
+ * Helper function to initialize a device with an interface
+ *
+ * Depending on the type of the device, certain functions in the interface might be mandatory.
+ *
+ * @ingroup aux_util
+ */
+void
+u_device_init(struct xrt_device *xdev, const struct xrt_device_interface *impl, enum xrt_device_type type);
 
 /*!
  * Helper function to allocate a device plus inputs in the same allocation
@@ -171,16 +181,6 @@ u_device_get_view_poses(struct xrt_device *xdev,
  * No-op implementation of functions.
  *
  */
-
-/*!
- * Noop function for @ref xrt_device::update_inputs,
- * should only be used from a device with any inputs.
- *
- * @ingroup aux_util
- */
-void
-u_device_noop_update_inputs(struct xrt_device *xdev);
-
 
 /*
  *

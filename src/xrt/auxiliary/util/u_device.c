@@ -225,6 +225,18 @@ u_device_setup_split_side_by_side(struct xrt_device *xdev, const struct u_device
 	return true;
 }
 
+void
+u_device_init(struct xrt_device *xdev, const struct xrt_device_interface *impl, enum xrt_device_type type)
+{
+	// Mandatory functions for all types
+	assert(impl->destroy);
+
+	// TODO validate impl depending on type
+
+	xdev->impl = impl;
+	xdev->device_type = type;
+}
+
 void *
 u_device_allocate(enum u_device_alloc_flags flags, size_t size, size_t input_count, size_t output_count)
 {
@@ -422,19 +434,6 @@ u_device_get_view_poses(struct xrt_device *xdev,
 	for (uint32_t i = 0; i < view_count; i++) {
 		u_device_get_view_pose(default_eye_relation, i, &out_poses[i]);
 	}
-}
-
-
-/*
- *
- * No-op implementation of functions.
- *
- */
-
-void
-u_device_noop_update_inputs(struct xrt_device *xdev)
-{
-	// Empty, should only be used from a device without any inputs.
 }
 
 
