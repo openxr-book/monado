@@ -111,11 +111,14 @@ enum vive_controller_input_index
  * Helper functions.
  *
  */
+static const struct xrt_device_interface wand_impl;
+static const struct xrt_device_interface controller_impl;
+static const struct xrt_device_interface tracker_impl;
 
 static inline struct vive_controller_device *
 vive_controller_device(struct xrt_device *xdev)
 {
-	assert(xdev);
+	assert(xdev->impl == &wand_impl || xdev->impl == &controller_impl || xdev->impl == &tracker_impl);
 	struct vive_controller_device *ret = (struct vive_controller_device *)xdev;
 	return ret;
 }
@@ -1038,6 +1041,31 @@ vive_controller_setup_ui(struct vive_controller_device *d)
 		(d->base.inputs[VIVE_CONTROLLER_INDEX_##NAME].name = XRT_INPUT_INDEX_##NAME2);                         \
 	} while (0)
 
+static const struct xrt_device_interface wand_impl = {
+    .name = "Vive wand controller",
+    .destroy = vive_controller_device_destroy,
+    .update_inputs = vive_controller_device_wand_update_inputs,
+    .get_tracked_pose = vive_controller_device_get_tracked_pose,
+    .set_output = vive_controller_device_set_output,
+};
+
+static const struct xrt_device_interface controller_impl = {
+    .name = "Vive controller",
+    .destroy = vive_controller_device_destroy,
+    .update_inputs = vive_controller_device_index_update_inputs,
+    .get_tracked_pose = vive_controller_device_get_tracked_pose,
+    .set_output = vive_controller_device_set_output,
+    .get_hand_tracking = vive_controller_get_hand_tracking,
+};
+
+static const struct xrt_device_interface tracker_impl = {
+    .name = "Vive tracker",
+    .destroy = vive_controller_device_destroy,
+    .update_inputs = u_device_noop_update_inputs,
+    .get_tracked_pose = vive_controller_device_get_tracked_pose,
+    .set_output = vive_controller_device_set_output,
+};
+
 struct vive_controller_device *
 vive_controller_create(struct os_hid_device *controller_hid, enum watchman_gen watchman_gen, int controller_num)
 {
@@ -1082,10 +1110,6 @@ vive_controller_create(struct os_hid_device *controller_hid, enum watchman_gen w
 	d->config.imu.gyro_bias.z = 0.0f;
 
 	d->controller_hid = controller_hid;
-
-	d->base.destroy = vive_controller_device_destroy;
-	d->base.get_tracked_pose = vive_controller_device_get_tracked_pose;
-	d->base.set_output = vive_controller_device_set_output;
 
 	// Have to init before destroy is called.
 	os_mutex_init(&d->lock);
@@ -1132,12 +1156,10 @@ vive_controller_create(struct os_hid_device *controller_hid, enum watchman_gen w
 
 		d->base.outputs[0].name = XRT_OUTPUT_NAME_VIVE_HAPTIC;
 
-		d->base.update_inputs = vive_controller_device_wand_update_inputs;
-
 		d->base.binding_profiles = vive_binding_profiles_wand;
 		d->base.binding_profile_count = vive_binding_profiles_wand_count;
 
-		d->base.device_type = XRT_DEVICE_TYPE_ANY_HAND_CONTROLLER;
+		u_device_init(&d->base, &wand_impl, XRT_DEVICE_TYPE_ANY_HAND_CONTROLLER);
 	} else if (d->config.variant == CONTROLLER_INDEX_LEFT || d->config.variant == CONTROLLER_INDEX_RIGHT) {
 		d->base.name = XRT_DEVICE_INDEX_CONTROLLER;
 
@@ -1165,41 +1187,33 @@ vive_controller_create(struct os_hid_device *controller_hid, enum watchman_gen w
 
 		d->base.outputs[0].name = XRT_OUTPUT_NAME_INDEX_HAPTIC;
 
-		d->base.update_inputs = vive_controller_device_index_update_inputs;
-
-		d->base.get_hand_tracking = vive_controller_get_hand_tracking;
-
 		d->base.binding_profiles = vive_binding_profiles_index;
 		d->base.binding_profile_count = vive_binding_profiles_index_count;
 
 		if (d->config.variant == CONTROLLER_INDEX_LEFT) {
-			d->base.device_type = XRT_DEVICE_TYPE_LEFT_HAND_CONTROLLER;
+			u_device_init(&d->base, &controller_impl, XRT_DEVICE_TYPE_LEFT_HAND_CONTROLLER);
 			d->base.inputs[VIVE_CONTROLLER_HAND_TRACKING].name = XRT_INPUT_GENERIC_HAND_TRACKING_LEFT;
 			snprintf(d->base.str, XRT_DEVICE_NAME_LEN, "Valve Index Left Controller (vive)");
 		} else if (d->config.variant == CONTROLLER_INDEX_RIGHT) {
-			d->base.device_type = XRT_DEVICE_TYPE_RIGHT_HAND_CONTROLLER;
+			u_device_init(&d->base, &controller_impl, XRT_DEVICE_TYPE_RIGHT_HAND_CONTROLLER);
 			d->base.inputs[VIVE_CONTROLLER_HAND_TRACKING].name = XRT_INPUT_GENERIC_HAND_TRACKING_RIGHT;
 			snprintf(d->base.str, XRT_DEVICE_NAME_LEN, "Valve Index Right Controller (vive)");
 		}
 	} else if (d->config.variant == CONTROLLER_TRACKER_GEN1) {
+		u_device_init(&d->base, &tracker_impl, XRT_DEVICE_TYPE_GENERIC_TRACKER);
 		d->base.name = XRT_DEVICE_VIVE_TRACKER_GEN1;
-		d->base.update_inputs = u_device_noop_update_inputs;
-		d->base.device_type = XRT_DEVICE_TYPE_GENERIC_TRACKER;
 		snprintf(d->base.str, XRT_DEVICE_NAME_LEN, "Vive Tracker Gen1 (vive)");
 	} else if (d->config.variant == CONTROLLER_TRACKER_GEN2) {
+		u_device_init(&d->base, &tracker_impl, XRT_DEVICE_TYPE_GENERIC_TRACKER);
 		d->base.name = XRT_DEVICE_VIVE_TRACKER_GEN2;
-		d->base.update_inputs = u_device_noop_update_inputs;
-		d->base.device_type = XRT_DEVICE_TYPE_GENERIC_TRACKER;
 		snprintf(d->base.str, XRT_DEVICE_NAME_LEN, "Vive Tracker Gen2 (vive)");
 	} else if (d->config.variant == CONTROLLER_TRACKER_GEN3) {
+		u_device_init(&d->base, &tracker_impl, XRT_DEVICE_TYPE_GENERIC_TRACKER);
 		d->base.name = XRT_DEVICE_VIVE_TRACKER_GEN3;
-		d->base.update_inputs = u_device_noop_update_inputs;
-		d->base.device_type = XRT_DEVICE_TYPE_GENERIC_TRACKER;
 		snprintf(d->base.str, XRT_DEVICE_NAME_LEN, "Vive Tracker Gen3 (vive)");
 	} else if (d->config.variant == CONTROLLER_TRACKER_TUNDRA) {
+		u_device_init(&d->base, &tracker_impl, XRT_DEVICE_TYPE_GENERIC_TRACKER);
 		d->base.name = XRT_DEVICE_VIVE_TRACKER_TUNDRA;
-		d->base.update_inputs = u_device_noop_update_inputs;
-		d->base.device_type = XRT_DEVICE_TYPE_GENERIC_TRACKER;
 		snprintf(d->base.str, XRT_DEVICE_NAME_LEN, "Tundra Tracker Gen3 (vive)");
 	} else {
 		d->base.name = XRT_DEVICE_GENERIC_HMD;

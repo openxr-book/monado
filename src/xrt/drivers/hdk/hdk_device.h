@@ -45,15 +45,8 @@ struct hdk_device
 	bool quat_valid;
 };
 
-static inline struct hdk_device *
-hdk_device(struct xrt_device *xdev)
-{
-	return (struct hdk_device *)xdev;
-}
-
 struct hdk_device *
 hdk_device_create(struct os_hid_device *dev, enum HDK_VARIANT variant);
-
 
 /*
  *

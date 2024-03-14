@@ -65,9 +65,12 @@ struct ht_device
 	enum u_logging_level log_level;
 };
 
+static const struct xrt_device_interface impl;
+
 static inline struct ht_device *
 ht_device(struct xrt_device *xdev)
 {
+	assert(xdev->impl == &impl);
 	return (struct ht_device *)xdev;
 }
 
@@ -178,6 +181,13 @@ ht_device_destroy(struct xrt_device *xdev)
 	u_device_free(&htd->base);
 }
 
+static const struct xrt_device_interface impl = {
+    .name = "Camera based hand tracker",
+    .destroy = ht_device_destroy,
+    .update_inputs = u_device_noop_update_inputs,
+    .get_hand_tracking = ht_device_get_hand_tracking,
+};
+
 static struct ht_device *
 ht_device_create_common(struct t_stereo_camera_calibration *calib,
                         bool own_xfctx,
@@ -194,6 +204,8 @@ ht_device_create_common(struct t_stereo_camera_calibration *calib,
 	// Allocate device
 	struct ht_device *htd = U_DEVICE_ALLOCATE(struct ht_device, flags, num_hands, 0);
 
+	u_device_init(&htd->base, &impl, XRT_DEVICE_TYPE_HAND_TRACKER);
+
 	// Setup logging first
 	htd->log_level = debug_get_log_option_ht_log();
 
@@ -208,10 +220,6 @@ ht_device_create_common(struct t_stereo_camera_calibration *calib,
 	htd->base.tracking_origin->offset.position.z = 0.0f;
 	htd->base.tracking_origin->offset.orientation.w = 1.0f;
 
-	htd->base.update_inputs = u_device_noop_update_inputs;
-	htd->base.get_hand_tracking = ht_device_get_hand_tracking;
-	htd->base.destroy = ht_device_destroy;
-
 	snprintf(htd->base.str, XRT_DEVICE_NAME_LEN, "Camera based Hand Tracker");
 	snprintf(htd->base.serial, XRT_DEVICE_NAME_LEN, "Camera based Hand Tracker");
 
@@ -220,7 +228,6 @@ ht_device_create_common(struct t_stereo_camera_calibration *calib,
 
 	// Yes, you need all of these. Yes, I tried disabling them all one at a time. You need all of these.
 	htd->base.name = XRT_DEVICE_HAND_TRACKER;
-	htd->base.device_type = XRT_DEVICE_TYPE_HAND_TRACKER;
 	htd->base.orientation_tracking_supported = true;
 	htd->base.position_tracking_supported = true;
 	htd->base.hand_tracking_supported = true;

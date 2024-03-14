@@ -225,6 +225,18 @@ u_device_setup_split_side_by_side(struct xrt_device *xdev, const struct u_device
 	return true;
 }
 
+void
+u_device_init(struct xrt_device *xdev, const struct xrt_device_interface *impl, enum xrt_device_type type)
+{
+	// Mandatory functions for all types
+	assert(impl->destroy);
+
+	// TODO validate impl depending on type
+
+	xdev->impl = impl;
+	xdev->device_type = type;
+}
+
 void *
 u_device_allocate(enum u_device_alloc_flags flags, size_t size, size_t input_count, size_t output_count)
 {

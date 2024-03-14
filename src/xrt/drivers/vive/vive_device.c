@@ -44,9 +44,12 @@
 static bool
 vive_mainboard_power_off(struct vive_device *d);
 
+static const struct xrt_device_interface impl;
+
 static inline struct vive_device *
 vive_device(struct xrt_device *xdev)
 {
+	assert(xdev->impl == &impl);
 	return (struct vive_device *)xdev;
 }
 
@@ -990,7 +993,6 @@ vive_set_trackers_status(struct vive_device *d, struct vive_tracking_status stat
 	d->base.orientation_tracking_supported = dof3_enabled || slam_enabled;
 	d->base.position_tracking_supported = slam_enabled;
 	d->base.hand_tracking_supported = false; // this is handled by a separate hand device
-	d->base.device_type = XRT_DEVICE_TYPE_HMD;
 
 	d->tracking.slam_enabled = slam_enabled;
 	d->tracking.hand_enabled = hand_enabled;
@@ -1052,6 +1054,15 @@ precompute_sensor_transforms(struct vive_device *d)
 	d->P_imu_me = P_imuxr_me;
 }
 
+static const struct xrt_device_interface impl = {
+    .name = "Vive hmd",
+    .destroy = vive_device_destroy,
+    .update_inputs = vive_device_update_inputs,
+    .get_tracked_pose = vive_device_get_tracked_pose,
+    .get_view_poses = vive_device_get_view_poses,
+    .compute_distortion = compute_distortion,
+};
+
 struct vive_device *
 vive_device_create(struct os_hid_device *mainboard_dev,
                    struct os_hid_device *sensors_dev,
@@ -1066,16 +1077,14 @@ vive_device_create(struct os_hid_device *mainboard_dev,
 	    (enum u_device_alloc_flags)(U_DEVICE_ALLOC_HMD | U_DEVICE_ALLOC_TRACKING_NONE);
 	struct vive_device *d = U_DEVICE_ALLOCATE(struct vive_device, flags, 1, 0);
 
+	u_device_init(&d->base, &impl, XRT_DEVICE_TYPE_HMD);
+
 	m_relation_history_create(&d->fusion.relation_hist);
 
 	size_t idx = 0;
 	d->base.hmd->blend_modes[idx++] = XRT_BLEND_MODE_OPAQUE;
 	d->base.hmd->blend_mode_count = idx;
 
-	d->base.update_inputs = vive_device_update_inputs;
-	d->base.get_tracked_pose = vive_device_get_tracked_pose;
-	d->base.get_view_poses = vive_device_get_view_poses;
-	d->base.destroy = vive_device_destroy;
 	d->base.inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;
 	d->base.name = XRT_DEVICE_GENERIC_HMD;
 	d->mainboard_dev = mainboard_dev;
@@ -1091,7 +1100,6 @@ vive_device_create(struct os_hid_device *mainboard_dev,
 
 	d->base.hmd->distortion.models = XRT_DISTORTION_MODEL_COMPUTE;
 	d->base.hmd->distortion.preferred = XRT_DISTORTION_MODEL_COMPUTE;
-	d->base.compute_distortion = compute_distortion;
 
 	if (d->mainboard_dev) {
 		vive_mainboard_power_on(d);

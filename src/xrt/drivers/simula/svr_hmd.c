@@ -55,9 +55,12 @@ struct svr_hmd
 	enum u_logging_level log_level;
 };
 
+static const struct xrt_device_interface impl;
+
 static inline struct svr_hmd *
 svr_hmd(struct xrt_device *xdev)
 {
+	assert(xdev->impl == &impl);
 	return (struct svr_hmd *)xdev;
 }
 
@@ -203,6 +206,14 @@ svr_mesh_calc(struct xrt_device *xdev, uint32_t view, float u, float v, struct x
 	return true;
 }
 
+static const struct xrt_device_interface impl = {
+    .name = "simulavr hmd",
+    .destroy = svr_hmd_destroy,
+    .update_inputs = u_device_noop_update_inputs,
+    .get_tracked_pose = svr_hmd_get_tracked_pose,
+    .get_view_poses = svr_hmd_get_view_poses,
+    .compute_distortion = svr_mesh_calc,
+};
 
 /*
  *
@@ -217,24 +228,17 @@ svr_hmd_create(struct svr_two_displays_distortion *distortion)
 	    (enum u_device_alloc_flags)(U_DEVICE_ALLOC_HMD | U_DEVICE_ALLOC_TRACKING_NONE);
 	struct svr_hmd *svr = U_DEVICE_ALLOCATE(struct svr_hmd, flags, 1, 0);
 
+	u_device_init(&svr->base, &impl, XRT_DEVICE_TYPE_HMD);
+
 	// Slow copy. Could refcount it but who cares, this runs once.
 	svr->distortion = *distortion;
 
 	svr->log_level = debug_get_log_option_svr_log();
-
-
-
-	svr->base.update_inputs = u_device_noop_update_inputs;
-	svr->base.get_tracked_pose = svr_hmd_get_tracked_pose;
-	svr->base.get_view_poses = svr_hmd_get_view_poses;
-	svr->base.destroy = svr_hmd_destroy;
 	svr->base.name = XRT_DEVICE_GENERIC_HMD;
 
 	// Sorta a lie, we have to do this to make the state tracker happy. (Should multi.c override these?)
 	svr->base.orientation_tracking_supported = true;
 	svr->base.position_tracking_supported = true;
-
-	svr->base.device_type = XRT_DEVICE_TYPE_HMD;
 
 	svr->base.hmd->screens[0].nominal_frame_interval_ns = (uint64_t)time_s_to_ns(1.0f / 90.0f);
 
@@ -264,12 +268,10 @@ svr_hmd_create(struct svr_two_displays_distortion *distortion)
 	u_distortion_mesh_set_none(&svr->base);
 	svr->base.hmd->distortion.models = XRT_DISTORTION_MODEL_COMPUTE;
 	svr->base.hmd->distortion.preferred = XRT_DISTORTION_MODEL_COMPUTE;
-	svr->base.compute_distortion = svr_mesh_calc;
 
 	// Setup variable tracker.
 	u_var_add_root(svr, "Simula HMD", true);
 	svr->base.orientation_tracking_supported = true;
-	svr->base.device_type = XRT_DEVICE_TYPE_HMD;
 
 	size_t idx = 0;
 

@@ -160,6 +160,16 @@ sample_hmd_get_visibility_mask(struct xrt_device *xdev,
 	return XRT_SUCCESS;
 }
 
+static const struct xrt_device_interface sample_impl = {
+	.name = "sample",
+	.update_inputs = sample_hmd_update_inputs,
+	.get_tracked_pose = sample_hmd_get_tracked_pose,
+	.get_view_poses = sample_hmd_get_view_poses,
+	.compute_distortion = u_distortion_mesh_none,
+	.get_visibility_mask = sample_hmd_get_visibility_mask,
+	.destroy = sample_hmd_destroy,
+};
+
 struct xrt_device *
 sample_hmd_create(void)
 {
@@ -169,16 +179,12 @@ sample_hmd_create(void)
 
 	struct sample_hmd *hmd = U_DEVICE_ALLOCATE(struct sample_hmd, flags, 1, 0);
 
+	u_device_init(&hmd->base, &sample_impl, XRT_DEVICE_TYPE_HMD);
+
 	// This list should be ordered, most preferred first.
 	size_t idx = 0;
 	hmd->base.hmd->blend_modes[idx++] = XRT_BLEND_MODE_OPAQUE;
 	hmd->base.hmd->blend_mode_count = idx;
-
-	hmd->base.update_inputs = sample_hmd_update_inputs;
-	hmd->base.get_tracked_pose = sample_hmd_get_tracked_pose;
-	hmd->base.get_view_poses = sample_hmd_get_view_poses;
-	hmd->base.get_visibility_mask = sample_hmd_get_visibility_mask;
-	hmd->base.destroy = sample_hmd_destroy;
 
 	// Distortion information, fills in xdev->compute_distortion().
 	u_distortion_mesh_set_none(&hmd->base);
@@ -258,7 +264,6 @@ sample_hmd_create(void)
 	// Setup variable tracker: Optional but useful for debugging
 	u_var_add_root(hmd, "Sample HMD", true);
 	u_var_add_log_level(hmd, &hmd->log_level, "log_level");
-
 
 	return &hmd->base;
 }

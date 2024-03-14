@@ -204,16 +204,18 @@ check_error(struct rs_source *rs, rs2_error *e, const char *file, int line)
 	exit(EXIT_FAILURE);
 }
 
-
 /*
  *
  * Device functionality
  *
  */
 
+static const struct xrt_device_interface impl;
+
 static inline struct rs_hdev *
 rs_hdev_from_xdev(struct xrt_device *xdev)
 {
+	assert(xdev->impl == &impl);
 	struct rs_hdev *rh = container_of(xdev, struct rs_hdev, xdev);
 	return rh;
 }
@@ -978,6 +980,12 @@ rs_source_node_destroy(struct xrt_frame_node *node)
 	free(rs);
 }
 
+static const struct xrt_device_interface impl = {
+    .name = "RealSense host-SLAM tracker",
+    .destroy = rs_hdev_destroy,
+    .update_inputs = u_device_noop_update_inputs,
+    .get_tracked_pose = rs_hdev_get_tracked_pose,
+};
 
 /*
  *
@@ -989,13 +997,15 @@ struct xrt_device *
 rs_hdev_create(struct xrt_prober *xp, int device_idx)
 {
 	struct rs_hdev *rh = U_DEVICE_ALLOCATE(struct rs_hdev, U_DEVICE_ALLOC_TRACKING_NONE, 1, 0);
+
+	u_device_init(&rh->xdev, &impl, XRT_DEVICE_TYPE_GENERIC_TRACKER);
+
 	rh->log_level = debug_get_log_option_rs_log();
 	rh->pose = (struct xrt_pose){{0, 0, 0, 1}, {0, 0, 0}};
 	rh->offset = (struct xrt_pose){{0, 0, 0, 1}, {0, 0, 0}};
 
 	struct xrt_device *xd = &rh->xdev;
 	xd->name = XRT_DEVICE_REALSENSE;
-	xd->device_type = XRT_DEVICE_TYPE_GENERIC_TRACKER;
 
 	snprintf(xd->str, XRT_DEVICE_NAME_LEN, "%s", RS_DEVICE_STR);
 	snprintf(xd->serial, XRT_DEVICE_NAME_LEN, "%s", RS_DEVICE_STR);
@@ -1007,10 +1017,6 @@ rs_hdev_create(struct xrt_prober *xp, int device_idx)
 
 	xd->orientation_tracking_supported = true;
 	xd->position_tracking_supported = true;
-
-	xd->update_inputs = u_device_noop_update_inputs;
-	xd->get_tracked_pose = rs_hdev_get_tracked_pose;
-	xd->destroy = rs_hdev_destroy;
 
 	// Setup UI
 	u_var_add_root(rh, "RealSense Device", false);

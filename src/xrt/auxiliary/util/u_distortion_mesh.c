@@ -455,9 +455,6 @@ u_distortion_mesh_set_none(struct xrt_device *xdev)
 
 	u_distortion_mesh_fill_in_none(xdev);
 
-	// Make sure that the xdev implements the compute_distortion function.
-	xdev->compute_distortion = u_distortion_mesh_none;
-
 	// Make the target completely usable.
 	target->distortion.models |= XRT_DISTORTION_MODEL_COMPUTE;
 }
@@ -472,7 +469,7 @@ u_distortion_mesh_set_none(struct xrt_device *xdev)
 void
 u_distortion_mesh_fill_in_compute(struct xrt_device *xdev)
 {
-	func_calc calc = xdev->compute_distortion;
+	func_calc calc = xdev->impl->compute_distortion;
 	if (calc == NULL) {
 		u_distortion_mesh_fill_in_none(xdev);
 		return;

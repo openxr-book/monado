@@ -641,7 +641,7 @@ handle_found_device(
 
 	if (i + 1 > xdev_count) {
 		P_ERROR(p, "Too many devices, closing '%s'", xdev->str);
-		xdev->destroy(xdev);
+		xdev->impl->destroy(xdev);
 		return;
 	}
 
@@ -649,7 +649,7 @@ handle_found_device(
 	if (xdev->device_type == XRT_DEVICE_TYPE_HMD) {
 		if (*have_hmd) {
 			P_ERROR(p, "Too many HMDs, closing '%s'", xdev->str);
-			xdev->destroy(xdev);
+			xdev->impl->destroy(xdev);
 			return;
 		}
 		*have_hmd = true;

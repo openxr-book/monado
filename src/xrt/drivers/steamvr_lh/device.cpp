@@ -182,24 +182,57 @@ device_bouncer(struct xrt_device *xdev, Args... args)
 HmdDevice::HmdDevice(const DeviceBuilder &builder) : Device(builder)
 {
 	this->name = XRT_DEVICE_GENERIC_HMD;
-	this->device_type = XRT_DEVICE_TYPE_HMD;
 	this->container_handle = 0;
 	this->stage_supported = true;
 
-#define SETUP_MEMBER_FUNC(name) this->xrt_device::name = &device_bouncer<HmdDevice, &HmdDevice::name>
-	SETUP_MEMBER_FUNC(get_view_poses);
-	SETUP_MEMBER_FUNC(compute_distortion);
+#define SETUP_MEMBER_FUNC(name) &device_bouncer<HmdDevice, &HmdDevice::name>
+	static const struct xrt_device_interface steamvr_hmd_impl = {
+	    "SteamVR hmd", // name
+	    // destroy
+	    [](xrt_device *xdev) {
+		    auto *dev = static_cast<Device *>(xdev);
+		    dev->deactivate();
+		    delete dev;
+	    },
+	    SETUP_MEMBER_FUNC(update_inputs), SETUP_MEMBER_FUNC(get_tracked_pose),
+	    nullptr, // get_hand_tracking
+	    nullptr, // get_face_tracking
+	    nullptr, // set_output
+	    SETUP_MEMBER_FUNC(get_view_poses), SETUP_MEMBER_FUNC(compute_distortion),
+	    nullptr, // get_visibility_mask
+	    nullptr, // ref_space_usage
+	    nullptr, // is_form_factor_available
+	};
 #undef SETUP_MEMBER_FUNC
+
+	u_device_init(this, &steamvr_hmd_impl, XRT_DEVICE_TYPE_HMD);
 }
 
 ControllerDevice::ControllerDevice(vr::PropertyContainerHandle_t handle, const DeviceBuilder &builder) : Device(builder)
 {
-	this->device_type = XRT_DEVICE_TYPE_UNKNOWN;
 	this->container_handle = handle;
-#define SETUP_MEMBER_FUNC(name) this->xrt_device::name = &device_bouncer<ControllerDevice, &ControllerDevice::name>
-	SETUP_MEMBER_FUNC(set_output);
-	SETUP_MEMBER_FUNC(get_hand_tracking);
+#define SETUP_MEMBER_FUNC(name) &device_bouncer<ControllerDevice, &ControllerDevice::name>
+	static const struct xrt_device_interface steamvr_controller_impl = {
+	    "SteamVR controller", // name
+	    // destroy
+	    [](xrt_device *xdev) {
+		    auto *dev = static_cast<Device *>(xdev);
+		    dev->deactivate();
+		    delete dev;
+	    },
+	    SETUP_MEMBER_FUNC(update_inputs), SETUP_MEMBER_FUNC(get_tracked_pose), SETUP_MEMBER_FUNC(get_hand_tracking),
+	    nullptr, // get_face_tracking
+	    SETUP_MEMBER_FUNC(set_output),
+	    nullptr, // get_view_poses
+	    nullptr, // compute_distortion
+	    nullptr, // get_visibility_mask
+	    nullptr, // ref_space_usage
+	    nullptr, // is_form_factor_available
+	};
 #undef SETUP_MEMBER_FUNC
+
+	// Device type is set later in `ControllerDevice::handle_property_write`
+	u_device_init(this, &steamvr_controller_impl, XRT_DEVICE_TYPE_UNKNOWN);
 }
 
 Device::~Device()
@@ -218,17 +251,6 @@ Device::Device(const DeviceBuilder &builder) : xrt_device({}), ctx(builder.ctx),
 	this->hand_tracking_supported = true;
 	this->force_feedback_supported = false;
 	this->form_factor_check_supported = false;
-
-#define SETUP_MEMBER_FUNC(name) this->xrt_device::name = &device_bouncer<Device, &Device::name>
-	SETUP_MEMBER_FUNC(update_inputs);
-	SETUP_MEMBER_FUNC(get_tracked_pose);
-#undef SETUP_MEMBER_FUNC
-
-	this->xrt_device::destroy = [](xrt_device *xdev) {
-		auto *dev = static_cast<Device *>(xdev);
-		dev->driver->Deactivate();
-		delete dev;
-	};
 
 	init_chaperone(builder.steam_install);
 }
@@ -698,6 +720,12 @@ Device::handle_properties(const vr::PropertyWrite_t *batch, uint32_t count)
 	for (uint32_t i = 0; i < count; ++i) {
 		handle_property_write(batch[i]);
 	}
+}
+
+void
+Device::deactivate()
+{
+	driver->Deactivate();
 }
 
 void

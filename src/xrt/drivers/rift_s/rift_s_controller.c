@@ -443,10 +443,19 @@ rift_s_update_input_vec2(struct rift_s_controller *ctrl, int index, int64_t when
 	ctrl->base.inputs[index].value.vec2.y = y;
 }
 
+static const struct xrt_device_interface impl;
+
+struct rift_s_controller *
+get_device(struct xrt_device *xdev)
+{
+	assert(xdev->impl == &impl);
+	return (struct rift_s_controller *)xdev;
+}
+
 static void
 rift_s_controller_update_inputs(struct xrt_device *xdev)
 {
-	struct rift_s_controller *ctrl = (struct rift_s_controller *)(xdev);
+	struct rift_s_controller *ctrl = get_device(xdev);
 
 	os_mutex_lock(&ctrl->mutex);
 
@@ -545,7 +554,7 @@ rift_s_controller_get_tracked_pose(struct xrt_device *xdev,
                                    uint64_t at_timestamp_ns,
                                    struct xrt_space_relation *out_relation)
 {
-	struct rift_s_controller *ctrl = (struct rift_s_controller *)(xdev);
+	struct rift_s_controller *ctrl = get_device(xdev);
 
 	if (name != XRT_INPUT_TOUCH_AIM_POSE && name != XRT_INPUT_TOUCH_GRIP_POSE) {
 		RIFT_S_ERROR("unknown pose name requested");
@@ -576,7 +585,7 @@ rift_s_controller_get_tracked_pose(struct xrt_device *xdev,
 static void
 rift_s_controller_destroy(struct xrt_device *xdev)
 {
-	struct rift_s_controller *ctrl = (struct rift_s_controller *)(xdev);
+	struct rift_s_controller *ctrl = get_device(xdev);
 
 	/* Tell the system this controller is going away */
 	rift_s_system_remove_controller(ctrl->sys, ctrl);
@@ -593,6 +602,15 @@ rift_s_controller_destroy(struct xrt_device *xdev)
 	u_device_free(&ctrl->base);
 }
 
+static const struct xrt_device_interface impl = {
+    .name = "Rift S controller",
+    .destroy = rift_s_controller_destroy,
+    .update_inputs = rift_s_controller_update_inputs,
+    .set_output = rift_s_controller_set_output,
+    .get_tracked_pose = rift_s_controller_get_tracked_pose,
+    .get_view_poses = u_device_get_view_poses,
+};
+
 struct rift_s_controller *
 rift_s_controller_create(struct rift_s_system *sys, enum xrt_device_type device_type)
 {
@@ -605,18 +623,14 @@ rift_s_controller_create(struct rift_s_system *sys, enum xrt_device_type device_
 		return NULL;
 	}
 
+	u_device_init(&ctrl->base, &impl, device_type);
+
 	/* Store a ref to the parent hmd, released in destroy */
 	rift_s_system_reference(&ctrl->sys, sys);
 
 	os_mutex_init(&ctrl->mutex);
 
-	ctrl->base.update_inputs = rift_s_controller_update_inputs;
-	ctrl->base.set_output = rift_s_controller_set_output;
-	ctrl->base.get_tracked_pose = rift_s_controller_get_tracked_pose;
-	ctrl->base.get_view_poses = u_device_get_view_poses;
-	ctrl->base.destroy = rift_s_controller_destroy;
 	ctrl->base.name = XRT_DEVICE_TOUCH_CONTROLLER;
-	ctrl->base.device_type = device_type;
 
 	if (device_type == XRT_DEVICE_TYPE_LEFT_HAND_CONTROLLER) {
 		ctrl->device_type = RIFT_S_DEVICE_LEFT_CONTROLLER;

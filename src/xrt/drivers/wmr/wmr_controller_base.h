@@ -132,6 +132,12 @@ wmr_controller_base_init(struct wmr_controller_base *wcb,
                          enum u_logging_level log_level);
 
 void
+wmr_controller_base_get_tracked_pose(struct xrt_device *xdev,
+                                     enum xrt_input_name name,
+                                     uint64_t at_timestamp_ns,
+                                     struct xrt_space_relation *out_relation);
+
+void
 wmr_controller_base_deinit(struct wmr_controller_base *wcb);
 
 static inline void
