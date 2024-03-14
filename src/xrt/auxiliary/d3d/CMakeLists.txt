@@ -6,6 +6,7 @@ target_link_libraries(aux_d3d PUBLIC aux-includes xrt-interfaces ${DXGI_LIBRARY}
 
 # needed for format includes
 target_include_directories(aux_d3d PUBLIC ${Vulkan_INCLUDE_DIR})
+target_compile_definitions(aux_d3d PUBLIC WIL_ENABLE_EXCEPTIONS)
 
 if(XRT_HAVE_D3D11)
 	target_sources(

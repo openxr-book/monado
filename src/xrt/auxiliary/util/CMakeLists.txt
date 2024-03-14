@@ -127,6 +127,7 @@ target_link_libraries(
 if(WIN32)
 	target_sources(aux_util PRIVATE u_windows.c u_windows.h)
 	target_link_libraries(aux_util PRIVATE WIL::WIL)
+	target_compile_definitions(aux_util PUBLIC WIL_ENABLE_EXCEPTIONS)
 endif()
 
 # Only uses POSIX/Linux libraries, doesn't add anything extra.
