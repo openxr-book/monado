@@ -35,6 +35,11 @@ ifeq (,$(findstring linux,$(DEB_HOST_ARCH_OS)))
 CONFIG_ARGS += -DXRT_FEATURE_SERVICE=OFF
 endif
 
+ifneq (,$(filter $(DEB_HOST_ARCH_CPU), i386))
+export DEB_CFLAGS_MAINT_APPEND += -ffloat-store
+export DEB_CXXFLAGS_MAINT_APPEND += -ffloat-store
+endif
+
 %:
 	dh $@
 

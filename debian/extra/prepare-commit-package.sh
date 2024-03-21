@@ -25,7 +25,7 @@ set -e
         echo "Appending custom revision suffix specified on command line: ${PKG_REVISION}"
         export PKG_REVISION
     else
-        PKG_REVISION=1~bpo11~ci$(date --utc "+%Y%m%d")
+        PKG_REVISION=1~bpo12~ci$(date --utc "+%Y%m%d")
         echo "Appending auto-generated revision suffix: ${PKG_REVISION}"
         export PKG_REVISION
     fi
