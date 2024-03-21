@@ -1,0 +1,95 @@
+monado (21.0.0~dfsg1-2~bpo11+1) bullseye-backports; urgency=medium
+
+  * Rebuild for bullseye-backports.
+  * d/control: Update for backport.
+  * d/gbp.conf: Update for backport
+
+ -- Rylie Pavlik <rylie@ryliepavlik.com>  Tue, 26 Oct 2021 17:04:56 -0500
+
+monado (21.0.0~dfsg1-2) unstable; urgency=medium
+
+  * d/control
+    - Add Build-Depends on libbsd-dev for pidfile support when
+      building service.
+    - Bump Standards-Version to 4.6.0, no changes required.
+    - Remove Build-Depends that we don't actually use.
+    - Exclude some dependencies on less-common arches to fix builds.
+  * d/copyright: Update
+  * Backport patch for upstream to fix FTBFS, closes: #997239
+  * Clean up/annotate patches
+  * Switch to pandoc from markdown for formatting changelog.
+
+ -- Rylie Pavlik <rylie@ryliepavlik.com>  Tue, 26 Oct 2021 16:59:16 -0500
+
+monado (21.0.0~dfsg1-1) unstable; urgency=medium
+
+  * New upstream version 21.0.0~dfsg1
+  * Fix gbp.conf for sid.
+  * Exclude bitmap icons for SteamVR driver due to unclear
+    license/source
+  * Disable building new SteamVR driver.
+  * d/control
+    - Fix Vcs- fields for sid
+    - Update metadata based on conformance results
+    - Update Standards-Version to 4.5.1 - no changes required.
+    - Add Build-Depends on gstreamer for video-file support
+  * d/copyright: Update
+  * Drop 0001-Fix-destdir-repetition-with-systemd-unit.patch:
+    merged upstream.
+  * Add patch to allow overriding package version
+  * d/rules: Provide the Debian version to the build
+
+ -- Rylie Pavlik <rylie@ryliepavlik.com>  Thu, 11 Feb 2021 15:36:12 -0600
+
+monado (0.3.0-3) unstable; urgency=medium
+
+  * Source-only upload.
+
+ -- Andrew Lee (李健秋) <ajqlee@debian.org>  Sat, 18 Jul 2020 07:58:47 +0800
+
+monado (0.3.0-2) experimental; urgency=medium
+
+  * Adjust build to use service-enabled mode on Linux.
+    - Adds a patch to fix systemd unit install location
+    - Adds a new binary package, monado-service, on Linux.
+
+ -- Rylie Pavlik <rylie@ryliepavlik.com>  Tue, 14 Jul 2020 16:01:24 -0500
+
+monado (0.3.0-1) unstable; urgency=medium
+
+  * New upstream version 0.3.0 - substantial upstream changes.
+  * Apply cme fixes.
+  * d/control:
+    - Fix Vcs-Browser, Vcs-Git
+    - Add Build-Depends on libx11-xcb-dev
+    - Revise package description now that conformance tests are released.
+    - Disable optional hidapi dependency on hurd
+    - Add Build-Depends: libdbus-1-dev and a Suggests for Bluetooth Low
+      Energy support
+  * d/copyright: Update
+  * d/rules:
+    - Disable IPC/service module for now.
+    - Fix/use all reproducibility flags.
+    - Configure to force system cJSON.
+    - Comment out flag only needed before Bullseye.
+    - Explicitly disable OpenHMD to avoid confusion/CI issues.
+    - Update for upstream config flags
+  * d/README.source: Document procedure for updating and backporting package
+  * docs: Bundle README.source
+  * docs: Ship upstream changelog.
+  * Update xml metadata description.
+
+ -- Rylie Pavlik <rylie@ryliepavlik.com>  Fri, 10 Jul 2020 16:53:54 -0500
+
+monado (0.1.0+git108.a8a4d8c3-2) unstable; urgency=medium
+
+  * Add patches to fix build on ppc64el, s390x, powerpc
+  * Rebuild to unblock migration.
+
+ -- Rylie Pavlik <rylie@ryliepavlik.com>  Thu, 09 Apr 2020 18:03:59 -0500
+
+monado (0.1.0+git108.a8a4d8c3-1) unstable; urgency=medium
+
+  * Initial release (Closes: #943486)
+
+ -- Rylie Pavlik <rylie@ryliepavlik.com>  Wed, 08 Apr 2020 10:11:01 -0500

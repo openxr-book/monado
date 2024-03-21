@@ -1,0 +1,12 @@
+tmp/
+libopenxr1-monado/
+monado-cli/
+monado-gui/
+monado-service/
+.debhelper/
+debhelper-build-stamp
+files
+*.debhelper.log
+*.substvars
+*.debhelper
+!patches/

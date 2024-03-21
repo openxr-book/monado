@@ -1,0 +1,23 @@
+monado (0.3.0-2) experimental; urgency=medium
+
+    This build of Monado on Linux supports running much of the runtime
+    in "service mode", with a systemd user service and socket activation
+    auto-starting it.
+
+    To enable this without logging out and back in, run:
+
+    systemctl --user enable monado
+    systemctl --user start monado.socket
+
+    If you do not do that, you will need to start monado-service manually
+    before running an OpenXR-based application.
+
+    To stop Monado, run:
+
+    systemctl --user stop monado.service
+
+    and run the following to allow manually running a monado-service instance:
+
+    systemctl --user stop monado.socket
+
+ -- Rylie Pavlik <rylie@ryliepavlik.com>  Tue, 14 Jul 2020 16:01:24 -0500

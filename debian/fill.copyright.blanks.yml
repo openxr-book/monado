@@ -1,0 +1,54 @@
+---
+debian/extra/:
+  license: CC0-1.0
+  skip: false
+doc/CHANGELOG.md:
+  license: CC0-1.0
+  skip: false
+doc/changes/:
+  copyright: 2020, Collabora, Ltd. and the Monado contributors
+  license: CC0-1.0
+  skip: true
+doc/changes/README.md:
+  copyright: 2020, Collabora, Ltd. and the Proclamation contributors
+  license: CC0-1.0
+  skip: false
+scripts/:
+  license: BSL-1.0
+  skip: false
+src/external/flexkalman/flexkalman/AbsolutePositionLeverArmMeasurement.h:
+  license: Apache-2.0 or BSL-1.0
+  skip: false
+src/external/flexkalman/flexkalman/SO3.h:
+  license: Apache-2.0 or BSL-1.0
+  skip: false
+src/external/imgui/imgui/imstb_rectpack.h:
+  override-license: Expat or Unlicense
+  skip: false
+src/external/imgui/imgui/imstb_textedit.h:
+  override-license: Expat or Unlicense
+  skip: false
+src/external/imgui/imgui/imstb_truetype.h:
+  override-license: Expat or Unlicense
+  skip: false
+src/external/imgui/imgui_monado/:
+  license: BSL-1.0
+  skip: false
+src/external/openvr_includes/openvr_driver.h:
+  override-copyright: 2015-2020, Valve Corporation
+  skip: false
+src/xrt:
+  license: BSL-1.0
+  skip: false
+src/xrt/auxiliary/math/m_quatexpmap.cpp:
+  license: Apache-2.0
+  skip: false
+src/xrt/drivers/north_star/distortion/:
+  license: BSD-3-clause
+  skip: false
+tests/tests_input_transform.cpp:
+  license: BSL-1.0
+  skip: false
+tests/tests_main.cpp:
+  license: BSL-1.0
+  skip: false
