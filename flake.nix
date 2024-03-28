@@ -20,9 +20,13 @@
         # See https://github.com/NixOS/nix/issues/7501 for a discussion on this
         clang
         cmake-format
+        codespell
         git
+        git-lfs
         gradle
         gradle-completion
+        include-what-you-use
+        opencv2
       ];
 
       nativeBuildInputsToUpstream = with pkgs; [
