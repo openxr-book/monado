@@ -35,6 +35,7 @@
         # If there are any buildInputs that are not in nixpkgs, add them here
         # buildInputs are any packages that are needed at runtime (i.e. dependencies)
         # Once they are upstreamed to nixpkgs master, remove them from this list
+        libdrm
       ];
       
       package = pkgs.monado.overrideAttrs (oldAttrs: {
