@@ -83,7 +83,7 @@ m_mat4_f64_view(const struct xrt_pose *pose, const struct xrt_vec3 *size, struct
 
 
 static inline struct xrt_matrix_4x4_f64 // Until clang-format-11 is on the CI.
-operator*(const struct xrt_matrix_4x4_f64 &a, const struct xrt_matrix_4x4_f64 &b)
+operator*(const struct xrt_matrix_4x4_f64 & a, const struct xrt_matrix_4x4_f64 & b)
 {
 	struct xrt_matrix_4x4_f64 ret = {{0}};
 	m_mat4_f64_multiply(&l, &r, &ret);

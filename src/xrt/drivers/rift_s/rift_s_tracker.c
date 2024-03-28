@@ -542,7 +542,7 @@ rift_s_tracker_imu_update(struct rift_s_tracker *t,
 	}
 }
 
-#define UPPER_32BITS(x) ((x)&0xffffffff00000000ULL)
+#define UPPER_32BITS(x) ((x) & 0xffffffff00000000ULL)
 
 void
 rift_s_tracker_push_slam_frames(struct rift_s_tracker *t,

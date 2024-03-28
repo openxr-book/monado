@@ -135,7 +135,7 @@ operator-(const struct xrt_vec2 &a, const struct xrt_vec2 &b)
 }
 
 static inline struct xrt_vec2 // Until clang-format-11 is on the CI.
-operator*(const struct xrt_vec2 &a, const struct xrt_vec2 &b)
+operator*(const struct xrt_vec2 & a, const struct xrt_vec2 & b)
 {
 	return m_vec2_mul(a, b);
 }

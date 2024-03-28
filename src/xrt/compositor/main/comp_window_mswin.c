@@ -54,7 +54,7 @@ static WCHAR szWindowData[] = L"MonadoWindow";
 		DWORD err = GetLastError();                                                                            \
 		char *buf = NULL;                                                                                      \
 		if (0 != FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM, NULL, err,        \
-		                        LANG_SYSTEM_DEFAULT, (LPSTR)&buf, 256, NULL)) {                                \
+		                        LANG_SYSTEM_DEFAULT, (LPSTR) & buf, 256, NULL)) {                              \
 			COMP_ERROR(C, MSG_WITH_PLACEHOLDER, buf);                                                      \
 			LocalFree(buf);                                                                                \
 		} else {                                                                                               \

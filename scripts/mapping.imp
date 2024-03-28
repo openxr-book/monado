@@ -51,6 +51,7 @@
 { symbol: ["XRT_FEATURE_OPENXR_LAYER_EQUIRECT1", "public", "\"xrt/xrt_config_build.h\"", "public"] },
 { symbol: ["XRT_FEATURE_OPENXR_LAYER_EQUIRECT2", "public", "\"xrt/xrt_config_build.h\"", "public"] },
 { symbol: ["XRT_FEATURE_OPENXR_LAYER_FB_ALPHA_BLEND", "public", "\"xrt/xrt_config_build.h\"", "public"] },
+{ symbol: ["XRT_FEATURE_OPENXR_LAYER_PASSTHROUGH", "public", "\"xrt/xrt_config_build.h\"", "public"] },
 { symbol: ["XRT_FEATURE_OPENXR_LAYER_FB_IMAGE_LAYOUT", "public", "\"xrt/xrt_config_build.h\"", "public"] },
 { symbol: ["XRT_FEATURE_OPENXR_LAYER_FB_SETTINGS", "public", "\"xrt/xrt_config_build.h\"", "public"] },
 { symbol: ["XRT_FEATURE_OPENXR_LAYER_FB_DEPTH_TEST", "public", "\"xrt/xrt_config_build.h\"", "public"] },
