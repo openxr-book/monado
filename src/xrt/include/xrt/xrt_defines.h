@@ -1567,6 +1567,13 @@ enum xrt_body_joint_set_type_fb
 	XRT_BODY_JOINT_SET_FULL_BODY_META,
 };
 
+// XR_META_body_tracking_fidelity
+enum xrt_body_tracking_fidelity_meta
+{
+	XRT_BODY_TRACKING_FIDELITY_LOW_META = 1,
+	XRT_BODY_TRACKING_FIDELITY_HIGH_META = 2,
+};
+
 // XR_FB_body_tracking
 struct xrt_body_skeleton_joint_fb
 {
@@ -1610,6 +1617,12 @@ struct xrt_base_body_joint_set_meta
 	float confidence;
 	uint32_t skeleton_changed_count;
 	bool is_active;
+
+	struct
+	{
+		// Requires XR_META_body_tracking_fidelity, @ref xrt_device::body_tracking_fidelity_supported
+		enum xrt_body_tracking_fidelity_meta fidelity_status;
+	} exts;
 };
 
 // XR_FB_body_tracking

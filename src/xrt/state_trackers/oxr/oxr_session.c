@@ -238,6 +238,9 @@ oxr_session_begin(struct oxr_logger *log, struct oxr_session *sess, const XrSess
 #ifdef OXR_HAVE_META_body_tracking_full_body
 		    .meta_body_tracking_full_body_enabled = extensions->META_body_tracking_full_body,
 #endif
+#ifdef OXR_HAVE_META_body_tracking_fidelity
+		    .meta_body_tracking_fidelity_enabled = extensions->META_body_tracking_fidelity,
+#endif
 		};
 
 		xrt_result_t xret = xrt_comp_begin_session(xc, &begin_session_info);

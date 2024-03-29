@@ -328,6 +328,10 @@ handle_non_null(struct oxr_instance *inst, struct oxr_logger *log, const char *n
 	ENTRY_IF_EXT(xrCreateXDevSpaceMNDX, MNDX_xdev_space);
 #endif // OXR_HAVE_MNDX_xdev_space
 
+#ifdef OXR_HAVE_META_body_tracking_fidelity
+	ENTRY_IF_EXT(xrRequestBodyTrackingFidelityMETA, META_body_tracking_fidelity);
+#endif
+
 	/*
 	 * Not logging here because there's no need to loudly advertise
 	 * which extensions the loader knows about (it calls this on

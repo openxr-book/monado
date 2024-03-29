@@ -165,6 +165,19 @@ ipc_client_device_get_body_joints(struct xrt_device *xdev,
 	IPC_CHK_ALWAYS_RET(icd->ipc_c, xret, "ipc_call_device_get_body_joints");
 }
 
+static xrt_result_t
+ipc_client_device_set_body_tracking_fidelity_meta(struct xrt_device *xdev,
+                                                  enum xrt_body_tracking_fidelity_meta new_fidelity)
+{
+	ipc_client_device_t *icd = ipc_client_device(xdev);
+
+	xrt_result_t xret = ipc_call_device_set_body_tracking_fidelity_meta( //
+	    icd->ipc_c,                                                      //
+	    icd->device_id,                                                  //
+	    new_fidelity);                                                   //
+	IPC_CHK_ALWAYS_RET(icd->ipc_c, xret, "ipc_call_device_set_body_tracking_fidelity_meta");
+}
+
 static void
 ipc_client_device_get_view_poses(struct xrt_device *xdev,
                                  const struct xrt_vec3 *default_eye_relation,
@@ -217,6 +230,7 @@ ipc_client_device_create(struct ipc_connection *ipc_c, struct xrt_tracking_origi
 	icd->base.get_face_tracking = ipc_client_device_get_face_tracking;
 	icd->base.get_body_skeleton = ipc_client_device_get_body_skeleton;
 	icd->base.get_body_joints = ipc_client_device_get_body_joints;
+	icd->base.set_body_tracking_fidelity_meta = ipc_client_device_set_body_tracking_fidelity_meta;
 	icd->base.get_view_poses = ipc_client_device_get_view_poses;
 	icd->base.set_output = ipc_client_device_set_output;
 	icd->base.get_visibility_mask = ipc_client_device_get_visibility_mask;

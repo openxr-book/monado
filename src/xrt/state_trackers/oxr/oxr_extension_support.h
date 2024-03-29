@@ -635,6 +635,17 @@
 
 
 /*
+ * XR_META_body_tracking_fidelity
+ */
+#if defined(XR_META_body_tracking_fidelity) && defined(XRT_FEATURE_OPENXR_BODY_TRACKING_FIDELITY_META)
+#define OXR_HAVE_META_body_tracking_fidelity
+#define OXR_EXTENSION_SUPPORT_META_body_tracking_fidelity(_) _(META_body_tracking_fidelity, META_BODY_TRACKING_FIDELITY)
+#else
+#define OXR_EXTENSION_SUPPORT_META_body_tracking_fidelity(_)
+#endif
+
+
+/*
  * XR_META_body_tracking_full_body
  */
 #if defined(XR_META_body_tracking_full_body) && defined(XRT_FEATURE_OPENXR_BODY_TRACKING_FULL_BODY_META)
@@ -709,6 +720,7 @@
     OXR_EXTENSION_SUPPORT_FB_display_refresh_rate(_) \
     OXR_EXTENSION_SUPPORT_FB_passthrough(_) \
     OXR_EXTENSION_SUPPORT_HTC_facial_tracking(_) \
+    OXR_EXTENSION_SUPPORT_META_body_tracking_fidelity(_) \
     OXR_EXTENSION_SUPPORT_META_body_tracking_full_body(_) \
     OXR_EXTENSION_SUPPORT_ML_ml2_controller_interaction(_) \
     OXR_EXTENSION_SUPPORT_MND_headless(_) \

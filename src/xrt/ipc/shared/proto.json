@@ -470,6 +470,12 @@
 		"out": [
 			{"name": "value", "type": "struct xrt_body_joint_set"}
 		]
-	}
+	},
 
+	"device_set_body_tracking_fidelity_meta": {
+		"in": [
+			{"name": "id", "type": "uint32_t"},
+			{"name": "new_fidelity", "type": "enum xrt_body_tracking_fidelity_meta"}
+		]
+	}
 }

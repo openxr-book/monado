@@ -20,6 +20,7 @@
 #include "oxr_logger.h"
 #include "oxr_handle.h"
 #include "oxr_conversions.h"
+#include "oxr_chain.h"
 
 static enum xrt_body_joint_set_type_fb
 oxr_to_xrt_body_joint_set_type_fb(XrBodyJointSetFB joint_set_type)
@@ -207,5 +208,17 @@ oxr_locate_body_joints_fb(struct oxr_logger *log,
 		m_relation_chain_resolve(&chain, &result);
 		OXR_XRT_POSE_TO_XRPOSEF(result.pose, dst_joint->pose);
 	}
+
+#ifdef OXR_HAVE_META_body_tracking_fidelity
+	XrBodyTrackingFidelityStatusMETA *fidelity_status = OXR_GET_OUTPUT_FROM_CHAIN(
+	    locations, XR_TYPE_BODY_TRACKING_FIDELITY_STATUS_META, XrBodyTrackingFidelityStatusMETA);
+	if (fidelity_status != NULL) {
+		if (!body_tracker_fb->xdev->body_tracking_fidelity_supported) {
+			return oxr_error(log, XR_ERROR_FEATURE_UNSUPPORTED,
+			                 "body tracking device does not support XR_META_body_tracking_fidelity");
+		}
+		fidelity_status->fidelity = (XrBodyTrackingFidelityMETA)body_joint_set_fb->exts.fidelity_status;
+	}
+#endif
 	return XR_SUCCESS;
 }

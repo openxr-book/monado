@@ -20,6 +20,7 @@
 #include "oxr_api_funcs.h"
 #include "oxr_api_verify.h"
 #include "oxr_handle.h"
+#include "oxr_chain.h"
 
 XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrCreateBodyTrackerFB(XrSession session, const XrBodyTrackerCreateInfoFB *createInfo, XrBodyTrackerFB *bodyTracker)
@@ -92,6 +93,35 @@ oxr_xrLocateBodyJointsFB(XrBodyTrackerFB bodyTracker,
 	OXR_VERIFY_ARG_NOT_NULL(&log, body_tracker_fb->xdev);
 	OXR_VERIFY_ARG_NOT_NULL(&log, locations->jointLocations);
 	OXR_VERIFY_SPACE_NOT_NULL(&log, locateInfo->baseSpace, base_spc);
-
+#ifdef OXR_HAVE_META_body_tracking_fidelity
+	XrBodyTrackingFidelityStatusMETA *fidelity_status = OXR_GET_OUTPUT_FROM_CHAIN(
+	    locations, XR_TYPE_BODY_TRACKING_FIDELITY_STATUS_META, XrBodyTrackingFidelityStatusMETA);
+	if (fidelity_status != NULL) {
+		OXR_VERIFY_EXTENSION(&log, body_tracker_fb->sess->sys->inst, META_body_tracking_fidelity);
+	}
+#endif
 	return oxr_locate_body_joints_fb(&log, body_tracker_fb, base_spc, locateInfo, locations);
 }
+
+#ifdef OXR_HAVE_META_body_tracking_fidelity
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrRequestBodyTrackingFidelityMETA(XrBodyTrackerFB bodyTracker, const XrBodyTrackingFidelityMETA fidelity)
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_logger log;
+	struct oxr_body_tracker_fb *body_tracker_fb = NULL;
+	OXR_VERIFY_BODY_TRACKER_FB_AND_INIT_LOG(&log, bodyTracker, body_tracker_fb,
+	                                        "xrRequestBodyTrackingFidelityMETA");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, body_tracker_fb->sess);
+	OXR_VERIFY_ARG_NOT_NULL(&log, body_tracker_fb->xdev);
+	OXR_VERIFY_EXTENSION(&log, body_tracker_fb->sess->sys->inst, META_body_tracking_fidelity);
+
+	if (!body_tracker_fb->xdev->body_tracking_fidelity_supported) {
+		return oxr_error(&log, XR_ERROR_FEATURE_UNSUPPORTED,
+		                 "Body tracking device does not support this operation");
+	}
+	return xrt_device_set_body_tracking_fidelity_meta(body_tracker_fb->xdev,
+	                                                  (enum xrt_body_tracking_fidelity_meta)fidelity);
+}
+#endif
