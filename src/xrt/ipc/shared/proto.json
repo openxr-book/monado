@@ -477,5 +477,18 @@
 			{"name": "id", "type": "uint32_t"},
 			{"name": "new_fidelity", "type": "enum xrt_body_tracking_fidelity_meta"}
 		]
+	},
+
+	"device_reset_body_tracking_calibration_meta": {
+		"in": [
+			{"name": "id", "type": "uint32_t"}
+		]
+	},
+
+	"device_set_body_tracking_calibration_override_meta": {
+		"in": [
+			{"name": "id", "type": "uint32_t"},
+			{"name": "new_body_height", "type": "float"}
+		]
 	}
 }

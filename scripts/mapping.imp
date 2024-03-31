@@ -31,6 +31,7 @@
 { symbol: ["XRT_FEATURE_COLOR_LOG", "public", "\"xrt/xrt_config_build.h\"", "public"] },
 { symbol: ["XRT_FEATURE_DEBUG_GUI", "public", "\"xrt/xrt_config_build.h\"", "public"] },
 { symbol: ["XRT_FEATURE_OPENXR", "public", "\"xrt/xrt_config_build.h\"", "public"] },
+{ symbol: ["XRT_FEATURE_OPENXR_BODY_TRACKING_CALIBRATION_META", "public", "\"xrt/xrt_config_build.h\"", "public"] },
 { symbol: ["XRT_FEATURE_OPENXR_BODY_TRACKING_FB", "public", "\"xrt/xrt_config_build.h\"", "public"] },
 { symbol: ["XRT_FEATURE_OPENXR_BODY_TRACKING_FIDELITY_META", "public", "\"xrt/xrt_config_build.h\"", "public"] },
 { symbol: ["XRT_FEATURE_OPENXR_BODY_TRACKING_FULL_BODY_META", "public", "\"xrt/xrt_config_build.h\"", "public"] },

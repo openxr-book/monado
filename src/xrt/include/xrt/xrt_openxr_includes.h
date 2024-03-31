@@ -69,4 +69,5 @@ typedef __eglMustCastToProperFunctionPointerType (*PFNEGLGETPROCADDRESSPROC)(con
 #if defined(XRT_USE_META_EXT_HEADERS)
 #include "meta_openxr_preview/meta_body_tracking_full_body.h"
 #include "meta_openxr_preview/meta_body_tracking_fidelity.h"
+#include "meta_openxr_preview/meta_body_tracking_calibration.h"
 #endif

@@ -384,6 +384,7 @@ update_session_state_locked(struct multi_system_compositor *msc)
 	    .fb_body_tracking_enabled = false,
 	    .meta_body_tracking_full_body_enabled = false,
 	    .meta_body_tracking_fidelity_enabled = false,
+	    .meta_body_tracking_calibration_enabled = false,
 	};
 
 	switch (msc->sessions.state) {

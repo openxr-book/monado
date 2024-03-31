@@ -270,6 +270,7 @@ struct xrt_device
 	bool face_tracking_supported;
 	bool body_tracking_supported;
 	bool body_tracking_fidelity_supported;
+	bool body_tracking_calibration_supported;
 
 	/*
 	 *
@@ -388,7 +389,23 @@ struct xrt_device
 	                                struct xrt_body_joint_set *out_value);
 
 	/*!
-	 * @brief XR_META_body_tracking_fidelity - body tracking extension for request changing the tracking fidelity
+	 * @brief XR_META_body_tracking_calibration - body tracking extension to reset the body tracking calibration
+	 *
+	 * @param[in] xdev              The body tracking device.
+	 */
+	xrt_result_t (*reset_body_tracking_calibration_meta)(struct xrt_device *xdev);
+
+	/*!
+	 * @brief XR_META_body_tracking_calibration - body tracking extension to suggest a body tracking calibration
+	 * override
+	 *
+	 * @param[in] xdev              The body tracking device.
+	 * @param[in] new_body_height   The suggested new body height to override.
+	 */
+	xrt_result_t (*set_body_tracking_calibration_override_meta)(struct xrt_device *xdev, float new_body_height);
+
+	/*!
+	 * @brief XR_META_body_tracking_calibration - body tracking extension for request changing the tracking fidelity
 	 *
 	 * @param[in] xdev              The body tracking device.
 	 * @param[in] new_fidelity      The new tracking fidelity mode.
@@ -634,6 +651,38 @@ xrt_device_set_body_tracking_fidelity_meta(struct xrt_device *xdev, enum xrt_bod
 		return XRT_ERROR_DEVICE_FUNCTION_NOT_IMPLEMENTED;
 	}
 	return xdev->set_body_tracking_fidelity_meta(xdev, new_fidelity);
+}
+
+/*!
+ * Helper function for @ref xrt_device::reset_body_tracking_calibration_meta.
+ *
+ * @copydoc xrt_device::reset_body_tracking_calibration_meta
+ *
+ * @public @memberof xrt_device
+ */
+static inline xrt_result_t
+xrt_device_reset_body_tracking_calibration_meta(struct xrt_device *xdev)
+{
+	if (xdev->reset_body_tracking_calibration_meta == NULL) {
+		return XRT_ERROR_DEVICE_FUNCTION_NOT_IMPLEMENTED;
+	}
+	return xdev->reset_body_tracking_calibration_meta(xdev);
+}
+
+/*!
+ * Helper function for @ref xrt_device::set_body_tracking_calibration_override_meta.
+ *
+ * @copydoc xrt_device::set_body_tracking_calibration_override_meta
+ *
+ * @public @memberof xrt_device
+ */
+static inline xrt_result_t
+xrt_device_set_body_tracking_calibration_override_meta(struct xrt_device *xdev, float new_body_height)
+{
+	if (xdev->set_body_tracking_calibration_override_meta == NULL) {
+		return XRT_ERROR_DEVICE_FUNCTION_NOT_IMPLEMENTED;
+	}
+	return xdev->set_body_tracking_calibration_override_meta(xdev, new_body_height);
 }
 
 /*!

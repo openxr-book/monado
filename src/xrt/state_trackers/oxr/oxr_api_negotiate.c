@@ -332,6 +332,11 @@ handle_non_null(struct oxr_instance *inst, struct oxr_logger *log, const char *n
 	ENTRY_IF_EXT(xrRequestBodyTrackingFidelityMETA, META_body_tracking_fidelity);
 #endif
 
+#ifdef OXR_HAVE_META_body_tracking_calibration
+	ENTRY_IF_EXT(xrResetBodyTrackingCalibrationMETA, META_body_tracking_calibration);
+	ENTRY_IF_EXT(xrSuggestBodyTrackingCalibrationOverrideMETA, META_body_tracking_calibration);
+#endif
+
 	/*
 	 * Not logging here because there's no need to loudly advertise
 	 * which extensions the loader knows about (it calls this on
