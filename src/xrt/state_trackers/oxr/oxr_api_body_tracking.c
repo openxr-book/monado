@@ -33,6 +33,11 @@ oxr_xrCreateBodyTrackerFB(XrSession session, const XrBodyTrackerCreateInfoFB *cr
 	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, createInfo, XR_TYPE_BODY_TRACKER_CREATE_INFO_FB);
 	OXR_VERIFY_EXTENSION(&log, sess->sys->inst, FB_body_tracking);
+#ifdef OXR_HAVE_META_body_tracking_full_body
+	if (createInfo->bodyJointSet == XR_BODY_JOINT_SET_FULL_BODY_META) {
+		OXR_VERIFY_EXTENSION(&log, sess->sys->inst, META_body_tracking_full_body);
+	}
+#endif
 
 	struct oxr_body_tracker_fb *body_tracker_fb = NULL;
 	ret = oxr_create_body_tracker_fb(&log, sess, createInfo, &body_tracker_fb);

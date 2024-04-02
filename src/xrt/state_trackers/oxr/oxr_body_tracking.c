@@ -24,6 +24,11 @@
 static enum xrt_body_joint_set_type_fb
 oxr_to_xrt_body_joint_set_type_fb(XrBodyJointSetFB joint_set_type)
 {
+#ifdef OXR_HAVE_META_body_tracking_full_body
+	if (joint_set_type == XR_BODY_JOINT_SET_FULL_BODY_META) {
+		return XRT_BODY_JOINT_SET_FULL_BODY_META;
+	}
+#endif
 	if (joint_set_type == XR_BODY_JOINT_SET_DEFAULT_FB) {
 		return XRT_BODY_JOINT_SET_DEFAULT_FB;
 	}
@@ -57,6 +62,15 @@ oxr_create_body_tracker_fb(struct oxr_logger *log,
 		                 "\"bodyJointSet\" set to an unknown body joint set type");
 	}
 
+#ifdef OXR_HAVE_META_body_tracking_full_body
+	if (joint_set_type == XRT_BODY_JOINT_SET_FULL_BODY_META) {
+		if (!oxr_system_get_full_body_tracking_meta_support(log, sess->sys->inst)) {
+			return oxr_error(log, XR_ERROR_FEATURE_UNSUPPORTED,
+			                 "System does not support META full body tracking");
+		}
+	}
+#endif
+
 	struct xrt_device *xdev = GET_XDEV_BY_ROLE(sess->sys, body);
 	if (xdev == NULL || !xdev->body_tracking_supported) {
 		return oxr_error(log, XR_ERROR_FEATURE_UNSUPPORTED, "No device found for body tracking role");
@@ -85,25 +99,33 @@ oxr_get_body_skeleton_fb(struct oxr_logger *log,
 		                 "Device not found or does not support body tracking.");
 	}
 
-	if (skeleton->jointCount < XRT_BODY_JOINT_COUNT_FB) {
+	const bool is_meta_full_body = body_tracker_fb->joint_set_type == XRT_BODY_JOINT_SET_FULL_BODY_META;
+	const uint32_t body_joint_count = is_meta_full_body ? XRT_FULL_BODY_JOINT_COUNT_META : XRT_BODY_JOINT_COUNT_FB;
+
+	if (skeleton->jointCount < body_joint_count) {
 		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE, "joint count is too small");
 	}
 
 	struct xrt_body_skeleton body_skeleton_result = {0};
-	struct xrt_body_skeleton_joint_fb *src_skeleton_joints = body_skeleton_result.body_skeleton_fb.joints;
+	struct xrt_body_skeleton_joint_fb *src_skeleton_joints =
+	    is_meta_full_body ? body_skeleton_result.full_body_skeleton_meta.joints
+	                      : body_skeleton_result.body_skeleton_fb.joints;
 
-	if (xrt_device_get_body_skeleton(body_tracker_fb->xdev, XRT_INPUT_FB_BODY_TRACKING, &body_skeleton_result) !=
-	    XRT_SUCCESS) {
+	const enum xrt_input_name input_name =
+	    is_meta_full_body ? XRT_INPUT_META_FULL_BODY_TRACKING : XRT_INPUT_FB_BODY_TRACKING;
+
+	if (xrt_device_get_body_skeleton(body_tracker_fb->xdev, input_name, &body_skeleton_result) != XRT_SUCCESS) {
 		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Failed to get body skeleton");
 	}
 
-	for (size_t joint_index = 0; joint_index < XRT_BODY_JOINT_COUNT_FB; ++joint_index) {
+	for (size_t joint_index = 0; joint_index < body_joint_count; ++joint_index) {
 		const struct xrt_body_skeleton_joint_fb *src_skeleton_joint = &src_skeleton_joints[joint_index];
 		XrBodySkeletonJointFB *dst_skeleton_joint = &skeleton->joints[joint_index];
 		OXR_XRT_POSE_TO_XRPOSEF(src_skeleton_joint->pose, dst_skeleton_joint->pose);
 		dst_skeleton_joint->joint = src_skeleton_joint->joint;
 		dst_skeleton_joint->parentJoint = src_skeleton_joint->parent_joint;
 	}
+
 	return XR_SUCCESS;
 }
 
@@ -119,7 +141,10 @@ oxr_locate_body_joints_fb(struct oxr_logger *log,
 		                 "Device not found or does not support body tracking.");
 	}
 
-	if (locations->jointCount < XRT_BODY_JOINT_COUNT_FB) {
+	const bool is_meta_full_body = body_tracker_fb->joint_set_type == XRT_BODY_JOINT_SET_FULL_BODY_META;
+	const uint32_t body_joint_count = is_meta_full_body ? XRT_FULL_BODY_JOINT_COUNT_META : XRT_BODY_JOINT_COUNT_FB;
+
+	if (locations->jointCount < body_joint_count) {
 		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE, "joint count is too small");
 	}
 
@@ -133,10 +158,14 @@ oxr_locate_body_joints_fb(struct oxr_logger *log,
 
 	struct xrt_body_joint_set body_joint_set_result = {0};
 	const struct xrt_body_joint_location_fb *src_body_joints =
-	    body_joint_set_result.body_joint_set_fb.joint_locations;
+	    is_meta_full_body ? body_joint_set_result.full_body_joint_set_meta.joint_locations
+	                      : body_joint_set_result.body_joint_set_fb.joint_locations;
 
-	if (xrt_device_get_body_joints(body_tracker_fb->xdev, XRT_INPUT_FB_BODY_TRACKING, at_timestamp_ns,
-	                               &body_joint_set_result) != XRT_SUCCESS) {
+	const enum xrt_input_name input_name =
+	    is_meta_full_body ? XRT_INPUT_META_FULL_BODY_TRACKING : XRT_INPUT_FB_BODY_TRACKING;
+
+	if (xrt_device_get_body_joints(body_tracker_fb->xdev, input_name, at_timestamp_ns, &body_joint_set_result) !=
+	    XRT_SUCCESS) {
 		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Failed to get FB body joint set");
 	}
 
@@ -165,7 +194,7 @@ oxr_locate_body_joints_fb(struct oxr_logger *log,
 	locations->confidence = body_joint_set_fb->confidence;
 	locations->skeletonChangedCount = body_joint_set_fb->skeleton_changed_count;
 
-	for (size_t joint_index = 0; joint_index < XRT_BODY_JOINT_COUNT_FB; ++joint_index) {
+	for (size_t joint_index = 0; joint_index < body_joint_count; ++joint_index) {
 		const struct xrt_body_joint_location_fb *src_joint = &src_body_joints[joint_index];
 		XrBodyJointLocationFB *dst_joint = &locations->jointLocations[joint_index];
 
