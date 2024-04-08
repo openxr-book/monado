@@ -91,6 +91,11 @@ if(ANDROID)
 	target_sources(st_oxr PRIVATE oxr_session_gfx_gles_android.c)
 	target_link_libraries(st_oxr PRIVATE aux_android)
 endif()
+
+if(ANDROID AND XRT_FEATURE_OPENXR_CHECK_OVERLAY_SIGNATURE)
+	target_compile_definitions(st_oxr PRIVATE CHECK_OVERLAY_SIGNATURE_ENABLED)
+endif()
+
 if(WIN32)
 	target_link_libraries(st_oxr PRIVATE kernel32)
 	target_compile_definitions(st_oxr PRIVATE XR_USE_PLATFORM_WIN32)
