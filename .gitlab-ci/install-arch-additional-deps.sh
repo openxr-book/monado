@@ -11,6 +11,7 @@ pushd deps
 
 for PKG in \
 	xr-hardware-git \
+	libdrm-git \
 	libsurvive-git \
 	percetto-git \
 	openhmd-git \

@@ -20,6 +20,7 @@ fdo_ci_templates_sha: 185ede0e9b9b1924b92306ab8b882a6294e92613
   patch:
   python3:
   pkg-config:
+  libdrm-dev:
   libx11-dev:
   libx11-xcb-dev:
   libxxf86vm-dev:
@@ -218,6 +219,7 @@ distributions:
           graphviz:
           gtk3:
           hidapi:
+          libdrm:
           libusb:
           libxrandr:
           mesa:
@@ -262,6 +264,7 @@ distributions:
           - "eigen-dev"
           - "eudev-dev"
           - "graphviz"
+          - "libdrm-dev"
           - "libjpeg-turbo-dev"
           - "libsurvive-dev"
           - "libxrandr-dev"

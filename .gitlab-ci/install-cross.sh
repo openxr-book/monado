@@ -22,6 +22,7 @@ for arch in $CROSS_ARCHITECTURES; do
     # they apparently can't be installed in both architectures at once
     apt-get install -y --no-install-recommends --no-remove \
             crossbuild-essential-${arch} \
+            libdrm-dev:${arch} \
             libelf-dev:${arch} \
             libegl1-mesa-dev:${arch} \
             libgl1-mesa-dev:${arch} \
