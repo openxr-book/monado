@@ -308,6 +308,7 @@ option_with_deps(XRT_BUILD_DRIVER_HANDTRACKING "Enable Camera Hand Tracking driv
 option_with_deps(XRT_BUILD_DRIVER_TWRAP "Enable Tracking Wrapper drivers" ON) # only depends on imu
 option_with_deps(XRT_BUILD_DRIVER_HDK "Enable HDK driver" DEPENDS XRT_HAVE_INTERNAL_HID)
 option_with_deps(XRT_BUILD_DRIVER_HYDRA "Enable Hydra driver" DEPENDS XRT_HAVE_INTERNAL_HID)
+option_with_deps(XRT_BUILD_DRIVER_NOLO "Enable Nolo driver" DEPENDS XRT_HAVE_INTERNAL_HID)
 option_with_deps(XRT_BUILD_DRIVER_ILLIXR "Enable ILLIXR driver" DEPENDS ILLIXR_PATH)
 option(XRT_BUILD_DRIVER_NS "Enable North Star driver" ON)
 option_with_deps(XRT_BUILD_DRIVER_OHMD "Enable OpenHMD driver" DEPENDS OPENHMD_FOUND)
@@ -448,6 +449,7 @@ list(
 	"SIMULATED"
 	"HANDTRACKING"
 	"HDK"
+	"NOLO"
 	"HYDRA"
 	"ILLIXR"
 	"NS"
@@ -666,6 +668,7 @@ message(STATUS "#    DRIVER_EUROC:                ${XRT_BUILD_DRIVER_EUROC}")
 message(STATUS "#    DRIVER_HANDTRACKING:         ${XRT_BUILD_DRIVER_HANDTRACKING}")
 message(STATUS "#    DRIVER_HDK:                  ${XRT_BUILD_DRIVER_HDK}")
 message(STATUS "#    DRIVER_HYDRA:                ${XRT_BUILD_DRIVER_HYDRA}")
+message(STATUS "#    DRIVER_NOLO:                 ${XRT_BUILD_DRIVER_NOLO}")
 message(STATUS "#    DRIVER_ILLIXR:               ${XRT_BUILD_DRIVER_ILLIXR}")
 message(STATUS "#    DRIVER_NS:                   ${XRT_BUILD_DRIVER_NS}")
 message(STATUS "#    DRIVER_OHMD:                 ${XRT_BUILD_DRIVER_OHMD}")
