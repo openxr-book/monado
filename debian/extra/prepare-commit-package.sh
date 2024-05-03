@@ -1,5 +1,5 @@
 #!/bin/sh
-# Copyright 2020-2022, Rylie Pavlik <rylie@ryliepavlik.com>
+# Copyright 2020-2024, Rylie Pavlik <rylie@ryliepavlik.com>
 # SPDX-License-Identifier: CC0-1.0
 
 # Packages produced this way are for automated use only and shouldn't be uploaded to the Debian archive.
@@ -32,6 +32,6 @@ set -e
 
     UPSTREAM_VER=$(git describe --exclude "v0*" "$COMMIT_TO_PACKAGE" | sed -E -e 's/^v//' -e 's/-([0-9]+)-g([0-9a-f])/+git\1.\2/')
     echo "Computed package version ${UPSTREAM_VER}"
-    git archive -o "../monado_${UPSTREAM_VER}.orig.tar.gz" ${COMMIT_TO_PACKAGE}
+    git archive --format=tar "--prefix=monado_${UPSTREAM_VER}/" "${COMMIT_TO_PACKAGE}" | gzip -n > "../monado_${UPSTREAM_VER}.orig.tar.gz"
     dch --newversion "${UPSTREAM_VER}-${PKG_REVISION}" --preserve "Automated CI build of commit ${COMMIT_TO_PACKAGE}"
 )
