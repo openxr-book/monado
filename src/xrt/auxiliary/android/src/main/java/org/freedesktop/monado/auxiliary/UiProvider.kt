@@ -3,14 +3,12 @@
 /*!
  * @file
  * @brief  Interface for target-specific UI-related things on Android.
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup aux_android
  */
 package org.freedesktop.monado.auxiliary
 
 import android.app.PendingIntent
-import android.content.Context
-import android.graphics.drawable.Drawable
 import android.graphics.drawable.Icon
 
 /**
@@ -26,14 +24,11 @@ interface UiProvider {
      */
     fun getNotificationIcon(): Icon? = null
 
-    /**
-     * Make a {@code PendingIntent} to launch an "About" activity for the runtime/target.
-     */
+    /** Make a {@code PendingIntent} to launch an "About" activity for the runtime/target. */
     fun makeAboutActivityPendingIntent(): PendingIntent
 
     /**
      * Make a {@code PendingIntent} to launch a configuration activity, if provided by the target.
      */
     fun makeConfigureActivityPendingIntent(): PendingIntent? = null
-
 }

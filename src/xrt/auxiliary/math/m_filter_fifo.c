@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  A fifo that also allows you to dynamically filter.
+ * @brief  A fifo that also lets you dynamically filter.
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @ingroup aux_math
  */
@@ -127,7 +127,9 @@ m_ff_vec3_f32_filter(struct m_ff_vec3_f32 *ff, uint64_t start_ns, uint64_t stop_
 	size_t num_sampled = 0;
 	size_t count = 0;
 	// Use double precision internally.
-	double x = 0, y = 0, z = 0;
+	double x = 0;
+	double y = 0;
+	double z = 0;
 
 	// Error, skip averaging.
 	if (start_ns > stop_ns) {

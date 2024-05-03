@@ -4,7 +4,7 @@
  * @file
  * @brief  Wrapper around OS native hid functions.
  * @author Jakob Bornecrantz <jakob@collabora.com>
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  *
  * @ingroup aux_os
  */
@@ -37,6 +37,8 @@ struct os_hid_device
 
 	int (*set_feature)(struct os_hid_device *hid_dev, const uint8_t *data, size_t size);
 
+	int (*get_physical_address)(struct os_hid_device *hid_dev, uint8_t *data, size_t size);
+
 	void (*destroy)(struct os_hid_device *hid_dev);
 };
 
@@ -68,8 +70,7 @@ os_hid_write(struct os_hid_device *hid_dev, const uint8_t *data, size_t size)
 /*!
  * Get a numbered feature report.
  *
- * If the device doesn't have more than one feature report, just request
- * report 0.
+ * If the device doesn't have more than one feature report, request report 0.
  *
  * @public @memberof os_hid_device
  */
@@ -105,6 +106,21 @@ os_hid_set_feature(struct os_hid_device *hid_dev, const uint8_t *data, size_t si
 }
 
 /*!
+ * Get the physical address.
+ *
+ * For USB devices, the string contains the physical path to the device (the
+ * USB controller, hubs, ports, etc).  For Bluetooth *devices, the string
+ * contains the hardware (MAC) address of the device.
+ *
+ * @public @memberof os_hid_device
+ */
+static inline int
+os_hid_get_physical_address(struct os_hid_device *hid_dev, uint8_t *data, size_t size)
+{
+	return hid_dev->get_physical_address(hid_dev, data, size);
+}
+
+/*!
  * Close and free the given device.
  *
  * @public @memberof os_hid_device
@@ -119,8 +135,8 @@ os_hid_destroy(struct os_hid_device *hid_dev)
 /*!
  * Open the given path as a hidraw device.
  *
- * @public @memberof hid_hidraw
- * @relatesalso os_hid_device
+ * @see hid_hidraw
+ * @public @memberof os_hid_device
  */
 int
 os_hid_open_hidraw(const char *path, struct os_hid_device **out_hid);

@@ -10,6 +10,7 @@
 #include "m_api.h"
 #include "m_vec3.h"
 #include "m_predict.h"
+#include "util/u_trace_marker.h"
 
 
 static void
@@ -42,7 +43,7 @@ do_orientation(const struct xrt_space_relation *rel,
 		accum.z += ang_vel_body_space.z;
 	}
 
-	// We don't want the angular acceleration, it's way to noisy.
+	// We don't want the angular acceleration, it's way too noisy.
 #if 0
 	if (valid_angular_acceleration) {
 		accum.x += delta_s / 2 * rel->angular_acceleration.x;
@@ -54,7 +55,7 @@ do_orientation(const struct xrt_space_relation *rel,
 	if (valid_orientation) {
 		math_quat_integrate_velocity(&rel->pose.orientation,      // Old orientation
 		                             &accum,                      // Angular velocity
-		                             delta_s,                     // Delta in seconds
+		                             (float)delta_s,              // Delta in seconds
 		                             &out_rel->pose.orientation); // Result
 	}
 
@@ -92,7 +93,7 @@ do_position(const struct xrt_space_relation *rel,
 	}
 
 	if (valid_position) {
-		out_rel->pose.position = m_vec3_add(rel->pose.position, m_vec3_mul_scalar(accum, delta_s));
+		out_rel->pose.position = m_vec3_add(rel->pose.position, m_vec3_mul_scalar(accum, (float)delta_s));
 	}
 
 	// We use the new linear velocity with the acceleration integrated.
@@ -104,6 +105,7 @@ do_position(const struct xrt_space_relation *rel,
 void
 m_predict_relation(const struct xrt_space_relation *rel, double delta_s, struct xrt_space_relation *out_rel)
 {
+	XRT_TRACE_MARKER();
 	enum xrt_space_relation_flags flags = rel->relation_flags;
 
 	do_orientation(rel, flags, delta_s, out_rel);

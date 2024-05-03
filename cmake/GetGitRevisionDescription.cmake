@@ -3,7 +3,7 @@
 # These functions force a re-configure on each git commit so that you can
 # trust the values of the variables in your build system.
 #
-#  get_git_head_revision(<refspecvar> <hashvar> [<additional arguments to git describe> ...])
+#  get_git_head_revision(<refspecvar> <hashvar> [ALLOW_LOOKING_ABOVE_CMAKE_SOURCE_DIR])
 #
 # Returns the refspec and sha hash of the current head revision
 #
@@ -32,13 +32,15 @@
 # Requires CMake 2.6 or newer (uses the 'function' command)
 #
 # Original Author:
-# 2009-2020 Ryan Pavlik <ryan.pavlik@gmail.com> <abiryan@ryand.net>
-# http://academic.cleardefinition.com
+# 2009-2020 Rylie Pavlik <rylie@ryliepavlik.com>
+# https://ryliepavlik.com/
 #
 # Copyright 2009-2013, Iowa State University.
-# Copyright 2013-2020, Ryan Pavlik
+# Copyright 2013-2020, Rylie Pavlik
 # Copyright 2013-2020, Contributors
+#
 # SPDX-License-Identifier: BSL-1.0
+#
 # Distributed under the Boost Software License, Version 1.0.
 # (See accompanying file LICENSE_1_0.txt or copy at
 # http://www.boost.org/LICENSE_1_0.txt)
@@ -68,7 +70,7 @@ function(_git_find_closest_git_dir _start_dir _git_dir_var)
     while(NOT EXISTS "${git_dir}")
         # .git dir not found, search parent directories
         set(git_previous_parent "${cur_dir}")
-        get_filename_component(cur_dir ${cur_dir} DIRECTORY)
+        get_filename_component(cur_dir "${cur_dir}" DIRECTORY)
         if(cur_dir STREQUAL git_previous_parent)
             # We have reached the root directory, we are not in git
             set(${_git_dir_var}
@@ -86,10 +88,16 @@ endfunction()
 function(get_git_head_revision _refspecvar _hashvar)
     _git_find_closest_git_dir("${CMAKE_CURRENT_SOURCE_DIR}" GIT_DIR)
 
+    if("${ARGN}" STREQUAL "ALLOW_LOOKING_ABOVE_CMAKE_SOURCE_DIR")
+        set(ALLOW_LOOKING_ABOVE_CMAKE_SOURCE_DIR TRUE)
+    else()
+        set(ALLOW_LOOKING_ABOVE_CMAKE_SOURCE_DIR FALSE)
+    endif()
     if(NOT "${GIT_DIR}" STREQUAL "")
         file(RELATIVE_PATH _relative_to_source_dir "${CMAKE_SOURCE_DIR}"
              "${GIT_DIR}")
-        if("${_relative_to_source_dir}" MATCHES "[.][.]")
+        if("${_relative_to_source_dir}" MATCHES "[.][.]"
+           AND NOT ALLOW_LOOKING_ABOVE_CMAKE_SOURCE_DIR)
             # We've gone above the CMake root dir.
             set(GIT_DIR "")
         endif()
@@ -138,6 +146,16 @@ function(get_git_head_revision _refspecvar _hashvar)
             string(REGEX REPLACE "gitdir: (.*)$" "\\1" git_worktree_dir
                                  ${worktree_ref})
             string(STRIP ${git_worktree_dir} git_worktree_dir)
+            # When running in an msys environment, the git_worktree_dir has to be
+            # converted to windows format, by adding the windows prefix of the
+            # msys root dir.
+            if(MINGW)
+                execute_process(
+                    COMMAND bash -c "cygpath.exe -m /"
+                    OUTPUT_VARIABLE real_root
+                    OUTPUT_STRIP_TRAILING_WHITESPACE)
+                set(git_worktree_dir "${real_root}${git_worktree_dir}")
+            endif()
             _git_find_closest_git_dir("${git_worktree_dir}" GIT_DIR)
             set(HEAD_SOURCE_FILE "${git_worktree_dir}/HEAD")
         endif()

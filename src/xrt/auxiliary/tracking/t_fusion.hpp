@@ -3,7 +3,7 @@
 /*!
  * @file
  * @brief  C++ sensor fusion/filtering code that uses flexkalman
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup aux_tracking
  */
 
@@ -22,7 +22,8 @@
 #include "flexkalman/PoseState.h"
 
 
-namespace xrt_fusion {
+namespace xrt::auxiliary::tracking {
+
 namespace types = flexkalman::types;
 using flexkalman::types::Vector;
 
@@ -227,4 +228,5 @@ private:
 	MeasurementVector knownLocationInBodySpace_;
 	MeasurementSquareMatrix covariance_;
 };
-} // namespace xrt_fusion
+
+} // namespace xrt::auxiliary::tracking

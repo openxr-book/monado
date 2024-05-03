@@ -1,6 +1,6 @@
-// Copyright 2020, Collabora, Ltd.
+// Copyright 2020-2021, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
-// Author: Ryan Pavlik <ryan.pavlik@collabora.com>
+// Author: Rylie Pavlik <rylie.pavlik@collabora.com>
 
 #pragma once
 
@@ -86,7 +86,7 @@ class Toast : public ObjectWrapperBase {
      * JNI signature: (Landroid/content/Context;II)Landroid/widget/Toast;
      *
      */
-    static Toast makeText(content::Context &context, int32_t resId,
+    static Toast makeText(content::Context const &context, int32_t resId,
                           int32_t duration);
 
     /*!
@@ -103,7 +103,7 @@ class Toast : public ObjectWrapperBase {
          * Singleton accessor
          */
         static Meta &data() {
-            static Meta instance;
+            static Meta instance{};
             return instance;
         }
 
@@ -111,6 +111,7 @@ class Toast : public ObjectWrapperBase {
         Meta();
     };
 };
+
 } // namespace android::widget
 } // namespace wrap
 #include "android.widget.impl.h"

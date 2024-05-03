@@ -60,10 +60,9 @@ step(struct m_permutator *mp)
 			mp->indices[mp->i]++;
 			mp->i = 0;
 			return true;
-		} else {
-			mp->indices[mp->i] = 0;
-			mp->i++;
 		}
+		mp->indices[mp->i] = 0;
+		mp->i++;
 	}
 
 	return false;
@@ -83,7 +82,8 @@ m_permutator_step(struct m_permutator *mp, uint32_t *out_elements, uint32_t num_
 		setup(mp, num_elements);
 		copy(mp, out_elements);
 		return true;
-	} else if (step(mp)) {
+	}
+	if (step(mp)) {
 
 		copy(mp, out_elements);
 		return true;
@@ -130,7 +130,7 @@ printArray(const uint32_t *array, uint32_t num)
 }
 
 void
-m_do_the_thing()
+m_do_the_thing(void)
 {
 	struct m_permutator mp = {0};
 	uint32_t elements[7];

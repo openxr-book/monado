@@ -1,6 +1,6 @@
-// Copyright 2020, Collabora, Ltd.
+// Copyright 2020-2021, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
-// Author: Ryan Pavlik <ryan.pavlik@collabora.com>
+// Author: Rylie Pavlik <rylie.pavlik@collabora.com>
 
 #pragma once
 
@@ -51,11 +51,39 @@ class Point : public ObjectWrapperBase {
          * Singleton accessor
          */
         static Meta &data() {
-            static Meta instance;
+            static Meta instance{};
             return instance;
         }
 
       private:
+        Meta();
+    };
+};
+
+class PixelFormat : public ObjectWrapperBase {
+public:
+  using ObjectWrapperBase::ObjectWrapperBase;
+  static constexpr const char *getTypeName() noexcept {
+      return "android/graphics/PixelFormat";
+  }
+
+  static int32_t OPAQUE();
+
+  /*!
+   * Class metadata
+   */
+  struct Meta : public MetaBaseDroppable {
+      impl::StaticFieldId<int32_t> OPAQUE;
+
+      /*!
+       * Singleton accessor
+       */
+      static Meta &data() {
+          static Meta instance{};
+          return instance;
+      }
+
+    private:
         Meta();
     };
 };

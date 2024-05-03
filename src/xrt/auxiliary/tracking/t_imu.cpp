@@ -4,9 +4,10 @@
  * @file
  * @brief  IMU fusion implementation - for inclusion into the single
  * kalman-incuding translation unit.
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup aux_tracking
  */
+// IWYU pragma: no_include "src/Core/MatrixBase.h"
 
 #include "tracking/t_imu.h"
 #include "tracking/t_imu_fusion.hpp"
@@ -16,13 +17,15 @@
 
 #include <memory>
 
+using xrt::auxiliary::tracking::SimpleIMUFusion;
+using namespace xrt::auxiliary::math;
 
 struct imu_fusion
 {
 public:
 	uint64_t time_ns{0};
 
-	xrt_fusion::SimpleIMUFusion simple_fusion;
+	SimpleIMUFusion simple_fusion;
 
 
 public:

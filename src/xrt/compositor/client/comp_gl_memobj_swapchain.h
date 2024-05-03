@@ -3,7 +3,7 @@
 /*!
  * @file
  * @brief  OpenGL client side glue using memory objects - header.
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @ingroup comp_client
  */
@@ -37,17 +37,19 @@ struct client_gl_memobj_swapchain
 
 /*!
  * Create a swapchain, belonging to a client_gl_compositor, that uses
- * GL_memory_object and related extensions to access the native buffer.
+ * GL_memory_object and related extensions to use the native buffer.
  *
  * This is most commonly used on desktop OpenGL.
  *
- * @see client_gl_swapchain_create_func, client_gl_compositor_init
+ * The caller must ensure that the app context is current.
+ *
+ * @see client_gl_swapchain_create_func_t, client_gl_compositor_init
  */
 struct xrt_swapchain *
 client_gl_memobj_swapchain_create(struct xrt_compositor *xc,
                                   const struct xrt_swapchain_create_info *info,
                                   struct xrt_swapchain_native *xscn,
-                                  struct client_gl_swapchain **out_sc);
+                                  struct client_gl_swapchain **out_cglsc);
 
 
 #ifdef __cplusplus

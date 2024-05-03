@@ -1,6 +1,6 @@
-// Copyright 2020, Collabora, Ltd.
+// Copyright 2020-2021, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
-// Author: Ryan Pavlik <ryan.pavlik@collabora.com>
+// Author: Rylie Pavlik <rylie.pavlik@collabora.com>
 
 #pragma once
 
@@ -34,7 +34,7 @@ class Service : public content::Context {
          * Singleton accessor
          */
         static Meta &data() {
-            static Meta instance;
+            static Meta instance{};
             return instance;
         }
 
@@ -42,6 +42,7 @@ class Service : public content::Context {
         Meta();
     };
 };
+
 /*!
  * Wrapper for android.app.Activity objects.
  */
@@ -53,15 +54,15 @@ class Activity : public content::Context {
     }
 
     /*!
-     * Wrapper for the getSystemService method
+     * Wrapper for the getWindow method
      *
      * Java prototype:
-     * `public java.lang.Object getSystemService(java.lang.String);`
+     * `public android.view.Window getWindow();`
      *
-     * JNI signature: (Ljava/lang/String;)Ljava/lang/Object;
+     * JNI signature: ()Landroid/view/Window;
      *
      */
-    jni::Object getSystemService(std::string const &name);
+    jni::Object getWindow();
 
     /*!
      * Wrapper for the setVrModeEnabled method
@@ -80,14 +81,14 @@ class Activity : public content::Context {
      * Class metadata
      */
     struct Meta : public MetaBaseDroppable {
-        jni::method_t getSystemService;
+        jni::method_t getWindow;
         jni::method_t setVrModeEnabled;
 
         /*!
          * Singleton accessor
          */
         static Meta &data() {
-            static Meta instance;
+            static Meta instance{};
             return instance;
         }
 
@@ -95,6 +96,7 @@ class Activity : public content::Context {
         Meta();
     };
 };
+
 } // namespace android::app
 } // namespace wrap
 #include "android.app.impl.h"

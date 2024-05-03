@@ -19,7 +19,7 @@ extern "C" {
 typedef void *EGLDisplay;
 typedef void *EGLConfig;
 typedef void *EGLContext;
-typedef void (*__eglMustCastToProperFunctionPointerType)(void);
+typedef void (*__eglMustCastToProperFunctionPointerType)(void); // NOLINT
 typedef __eglMustCastToProperFunctionPointerType (*PFNEGLGETPROCADDRESSPROC)(const char *proc);
 struct time_state;
 
@@ -29,12 +29,14 @@ struct time_state;
  * @ingroup xrt_iface
  * @public @memberof xrt_compositor_native
  */
-struct xrt_compositor_gl *
+xrt_result_t
 xrt_gfx_provider_create_gl_egl(struct xrt_compositor_native *xcn,
                                EGLDisplay display,
                                EGLConfig config,
                                EGLContext context,
-                               PFNEGLGETPROCADDRESSPROC getProcAddress);
+                               PFNEGLGETPROCADDRESSPROC get_gl_procaddr,
+                               bool renderdoc_enabled,
+                               struct xrt_compositor_gl **out_xcgl);
 
 #ifdef __cplusplus
 }

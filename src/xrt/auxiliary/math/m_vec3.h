@@ -1,4 +1,4 @@
-// Copyright 2019-2020, Collabora, Ltd.
+// Copyright 2019-2021, Collabora, Ltd.
 // Copyright 2020, Nova King.
 // SPDX-License-Identifier: BSL-1.0
 /*!
@@ -6,6 +6,7 @@
  * @brief  C vec3 math library.
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @author Nova King <technobaboo@gmail.com>
+ * @author Moses Turner <moses@collabora.com>>
  *
  * @see xrt_vec3
  * @ingroup aux_math
@@ -109,13 +110,51 @@ m_vec3_angle(struct xrt_vec3 l, struct xrt_vec3 r)
 	if (lengths == 0) {
 		return 0;
 	}
+	lengths = sqrtf(lengths);
 
 	return acosf(dot / lengths);
+}
+
+static inline struct xrt_vec3
+m_vec3_project(struct xrt_vec3 project_this, struct xrt_vec3 onto_this)
+{
+
+	float amnt = (m_vec3_dot(project_this, onto_this) / m_vec3_len_sqrd(onto_this));
+
+	return m_vec3_mul_scalar(onto_this, amnt);
+}
+
+static inline struct xrt_vec3
+m_vec3_orthonormalize(struct xrt_vec3 leave_this_alone, struct xrt_vec3 change_this_one)
+{
+	return m_vec3_normalize(m_vec3_sub(change_this_one, m_vec3_project(change_this_one, leave_this_alone)));
+}
+
+static inline struct xrt_vec3
+m_vec3_lerp(struct xrt_vec3 from, struct xrt_vec3 to, float amount)
+{
+	// Recommend amount being in [0,1]
+	return m_vec3_add(m_vec3_mul_scalar(from, 1.0f - amount), m_vec3_mul_scalar(to, amount));
+}
+
+static inline bool
+m_vec3_equal_exact(struct xrt_vec3 l, struct xrt_vec3 r)
+{
+	return l.x == r.x && l.y == r.y && l.z == r.z;
+}
+
+typedef float m_vec3_float_arr[3];
+
+static inline m_vec3_float_arr *
+m_vec3_ptr_to_float_arr_ptr(struct xrt_vec3 *ptr)
+{
+	return (m_vec3_float_arr *)ptr;
 }
 
 
 #ifdef __cplusplus
 }
+
 
 static inline struct xrt_vec3
 operator+(const struct xrt_vec3 &a, const struct xrt_vec3 &b)
@@ -129,7 +168,13 @@ operator-(const struct xrt_vec3 &a, const struct xrt_vec3 &b)
 	return m_vec3_sub(a, b);
 }
 
-static inline struct xrt_vec3 // Until clang-format-11 is on the CI.
+static inline struct xrt_vec3
+operator*(const struct xrt_vec3 &a, const float &b)
+{
+	return m_vec3_mul_scalar(a, b);
+}
+
+static inline struct xrt_vec3
 operator*(const struct xrt_vec3 &a, const struct xrt_vec3 &b)
 {
 	return m_vec3_mul(a, b);
@@ -139,6 +184,12 @@ static inline struct xrt_vec3
 operator/(const struct xrt_vec3 &a, const struct xrt_vec3 &b)
 {
 	return m_vec3_div(a, b);
+}
+
+static inline struct xrt_vec3
+operator/(const struct xrt_vec3 &a, const float &b)
+{
+	return m_vec3_div_scalar(a, b);
 }
 
 static inline void
@@ -155,6 +206,12 @@ operator-=(struct xrt_vec3 &a, const struct xrt_vec3 &b)
 
 static inline void
 operator*=(struct xrt_vec3 &a, const struct xrt_vec3 &b)
+{
+	a = a * b;
+}
+
+static inline void
+operator*=(struct xrt_vec3 &a, const float &b)
 {
 	a = a * b;
 }

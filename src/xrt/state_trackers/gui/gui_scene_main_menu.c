@@ -34,6 +34,12 @@ scene_render(struct gui_scene *scene, struct gui_program *p)
 		gui_scene_select_video_calibrate(p);
 	}
 
+	if (igButton("Tracking Overrides", button_dims)) {
+		gui_scene_delete_me(p, scene);
+
+		gui_scene_tracking_overrides(p);
+	}
+
 	if (igButton("Debug Test", button_dims)) {
 		gui_scene_delete_me(p, scene);
 
@@ -45,10 +51,40 @@ scene_render(struct gui_scene *scene, struct gui_program *p)
 		gui_scene_debug(p);
 	}
 
+	if (igButton("Record (DepthAI Monocular)", button_dims)) {
+		gui_scene_delete_me(p, scene);
+		gui_scene_record(p, "depthai-monocular");
+	}
+
+	if (igButton("Record (DepthAI Stereo)", button_dims)) {
+		gui_scene_delete_me(p, scene);
+		gui_scene_record(p, "depthai-stereo");
+	}
+
+	if (igButton("Record (Index)", button_dims)) {
+		gui_scene_delete_me(p, scene);
+		gui_scene_record(p, "index");
+	}
+
+	if (igButton("Record (Leap Motion)", button_dims)) {
+		gui_scene_delete_me(p, scene);
+		gui_scene_record(p, "leap_motion");
+	}
+
 	if (igButton("Remote", button_dims)) {
 		gui_scene_delete_me(p, scene);
 
-		gui_scene_remote(p);
+		gui_scene_remote(p, NULL);
+	}
+
+	if (igButton("Hand-Tracking Demo", button_dims)) {
+		gui_scene_delete_me(p, scene);
+		gui_scene_hand_tracking_demo(p);
+	}
+
+	if (igButton("EuRoC recorder (DepthAI Stereo)", button_dims)) {
+		gui_scene_delete_me(p, scene);
+		gui_scene_record_euroc(p);
 	}
 
 	igSeparator();

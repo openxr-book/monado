@@ -1,9 +1,11 @@
-// Copyright 2019, Collabora, Ltd.
+// Copyright 2019-2021, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  C interface to math library.
  * @author Jakob Bornecrantz <jakob@collabora.com>
+ * @author Moses Turner <mosesturner@protonmail.com>
+ * @author Nis Madsen <nima_zero_one@protonmail.com>
  *
  * @see xrt_vec3
  * @see xrt_quat
@@ -47,6 +49,31 @@ extern "C" {
  * @ingroup aux_math
  */
 #define MATH_GRAVITY_M_S2 (9.8066)
+
+/*!
+ * Minimum of A and B.
+ *
+ * @ingroup aux_math
+ */
+#ifndef MIN // Avoid clash with OpenCV def
+#define MIN(A, B) ((A) < (B) ? (A) : (B))
+#endif
+
+/*!
+ * Maximum of A and B.
+ *
+ * @ingroup aux_math
+ */
+#ifndef MAX // Avoid clash with OpenCV def
+#define MAX(A, B) ((A) > (B) ? (A) : (B))
+#endif
+
+/*!
+ * X clamped to the range [A, B].
+ *
+ * @ingroup aux_math
+ */
+#define CLAMP(X, A, B) (MIN(MAX((X), (A)), (B)))
 
 
 /*
@@ -127,6 +154,14 @@ math_vec3_scalar_mul(float scalar, struct xrt_vec3 *inAndOut);
 void
 math_vec3_cross(const struct xrt_vec3 *l, const struct xrt_vec3 *r, struct xrt_vec3 *result);
 
+/*!
+ * Get translation vector from isometry matrix (col-major).
+ *
+ * @relates xrt_vec3
+ * @ingroup aux_math
+ */
+void
+math_vec3_translation_from_isometry(const struct xrt_matrix_4x4 *isometry, struct xrt_vec3 *result);
 
 /*!
  * Normalize a vec3 in place.
@@ -137,6 +172,32 @@ math_vec3_cross(const struct xrt_vec3 *l, const struct xrt_vec3 *r, struct xrt_v
 void
 math_vec3_normalize(struct xrt_vec3 *in);
 
+
+/*
+ *
+ * 64 bit vector functions.
+ *
+ */
+
+/*!
+ * Cross product of a vec3_f64.
+ *
+ * @relates xrt_vec3_f64
+ * @ingroup aux_math
+ */
+void
+math_vec3_f64_cross(const struct xrt_vec3_f64 *l, const struct xrt_vec3_f64 *r, struct xrt_vec3_f64 *result);
+
+/*!
+ * Normalize a vec3_f64 in place.
+ *
+ * @relates xrt_vec3_f64
+ * @ingroup aux_math
+ */
+void
+math_vec3_f64_normalize(struct xrt_vec3_f64 *in);
+
+
 /*
  *
  * Quat functions.
@@ -144,20 +205,28 @@ math_vec3_normalize(struct xrt_vec3 *in);
  */
 
 /*!
- * Create a rotation from a angle in radians and a vector.
+ * Create a rotation from an angle in radians and a unit vector.
  *
  * @relates xrt_quat
- * @relates xrt_vec3
+ * @see xrt_vec3
  * @ingroup aux_math
  */
 void
 math_quat_from_angle_vector(float angle_rads, const struct xrt_vec3 *vector, struct xrt_quat *result);
 
 /*!
- * Create a rotation from a 3x3 rotation matrix.
+ * Create a rotation from euler angles to a quaternion
+ * @relates xrt_quat
+ * @ingroup aux_math
+ */
+void
+math_quat_from_euler_angles(const struct xrt_vec3 *angles, struct xrt_quat *result);
+
+/*!
+ * Create a rotation from a 3x3 rotation (row major) matrix.
  *
  * @relates xrt_quat
- * @relates xrt_matrix_3x3
+ * @see xrt_matrix_3x3
  * @ingroup aux_math
  */
 void
@@ -167,8 +236,10 @@ math_quat_from_matrix_3x3(const struct xrt_matrix_3x3 *mat, struct xrt_quat *res
  * Create a rotation from two vectors plus x and z, by creating a rotation
  * matrix by crossing z and x to get the y axis.
  *
+ * Input vectors should be normalized.
+ *
  * @relates xrt_quat
- * @relates xrt_vec3
+ * @see xrt_vec3
  * @ingroup aux_math
  */
 void
@@ -202,6 +273,15 @@ void
 math_quat_invert(const struct xrt_quat *quat, struct xrt_quat *out_quat);
 
 /*!
+ * The euclidean norm or length of a quaternion. Same as if it were a vec4.
+ *
+ * @relates xrt_quat
+ * @ingroup aux_math
+ */
+float
+math_quat_len(const struct xrt_quat *quat);
+
+/*!
  * Normalize a quaternion.
  *
  * @relates xrt_quat
@@ -226,7 +306,7 @@ math_quat_ensure_normalized(struct xrt_quat *inout);
  * Rotate a vector.
  *
  * @relates xrt_quat
- * @relatesalso xrt_vec3
+ * @see xrt_vec3
  * @ingroup aux_math
  */
 void
@@ -241,16 +321,24 @@ math_quat_rotate_vec3(const struct xrt_quat *left, const struct xrt_vec3 *right,
 void
 math_quat_rotate(const struct xrt_quat *left, const struct xrt_quat *right, struct xrt_quat *result);
 
+/*!
+ * Inverse of @ref math_quat_rotate. Removes @p left rotation from @p right.
+ *
+ * @relates xrt_quat
+ * @ingroup aux_math
+ */
+void
+math_quat_unrotate(const struct xrt_quat *left, const struct xrt_quat *right, struct xrt_quat *result);
 
 /*!
- * Integrate an angular velocity vector (exponential map) and apply to a
+ * Integrate a local angular velocity vector (exponential map) and apply to a
  * quaternion.
  *
  * ang_vel and dt should share the same units of time, and the ang_vel
  * vector should be in radians per unit of time.
  *
  * @relates xrt_quat
- * @relatesalso xrt_vec3
+ * @see xrt_vec3
  * @ingroup aux_math
  */
 void
@@ -260,8 +348,8 @@ math_quat_integrate_velocity(const struct xrt_quat *quat,
                              struct xrt_quat *result);
 
 /*!
- * Compute an angular velocity vector (exponential map format) by taking the
- * finite difference of two quaternions.
+ * Compute a global angular velocity vector (exponential map format) by taking
+ * the finite difference of two quaternions.
  *
  * quat1 is the orientation dt time after the orientation was quat0
  *
@@ -269,7 +357,7 @@ math_quat_integrate_velocity(const struct xrt_quat *quat,
  * radians per unit of time.
  *
  * @relates xrt_quat
- * @relatesalso xrt_vec3
+ * @see xrt_vec3
  * @ingroup aux_math
  */
 void
@@ -279,15 +367,76 @@ math_quat_finite_difference(const struct xrt_quat *quat0,
                             struct xrt_vec3 *out_ang_vel);
 
 /*!
- * Used to rotate a derivative like a angular velocity.
+ * Takes a rotation vector equal to half of a Rodrigues rotation vector and returns its corresponding unit quaternion.
+ * Useful for head tracking and pose-prediction.
  *
  * @relates xrt_quat
- * @relatesalso xrt_vec3
+ * @see xrt_vec3
  * @ingroup aux_math
  */
 void
-math_quat_rotate_derivative(const struct xrt_quat *rot, const struct xrt_vec3 *deriv, struct xrt_vec3 *result);
+math_quat_exp(const struct xrt_vec3 *axis_angle, struct xrt_quat *out_quat);
 
+
+/*!
+ * Takes a unit quaternion and returns a rotation vector equal to half of its corresponding Rodrigues rotation vector.
+ * Useful for head tracking and pose-prediction.
+ *
+ * @relates xrt_quat
+ * @see xrt_vec3
+ * @ingroup aux_math
+ */
+void
+math_quat_ln(const struct xrt_quat *quat, struct xrt_vec3 *out_axis_angle);
+
+/*!
+ * Used to rotate a derivative like a angular velocity.
+ *
+ * @relates xrt_quat
+ * @see xrt_vec3
+ * @ingroup aux_math
+ */
+void
+math_quat_rotate_derivative(const struct xrt_quat *quat, const struct xrt_vec3 *deriv, struct xrt_vec3 *result);
+
+
+/*!
+ * Slerp (spherical linear interpolation) between two quaternions
+ *
+ * @relates xrt_quat
+ * @ingroup aux_math
+ */
+void
+math_quat_slerp(const struct xrt_quat *left, const struct xrt_quat *right, float t, struct xrt_quat *result);
+
+
+/*!
+ * Converts a 2D vector to a quaternion
+ *
+ * @relates xrt_quat
+ * @ingroup aux_math
+ */
+void
+math_quat_from_swing(const struct xrt_vec2 *swing, struct xrt_quat *result);
+
+
+/*!
+ * Converts a 2D vector and a float to a quaternion
+ *
+ * @relates xrt_quat
+ * @ingroup aux_math
+ */
+void
+math_quat_from_swing_twist(const struct xrt_vec2 *swing, const float twist, struct xrt_quat *result);
+
+/*!
+ * Converts a quaternion to XY-swing and Z-twist
+ *
+ * @relates xrt_quat
+ * @ingroup aux_math
+ */
+void
+math_quat_to_swing_twist(const struct xrt_quat *in, struct xrt_vec2 *out_swing, float *out_twist);
 
 /*
  *
@@ -296,20 +445,117 @@ math_quat_rotate_derivative(const struct xrt_quat *rot, const struct xrt_vec3 *d
  */
 
 /*!
- * Multiply Matrix2x2.
+ * Initialize a 3x3 matrix to the identity matrix
  *
- * @relates xrt_matrix_2x2
+ * @see xrt_matrix_3x3
  * @ingroup aux_math
  */
 void
-math_matrix_2x2_multiply(const struct xrt_matrix_2x2 *left,
-                         const struct xrt_matrix_2x2 *right,
-                         struct xrt_matrix_2x2 *result);
+math_matrix_3x3_identity(struct xrt_matrix_3x3 *mat);
 
+/*!
+ * Initialize a 3x3 matrix from a quaternion
+ *
+ * @see xrt_matrix_3x3
+ * @ingroup aux_math
+ */
+void
+math_matrix_3x3_from_quat(const struct xrt_quat *q, struct xrt_matrix_3x3 *result_out);
+
+/*!
+ * Initialize a double 3x3 matrix to the identity matrix
+ *
+ * @see xrt_matrix_3x3
+ * @ingroup aux_math
+ */
+void
+math_matrix_3x3_f64_identity(struct xrt_matrix_3x3_f64 *mat);
+
+/*!
+ * Transform a vec3 by a 3x3 matrix
+ *
+ * @see xrt_matrix_3x3
+ * @ingroup aux_math
+ */
 void
 math_matrix_3x3_transform_vec3(const struct xrt_matrix_3x3 *left,
                                const struct xrt_vec3 *right,
-                               struct xrt_vec3 *result);
+                               struct xrt_vec3 *result_out);
+
+/*!
+ * Transform a vec3 by a 4x4 matrix, extending the vector with w = 1.0
+ *
+ * @see xrt_matrix_4x4
+ * @ingroup aux_math
+ */
+void
+math_matrix_4x4_transform_vec3(const struct xrt_matrix_4x4 *left,
+                               const struct xrt_vec3 *right,
+                               struct xrt_vec3 *result_out);
+
+/*!
+ * Transform a double vec3 by a 3x3 double matrix
+ *
+ * @see xrt_matrix_3x3
+ * @ingroup aux_math
+ */
+void
+math_matrix_3x3_f64_transform_vec3_f64(const struct xrt_matrix_3x3_f64 *left,
+                                       const struct xrt_vec3_f64 *right,
+                                       struct xrt_vec3_f64 *result_out);
+
+/*!
+ * Multiply Matrix3x3.
+ *
+ * @relates xrt_matrix_3x3
+ * @ingroup aux_math
+ */
+void
+math_matrix_3x3_multiply(const struct xrt_matrix_3x3 *left,
+                         const struct xrt_matrix_3x3 *right,
+                         struct xrt_matrix_3x3 *result_out);
+
+/*!
+ * Invert Matrix3x3
+ *
+ * @relates xrt_matrix_3x3
+ * @ingroup aux_math
+ */
+void
+math_matrix_3x3_inverse(const struct xrt_matrix_3x3 *in, struct xrt_matrix_3x3 *result);
+
+/*!
+ * Transpose Matrix3x3
+ *
+ * @relates xrt_matrix_3x3
+ * @ingroup aux_math
+ */
+void
+math_matrix_3x3_transpose(const struct xrt_matrix_3x3 *in, struct xrt_matrix_3x3 *result);
+
+/*!
+ * Create a rotation from two vectors plus x and z, by
+ * creating a rotation matrix by crossing z and x to
+ * get the y axis.
+ *
+ * Input vectors should be normalized.
+ *
+ * @relates xrt_matrix_3x3
+ * @ingroup aux_math
+ */
+void
+math_matrix_3x3_f64_from_plus_x_z(const struct xrt_vec3_f64 *plus_x,
+                                  const struct xrt_vec3_f64 *plus_z,
+                                  struct xrt_matrix_3x3_f64 *result);
+
+/*!
+ * Get the rotation matrix from an isomertry matrix (col-major).
+ *
+ * @relates xrt_matrix_4x4
+ * @ingroup aux_math
+ */
+void
+math_matrix_3x3_rotation_from_isometry(const struct xrt_matrix_4x4 *isometry, struct xrt_matrix_3x3 *result);
 
 /*!
  * Initialize Matrix4x4 with identity.
@@ -332,6 +578,33 @@ math_matrix_4x4_multiply(const struct xrt_matrix_4x4 *left,
                          struct xrt_matrix_4x4 *result);
 
 /*!
+ * Invert Matrix4x4.
+ *
+ * @relates xrt_matrix_4x4
+ * @ingroup aux_math
+ */
+void
+math_matrix_4x4_inverse(const struct xrt_matrix_4x4 *in, struct xrt_matrix_4x4 *result);
+
+/*!
+ * Invert a homogeneous isometry 4x4 (col-major) matrix in SE(3).
+ *
+ * @relates xrt_matrix_4x4
+ * @ingroup aux_math
+ */
+void
+math_matrix_4x4_isometry_inverse(const struct xrt_matrix_4x4 *in, struct xrt_matrix_4x4 *result);
+
+/*!
+ * Transpose Matrix4x4
+ *
+ * @relates xrt_matrix_4x4
+ * @ingroup aux_math
+ */
+void
+math_matrix_4x4_transpose(const struct xrt_matrix_4x4 *in, struct xrt_matrix_4x4 *result);
+
+/*!
  * Compute view matrix from xrt_pose.
  *
  * @relates xrt_matrix_4x4
@@ -339,6 +612,27 @@ math_matrix_4x4_multiply(const struct xrt_matrix_4x4 *left,
  */
 void
 math_matrix_4x4_view_from_pose(const struct xrt_pose *pose, struct xrt_matrix_4x4 *result);
+
+/*!
+ * Get an isometry matrix —in SE(3)— from a rotation matrix —SO(3)— and a
+ * translation vector. All col-major matrices.
+ *
+ * @relates xrt_matrix_4x4
+ * @ingroup aux_math
+ */
+void
+math_matrix_4x4_isometry_from_rt(const struct xrt_matrix_3x3 *rotation,
+                                 const struct xrt_vec3 *translation,
+                                 struct xrt_matrix_4x4 *result);
+
+/*!
+ * Get a col-major isometry matrix —in SE(3)— from a pose.
+ *
+ * @relates xrt_matrix_4x4
+ * @ingroup aux_math
+ */
+void
+math_matrix_4x4_isometry_from_pose(const struct xrt_pose *pose, struct xrt_matrix_4x4 *result);
 
 /*!
  * Compute quad layer model matrix from xrt_pose and xrt_vec2 size.
@@ -361,11 +655,34 @@ math_matrix_4x4_inverse_view_projection(const struct xrt_matrix_4x4 *view,
                                         const struct xrt_matrix_4x4 *projection,
                                         struct xrt_matrix_4x4 *result);
 
+/*!
+ * Compute a projection matrix with settings for Vulkan, it will also have it's
+ * far plane at infinite and the NDC depth will be reversed.
+ *
+ * @relates xrt_matrix_4x4
+ * @ingroup aux_math
+ */
+void
+math_matrix_4x4_projection_vulkan_infinite_reverse(const struct xrt_fov *fov,
+                                                   float near_plane,
+                                                   struct xrt_matrix_4x4 *result);
+
+
 /*
  *
  * Pose functions.
  *
  */
+
+
+/*!
+ * Somewhat laboriously make an xrt_pose identity.
+ *
+ * @relates xrt_pose
+ * @ingroup aux_math
+ */
+void
+math_pose_identity(struct xrt_pose *pose);
 
 /*!
  * Check if this pose can be used in transformation operations.
@@ -388,6 +705,25 @@ void
 math_pose_invert(const struct xrt_pose *pose, struct xrt_pose *outPose);
 
 /*!
+ * Converts a (col-major) isometry into a pose.
+ *
+ * @relates xrt_pose
+ * @ingroup aux_math
+ */
+void
+math_pose_from_isometry(const struct xrt_matrix_4x4 *transform, struct xrt_pose *result);
+
+/*!
+ * Interpolated pose between poses `a` and `b` by lerping position and slerping
+ * orientation by t.
+ *
+ * @relates xrt_pose
+ * @ingroup aux_math
+ */
+void
+math_pose_interpolate(const struct xrt_pose *a, const struct xrt_pose *b, float t, struct xrt_pose *outPose);
+
+/*!
  * Apply a rigid-body transformation to a pose.
  *
  * OK if input and output are the same addresses.
@@ -404,12 +740,34 @@ math_pose_transform(const struct xrt_pose *transform, const struct xrt_pose *pos
  * The input point and output may be the same pointer.
  *
  * @relates xrt_pose
- * @relates xrt_vec3
+ * @see xrt_vec3
  * @ingroup aux_math
  */
 void
 math_pose_transform_point(const struct xrt_pose *transform, const struct xrt_vec3 *point, struct xrt_vec3 *out_point);
 
+
+/*
+ *
+ * Inline functions.
+ *
+ */
+
+/*!
+ * Map a number from one range to another range.
+ * Exactly the same as Arduino's map().
+ */
+static inline double
+math_map_ranges(double value, double from_low, double from_high, double to_low, double to_high)
+{
+	return (value - from_low) * (to_high - to_low) / (from_high - from_low) + to_low;
+}
+
+static inline double
+math_lerp(double from, double to, double amount)
+{
+	return (from * (1.0 - amount)) + (to * (amount));
+}
 
 /*
  *

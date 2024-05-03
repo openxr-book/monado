@@ -76,7 +76,7 @@ static bool
 comp_window_wayland_init_swapchain(struct comp_target *ct, uint32_t width, uint32_t height);
 
 static VkResult
-comp_window_wayland_create_surface(struct comp_window_wayland *w, VkSurfaceKHR *vk_surface);
+comp_window_wayland_create_surface(struct comp_window_wayland *w, VkSurfaceKHR *out_surface);
 
 static void
 comp_window_wayland_flush(struct comp_target *ct);
@@ -94,7 +94,7 @@ comp_window_wayland_configure(struct comp_window_wayland *w, int32_t width, int3
 static inline struct vk_bundle *
 get_vk(struct comp_window_wayland *cww)
 {
-	return &cww->base.base.c->vk;
+	return &cww->base.base.c->base.vk;
 }
 
 struct comp_target *
@@ -102,9 +102,11 @@ comp_window_wayland_create(struct comp_compositor *c)
 {
 	struct comp_window_wayland *w = U_TYPED_CALLOC(struct comp_window_wayland);
 
-	comp_target_swapchain_init_set_fnptrs(&w->base);
+	// The display timing code hasn't been tested on Wayland and may be broken.
+	comp_target_swapchain_init_and_set_fnptrs(&w->base, COMP_TARGET_FORCE_FAKE_DISPLAY_TIMING);
 
 	w->base.base.name = "wayland";
+	w->base.display = VK_NULL_HANDLE;
 	w->base.base.destroy = comp_window_wayland_destroy;
 	w->base.base.flush = comp_window_wayland_flush;
 	w->base.base.init_pre_vulkan = comp_window_wayland_init;
@@ -177,6 +179,12 @@ _xdg_toplevel_close_cb(void *data, struct xdg_toplevel *toplevel)
 static const struct xdg_toplevel_listener xdg_toplevel_listener = {
     _xdg_toplevel_configure_cb,
     _xdg_toplevel_close_cb,
+#if XDG_TOPLEVEL_CONFIGURE_BOUNDS_SINCE_VERSION >= 4
+    NULL,
+#endif
+#if XDG_TOPLEVEL_WM_CAPABILITIES_SINCE_VERSION >= 5
+    NULL,
+#endif
 };
 
 static void
@@ -208,7 +216,7 @@ comp_window_wayland_init_swapchain(struct comp_target *ct, uint32_t width, uint3
 }
 
 static VkResult
-comp_window_wayland_create_surface(struct comp_window_wayland *w, VkSurfaceKHR *vk_surface)
+comp_window_wayland_create_surface(struct comp_window_wayland *w, VkSurfaceKHR *out_surface)
 {
 	struct vk_bundle *vk = get_vk(w);
 	VkResult ret;
@@ -219,11 +227,19 @@ comp_window_wayland_create_surface(struct comp_window_wayland *w, VkSurfaceKHR *
 	    .surface = w->surface,
 	};
 
-	ret = vk->vkCreateWaylandSurfaceKHR(vk->instance, &surface_info, NULL, vk_surface);
+	VkSurfaceKHR surface = VK_NULL_HANDLE;
+	ret = vk->vkCreateWaylandSurfaceKHR( //
+	    vk->instance,                    //
+	    &surface_info,                   //
+	    NULL,                            //
+	    &surface);                       //
 	if (ret != VK_SUCCESS) {
 		COMP_ERROR(w->base.base.c, "vkCreateWaylandSurfaceKHR: %s", vk_result_string(ret));
 		return ret;
 	}
+
+	VK_NAME_SURFACE(vk, surface, "comp_window_wayland surface");
+	*out_surface = surface;
 
 	return VK_SUCCESS;
 }
@@ -317,7 +333,7 @@ comp_window_wayland_init(struct comp_target *ct)
 	w_wayland->xdg_toplevel = xdg_surface_get_toplevel(w_wayland->xdg_surface);
 
 	xdg_toplevel_add_listener(w_wayland->xdg_toplevel, &xdg_toplevel_listener, w_wayland);
-	/* Sane defaults */
+	/* basic defaults */
 	xdg_toplevel_set_app_id(w_wayland->xdg_toplevel, "openxr");
 	xdg_toplevel_set_title(w_wayland->xdg_toplevel, "OpenXR application");
 
@@ -335,3 +351,47 @@ comp_window_wayland_configure(struct comp_window_wayland *w, int32_t width, int3
 		w->fullscreen_requested = true;
 	}
 }
+
+
+/*
+ *
+ * Factory
+ *
+ */
+
+static const char *instance_extensions[] = {
+    VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME,
+};
+
+static bool
+detect(const struct comp_target_factory *ctf, struct comp_compositor *c)
+{
+	return false;
+}
+
+static bool
+create_target(const struct comp_target_factory *ctf, struct comp_compositor *c, struct comp_target **out_ct)
+{
+	struct comp_target *ct = comp_window_wayland_create(c);
+	if (ct == NULL) {
+		return false;
+	}
+
+	*out_ct = ct;
+
+	return true;
+}
+
+const struct comp_target_factory comp_target_factory_wayland = {
+    .name = "Wayland Windowed",
+    .identifier = "wayland",
+    .requires_vulkan_for_create = false,
+    .is_deferred = false,
+    .required_instance_version = 0,
+    .required_instance_extensions = instance_extensions,
+    .required_instance_extension_count = ARRAY_SIZE(instance_extensions),
+    .optional_device_extensions = NULL,
+    .optional_device_extension_count = 0,
+    .detect = detect,
+    .create_target = create_target,
+};

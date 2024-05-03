@@ -4,7 +4,7 @@
  * @file
  * @brief  PSVR prober code.
  * @author Jakob Bornecrantz <jakob@collabora.com>
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup drv_psvr
  */
 
@@ -14,6 +14,7 @@
 
 #include <hidapi.h>
 #include "xrt/xrt_prober.h"
+#include "xrt/xrt_tracking.h"
 
 #include "util/u_misc.h"
 #include "util/u_debug.h"
@@ -74,8 +75,12 @@ psvr_prober_destroy(struct xrt_auto_prober *p)
 }
 
 //! @public @memberof psvr_prober
-static struct xrt_device *
-psvr_prober_autoprobe(struct xrt_auto_prober *xap, cJSON *attached_data, bool no_hmds, struct xrt_prober *xp)
+static int
+psvr_prober_autoprobe(struct xrt_auto_prober *xap,
+                      cJSON *attached_data,
+                      bool no_hmds,
+                      struct xrt_prober *xp,
+                      struct xrt_device **out_xdevs)
 {
 	struct psvr_prober *ppsvr = psvr_prober(xap);
 	struct hid_device_info *info_control = NULL;
@@ -86,7 +91,7 @@ psvr_prober_autoprobe(struct xrt_auto_prober *xap, cJSON *attached_data, bool no
 
 	// Do not look for the PSVR if we are not looking for HMDs.
 	if (no_hmds) {
-		return NULL;
+		return 0;
 	}
 
 	devs = hid_enumerate(PSVR_VID, PSVR_PID);
@@ -102,7 +107,13 @@ psvr_prober_autoprobe(struct xrt_auto_prober *xap, cJSON *attached_data, bool no
 
 	if (info_control != NULL && info_handle != NULL) {
 		if (ppsvr->enabled) {
-			dev = psvr_device_create(info_handle, info_control, xp, ppsvr->log_level);
+			// If there is a tracking factory use it.
+			struct xrt_tracked_psvr *tracker = NULL;
+			if (xp->tracking != NULL) {
+				xp->tracking->create_tracked_psvr(xp->tracking, &tracker);
+			}
+
+			dev = psvr_device_create_auto_prober(info_handle, info_control, tracker, ppsvr->log_level);
 		} else {
 			PSVR_DEBUG(ppsvr, "Found a PSVR hmd but driver is disabled");
 		}
@@ -110,7 +121,12 @@ psvr_prober_autoprobe(struct xrt_auto_prober *xap, cJSON *attached_data, bool no
 
 	hid_free_enumeration(devs);
 
-	return dev;
+	if (!dev) {
+		return 0;
+	}
+
+	out_xdevs[0] = dev;
+	return 1;
 }
 
 
@@ -131,4 +147,42 @@ psvr_create_auto_prober(void)
 	ppsvr->log_level = debug_get_log_option_psvr_log();
 
 	return &ppsvr->base;
+}
+
+struct xrt_device *
+psvr_device_create(struct xrt_tracked_psvr *tracker)
+{
+	struct hid_device_info *info_control = NULL;
+	struct hid_device_info *info_handle = NULL;
+	struct hid_device_info *cur_dev = NULL;
+	struct hid_device_info *devs = NULL;
+	struct xrt_device *xdev = NULL;
+	enum u_logging_level log_level = debug_get_log_option_psvr_log();
+
+	devs = hid_enumerate(PSVR_VID, PSVR_PID);
+	cur_dev = devs;
+
+	for (; cur_dev != NULL; cur_dev = cur_dev->next) {
+		switch (cur_dev->interface_number) {
+		case PSVR_HANDLE_IFACE: info_handle = cur_dev; break;
+		case PSVR_CONTROL_IFACE: info_control = cur_dev; break;
+		default: break;
+		}
+	}
+
+	if (info_handle == NULL) {
+		U_LOG_IFL_W(log_level, "PSVR_HANDLE_IFACE: could not be opened!");
+	}
+
+	if (info_control == NULL) {
+		U_LOG_IFL_W(log_level, "PSVR_CONTROL_IFACE: could not be opened!");
+	}
+
+	if (info_control != NULL && info_handle != NULL) {
+		xdev = psvr_device_create_auto_prober(info_handle, info_control, tracker, log_level);
+	}
+
+	hid_free_enumeration(devs);
+
+	return xdev;
 }

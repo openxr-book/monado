@@ -3,7 +3,7 @@
 /*!
  * @file
  * @brief  Implementation of VrListenerService.
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  */
 
 package org.freedesktop.monado.android_common
@@ -25,11 +25,9 @@ class MonadoVrListener : VrListenerService() {
         if (component == null) {
             Toast.makeText(this, "Now in VR for 2D", Toast.LENGTH_SHORT).show()
             Log.i("OpenXRListener", "Got VR mode for 2D")
-
         } else {
             Toast.makeText(this, "Now in VR for $component", Toast.LENGTH_SHORT).show()
             Log.i("OpenXRListener", "Got VR mode for component: $component")
         }
-
     }
 }

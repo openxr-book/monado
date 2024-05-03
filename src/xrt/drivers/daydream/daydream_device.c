@@ -88,7 +88,8 @@ update_fusion(struct daydream_device *dd,
               time_duration_ns delta_ns)
 {
 
-	struct xrt_vec3 accel, gyro;
+	struct xrt_vec3 accel;
+	struct xrt_vec3 gyro;
 	m_imu_pre_filter_data(&dd->pre_filter, &sample->accel, &sample->gyro, &accel, &gyro);
 
 	DAYDREAM_DEBUG(dd,
@@ -184,7 +185,7 @@ daydream_run_thread(void *ptr)
 {
 	struct daydream_device *daydream = (struct daydream_device *)ptr;
 	//! @todo this should be injected at construction time
-	struct time_state *time = time_state_create();
+	struct time_state *time = time_state_create(os_monotonic_get_ns());
 
 	uint8_t buffer[20];
 	struct daydream_parsed_input input; // = {0};
@@ -337,9 +338,9 @@ static struct xrt_binding_profile binding_profiles[1] = {
     {
         .name = XRT_DEVICE_SIMPLE_CONTROLLER,
         .inputs = simple_inputs,
-        .num_inputs = ARRAY_SIZE(simple_inputs),
+        .input_count = ARRAY_SIZE(simple_inputs),
         .outputs = NULL,
-        .num_outputs = 0,
+        .output_count = 0,
     },
 };
 
@@ -368,10 +369,14 @@ daydream_device_create(struct os_ble_device *ble)
 	dd->base.inputs[5].name = XRT_INPUT_DAYDREAM_VOLUP_CLICK;
 	dd->base.inputs[6].name = XRT_INPUT_DAYDREAM_TOUCHPAD;
 	dd->base.binding_profiles = binding_profiles;
-	dd->base.num_binding_profiles = ARRAY_SIZE(binding_profiles);
+	dd->base.binding_profile_count = ARRAY_SIZE(binding_profiles);
+
+	static int controller_num = 0;
+	snprintf(dd->base.str, XRT_DEVICE_NAME_LEN, "Daydream");
+	snprintf(dd->base.serial, XRT_DEVICE_NAME_LEN, "Daydream %d", controller_num++);
 
 	dd->ble = ble;
-	dd->ll = debug_get_log_option_daydream_log();
+	dd->log_level = debug_get_log_option_daydream_log();
 
 	float accel_ticks_to_float = MATH_GRAVITY_M_S2 / 520.0;
 	float gyro_ticks_to_float = 1.0 / 120.0;

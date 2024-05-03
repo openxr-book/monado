@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  A fifo that also allows you to dynamically filter.
+ * @brief  A fifo that also lets you dynamically filter.
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @ingroup aux_math
  */
 
 #pragma once
 
-#include "xrt/xrt_defines.h"
+#include "xrt/xrt_defines.h" // IWYU pragma: keep
 
 #ifdef __cplusplus
 extern "C" {
@@ -27,7 +27,7 @@ void
 m_ff_vec3_f32_alloc(struct m_ff_vec3_f32 **ff_out, size_t num);
 
 /*!
- * Frees the given filter fifo and all it's samples.
+ * Frees the given filter fifo and all its samples.
  */
 void
 m_ff_vec3_f32_free(struct m_ff_vec3_f32 **ff_ptr);
@@ -75,7 +75,7 @@ void
 m_ff_f64_alloc(struct m_ff_f64 **ff_out, size_t num);
 
 /*!
- * Frees the given filter fifo and all it's samples.
+ * Frees the given filter fifo and all its samples.
  */
 void
 m_ff_f64_free(struct m_ff_f64 **ff_ptr);
@@ -94,8 +94,7 @@ void
 m_ff_f64_push(struct m_ff_f64 *ff, const double *sample, uint64_t timestamp_ns);
 
 /*!
- * Return the sample at the index, zero means the last sample push, one second
- * last and so on.
+ * Return the sample at the index, 0 means the last sample push, 1 second-to-last, etc.
  */
 bool
 m_ff_f64_get(struct m_ff_f64 *ff, size_t num, double *out_sample, uint64_t *out_timestamp_ns);
@@ -120,12 +119,12 @@ m_ff_f64_filter(struct m_ff_f64 *ff, uint64_t start_ns, uint64_t stop_ns, double
 }
 
 /*!
- * Helper class to wrap a C filter fifo.
+ * Helper class to wrap a C filter fifo (@ref m_ff_vec3_f32).
  */
 class FilterFifo3F
 {
 private:
-	struct m_ff_vec3_f32 *ff;
+	m_ff_vec3_f32 *mFifoPtr;
 
 
 public:
@@ -133,30 +132,54 @@ public:
 
 	FilterFifo3F(size_t size)
 	{
-		m_ff_vec3_f32_alloc(&ff, size);
+		m_ff_vec3_f32_alloc(&mFifoPtr, size);
 	}
 
 	~FilterFifo3F()
 	{
-		m_ff_vec3_f32_free(&ff);
+		m_ff_vec3_f32_free(&mFifoPtr);
 	}
 
+	/*!
+	 * Get the pointer to the C filter fifo, ownership is not passed.
+	 */
+	inline m_ff_vec3_f32 *
+	unsafeGetFilterFifo()
+	{
+		return mFifoPtr;
+	}
+
+	/*!
+	 * @copydoc m_ff_vec3_f32_push
+	 *
+	 * Wrapper for @ref m_ff_vec3_f32_push.
+	 */
 	inline void
 	push(const xrt_vec3 &sample, uint64_t timestamp_ns)
 	{
-		m_ff_vec3_f32_push(ff, &sample, timestamp_ns);
+		m_ff_vec3_f32_push(mFifoPtr, &sample, timestamp_ns);
 	}
 
-	inline void
+	/*!
+	 * @copydoc m_ff_vec3_f32_get
+	 *
+	 * Wrapper for @ref m_ff_vec3_f32_get.
+	 */
+	inline bool
 	get(size_t num, xrt_vec3 *out_sample, uint64_t *out_timestamp_ns)
 	{
-		m_ff_vec3_f32_get(ff, num, out_sample, out_timestamp_ns);
+		return m_ff_vec3_f32_get(mFifoPtr, num, out_sample, out_timestamp_ns);
 	}
 
+	/*!
+	 * @copydoc m_ff_vec3_f32_filter
+	 *
+	 * Wrapper for @ref m_ff_vec3_f32_filter.
+	 */
 	inline size_t
 	filter(uint64_t start_ns, uint64_t stop_ns, struct xrt_vec3 *out_average)
 	{
-		return m_ff_vec3_f32_filter(ff, start_ns, stop_ns, out_average);
+		return m_ff_vec3_f32_filter(mFifoPtr, start_ns, stop_ns, out_average);
 	}
 };
 #endif

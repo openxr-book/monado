@@ -3,7 +3,7 @@
 /*!
  * @file
  * @brief AHardwareBuffer backed image buffer allocator.
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup aux_android
  */
 
@@ -69,6 +69,11 @@ ahardwarebuffer_image_allocate(const struct xrt_swapchain_create_info *xsci, xrt
 	if (0 != (xsci->bits & (XRT_SWAPCHAIN_USAGE_COLOR | XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL))) {
 		desc.usage |= AHARDWAREBUFFER_USAGE_GPU_FRAMEBUFFER;
 	}
+
+	// The compositor always needs to sample the buffer, add the flag.
+	desc.usage |= AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE;
+
+	// Here if the above changes.
 	if (0 != (xsci->bits & XRT_SWAPCHAIN_USAGE_SAMPLED)) {
 		desc.usage |= AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE;
 	}
@@ -95,7 +100,7 @@ ahardwarebuffer_image_allocate(const struct xrt_swapchain_create_info *xsci, xrt
 static xrt_result_t
 ahardwarebuffer_images_allocate(struct xrt_image_native_allocator *xina,
                                 const struct xrt_swapchain_create_info *xsci,
-                                size_t num_images,
+                                size_t image_count,
                                 struct xrt_image_native *out_images)
 {
 	AHardwareBuffer_Desc desc;
@@ -109,15 +114,14 @@ ahardwarebuffer_images_allocate(struct xrt_image_native_allocator *xina,
 	desc.width = xsci->width;
 	desc.format = ahb_format;
 	desc.layers = xsci->array_size;
+	// Monado always samples layers
+	desc.usage |= AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE;
 	if (xsci->face_count == 6) {
 		desc.usage |= AHARDWAREBUFFER_USAGE_GPU_CUBE_MAP;
 		desc.layers *= 6;
 	}
 	if (0 != (xsci->bits & (XRT_SWAPCHAIN_USAGE_COLOR | XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL))) {
 		desc.usage |= AHARDWAREBUFFER_USAGE_GPU_FRAMEBUFFER;
-	}
-	if (0 != (xsci->bits & XRT_SWAPCHAIN_USAGE_SAMPLED)) {
-		desc.usage |= AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE;
 	}
 	if (0 != (xsci->create & XRT_SWAPCHAIN_CREATE_PROTECTED_CONTENT)) {
 		desc.usage |= AHARDWAREBUFFER_USAGE_PROTECTED_CONTENT;
@@ -130,9 +134,9 @@ ahardwarebuffer_images_allocate(struct xrt_image_native_allocator *xina,
 	}
 #endif
 
-	memset(out_images, 0, sizeof(*out_images) * num_images);
+	memset(out_images, 0, sizeof(*out_images) * image_count);
 	bool failed = false;
-	for (size_t i = 0; i < num_images; ++i) {
+	for (size_t i = 0; i < image_count; ++i) {
 		int ret = AHardwareBuffer_allocate(&desc, &(out_images[i].handle));
 		if (ret != 0) {
 			AHB_ERROR("Failed allocating image %d.", (int)i);
@@ -141,7 +145,7 @@ ahardwarebuffer_images_allocate(struct xrt_image_native_allocator *xina,
 		}
 	}
 	if (failed) {
-		for (size_t i = 0; i < num_images; ++i) {
+		for (size_t i = 0; i < image_count; ++i) {
 			u_graphics_buffer_unref(&(out_images[i].handle));
 		}
 		return XRT_ERROR_ALLOCATION;
@@ -150,9 +154,11 @@ ahardwarebuffer_images_allocate(struct xrt_image_native_allocator *xina,
 }
 
 static xrt_result_t
-ahardwarebuffer_images_free(struct xrt_image_native_allocator *xina, size_t num_images, struct xrt_image_native *images)
+ahardwarebuffer_images_free(struct xrt_image_native_allocator *xina,
+                            size_t image_count,
+                            struct xrt_image_native *images)
 {
-	for (size_t i = 0; i < num_images; ++i) {
+	for (size_t i = 0; i < image_count; ++i) {
 		u_graphics_buffer_unref(&(images[i].handle));
 	}
 	return XRT_SUCCESS;

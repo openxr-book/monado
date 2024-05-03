@@ -1,7 +1,7 @@
 // Copyright 2013, Fredrik Hultin.
 // Copyright 2013, Jakob Bornecrantz.
 // Copyright 2015, Joey Ferwerda.
-// Copyright 2020, Collabora, Ltd.
+// Copyright 2020-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -82,10 +82,19 @@ android_sensor_callback(int fd, int events, void *data)
 	return 1;
 }
 
+static inline int32_t
+android_get_sensor_poll_rate(const struct android_device *d)
+{
+	const float freq_multiplier = 1.0f / 3.0f;
+	return (d == NULL) ? POLL_RATE_USEC
+	                   : (int32_t)(d->base.hmd->screens[0].nominal_frame_interval_ns * freq_multiplier * 0.001f);
+}
+
 static void *
 android_run_thread(void *ptr)
 {
 	struct android_device *d = (struct android_device *)ptr;
+	const int32_t poll_rate_usec = android_get_sensor_poll_rate(d);
 
 #if __ANDROID_API__ >= 26
 	d->sensor_manager = ASensorManager_getInstanceForPackage(XRT_ANDROID_PACKAGE);
@@ -101,18 +110,32 @@ android_run_thread(void *ptr)
 	d->event_queue = ASensorManager_createEventQueue(d->sensor_manager, looper, ALOOPER_POLL_CALLBACK,
 	                                                 android_sensor_callback, (void *)d);
 
-	// Start sensors in case this was not done already.
+	/*
+	 * Start sensors in case this was not done already.
+	 *
+	 * On some Android devices, such as Pixel 4 and Meizu 20 series, running
+	 * apps was not smooth due to the failure in setting the sensor's event
+	 * rate. This was caused by the calculated sensor's event rate based on
+	 * the screen refresh rate, which could be smaller than the sensor's
+	 * minimum delay value. Make sure to set it to a valid value.
+	 */
 	if (d->accelerometer != NULL) {
+		int32_t accelerometer_min_delay = ASensor_getMinDelay(d->accelerometer);
+		int32_t accelerometer_poll_rate_usec = MAX(poll_rate_usec, accelerometer_min_delay);
+
 		ASensorEventQueue_enableSensor(d->event_queue, d->accelerometer);
-		ASensorEventQueue_setEventRate(d->event_queue, d->accelerometer, POLL_RATE_USEC);
+		ASensorEventQueue_setEventRate(d->event_queue, d->accelerometer, accelerometer_poll_rate_usec);
 	}
 	if (d->gyroscope != NULL) {
+		int32_t gyroscope_min_delay = ASensor_getMinDelay(d->gyroscope);
+		int32_t gyroscope_poll_rate_usec = MAX(poll_rate_usec, gyroscope_min_delay);
+
 		ASensorEventQueue_enableSensor(d->event_queue, d->gyroscope);
-		ASensorEventQueue_setEventRate(d->event_queue, d->gyroscope, POLL_RATE_USEC);
+		ASensorEventQueue_setEventRate(d->event_queue, d->gyroscope, gyroscope_poll_rate_usec);
 	}
 
 	int ret = 0;
-	while (ret != ALOOPER_POLL_ERROR) {
+	while (d->oth.running && ret != ALOOPER_POLL_ERROR) {
 		ret = ALooper_pollAll(0, NULL, NULL, NULL);
 	}
 
@@ -147,12 +170,6 @@ android_device_destroy(struct xrt_device *xdev)
 }
 
 static void
-android_device_update_inputs(struct xrt_device *xdev)
-{
-	// Empty
-}
-
-static void
 android_device_get_tracked_pose(struct xrt_device *xdev,
                                 enum xrt_input_name name,
                                 uint64_t at_timestamp_ns,
@@ -168,32 +185,6 @@ android_device_get_tracked_pose(struct xrt_device *xdev,
 	                                                               XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
 }
 
-static void
-android_device_get_view_pose(struct xrt_device *xdev,
-                             struct xrt_vec3 *eye_relation,
-                             uint32_t view_index,
-                             struct xrt_pose *out_pose)
-{
-	struct xrt_pose pose = {{0.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 0.0f}};
-	bool adjust = view_index == 0;
-
-	pose.position.x = eye_relation->x / 2.0f;
-	pose.position.y = eye_relation->y / 2.0f;
-	pose.position.z = eye_relation->z / 2.0f;
-
-	// Adjust for left/right while also making sure there aren't any -0.f.
-	if (pose.position.x > 0.0f && adjust) {
-		pose.position.x = -pose.position.x;
-	}
-	if (pose.position.y > 0.0f && adjust) {
-		pose.position.y = -pose.position.y;
-	}
-	if (pose.position.z > 0.0f && adjust) {
-		pose.position.z = -pose.position.z;
-	}
-
-	*out_pose = pose;
-}
 
 /*
  *
@@ -202,7 +193,8 @@ android_device_get_view_pose(struct xrt_device *xdev,
  */
 
 static bool
-android_device_compute_distortion(struct xrt_device *xdev, int view, float u, float v, struct xrt_uv_triplet *result)
+android_device_compute_distortion(
+    struct xrt_device *xdev, uint32_t view, float u, float v, struct xrt_uv_triplet *result)
 {
 	struct android_device *d = android_device(xdev);
 	return u_compute_distortion_cardboard(&d->cardboard.values[view], u, v, result);
@@ -218,34 +210,46 @@ android_device_create()
 
 	d->base.name = XRT_DEVICE_GENERIC_HMD;
 	d->base.destroy = android_device_destroy;
-	d->base.update_inputs = android_device_update_inputs;
+	d->base.update_inputs = u_device_noop_update_inputs;
 	d->base.get_tracked_pose = android_device_get_tracked_pose;
-	d->base.get_view_pose = android_device_get_view_pose;
+	d->base.get_view_poses = u_device_get_view_poses;
 	d->base.compute_distortion = android_device_compute_distortion;
 	d->base.inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;
 	d->base.device_type = XRT_DEVICE_TYPE_HMD;
 	snprintf(d->base.str, XRT_DEVICE_NAME_LEN, "Android Sensors");
+	snprintf(d->base.serial, XRT_DEVICE_NAME_LEN, "Android Sensors");
 
-	d->ll = debug_get_log_option_android_log();
+	d->log_level = debug_get_log_option_android_log();
 
 	m_imu_3dof_init(&d->fusion, M_IMU_3DOF_USE_GRAVITY_DUR_20MS);
 
-	// Everything done, finally start the thread.
-	int ret = os_thread_helper_start(&d->oth, android_run_thread, d);
+	int ret = os_mutex_init(&d->lock);
 	if (ret != 0) {
-		ANDROID_ERROR(d, "Failed to start thread!");
+		U_LOG_E("Failed to init mutex!");
 		android_device_destroy(&d->base);
-		return NULL;
+		return 0;
 	}
 
 	struct xrt_android_display_metrics metrics;
-	if (!android_custom_surface_get_display_metrics(android_globals_get_vm(), android_globals_get_activity(),
+	if (!android_custom_surface_get_display_metrics(android_globals_get_vm(), android_globals_get_context(),
 	                                                &metrics)) {
 		U_LOG_E("Could not get Android display metrics.");
 		/* Fallback to default values (Pixel 3) */
 		metrics.width_pixels = 2960;
 		metrics.height_pixels = 1440;
 		metrics.density_dpi = 572;
+		metrics.refresh_rate = 60.0f;
+	}
+
+	d->base.hmd->screens[0].nominal_frame_interval_ns = time_s_to_ns(1.0f / metrics.refresh_rate);
+
+	// Everything done, finally start the thread.
+	os_thread_helper_init(&d->oth);
+	ret = os_thread_helper_start(&d->oth, android_run_thread, d);
+	if (ret != 0) {
+		ANDROID_ERROR(d, "Failed to start thread!");
+		android_device_destroy(&d->base);
+		return NULL;
 	}
 
 	const uint32_t w_pixels = metrics.width_pixels;

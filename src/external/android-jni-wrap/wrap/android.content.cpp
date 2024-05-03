@@ -1,6 +1,6 @@
-// Copyright 2020, Collabora, Ltd.
+// Copyright 2020-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
-// Author: Ryan Pavlik <ryan.pavlik@collabora.com>
+// Author: Rylie Pavlik <rylie.pavlik@collabora.com>
 
 #include "android.content.h"
 
@@ -12,17 +12,35 @@ Context::Meta::Meta(bool deferDrop)
       WINDOW_SERVICE(classRef(), "WINDOW_SERVICE"),
       getPackageManager(classRef().getMethod(
           "getPackageManager", "()Landroid/content/pm/PackageManager;")),
+      getContentResolver(classRef().getMethod(
+          "getContentResolver", "()Landroid/content/ContentResolver;")),
       getApplicationContext(classRef().getMethod(
           "getApplicationContext", "()Landroid/content/Context;")),
       getClassLoader(
           classRef().getMethod("getClassLoader", "()Ljava/lang/ClassLoader;")),
+      getExternalFilesDir(classRef().getMethod(
+          "getExternalFilesDir", "(Ljava/lang/String;)Ljava/io/File;")),
       startActivity(
           classRef().getMethod("startActivity", "(Landroid/content/Intent;)V")),
       startActivity1(classRef().getMethod(
           "startActivity", "(Landroid/content/Intent;Landroid/os/Bundle;)V")),
+      getSystemService(classRef().getMethod(
+          "getSystemService", "(Ljava/lang/String;)Ljava/lang/Object;")),
       createPackageContext(classRef().getMethod(
           "createPackageContext",
-          "(Ljava/lang/String;I)Landroid/content/Context;")) {
+          "(Ljava/lang/String;I)Landroid/content/Context;")),
+      createDisplayContext(classRef().getMethod(
+          "createDisplayContext",
+          "(Landroid/view/Display;)Landroid/content/Context;")) {
+    if (!deferDrop) {
+        MetaBaseDroppable::dropClassRef();
+    }
+}
+ContentUris::Meta::Meta(bool deferDrop)
+    : MetaBaseDroppable(ContentUris::getTypeName()),
+      appendId(classRef().getStaticMethod(
+          "appendId",
+          "(Landroid/net/Uri$Builder;J)Landroid/net/Uri$Builder;")) {
     if (!deferDrop) {
         MetaBaseDroppable::dropClassRef();
     }
@@ -51,5 +69,21 @@ Intent::Meta::Meta()
                                  "content/Context;Ljava/lang/Class;)V")),
       setFlags(
           classRef().getMethod("setFlags", "(I)Landroid/content/Intent;")) {}
+ContentResolver::Meta::Meta()
+    : MetaBaseDroppable(ContentResolver::getTypeName()),
+      query(classRef().getMethod(
+          "query",
+          "(Landroid/net/Uri;[Ljava/lang/String;Ljava/lang/String;[Ljava/lang/"
+          "String;Ljava/lang/String;)Landroid/database/Cursor;")),
+      query1(classRef().getMethod(
+          "query", "(Landroid/net/Uri;[Ljava/lang/String;Ljava/lang/"
+                   "String;[Ljava/lang/String;Ljava/lang/String;Landroid/os/"
+                   "CancellationSignal;)Landroid/database/Cursor;")),
+      query2(classRef().getMethod(
+          "query",
+          "(Landroid/net/Uri;[Ljava/lang/String;Landroid/os/Bundle;Landroid/os/"
+          "CancellationSignal;)Landroid/database/Cursor;")) {
+    MetaBaseDroppable::dropClassRef();
+}
 } // namespace android::content
 } // namespace wrap

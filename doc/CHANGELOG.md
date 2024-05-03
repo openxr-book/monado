@@ -1,4 +1,4 @@
-# Changelog for Monado
+# Changelog for Monado {#CHANGELOG}
 
 ```txt
 SPDX-License-Identifier: CC0-1.0
@@ -48,7 +48,7 @@ SPDX-FileCopyrightText: 2020 Collabora, Ltd. and the Monado contributors
     length, normalize if not within float epsilon.
     ([!659](https://gitlab.freedesktop.org/monado/monado/merge_requests/659))
 - Drivers
-  - North Star: Fix memory leak in math code.
+  - ns: Fix memory leak in math code.
     ([!564](https://gitlab.freedesktop.org/monado/monado/merge_requests/564))
   - psvr: Rename some variables for better readability.
     ([!597](https://gitlab.freedesktop.org/monado/monado/merge_requests/597))
@@ -177,7 +177,7 @@ SPDX-FileCopyrightText: 2020 Collabora, Ltd. and the Monado contributors
     now a per layer thing.
     ([!461](https://gitlab.freedesktop.org/monado/monado/merge_requests/461))
   - Add `xrt_compositor_info` struct that allows the compositor carry information
-    to about it's capbilities and it's recommended values. Not everything is hooked
+    to about its capabilities and its recommended values. Not everything is hooked
     up at the moment.
     ([!461](https://gitlab.freedesktop.org/monado/monado/merge_requests/461))
   - Add defines for underlying handle types.
@@ -218,7 +218,7 @@ SPDX-FileCopyrightText: 2020 Collabora, Ltd. and the Monado contributors
   - Remove the `out_timestamp` argument to the `xrt_device::get_tracked_pose`
     function, it's not needed anymore and the devices can do prediction better
     as
-    it knows more about it's tracking system the the state tracker.
+    it knows more about its tracking system the the state tracker.
     ([!521](https://gitlab.freedesktop.org/monado/monado/merge_requests/521))
   - Replace mesh generator with `compute_distortion` function on `xrt_device`. This
     is used to both make it possible to use mesh shaders for devices and to provide
@@ -439,7 +439,7 @@ SPDX-FileCopyrightText: 2020 Collabora, Ltd. and the Monado contributors
 - Major changes
   - Centralise the logging functionality in Monado to a single util helper.
     Previously most of our logging was done via fprints and gated behind booleans,
-    now there are common functions to call and a predfined set of levels.
+    now there are common functions to call and a predefined set of levels.
     ([!408](https://gitlab.freedesktop.org/monado/monado/merge_requests/408),
     [!409](https://gitlab.freedesktop.org/monado/monado/merge_requests/409))
 - XRT Interface
@@ -566,12 +566,12 @@ SPDX-FileCopyrightText: 2020 Collabora, Ltd. and the Monado contributors
   - comp: Set a compositor window title.
     ([!418](https://gitlab.freedesktop.org/monado/monado/merge_requests/418))
 - IPC
-  - server: Almost completely overhaul the handling of swapchain life cycle
+  - server: Almost completely overhaul the handling of swapchain lifecycle
     including: correctly track which swapchains are alive; reuse ids; enforce the
     maximum number of swapchains; and destroy underlying swapchains when they are
     destroyed by the client.
     ([!359](https://gitlab.freedesktop.org/monado/monado/merge_requests/359))
-  - util: Make sure to not access NULL control messages, say in the case of the
+  - util: Make sure to not dereference NULL control messages, say in the case of the
     server failing to create a swapchain. Also add a whole bunch of paranoia when
     it comes to the alignment of the control message buffers.
     ([!359](https://gitlab.freedesktop.org/monado/monado/merge_requests/359))
@@ -587,7 +587,7 @@ SPDX-FileCopyrightText: 2020 Collabora, Ltd. and the Monado contributors
     copies the FDs to the client.
     ([!359](https://gitlab.freedesktop.org/monado/monado/merge_requests/359))
   - client: When we give a image fd to the either OpenGL or Vulkan it is consumed
-    and can not be rused. So make sure that it is set to an invalid fd value on the
+    and cannot be reused. So make sure that it is set to an invalid fd value on the
     `xrt_image_fd` on the owning `xrt_swapchain_fd`.
     ([!359](https://gitlab.freedesktop.org/monado/monado/merge_requests/359))
   - main: We were alpha blending all layers previously, but now we support the

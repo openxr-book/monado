@@ -20,7 +20,7 @@ extern "C" {
 struct xrt_hmd_parts;
 
 /*!
- * @defgroup aux_distortion Distortion utilities.
+ * @defgroup aux_distortion Distortion utilities
  * @ingroup aux_util
  */
 
@@ -60,7 +60,7 @@ struct u_cardboard_distortion_arguments
  * Values to create a distortion mesh from cardboard values.
  *
  * This matches the formula in the cardboard SDK, while the array is fixed size
- * just setting the K value to zero will make it not have a effect.
+ * setting the K value to zero will make it not have a effect.
  *
  *    p' = p (1 + K0 r^2 + K1 r^4 + ... + Kn r^(2n))
  *
@@ -91,7 +91,7 @@ struct u_cardboard_distortion
 	struct u_cardboard_distortion_arguments args;
 
 	//! Distortion parameters, some derived from @ref args.
-	struct u_cardboard_distortion_values values[2];
+	struct u_cardboard_distortion_values values[XRT_MAX_VIEWS];
 };
 
 /*!

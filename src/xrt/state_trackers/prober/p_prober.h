@@ -16,6 +16,7 @@
 #include "xrt/xrt_settings.h"
 
 #include "util/u_logging.h"
+#include "util/u_config_json.h"
 
 #ifdef XRT_HAVE_LIBUSB
 #include <libusb.h>
@@ -35,23 +36,13 @@
  *
  */
 
-#define P_TRACE(d, ...) U_LOG_IFL_T(d->ll, __VA_ARGS__)
-#define P_DEBUG(d, ...) U_LOG_IFL_D(d->ll, __VA_ARGS__)
-#define P_INFO(d, ...) U_LOG_IFL_I(d->ll, __VA_ARGS__)
-#define P_WARN(d, ...) U_LOG_IFL_W(d->ll, __VA_ARGS__)
-#define P_ERROR(d, ...) U_LOG_IFL_E(d->ll, __VA_ARGS__)
+#define P_PROBER_BLUETOOTH_PRODUCT_COUNT 64
 
-#define MAX_AUTO_PROBERS 8
-
-/*!
- * What config is currently active in the config file.
- */
-enum p_active_config
-{
-	P_ACTIVE_CONFIG_NONE = 0,
-	P_ACTIVE_CONFIG_TRACKING = 1,
-	P_ACTIVE_CONFIG_REMOTE = 2,
-};
+#define P_TRACE(d, ...) U_LOG_IFL_T(d->log_level, __VA_ARGS__)
+#define P_DEBUG(d, ...) U_LOG_IFL_D(d->log_level, __VA_ARGS__)
+#define P_INFO(d, ...) U_LOG_IFL_I(d->log_level, __VA_ARGS__)
+#define P_WARN(d, ...) U_LOG_IFL_W(d->log_level, __VA_ARGS__)
+#define P_ERROR(d, ...) U_LOG_IFL_E(d->log_level, __VA_ARGS__)
 
 #ifdef XRT_OS_LINUX
 /*!
@@ -104,6 +95,8 @@ struct prober_device
 	struct
 	{
 		uint64_t id;
+
+		char product[P_PROBER_BLUETOOTH_PRODUCT_COUNT];
 	} bluetooth;
 
 #ifdef XRT_HAVE_LIBUVC
@@ -133,13 +126,22 @@ struct prober
 
 	struct xrt_prober_entry_lists *lists;
 
-	struct
-	{
-		//! For error reporting, was it loaded but not parsed?
-		bool file_loaded;
+	struct u_config_json json;
 
-		cJSON *root;
-	} json;
+	/*!
+	 * List of created builder.
+	 */
+	struct xrt_builder **builders;
+
+	/*!
+	 * The number of created builders.
+	 */
+	size_t builder_count;
+
+	/*!
+	 * Has the list been locked.
+	 */
+	bool list_locked;
 
 #ifdef XRT_HAVE_LIBUSB
 	struct
@@ -159,15 +161,20 @@ struct prober
 	} uvc;
 #endif
 
-	struct xrt_auto_prober *auto_probers[MAX_AUTO_PROBERS];
 
-	size_t num_devices;
+	struct xrt_auto_prober *auto_probers[XRT_MAX_AUTO_PROBERS];
+
+	size_t device_count;
 	struct prober_device *devices;
 
 	size_t num_entries;
 	struct xrt_prober_entry **entries;
 
-	enum u_logging_level ll;
+	// must not be accessed after freeing json
+	size_t num_disabled_drivers;
+	char **disabled_drivers;
+
+	enum u_logging_level log_level;
 };
 
 
@@ -178,46 +185,12 @@ struct prober
  */
 
 /*!
- * Load the JSON config file.
- *
- * @public @memberof prober
- */
-void
-p_json_open_or_create_main_file(struct prober *p);
-
-/*!
- * Read from the JSON loaded json config file and returns the active config,
- * can be overridden by `P_OVERRIDE_ACTIVE_CONFIG` envirmental variable.
- *
- * @public @memberof prober
- */
-void
-p_json_get_active(struct prober *p, enum p_active_config *out_active);
-
-/*!
- * Extract tracking settings from the JSON.
- *
- * @public @memberof prober
- * @relatesalso xrt_settings_tracking
- */
-bool
-p_json_get_tracking_settings(struct prober *p, struct xrt_settings_tracking *s);
-
-/*!
- * Extract remote settings from the JSON.
- *
- * @public @memberof prober
- */
-bool
-p_json_get_remote_port(struct prober *p, int *out_port);
-
-/*!
  * Dump the given device to stdout.
  *
  * @public @memberof prober
  */
 void
-p_dump_device(struct prober *p, struct prober_device *pdev, int id);
+p_dump_device(struct prober *p, struct prober_device *pdev, int id, bool use_stdout);
 
 /*!
  * Get or create a @ref prober_device from the device.
@@ -238,8 +211,12 @@ p_dev_get_usb_dev(struct prober *p,
  * @public @memberof prober
  */
 int
-p_dev_get_bluetooth_dev(
-    struct prober *p, uint64_t id, uint16_t vendor_id, uint16_t product_id, struct prober_device **out_pdev);
+p_dev_get_bluetooth_dev(struct prober *p,
+                        uint64_t id,
+                        uint16_t vendor_id,
+                        uint16_t product_id,
+                        const char *product_name,
+                        struct prober_device **out_pdev);
 
 /*!
  * @name Tracking systems
@@ -249,7 +226,7 @@ p_dev_get_bluetooth_dev(
  * Init the tracking factory.
  *
  * @private @memberof prober
- * @relatesalso xrt_tracking_factory
+ * @see xrt_tracking_factory
  */
 int
 p_tracking_init(struct prober *p);
@@ -258,7 +235,7 @@ p_tracking_init(struct prober *p);
  * Teardown the tracking factory.
  *
  * @private @memberof prober
- * @relatesalso xrt_tracking_factory
+ * @see xrt_tracking_factory
  */
 void
 p_tracking_teardown(struct prober *p);

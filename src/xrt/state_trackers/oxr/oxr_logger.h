@@ -1,4 +1,4 @@
-// Copyright 2018-2019, Collabora, Ltd.
+// Copyright 2018-2022, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -8,6 +8,9 @@
  */
 
 #pragma once
+
+#include "util/u_pretty_print.h"
+
 
 #ifdef __cplusplus
 extern "C" {
@@ -41,7 +44,7 @@ struct oxr_logger
 
 
 /*!
- * @ingroup oxr_main
+ * @addtogroup oxr_main
  * @{
  */
 
@@ -92,13 +95,29 @@ struct oxr_sink_logger
  * Log string to sink logger.
  */
 void
-oxr_slog(struct oxr_sink_logger *slog, const char *fmt, ...);
+oxr_slog(struct oxr_sink_logger *slog, const char *fmt, ...) XRT_PRINTF_FORMAT(2, 3);
 
 /*!
- * Abort logging, frees all internal data.
+ * Add the string to the slog struct.
  */
 void
-oxr_slog_abort(struct oxr_sink_logger *slog);
+oxr_slog_add_array(struct oxr_sink_logger *slog, const char *str, size_t size);
+
+/*!
+ * Get a pretty print delegate from a @ref oxr_sink_logger.
+ */
+static inline u_pp_delegate_t
+oxr_slog_dg(struct oxr_sink_logger *slog)
+{
+	u_pp_delegate_t dg = {(void *)slog, (u_pp_delegate_func_t)oxr_slog_add_array};
+	return dg;
+}
+
+/*!
+ * Cancel logging, frees all internal data.
+ */
+void
+oxr_slog_cancel(struct oxr_sink_logger *slog);
 
 /*!
  * Flush sink as a log message, frees all internal data.

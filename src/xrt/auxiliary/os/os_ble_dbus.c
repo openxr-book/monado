@@ -72,7 +72,8 @@ add_single_byte_array(DBusMessage *msg, uint8_t value)
 {
 	// Create an array of bytes.
 	const char *container_signature = "y"; // dbus type signature string
-	DBusMessageIter iter, array;
+	DBusMessageIter iter;
+	DBusMessageIter array;
 
 	// attach it to our dbus message
 	dbus_message_iter_init_append(msg, &iter);
@@ -86,7 +87,8 @@ add_empty_dict_sv(DBusMessage *msg)
 {
 	// Create an empty array of string variant dicts.
 	const char *container_signature = "{sv}"; // dbus type signature string
-	DBusMessageIter iter, options;
+	DBusMessageIter iter;
+	DBusMessageIter options;
 
 	// attach it to our dbus message
 	dbus_message_iter_init_append(msg, &iter);
@@ -388,7 +390,7 @@ array_get_first_elem_of_type(const DBusMessageIter *in_parent, int of_type, DBus
 
 /*!
  * Given a the first element in a array of dict, loop over them and check if
- * the key matches it's string value. Returns positive if a match is found,
+ * the key matches its string value. Returns positive if a match is found,
  * zero if not found and negative on failure. The argument @p out_value holds
  * the value of the dict pair.
  */
@@ -516,12 +518,13 @@ dbus_has_name(DBusConnection *conn, const char *name)
 
 /*!
  * Returns true if the object implements the `org.bluez.Device1` interface,
- * and one of it's `UUIDs` matches the given @p uuid.
+ * and one of its `UUIDs` matches the given @p uuid.
  */
 static int
 device_has_uuid(const DBusMessageIter *dict, const char *uuid, const char **out_path_str)
 {
-	DBusMessageIter iface_elm, first_elm;
+	DBusMessageIter iface_elm;
+	DBusMessageIter first_elm;
 	const char *iface_str;
 	const char *path_str;
 
@@ -558,7 +561,7 @@ device_has_uuid(const DBusMessageIter *dict, const char *uuid, const char **out_
 
 
 /*!
- * On a gatt interface object get it's Flags property and check if notify is
+ * On a gatt interface object get its Flags property and check if notify is
  * set, returns positive if it found that Flags property, zero on not finding it
  * and negative on error.
  */
@@ -586,7 +589,7 @@ gatt_iface_get_flag_notifiable(const DBusMessageIter *iface_elm, bool *out_bool)
 }
 
 /*!
- * On a gatt interface object get it's UUID string property, returns positive
+ * On a gatt interface object get its UUID string property, returns positive
  * if found, zero on not finding it and negative on error.
  */
 static int
@@ -610,13 +613,14 @@ gatt_iface_get_uuid(const DBusMessageIter *iface_elm, const char **out_str)
 
 /*!
  * Returns positive value if the object implements the
- * `org.bluez.GattCharacteristic1` interface, it's `UUID` matches the given @p
+ * `org.bluez.GattCharacteristic1` interface, its `UUID` matches the given @p
  * uuid and has the notify flag set.
  */
 static int
 gatt_char_has_uuid_and_notify(const DBusMessageIter *dict, const char *uuid, const char **out_path_str)
 {
-	DBusMessageIter first_elm, iface_elm;
+	DBusMessageIter first_elm;
+	DBusMessageIter iface_elm;
 	const char *iface_str;
 	const char *path_str;
 	const char *uuid_str;
@@ -753,7 +757,8 @@ ble_connect(struct ble_conn_helper *bch, const char *dbus_address)
 	DBusMessage *msg = NULL;
 	DBusMessageIter args;
 	char *response = NULL;
-	int ret, type;
+	int ret;
+	int type;
 
 	I(bch, "Connecting '%s'", dbus_address);
 
@@ -794,7 +799,8 @@ ble_connect(struct ble_conn_helper *bch, const char *dbus_address)
 static int
 ble_connect_all_devices_with_service_uuid(struct ble_conn_helper *bch, const char *service_uuid)
 {
-	DBusMessageIter args, first_elm;
+	DBusMessageIter args;
+	DBusMessageIter first_elm;
 	DBusMessage *msg = NULL;
 
 	int ret = ble_get_managed_objects(bch, &msg);
@@ -833,7 +839,8 @@ ble_write_value(struct ble_conn_helper *bch, const char *dbus_address, uint8_t v
 	DBusMessage *msg = NULL;
 	DBusMessageIter args;
 	char *response = NULL;
-	int ret, type;
+	int ret;
+	int type;
 
 	msg = dbus_message_new_method_call("org.bluez",                     // target for the method call
 	                                   dbus_address,                    // object to call on
@@ -877,7 +884,8 @@ static ssize_t
 get_path_to_notify_char(
     struct ble_conn_helper *bch, const char *dev_uuid, const char *char_uuid, char *output, size_t output_len)
 {
-	DBusMessageIter args, first_elm;
+	DBusMessageIter args;
+	DBusMessageIter first_elm;
 	DBusMessage *msg;
 
 	int ret = ble_get_managed_objects(bch, &msg);
@@ -1078,7 +1086,8 @@ int
 os_ble_broadcast_write_value(const char *service_uuid, const char *char_uuid, uint8_t value)
 {
 	struct ble_conn_helper bch = {0};
-	DBusMessageIter args, first_elm;
+	DBusMessageIter args;
+	DBusMessageIter first_elm;
 	DBusMessage *msg = NULL;
 	int ret = 0;
 

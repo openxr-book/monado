@@ -13,6 +13,7 @@
 #include "util/u_logging.h"
 
 #include "math/m_api.h"
+#include "math/m_vec2.h"
 
 #include "gui_common.h"
 #include "gui_imgui.h"
@@ -39,7 +40,16 @@ struct gui_remote
 	struct r_remote_data reset;
 	struct r_remote_data data;
 
+	// Was the left trigger pushed last frame?
+	bool left_trigger_was_pressed_last_frame;
+
+	// Was the right trigger pushed last frame?
+	bool right_trigger_was_pressed_last_frame;
+
 	bool cheat_menu;
+
+	char address[1024];
+	int port;
 };
 
 const ImVec2 zero_dims = {0, 0};
@@ -100,6 +110,63 @@ handle_downable_button(const char *name)
 {
 	igButton(name, zero_dims);
 	return igIsItemHovered(ImGuiHoveredFlags_RectOnly) && igIsMouseDown(ImGuiMouseButton_Left);
+}
+
+static void
+handle_input(struct r_remote_controller_data *d, bool *trigger_was_pressed_last_frame)
+{
+	igText("Hover buttons and sliders to touch component.");
+	bool touched = false;
+
+	d->system_click = handle_downable_button("System");
+	d->system_touch = igIsItemHovered(ImGuiHoveredFlags_RectOnly);
+	igSameLine(0, 3);
+
+	d->a_click = handle_downable_button("A");
+	d->a_touch = igIsItemHovered(ImGuiHoveredFlags_RectOnly);
+	igSameLine(0, 3);
+
+	d->b_click = handle_downable_button("B");
+	d->b_touch = igIsItemHovered(ImGuiHoveredFlags_RectOnly);
+	igSameLine(0, 3);
+
+	igCheckbox("Active", &d->active);
+
+	// Squeeze
+	igSliderFloat("Squeeze Value", &d->squeeze_value.x, 0, 1, "%.2f", 0);
+	igSliderFloat("Squeeze Force", &d->squeeze_force.x, 0, 1, "%.2f", 0);
+
+	// Trigger
+	igText("Value > 0.0 causes touch, 0.7 > causes click");
+	if (handle_downable_button("Press for 1.0")) {
+		d->trigger_value.x = 1.0f;
+		*trigger_was_pressed_last_frame = true;
+	} else if (*trigger_was_pressed_last_frame) {
+		d->trigger_value.x = 0.0f;
+		*trigger_was_pressed_last_frame = false;
+	}
+	igSliderFloat("Trigger", &d->trigger_value.x, 0, 1, "%.2f", 0);
+	touched |= igIsItemHovered(ImGuiHoveredFlags_RectOnly);
+	d->trigger_click = d->trigger_value.x > 0.7;
+	touched |= d->trigger_value.x > 0.0001;
+	d->trigger_touch = touched;
+
+	// Thumbstick
+	touched = false;
+	d->thumbstick_click = handle_downable_button("Thumbstick Click");
+	touched |= igIsItemHovered(ImGuiHoveredFlags_RectOnly);
+	igSliderFloat2("Thumbstick", *m_vec2_ptr_to_float_arr_ptr(&d->thumbstick), -1, 1, "%.2f", 0);
+	touched |= igIsItemHovered(ImGuiHoveredFlags_RectOnly);
+	d->thumbstick_touch = touched;
+
+	// Trackpad
+	touched = false;
+	igSliderFloat2("Trackpad", *m_vec2_ptr_to_float_arr_ptr(&d->trackpad), -1, 1, "%.2f", 0);
+	touched |= igIsItemHovered(ImGuiHoveredFlags_RectOnly);
+	igSliderFloat("Trackpad Force", &d->trackpad_force.x, 0, 1, "%.2f", 0);
+	touched |= igIsItemHovered(ImGuiHoveredFlags_RectOnly);
+	touched |= d->trackpad_force.x >= 0.0001f;
+	d->trackpad_touch = touched;
 }
 
 static void
@@ -177,6 +244,49 @@ render_cheat_menu(struct gui_remote *gr, struct gui_program *p)
 #endif
 	}
 
+	if (igButton("XR_EXT_hand_tracking Touch Index Fingertips", zero_dims)) {
+		d->left.pose.position.x = -0.0250000f;
+		d->left.pose.position.y = 1.300000f;
+		d->left.pose.position.z = -0.500000f;
+		d->left.pose.orientation.x = 0.000000f;
+		d->left.pose.orientation.y = 0.000000f;
+		d->left.pose.orientation.z = 0.000000f;
+		d->left.pose.orientation.w = 1.000000f;
+		d->left.linear_velocity.x = 0.000000f;
+		d->left.linear_velocity.y = 0.000000f;
+		d->left.linear_velocity.z = -1.830000f;
+		d->left.angular_velocity.x = -16.900000f;
+		d->left.angular_velocity.y = 0.000000f;
+		d->left.angular_velocity.z = 0.000000f;
+
+		d->left.hand_curl[0] = 0.0f;
+		d->left.hand_curl[1] = 0.0f;
+		d->left.hand_curl[2] = 0.0f;
+		d->left.hand_curl[3] = 0.0f;
+		d->left.hand_curl[4] = 0.0f;
+
+
+		d->right.pose.position.x = 0.0250000f;
+		d->right.pose.position.y = 1.300000f;
+		d->right.pose.position.z = -0.500000f;
+		d->right.pose.orientation.x = 0.000000f;
+		d->right.pose.orientation.y = 0.000000f;
+		d->right.pose.orientation.z = 0.000000f;
+		d->right.pose.orientation.w = 1.000000f;
+		d->right.linear_velocity.x = 0.000000f;
+		d->right.linear_velocity.y = 0.000000f;
+		d->right.linear_velocity.z = -1.830000f;
+		d->right.angular_velocity.x = -16.900000f;
+		d->right.angular_velocity.y = 0.000000f;
+		d->right.angular_velocity.z = 0.000000f;
+
+		d->right.hand_curl[0] = 0.0f;
+		d->right.hand_curl[1] = 0.0f;
+		d->right.hand_curl[2] = 0.0f;
+		d->right.hand_curl[3] = 0.0f;
+		d->right.hand_curl[4] = 0.0f;
+	}
+
 	if (igButton("Dump left", zero_dims)) {
 		U_LOG_RAW(
 		    "d->left.pose.position.x = %ff;\n"
@@ -202,10 +312,8 @@ render_cheat_menu(struct gui_remote *gr, struct gui_program *p)
 
 #define POSE(prefix)                                                                                                   \
 	do {                                                                                                           \
-		handle_draggable_vec3_f32(#prefix ".pose.position", &d->prefix.pose.position,                          \
-		                          &r->prefix.pose.position);                                                   \
-		handle_draggable_quat(#prefix ".pose.orientation", &d->prefix.pose.orientation,                        \
-		                      &r->prefix.pose.orientation);                                                    \
+		handle_draggable_vec3_f32(#prefix ".pose.position", &d->prefix.position, &r->prefix.position);         \
+		handle_draggable_quat(#prefix ".pose.orientation", &d->prefix.orientation, &r->prefix.orientation);    \
 	} while (false)
 
 #define LIN_ANG(prefix)                                                                                                \
@@ -218,16 +326,13 @@ render_cheat_menu(struct gui_remote *gr, struct gui_program *p)
 
 #define BUTTONS(prefix)                                                                                                \
 	do {                                                                                                           \
-		d->prefix.select = handle_downable_button("Select");                                                   \
-		igSameLine(0, 3);                                                                                      \
-		d->prefix.menu = handle_downable_button("Menu");                                                       \
-		igSameLine(0, 3);                                                                                      \
-		igCheckbox("Active", &d->prefix.active);                                                               \
+		handle_input(&d->prefix, &gr->prefix##_trigger_was_pressed_last_frame);                                \
 	} while (false)
 
 #define CURL(prefix, name, index) igDragFloat(#prefix "." #name, &d->prefix.hand_curl[index], 0.01, 0.0, 1.0, "%f", 0);
 #define HAND(prefix)                                                                                                   \
 	do {                                                                                                           \
+		igCheckbox("Hand tracking Active", &d->prefix.hand_tracking_active);                                   \
 		CURL(prefix, little, 0);                                                                               \
 		CURL(prefix, ring, 1);                                                                                 \
 		CURL(prefix, middle, 2);                                                                               \
@@ -241,27 +346,23 @@ on_connected(struct gui_remote *gr, struct gui_program *p)
 	const struct r_remote_data *r = &gr->reset;
 	struct r_remote_data *d = &gr->data;
 
-	const ImVec2 hmd_size = {0, 46};
-	const uint32_t hand_size = 23 * 5;
-	const ImVec2 ctrl_size = {0, 64 + hand_size + 52};
+	igPushIDPtr(&d->head); // Make all IDs unique.
+	POSE(head.center);
+	igPopID(); // Pop unique IDs
 
-	igBeginChildStr("hmd", hmd_size, false, 0);
-	POSE(hmd);
-	igEndChild();
-
-	igBeginChildStr("left", ctrl_size, false, 0);
-	POSE(left);
+	igPushIDPtr(&d->left); // Make all IDs unique.
+	POSE(left.pose);
 	LIN_ANG(left);
 	BUTTONS(left);
 	HAND(left);
-	igEndChild();
+	igPopID(); // Pop unique IDs
 
-	igBeginChildStr("right", ctrl_size, false, 0);
-	POSE(right);
+	igPushIDPtr(&d->right); // Make all IDs unique.
+	POSE(right.pose);
 	LIN_ANG(right);
 	BUTTONS(right);
 	HAND(right);
-	igEndChild();
+	igPopID(); // Pop unique IDs
 
 	igCheckbox("Predefined poses", &gr->cheat_menu);
 	if (gr->cheat_menu) {
@@ -274,11 +375,23 @@ on_connected(struct gui_remote *gr, struct gui_program *p)
 static void
 on_not_connected(struct gui_remote *gr, struct gui_program *p)
 {
-	if (!igButton("Connect", zero_dims)) {
+	igInputText("Address", gr->address, sizeof(gr->address), 0, NULL, NULL);
+	igInputInt("Port", &gr->port, 1, 1, 0);
+
+	bool connect = igButton("Connect", zero_dims);
+
+	igSameLine(0, 4.0f);
+
+	if (igButton("Exit", zero_dims)) {
+		gui_scene_delete_me(p, &gr->base);
 		return;
 	}
 
-	r_remote_connection_init(&gr->rc, "127.0.0.1", 4242);
+	if (!connect) {
+		return;
+	}
+
+	r_remote_connection_init(&gr->rc, gr->address, gr->port);
 	r_remote_connection_read_one(&gr->rc, &gr->reset);
 	r_remote_connection_read_one(&gr->rc, &gr->data);
 }
@@ -332,13 +445,21 @@ scene_destroy(struct gui_scene *scene, struct gui_program *p)
  */
 
 void
-gui_scene_remote(struct gui_program *p)
+gui_scene_remote(struct gui_program *p, const char *address)
 {
 	struct gui_remote *gr = U_TYPED_CALLOC(struct gui_remote);
 
 	gr->base.render = scene_render;
 	gr->base.destroy = scene_destroy;
 	gr->rc.fd = -1;
+
+	// GUI input defaults.
+	if (address != NULL) {
+		snprintf(gr->address, sizeof(gr->address), "%s", address);
+	} else {
+		snprintf(gr->address, sizeof(gr->address), "localhost");
+	}
+	gr->port = 4242;
 
 	gui_scene_push_front(p, &gr->base);
 }

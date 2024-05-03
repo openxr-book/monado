@@ -94,7 +94,7 @@ struct arduino_device
 		bool last;
 	} gui;
 
-	enum u_logging_level ll;
+	enum u_logging_level log_level;
 };
 
 
@@ -104,11 +104,11 @@ struct arduino_device
  *
  */
 
-#define ARDUINO_TRACE(d, ...) U_LOG_XDEV_IFL_T(&d->base, d->ll, __VA_ARGS__)
-#define ARDUINO_DEBUG(d, ...) U_LOG_XDEV_IFL_D(&d->base, d->ll, __VA_ARGS__)
-#define ARDUINO_INFO(d, ...) U_LOG_XDEV_IFL_I(&d->base, d->ll, __VA_ARGS__)
-#define ARDUINO_WARN(d, ...) U_LOG_XDEV_IFL_W(&d->base, d->ll, __VA_ARGS__)
-#define ARDUINO_ERROR(d, ...) U_LOG_XDEV_IFL_E(&d->base, d->ll, __VA_ARGS__)
+#define ARDUINO_TRACE(d, ...) U_LOG_XDEV_IFL_T(&d->base, d->log_level, __VA_ARGS__)
+#define ARDUINO_DEBUG(d, ...) U_LOG_XDEV_IFL_D(&d->base, d->log_level, __VA_ARGS__)
+#define ARDUINO_INFO(d, ...) U_LOG_XDEV_IFL_I(&d->base, d->log_level, __VA_ARGS__)
+#define ARDUINO_WARN(d, ...) U_LOG_XDEV_IFL_W(&d->base, d->log_level, __VA_ARGS__)
+#define ARDUINO_ERROR(d, ...) U_LOG_XDEV_IFL_E(&d->base, d->log_level, __VA_ARGS__)
 
 static inline struct arduino_device *
 arduino_device(struct xrt_device *xdev)
@@ -149,7 +149,8 @@ update_fusion(struct arduino_device *ad,
               timepoint_ns timestamp_ns,
               time_duration_ns delta_ns)
 {
-	struct xrt_vec3 accel, gyro;
+	struct xrt_vec3 accel;
+	struct xrt_vec3 gyro;
 	m_imu_pre_filter_data(&ad->pre_filter, &sample->accel, &sample->gyro, &accel, &gyro);
 
 	ad->device_time += (uint64_t)sample->delta * 1000;
@@ -231,7 +232,8 @@ arduino_run_thread(void *ptr)
 {
 	struct arduino_device *ad = (struct arduino_device *)ptr;
 	uint8_t buffer[20];
-	timepoint_ns then_ns, now_ns;
+	timepoint_ns then_ns;
+	timepoint_ns now_ns;
 	struct arduino_parsed_input input; // = {0};
 
 	// wait for a package to sync up, it's discarded but that's okay.
@@ -357,9 +359,9 @@ static struct xrt_binding_profile binding_profiles[1] = {
     {
         .name = XRT_DEVICE_SIMPLE_CONTROLLER,
         .inputs = simple_inputs,
-        .num_inputs = ARRAY_SIZE(simple_inputs),
+        .input_count = ARRAY_SIZE(simple_inputs),
         .outputs = NULL,
-        .num_outputs = 0,
+        .output_count = 0,
     },
 };
 
@@ -388,10 +390,14 @@ arduino_device_create(struct os_ble_device *ble)
 	ad->base.inputs[5].name = XRT_INPUT_DAYDREAM_VOLUP_CLICK;
 	ad->base.inputs[6].name = XRT_INPUT_DAYDREAM_TOUCHPAD;
 	ad->base.binding_profiles = binding_profiles;
-	ad->base.num_binding_profiles = ARRAY_SIZE(binding_profiles);
+	ad->base.binding_profile_count = ARRAY_SIZE(binding_profiles);
+
+	static int controller_num = 0;
+	snprintf(ad->base.str, XRT_DEVICE_NAME_LEN, "Arduino");
+	snprintf(ad->base.serial, XRT_DEVICE_NAME_LEN, "Arduino %d", controller_num++);
 
 	ad->ble = ble;
-	ad->ll = debug_get_log_option_arduino_log();
+	ad->log_level = debug_get_log_option_arduino_log();
 
 	m_imu_3dof_init(&ad->fusion, M_IMU_3DOF_USE_GRAVITY_DUR_300MS);
 

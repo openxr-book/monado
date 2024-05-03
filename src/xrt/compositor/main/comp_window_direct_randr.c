@@ -51,7 +51,7 @@ struct comp_window_direct_randr
 
 	struct comp_window_direct_randr_display *displays;
 
-	uint16_t num_displays;
+	uint16_t display_count;
 };
 
 
@@ -92,7 +92,7 @@ comp_window_direct_randr_get_outputs(struct comp_window_direct_randr *w);
 static inline struct vk_bundle *
 get_vk(struct comp_window_direct_randr *cwdr)
 {
-	return &cwdr->base.base.c->vk;
+	return &cwdr->base.base.c->base.vk;
 }
 
 static void
@@ -113,9 +113,11 @@ comp_window_direct_randr_create(struct comp_compositor *c)
 {
 	struct comp_window_direct_randr *w = U_TYPED_CALLOC(struct comp_window_direct_randr);
 
-	comp_target_swapchain_init_set_fnptrs(&w->base);
+	// Display timing is tested and know working.
+	comp_target_swapchain_init_and_set_fnptrs(&w->base, COMP_TARGET_USE_DISPLAY_IF_AVAILABLE);
 
 	w->base.base.name = "direct";
+	w->base.display = VK_NULL_HANDLE;
 	w->base.base.destroy = comp_window_direct_randr_destroy;
 	w->base.base.flush = _flush;
 	w->base.base.init_pre_vulkan = comp_window_direct_randr_init;
@@ -135,7 +137,7 @@ comp_window_direct_randr_destroy(struct comp_target *ct)
 
 	struct vk_bundle *vk = get_vk(w_direct);
 
-	for (uint32_t i = 0; i < w_direct->num_displays; i++) {
+	for (uint32_t i = 0; i < w_direct->display_count; i++) {
 		struct comp_window_direct_randr_display *d = &w_direct->displays[i];
 
 		if (d->display == VK_NULL_HANDLE) {
@@ -147,8 +149,9 @@ comp_window_direct_randr_destroy(struct comp_target *ct)
 		free(d->name);
 	}
 
-	if (w_direct->displays != NULL)
+	if (w_direct->displays != NULL) {
 		free(w_direct->displays);
+	}
 
 	if (w_direct->dpy) {
 		XCloseDisplay(w_direct->dpy);
@@ -161,7 +164,7 @@ comp_window_direct_randr_destroy(struct comp_target *ct)
 static void
 comp_window_direct_randr_list_screens(struct comp_window_direct_randr *w)
 {
-	for (int i = 0; i < w->num_displays; i++) {
+	for (int i = 0; i < w->display_count; i++) {
 		const struct comp_window_direct_randr_display *d = &w->displays[i];
 		COMP_DEBUG(w->base.base.c, "%d: %s %dx%d@%.2f", i, d->name, d->primary_mode.width,
 		           d->primary_mode.height,
@@ -173,9 +176,9 @@ static bool
 comp_window_direct_randr_init(struct comp_target *ct)
 {
 	struct comp_window_direct_randr *w_direct = (struct comp_window_direct_randr *)ct;
+	struct vk_bundle *vk = get_vk(w_direct);
 
-	// Sanity check.
-	if (ct->c->vk.instance != VK_NULL_HANDLE) {
+	if (vk->instance != VK_NULL_HANDLE) {
 		COMP_ERROR(ct->c, "Vulkan initialized before RANDR init!");
 		return false;
 	}
@@ -189,20 +192,22 @@ comp_window_direct_randr_init(struct comp_target *ct)
 
 	xcb_screen_iterator_t iter = xcb_setup_roots_iterator(xcb_get_setup(connection));
 
-	w_direct->screen = iter.data;
+	while (iter.rem > 0 && w_direct->display_count == 0) {
+		w_direct->screen = iter.data;
+		comp_window_direct_randr_get_outputs(w_direct);
+		xcb_screen_next(&iter);
+	}
 
-	comp_window_direct_randr_get_outputs(w_direct);
-
-	if (w_direct->num_displays == 0) {
+	if (w_direct->display_count == 0) {
 		COMP_ERROR(ct->c, "No non-desktop output available.");
 		return false;
 	}
 
-	if (ct->c->settings.display > (int)w_direct->num_displays - 1) {
+	if (ct->c->settings.display > (int)w_direct->display_count - 1) {
 		COMP_DEBUG(ct->c,
 		           "Requested display %d, but only %d displays are "
 		           "available.",
-		           ct->c->settings.display, w_direct->num_displays);
+		           ct->c->settings.display, w_direct->display_count);
 
 		ct->c->settings.display = 0;
 		struct comp_window_direct_randr_display *d = comp_window_direct_randr_current_display(w_direct);
@@ -216,8 +221,10 @@ comp_window_direct_randr_init(struct comp_target *ct)
 	}
 
 	struct comp_window_direct_randr_display *d = comp_window_direct_randr_current_display(w_direct);
-	ct->c->settings.preferred.width = d->primary_mode.width;
-	ct->c->settings.preferred.height = d->primary_mode.height;
+
+	// Make the compositor use this size.
+	VkExtent2D extent = {d->primary_mode.width, d->primary_mode.height};
+	comp_target_swapchain_override_extents(&w_direct->base, extent);
 
 	return true;
 }
@@ -226,11 +233,13 @@ static struct comp_window_direct_randr_display *
 comp_window_direct_randr_current_display(struct comp_window_direct_randr *w)
 {
 	int index = w->base.base.c->settings.display;
-	if (index == -1)
+	if (index == -1) {
 		index = 0;
+	}
 
-	if (w->num_displays <= (uint32_t)index)
+	if (w->display_count <= (uint32_t)index) {
 		return NULL;
+	}
 
 	return &w->displays[index];
 }
@@ -247,13 +256,17 @@ comp_window_direct_randr_init_swapchain(struct comp_target *ct, uint32_t width, 
 		return false;
 	}
 
-	COMP_DEBUG(ct->c, "Will use display: %s %dx%d@%.2f", d->name, d->primary_mode.width, d->primary_mode.height,
+	COMP_DEBUG(ct->c, "Will use display: %s with primary mode %dx%d@%.2f", d->name, d->primary_mode.width,
+	           d->primary_mode.height,
 	           (double)d->primary_mode.dot_clock / (d->primary_mode.htotal * d->primary_mode.vtotal));
 
 	d->display = comp_window_direct_randr_get_output(w_direct, d->output);
 	if (d->display == VK_NULL_HANDLE) {
 		return false;
 	}
+
+	struct comp_target_swapchain *cts = (struct comp_target_swapchain *)ct;
+	cts->display = d->display;
 
 	return comp_window_direct_init_swapchain(&w_direct->base, w_direct->dpy, d->display, width, height);
 }
@@ -293,8 +306,8 @@ append_randr_display(struct comp_window_direct_randr *w,
 	uint8_t *name = xcb_randr_get_output_info_name(output_reply);
 	int name_len = xcb_randr_get_output_info_name_length(output_reply);
 
-	int num_modes = xcb_randr_get_output_info_modes_length(output_reply);
-	if (num_modes == 0) {
+	int mode_count = xcb_randr_get_output_info_modes_length(output_reply);
+	if (mode_count == 0) {
 		COMP_ERROR(w->base.base.c,
 		           "%s does not have any modes "
 		           "available. "
@@ -307,12 +320,15 @@ append_randr_display(struct comp_window_direct_randr *w,
 	int n = xcb_randr_get_screen_resources_modes_length(resources_reply);
 
 	xcb_randr_mode_info_t *mode_info = NULL;
-	for (int i = 0; i < n; i++)
-		if (mode_infos[i].id == output_modes[0])
+	for (int i = 0; i < n; i++) {
+		if (mode_infos[i].id == output_modes[0]) {
 			mode_info = &mode_infos[i];
+		}
+	}
 
-	if (mode_info == NULL)
+	if (mode_info == NULL) {
 		COMP_ERROR(w->base.base.c, "No mode with id %d found??", output_modes[0]);
+	}
 
 
 	struct comp_window_direct_randr_display d = {
@@ -325,14 +341,19 @@ append_randr_display(struct comp_window_direct_randr *w,
 	memcpy(d.name, name, name_len);
 	d.name[name_len] = '\0';
 
-	w->num_displays += 1;
+	w->display_count += 1;
 
-	U_ARRAY_REALLOC_OR_FREE(w->displays, struct comp_window_direct_randr_display, w->num_displays);
+	U_ARRAY_REALLOC_OR_FREE(w->displays, struct comp_window_direct_randr_display, w->display_count);
 
-	if (w->displays == NULL)
+	if (w->displays == NULL) {
 		COMP_ERROR(w->base.base.c, "Unable to reallocate randr_displays");
 
-	w->displays[w->num_displays - 1] = d;
+		// Reset the count.
+		w->display_count = 0;
+		return;
+	}
+
+	w->displays[w->display_count - 1] = d;
 }
 
 static void
@@ -365,6 +386,7 @@ comp_window_direct_randr_get_outputs(struct comp_window_direct_randr *w)
 	xcb_intern_atom_reply_t *non_desktop_reply = xcb_intern_atom_reply(connection, non_desktop_cookie, &error);
 
 	if (error != NULL) {
+		free(non_desktop_reply);
 		COMP_ERROR(ct->c, "xcb_intern_atom_reply returned error %d", error->error_code);
 		return;
 	}
@@ -375,6 +397,7 @@ comp_window_direct_randr_get_outputs(struct comp_window_direct_randr *w)
 	}
 
 	if (non_desktop_reply->atom == XCB_NONE) {
+		free(non_desktop_reply);
 		COMP_ERROR(ct->c, "No output has non-desktop property");
 		return;
 	}
@@ -438,5 +461,52 @@ comp_window_direct_randr_get_outputs(struct comp_window_direct_randr *w)
 		free(output_reply);
 	}
 
+	free(non_desktop_reply);
 	free(resources_reply);
 }
+
+
+/*
+ *
+ * Factory
+ *
+ */
+
+static const char *instance_extensions[] = {
+    VK_KHR_DISPLAY_EXTENSION_NAME,
+    VK_EXT_DIRECT_MODE_DISPLAY_EXTENSION_NAME,
+    VK_EXT_ACQUIRE_XLIB_DISPLAY_EXTENSION_NAME,
+};
+
+static bool
+detect(const struct comp_target_factory *ctf, struct comp_compositor *c)
+{
+	return false;
+}
+
+static bool
+create_target(const struct comp_target_factory *ctf, struct comp_compositor *c, struct comp_target **out_ct)
+{
+	struct comp_target *ct = comp_window_direct_randr_create(c);
+	if (ct == NULL) {
+		return false;
+	}
+
+	*out_ct = ct;
+
+	return true;
+}
+
+const struct comp_target_factory comp_target_factory_direct_randr = {
+    .name = "X11(RandR) Direct-Mode",
+    .identifier = "x11_direct",
+    .requires_vulkan_for_create = false,
+    .is_deferred = false,
+    .required_instance_version = 0,
+    .required_instance_extensions = instance_extensions,
+    .required_instance_extension_count = ARRAY_SIZE(instance_extensions),
+    .optional_device_extensions = NULL,
+    .optional_device_extension_count = 0,
+    .detect = detect,
+    .create_target = create_target,
+};

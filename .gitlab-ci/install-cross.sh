@@ -23,7 +23,6 @@ for arch in $CROSS_ARCHITECTURES; do
     apt-get install -y --no-install-recommends --no-remove \
             crossbuild-essential-${arch} \
             libelf-dev:${arch} \
-            libavcodec-dev:${arch} \
             libegl1-mesa-dev:${arch} \
             libgl1-mesa-dev:${arch} \
             libglvnd-dev:${arch} \
@@ -57,16 +56,3 @@ done
 
 apt-get autoremove -y --purge
 apt-get clean
-
-# Generate cross build files for Meson
-for arch in $CROSS_ARCHITECTURES; do
-  cross_file="/cross_file-$arch.txt"
-  /usr/share/meson/debcrossgen --arch "$arch" -o "$cross_file"
-  if [ "$arch" = "i386" ]; then
-    # Work around a bug in debcrossgen that should be fixed in the next release
-    sed -i "s|cpu_family = 'i686'|cpu_family = 'x86'|g" "$cross_file"
-  fi
-
-  # Rely on qemu-user being configured in binfmt_misc on the host
-  sed -i -e '/\[properties\]/a\' -e "needs_exe_wrapper = False" "$cross_file"
-done

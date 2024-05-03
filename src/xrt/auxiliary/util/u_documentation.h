@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  Header with just documentation.
+ * @brief  Header with only documentation.
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @ingroup aux_util
  */
@@ -38,3 +38,29 @@
  *
  * @brief Smaller pieces of auxiliary utilities code.
  */
+
+#ifdef __cplusplus
+/*!
+ * @brief C++-only APIs in Monado.
+ *
+ * There are not very many of them.
+ */
+namespace xrt {
+
+/*!
+ * @brief C++-only functionality from assorted helper libraries
+ */
+namespace auxiliary {
+
+	/*!
+	 * @brief C++-only functionality from the miscellaneous "util" helper library
+	 */
+	namespace util {
+		// Empty
+	} // namespace util
+
+} // namespace auxiliary
+
+} // namespace xrt
+
+#endif

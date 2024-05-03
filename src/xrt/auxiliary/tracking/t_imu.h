@@ -3,7 +3,7 @@
 /*!
  * @file
  * @brief  C interface to basic IMU fusion.
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup aux_tracking
  */
 
@@ -26,7 +26,7 @@ struct imu_fusion;
  * @ingroup aux_tracking
  */
 struct imu_fusion *
-imu_fusion_create();
+imu_fusion_create(void);
 
 
 /*!

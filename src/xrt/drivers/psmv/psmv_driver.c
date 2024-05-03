@@ -4,7 +4,7 @@
  * @file
  * @brief  PlayStation Move motion controller prober and driver code.
  * @author Jakob Bornecrantz <jakob@collabora.com>
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup drv_psmv
  */
 
@@ -27,6 +27,7 @@
 #include "util/u_debug.h"
 #include "util/u_device.h"
 #include "util/u_logging.h"
+#include "util/u_trace_marker.h"
 
 #include "psmv_interface.h"
 
@@ -37,7 +38,7 @@
 
 
 /*!
- * @ingroup drv_psmv
+ * @addtogroup drv_psmv
  * @{
  */
 
@@ -256,7 +257,7 @@ struct psmv_parsed_calibration_zcm1
 	 * vector before subtracting from the gyro 80rpm measures, I get a
 	 * better calibration.
 	 *
-	 * So in order to get the accurate 80rpm measures:
+	 * So to get the accurate 80rpm measures:
 	 * GyroMeasure80rpm-(GyroBias1*UnknownVector2) or
 	 * GyroMeasure80rpm-(GyroBias2*UnknownVector2)
 	 */
@@ -408,7 +409,7 @@ struct psmv_parsed_input
 			//! Accelerometer and gyro scope samples (ZCM2).
 			struct psmv_parsed_sample sample;
 
-			//! Copy of above (ZCM2).
+			//! Copy of preceding (ZCM2).
 			struct psmv_parsed_sample sample_copy;
 		};
 	};
@@ -706,6 +707,8 @@ psmv_read_one_packet(struct psmv_device *psmv, uint8_t *buffer, size_t size)
 static void *
 psmv_run_thread(void *ptr)
 {
+	U_TRACE_SET_THREAD_NAME("PS Move");
+
 	struct psmv_device *psmv = (struct psmv_device *)ptr;
 
 	union {
@@ -792,7 +795,7 @@ psmv_get_fusion_pose(struct psmv_device *psmv,
 }
 
 static void
-psmv_add_pose_offset(enum xrt_input_name name, struct xrt_space_graph *xsg)
+psmv_push_pose_offset(enum xrt_input_name name, struct xrt_relation_chain *xrc)
 {
 	/*
 	 * Both the grip and aim pose needs adjustments, the grip is a rotated
@@ -814,7 +817,7 @@ psmv_add_pose_offset(enum xrt_input_name name, struct xrt_space_graph *xsg)
 	    {0, y, 0},
 	};
 
-	m_space_graph_add_pose(xsg, &pose);
+	m_relation_chain_push_pose(xrc, &pose);
 }
 
 
@@ -883,16 +886,16 @@ psmv_device_update_inputs(struct xrt_device *xdev)
 }
 
 static xrt_result_t
-psmv_device_get_space_graph(struct xrt_device *xdev,
-                            enum xrt_input_name name,
-                            uint64_t at_timestamp_ns,
-                            struct xrt_space_graph *xgs)
+psmv_device_get_relation_chain(struct xrt_device *xdev,
+                               enum xrt_input_name name,
+                               uint64_t at_timestamp_ns,
+                               struct xrt_relation_chain *xrc)
 {
 	struct psmv_device *psmv = psmv_device(xdev);
 
-	psmv_add_pose_offset(name, xgs);
+	psmv_push_pose_offset(name, xrc);
 
-	struct xrt_space_relation *rel = m_space_graph_reserve(xgs);
+	struct xrt_space_relation *rel = m_relation_chain_reserve(xrc);
 
 	if (psmv->ball != NULL) {
 		xrt_tracked_psmv_get_tracked_pose(psmv->ball, name, at_timestamp_ns, rel);
@@ -909,11 +912,11 @@ psmv_device_get_tracked_pose(struct xrt_device *xdev,
                              uint64_t at_timestamp_ns,
                              struct xrt_space_relation *out_relation)
 {
-	struct xrt_space_graph xgs = {0};
+	struct xrt_relation_chain xrc = {0};
 
-	psmv_device_get_space_graph(xdev, name, at_timestamp_ns, &xgs);
+	psmv_device_get_relation_chain(xdev, name, at_timestamp_ns, &xrc);
 
-	m_space_graph_resolve(&xgs, out_relation);
+	m_relation_chain_resolve(&xrc, out_relation);
 }
 
 static float
@@ -931,7 +934,7 @@ amp_scale(struct psmv_device *psmv, float amp)
 }
 
 static void
-psmv_device_set_output(struct xrt_device *xdev, enum xrt_output_name name, union xrt_output_value *value)
+psmv_device_set_output(struct xrt_device *xdev, enum xrt_output_name name, const union xrt_output_value *value)
 {
 	struct psmv_device *psmv = psmv_device(xdev);
 
@@ -977,9 +980,9 @@ static struct xrt_binding_profile binding_profiles[1] = {
     {
         .name = XRT_DEVICE_SIMPLE_CONTROLLER,
         .inputs = simple_inputs,
-        .num_inputs = ARRAY_SIZE(simple_inputs),
+        .input_count = ARRAY_SIZE(simple_inputs),
         .outputs = simple_outputs,
-        .num_outputs = ARRAY_SIZE(simple_outputs),
+        .output_count = ARRAY_SIZE(simple_outputs),
     },
 };
 
@@ -995,29 +998,47 @@ static struct xrt_binding_profile binding_profiles[1] = {
 int
 psmv_found(struct xrt_prober *xp,
            struct xrt_prober_device **devices,
-           size_t num_devices,
+           size_t device_count,
            size_t index,
            cJSON *attached_data,
            struct xrt_device **out_xdevs)
 {
-	struct os_hid_device *hid = NULL;
-	int ret;
-
 	// We do not receive any sensor packages on USB.
 	if (devices[index]->bus != XRT_BUS_TYPE_BLUETOOTH) {
 		return 0;
 	}
 
-	// Sanity check for device type.
+	// Validate device type.
 	switch (devices[index]->product_id) {
 	case PSMV_PID_ZCM1: break;
 	case PSMV_PID_ZCM2: break;
 	default: return -1;
 	}
 
-	ret = xrt_prober_open_hid_interface(xp, devices[index], 0, &hid);
-	if (ret != 0) {
+	struct xrt_tracked_psmv *tracker = NULL;
+	if (xp->tracking != NULL) {
+		xp->tracking->create_tracked_psmv(xp->tracking, &tracker);
+	}
+
+	struct xrt_device *xdev = psmv_device_create(xp, devices[index], tracker);
+	if (xdev == NULL) {
 		return -1;
+	}
+
+	*out_xdevs = xdev;
+
+	return 1;
+}
+
+struct xrt_device *
+psmv_device_create(struct xrt_prober *xp, struct xrt_prober_device *xpdev, struct xrt_tracked_psmv *tracker)
+{
+	struct os_hid_device *hid = NULL;
+	int ret = 0;
+
+	ret = xrt_prober_open_hid_interface(xp, xpdev, 0, &hid);
+	if (ret != 0) {
+		return NULL;
 	}
 
 	enum u_device_alloc_flags flags = U_DEVICE_ALLOC_TRACKING_NONE;
@@ -1028,18 +1049,32 @@ psmv_found(struct xrt_prober *xp,
 	psmv->base.set_output = psmv_device_set_output;
 	psmv->base.name = XRT_DEVICE_PSMV;
 	psmv->base.binding_profiles = binding_profiles;
-	psmv->base.num_binding_profiles = ARRAY_SIZE(binding_profiles);
+	psmv->base.binding_profile_count = ARRAY_SIZE(binding_profiles);
 	psmv->fusion.rot.w = 1.0f;
 	psmv->fusion.fusion = imu_fusion_create();
 	psmv->log_level = debug_get_log_option_psmv_log();
-	psmv->pid = devices[index]->product_id;
+	psmv->pid = xpdev->product_id;
 	psmv->hid = hid;
+
+	int str_serial_ret = xrt_prober_get_string_descriptor( //
+	    xp,                                                //
+	    xpdev,                                             //
+	    XRT_PROBER_STRING_SERIAL_NUMBER,                   //
+	    (unsigned char *)psmv->base.serial,                //
+	    XRT_DEVICE_NAME_LEN);                              //
+
+	static int controller_num = 0;
+	if (str_serial_ret <= 0) {
+		snprintf(psmv->base.serial, XRT_DEVICE_NAME_LEN, "PS Move Controller %d", controller_num++);
+		PSMV_ERROR(psmv, "Could not get bluetooth serial, fallback: %s", psmv->base.serial);
+	}
+
 	snprintf(psmv->base.str, XRT_DEVICE_NAME_LEN, "%s", "PS Move Controller");
 
 	m_imu_pre_filter_init(&psmv->calibration.prefilter, 1.f, 1.f);
 
 	// Default variance
-	switch (devices[index]->product_id) {
+	switch (xpdev->product_id) {
 	case PSMV_PID_ZCM1:
 		// Note that there is one axis "weird" in each - this model has
 		// 2-axis sensors.
@@ -1061,7 +1096,7 @@ psmv_found(struct xrt_prober *xp,
 		break;
 	default:
 		//! @todo cleanup to not leak
-		return -1;
+		return NULL;
 	}
 
 	// Setup inputs.
@@ -1087,7 +1122,7 @@ psmv_found(struct xrt_prober *xp,
 	if (ret != 0) {
 		PSMV_ERROR(psmv, "Failed to init mutex!");
 		psmv_device_destroy(&psmv->base);
-		return ret;
+		return NULL;
 	}
 
 	// Thread and other state.
@@ -1095,23 +1130,21 @@ psmv_found(struct xrt_prober *xp,
 	if (ret != 0) {
 		PSMV_ERROR(psmv, "Failed to init threading!");
 		psmv_device_destroy(&psmv->base);
-		return ret;
+		return NULL;
 	}
 	// Get calibration data.
 	ret = psmv_get_calibration(psmv);
 	if (ret != 0) {
 		PSMV_ERROR(psmv, "Failed to get calibration data!");
 		psmv_device_destroy(&psmv->base);
-		return ret;
+		return NULL;
 	}
 
 #if 1
 	// 45mm
 	float diameter = PSMV_BALL_DIAMETER_M;
 	(void)diameter;
-	if (xp->tracking != NULL) {
-		xp->tracking->create_tracked_psmv(xp->tracking, &psmv->base, &psmv->ball);
-	}
+	psmv->ball = tracker;
 #endif
 
 	if (psmv->ball != NULL) {
@@ -1144,7 +1177,7 @@ psmv_found(struct xrt_prober *xp,
 	if (ret != 0) {
 		PSMV_ERROR(psmv, "Failed to start thread!");
 		psmv_device_destroy(&psmv->base);
-		return ret;
+		return NULL;
 	}
 
 	// Start the variable tracking now that everything is in place.
@@ -1209,9 +1242,7 @@ psmv_found(struct xrt_prober *xp,
 	psmv->base.device_type = XRT_DEVICE_TYPE_ANY_HAND_CONTROLLER;
 
 	// And finally done
-	*out_xdevs = &psmv->base;
-
-	return 1;
+	return &psmv->base;
 }
 
 
@@ -1284,7 +1315,8 @@ psmv_get_calibration_zcm1(struct psmv_device *psmv)
 	struct psmv_calibration_zcm1 data;
 	uint8_t *dst = (uint8_t *)&data;
 	int ret = 0;
-	size_t src_offset, dst_offset;
+	size_t src_offset;
+	size_t dst_offset;
 
 	for (int i = 0; i < 3; i++) {
 		struct psmv_calibration_part part = {0};
@@ -1500,7 +1532,8 @@ psmv_get_calibration_zcm2(struct psmv_device *psmv)
 	struct psmv_calibration_zcm2 data;
 	uint8_t *dst = (uint8_t *)&data;
 	int ret = 0;
-	size_t src_offset, dst_offset;
+	size_t src_offset;
+	size_t dst_offset;
 
 	for (int i = 0; i < 2; i++) {
 		struct psmv_calibration_part part = {0};

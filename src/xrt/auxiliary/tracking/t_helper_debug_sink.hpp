@@ -13,9 +13,11 @@
 #error "This header is C++-only."
 #endif
 
-#include <opencv2/opencv.hpp>
+#include "util/u_sink.h"
 #include "util/u_frame.h"
+#include <opencv2/opencv.hpp>
 
+namespace xrt::auxiliary::tracking {
 
 struct HelperDebugSink
 {
@@ -26,37 +28,42 @@ public:
 		AlwaysSingle,
 	};
 
-public:
+
 	Kind kind = AllAvailable;
-	struct xrt_frame_sink *sink = {};
+	struct u_sink_debug usd = {};
 	struct xrt_frame *frame = {};
 
 	cv::Mat rgb[2] = {};
 
 
-public:
+
 	HelperDebugSink(Kind kind)
 	{
 		this->kind = kind;
+		u_sink_debug_init(&usd);
 	}
 
 	HelperDebugSink() = delete;
 
 	~HelperDebugSink()
 	{
+		u_sink_debug_destroy(&usd);
 		xrt_frame_reference(&frame, NULL);
 	}
 
 	void
 	refresh(struct xrt_frame *xf)
 	{
-		if (sink == NULL) {
+		if (!u_sink_debug_is_active(&usd)) {
 			return;
 		}
 
 		// But what about second breakfast?
 		bool second_view = false;
-		int rows, cols, width, height;
+		int rows;
+		int cols;
+		int width;
+		int height;
 
 		cols = xf->width;
 		rows = xf->height;
@@ -112,15 +119,22 @@ public:
 	void
 	submit()
 	{
-		if (frame != NULL) {
-			// Make sure that the cv::Mats doesn't use the data.
-			rgb[0] = cv::Mat();
-			rgb[1] = cv::Mat();
-			sink->push_frame(sink, frame);
+		// Make sure that the cv::Mats doesn't use the data.
+		rgb[0] = cv::Mat();
+		rgb[1] = cv::Mat();
+
+		// Don't try to push null frames.
+		if (frame == nullptr) {
+			return;
 		}
+
+		// Does checking if the sink is active.
+		u_sink_debug_push_frame(&usd, frame);
 
 		// We unreference the frame here, downstream is either
 		// done with it or have referenced it themselves.
 		xrt_frame_reference(&frame, NULL);
 	}
 };
+
+} // namespace xrt::auxiliary::tracking

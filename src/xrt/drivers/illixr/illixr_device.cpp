@@ -108,12 +108,6 @@ illixr_hmd_destroy(struct xrt_device *xdev)
 }
 
 static void
-illixr_hmd_update_inputs(struct xrt_device *xdev)
-{
-	// Empty
-}
-
-static void
 illixr_hmd_get_tracked_pose(struct xrt_device *xdev,
                             enum xrt_input_name name,
                             uint64_t at_timestamp_ns,
@@ -128,17 +122,6 @@ illixr_hmd_get_tracked_pose(struct xrt_device *xdev,
 	out_relation->relation_flags = (enum xrt_space_relation_flags)(
 	    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |
 	    XRT_SPACE_RELATION_POSITION_VALID_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT);
-}
-
-static void
-illixr_hmd_get_view_pose(struct xrt_device *xdev,
-                         struct xrt_vec3 *eye_relation,
-                         uint32_t view_index,
-                         struct xrt_pose *out_pose)
-{
-	struct xrt_pose pose = illixr_read_pose();
-
-	*out_pose = pose;
 }
 
 std::vector<std::string>
@@ -171,13 +154,17 @@ illixr_hmd_create(const char *path_in, const char *comp_in)
 	enum u_device_alloc_flags flags =
 	    (enum u_device_alloc_flags)(U_DEVICE_ALLOC_HMD | U_DEVICE_ALLOC_TRACKING_NONE);
 	dh = U_DEVICE_ALLOCATE(struct illixr_hmd, flags, 1, 0);
-	dh->base.update_inputs = illixr_hmd_update_inputs;
+	dh->base.update_inputs = u_device_noop_update_inputs;
 	dh->base.get_tracked_pose = illixr_hmd_get_tracked_pose;
-	dh->base.get_view_pose = illixr_hmd_get_view_pose;
+	dh->base.get_view_poses = u_device_get_view_poses;
 	dh->base.destroy = illixr_hmd_destroy;
 	dh->base.name = XRT_DEVICE_GENERIC_HMD;
 	dh->base.device_type = XRT_DEVICE_TYPE_HMD;
-	dh->base.hmd->blend_mode = XRT_BLEND_MODE_OPAQUE;
+
+	size_t idx = 0;
+	dh->base.hmd->blend_modes[idx++] = XRT_BLEND_MODE_OPAQUE;
+	dh->base.hmd->blend_mode_count = idx;
+
 	dh->pose.orientation.w = 1.0f; // All other values set to zero.
 	dh->print_spew = debug_get_bool_option_illixr_spew();
 	dh->print_debug = debug_get_bool_option_illixr_debug();
@@ -186,6 +173,7 @@ illixr_hmd_create(const char *path_in, const char *comp_in)
 
 	// Print name.
 	snprintf(dh->base.str, XRT_DEVICE_NAME_LEN, "ILLIXR");
+	snprintf(dh->base.serial, XRT_DEVICE_NAME_LEN, "ILLIXR");
 
 	// Setup input.
 	dh->base.inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;
@@ -198,8 +186,8 @@ illixr_hmd_create(const char *path_in, const char *comp_in)
 	info.display.h_meters = 0.07f;
 	info.lens_horizontal_separation_meters = 0.13f / 2.0f;
 	info.lens_vertical_position_meters = 0.07f / 2.0f;
-	info.views[0].fov = 85.0f * (M_PI / 180.0f);
-	info.views[1].fov = 85.0f * (M_PI / 180.0f);
+	info.fov[0] = 85.0f * (M_PI / 180.0f);
+	info.fov[1] = 85.0f * (M_PI / 180.0f);
 
 	if (!u_device_setup_split_side_by_side(&dh->base, &info)) {
 		DH_ERROR(dh, "Failed to setup basic device info");

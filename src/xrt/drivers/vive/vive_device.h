@@ -1,4 +1,4 @@
-// Copyright 2019, Collabora, Ltd.
+// Copyright 2019-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -10,47 +10,22 @@
 #pragma once
 
 #include "xrt/xrt_device.h"
-#include "math/m_imu_3dof.h"
 #include "os/os_threading.h"
 #include "util/u_logging.h"
-#include "util/u_distortion_mesh.h"
+#include "util/u_debug.h"
+#include "util/u_time.h"
+#include "util/u_var.h"
+#include "math/m_imu_3dof.h"
+#include "math/m_relation_history.h"
+
+#include "vive/vive_config.h"
 
 #include "vive_lighthouse.h"
+#include "xrt/xrt_tracking.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-
-/*!
- * A lighthouse consisting of sensors.
- *
- * All sensors are placed in IMU space.
- */
-struct lh_model
-{
-	struct lh_sensor *sensors;
-	size_t num_sensors;
-};
-
-/*!
- * A single lighthouse senosor point and normal, in IMU space.
- */
-struct lh_sensor
-{
-	struct xrt_vec3 pos;
-	uint32_t _pad0;
-	struct xrt_vec3 normal;
-	uint32_t _pad1;
-};
-
-enum VIVE_VARIANT
-{
-	VIVE_UNKNOWN = 0,
-	VIVE_VARIANT_VIVE,
-	VIVE_VARIANT_PRO,
-	VIVE_VARIANT_INDEX
-};
 
 /*!
  * @implements xrt_device
@@ -64,52 +39,16 @@ struct vive_device
 
 	struct lighthouse_watchman watchman;
 
-	enum VIVE_VARIANT variant;
-
 	struct os_thread_helper sensors_thread;
 	struct os_thread_helper watchman_thread;
 	struct os_thread_helper mainboard_thread;
 
-	struct lh_model lh;
-
 	struct
 	{
-		uint64_t time_ns;
+		timepoint_ns last_sample_ts_ns;
+		uint32_t last_sample_ticks;
 		uint8_t sequence;
-		uint32_t last_sample_time_raw;
-		double acc_range;
-		double gyro_range;
-		struct xrt_vec3 acc_bias;
-		struct xrt_vec3 acc_scale;
-		struct xrt_vec3 gyro_bias;
-		struct xrt_vec3 gyro_scale;
-
-		//! IMU position in tracking space.
-		struct xrt_pose trackref;
 	} imu;
-
-	struct m_imu_3dof fusion;
-
-	struct
-	{
-		struct xrt_vec3 acc;
-		struct xrt_vec3 gyro;
-	} last;
-
-	struct
-	{
-		double lens_separation;
-		double persistence;
-		int eye_target_height_in_pixels;
-		int eye_target_width_in_pixels;
-
-		struct xrt_quat rot[2];
-
-		//! Head position in tracking space.
-		struct xrt_pose trackref;
-		//! Head position in IMU space.
-		struct xrt_pose imuref;
-	} display;
 
 	struct
 	{
@@ -117,40 +56,109 @@ struct vive_device
 		uint16_t lens_separation;
 		uint16_t proximity;
 		uint8_t button;
+		uint8_t audio_button;
 	} board;
 
-	struct
-	{
-		uint32_t display_firmware_version;
-		uint32_t firmware_version;
-		uint8_t hardware_revision;
-		uint8_t hardware_version_micro;
-		uint8_t hardware_version_minor;
-		uint8_t hardware_version_major;
-		char mb_serial_number[32];
-		char model_number[32];
-		char device_serial_number[32];
-	} firmware;
-
-	struct xrt_quat rot_filtered;
-
-	enum u_logging_level ll;
+	enum u_logging_level log_level;
 	bool disconnect_notified;
 
 	struct
 	{
-		bool calibration;
-		bool last;
+		struct u_var_button switch_tracker_btn;
+		char hand_status[128];
+		char slam_status[128];
 	} gui;
 
-	struct u_vive_values distortion[2];
+	struct vive_config config;
+
+	struct
+	{
+		//! Protects all members of the `fusion` substruct.
+		struct os_mutex mutex;
+
+		//! Main fusion calculator.
+		struct m_imu_3dof i3dof;
+
+		//! Prediction
+		struct m_relation_history *relation_hist;
+	} fusion;
+
+	//! Fields related to camera-based tracking (SLAM and hand tracking)
+	struct
+	{
+		//! SLAM tracker.
+		struct xrt_tracked_slam *slam;
+
+		//! Set at start. Whether the SLAM tracker was initialized.
+		bool slam_enabled;
+
+		//! Set at start. Whether the hand tracker was initialized.
+		bool hand_enabled;
+
+		//! SLAM systems track the IMU pose, enabling this corrects it to middle of the eyes
+		bool imu2me;
+	} tracking;
+
+	/*!
+	 * Offset for tracked pose offsets (applies to both fusion and SLAM).
+	 * Applied when getting the tracked poses, so is effectivily a offset
+	 * to increase or decrease prediction.
+	 */
+	struct u_var_draggable_f32 tracked_offset_ms;
+
+	struct xrt_pose P_imu_me; //!< IMU to head/display/middle-of-eyes transform in OpenXR coords
+
+	//! Whether to track the HMD with 6dof SLAM or fallback to the 3dof tracker
+	bool slam_over_3dof;
+
+	//! In charge of managing raw samples, redirects them for tracking
+	struct vive_source *source;
+
+	//! Last tracked pose
+	struct xrt_pose pose;
+
+	//! Additional offset to apply to `pose`
+	struct xrt_pose offset;
 };
+
+
+/*!
+ * Summary of the status of various trackers.
+ *
+ * @todo Creation flow is a bit broken for now, in the future this info should be closer
+ * to the tracker creation code, thus avoiding the need to pass it around like this.
+ */
+struct vive_tracking_status
+{
+	bool slam_wanted;
+	bool slam_supported;
+	bool slam_enabled;
+
+	//! Has Monado been built with the correct libraries to do optical hand tracking?
+	bool hand_supported;
+
+	//! Did we find controllers?
+	bool controllers_found;
+
+	//! If this is set to ON, we always do optical hand tracking even if controllers were found.
+	//! If this is set to AUTO, we do optical hand tracking only if no controllers were found.
+	//! If this is set to OFF, we don't do optical hand tracking.
+	enum debug_tristate_option hand_wanted;
+
+	//! Computed in target_builder_lighthouse.c based on the past three
+	bool hand_enabled;
+};
+
+void
+vive_set_trackers_status(struct vive_device *d, struct vive_tracking_status status);
 
 struct vive_device *
 vive_device_create(struct os_hid_device *mainboard_dev,
                    struct os_hid_device *sensors_dev,
                    struct os_hid_device *watchman_dev,
-                   enum VIVE_VARIANT variant);
+                   enum VIVE_VARIANT variant,
+                   struct vive_tracking_status tstatus,
+                   struct vive_source *vs);
 
 #ifdef __cplusplus
 }

@@ -1,4 +1,4 @@
-# Copyright 2018-2020, Collabora, Ltd. and the Monado contributors
+# Copyright 2018-2021, Collabora, Ltd. and the Monado contributors
 # SPDX-License-Identifier: BSL-1.0
 
 QUIET                  = YES
@@ -17,6 +17,8 @@ RECURSIVE              = YES
 EXCLUDE                = @SRCDIR@/src/external \
                          @SRCDIR@/doc/changes \
                          @BUILDDIR@
+EXCLUDE_PATTERNS       = */build/*
+
 STRIP_FROM_PATH        = @SRCDIR@/src/xrt \
                          @SRCDIR@/src/xrt/include \
                          @SRCDIR@/doc
@@ -34,7 +36,7 @@ PREDEFINED             = VK_USE_PLATFORM_XCB_KHR \
                          XR_USE_GRAPHICS_API_VULKAN \
                          XR_USE_PLATFORM_XLIB \
                          XR_USE_TIMESPEC \
-                         XRT_BUILD_DRIVER_RS \
+                         XRT_BUILD_DRIVER_REALSENSE \
                          XRT_DOXYGEN \
                          XRT_FEATURE_SERVICE \
                          XRT_HAVE_JPEG \
@@ -59,10 +61,13 @@ REFERENCED_BY_RELATION = YES
 REFERENCES_RELATION    = YES
 ALWAYS_DETAILED_SEC    = YES
 
+# Our common headers are too popular
+INCLUDED_BY_GRAPH = NO
 
 WARN_IF_UNDOCUMENTED   = @DOXYGEN_WARN_UNDOCUMENTED@
 EXTRACT_ALL            = @DOXYGEN_EXTRACT_ALL@
 HIDE_UNDOC_RELATIONS   = NO
+EXTRACT_STATIC         = YES
 
 MACRO_EXPANSION        = YES
 
@@ -88,3 +93,19 @@ BUILTIN_STL_SUPPORT    = YES
 CASE_SENSE_NAMES       = NO
 
 GENERATE_LATEX         = NO
+
+USE_MATHJAX            = YES
+
+# Doxygen Awesome theme settings
+GENERATE_TREEVIEW      = YES # required!
+DISABLE_INDEX          = NO
+FULL_SIDEBAR           = NO
+HTML_COLORSTYLE        = LIGHT # required with Doxygen >= 1.9.5
+HTML_HEADER            = @SRCDIR@/doc/header.html
+HTML_EXTRA_STYLESHEET  = @SRCDIR@/doc/doxygen-awesome-css/doxygen-awesome.css \
+HTML_EXTRA_FILES       = @SRCDIR@/doc/doxygen-awesome-css/doxygen-awesome-darkmode-toggle.js \
+                         @SRCDIR@/doc/doxygen-awesome-css/doxygen-awesome-fragment-copy-button.js \
+                         @SRCDIR@/doc/doxygen-awesome-css/doxygen-awesome-paragraph-link.js \
+                         @SRCDIR@/doc/doxygen-awesome-css/doxygen-custom/toggle-alternative-theme.js \
+                         @SRCDIR@/doc/doxygen-awesome-css/doxygen-awesome-interactive-toc.js \
+                         @SRCDIR@/doc/doxygen-awesome-css/doxygen-awesome-tabs.js

@@ -21,8 +21,10 @@
 #include "util/u_var.h"
 #include "util/u_logging.h"
 
+#include "math/m_mathinclude.h"
 #include "math/m_api.h"
 #include "math/m_permutation.h"
+#include "math/m_imu_3dof.h"
 
 #include "os/os_threading.h"
 
@@ -38,11 +40,11 @@
 
 DEBUG_GET_ONCE_LOG_OPTION(psvr_log, "PSVR_TRACKING_LOG", U_LOGGING_WARN)
 
-#define PSVR_TRACE(...) U_LOG_IFL_T(t.ll, __VA_ARGS__)
-#define PSVR_DEBUG(...) U_LOG_IFL_D(t.ll, __VA_ARGS__)
-#define PSVR_INFO(...) U_LOG_IFL_I(t.ll, __VA_ARGS__)
-#define PSVR_WARN(...) U_LOG_IFL_W(t.ll, __VA_ARGS__)
-#define PSVR_ERROR(...) U_LOG_IFL_E(t.ll, __VA_ARGS__)
+#define PSVR_TRACE(...) U_LOG_IFL_T(t.log_level, __VA_ARGS__)
+#define PSVR_DEBUG(...) U_LOG_IFL_D(t.log_level, __VA_ARGS__)
+#define PSVR_INFO(...) U_LOG_IFL_I(t.log_level, __VA_ARGS__)
+#define PSVR_WARN(...) U_LOG_IFL_W(t.log_level, __VA_ARGS__)
+#define PSVR_ERROR(...) U_LOG_IFL_E(t.log_level, __VA_ARGS__)
 
 
 /*!
@@ -104,8 +106,14 @@ DEBUG_GET_ONCE_LOG_OPTION(psvr_log, "PSVR_TRACKING_LOG", U_LOGGING_WARN)
 // uncomment this to dump comprehensive optical and imu data to
 // /tmp/psvr_dump.txt
 
-//#define PSVR_DUMP_FOR_OFFLINE_ANALYSIS
-//#define PSVR_DUMP_IMU_FOR_OFFLINE_ANALYSIS
+// Debug define(s), always off.
+#undef PSVR_DUMP_FOR_OFFLINE_ANALYSIS
+#undef PSVR_DUMP_IMU_FOR_OFFLINE_ANALYSIS
+
+using namespace xrt::auxiliary::tracking;
+
+//! Namespace for PSVR tracking implementation
+namespace xrt::auxiliary::tracking::psvr {
 
 typedef enum blob_type
 {
@@ -130,8 +138,7 @@ struct View
 
 	cv::Matx33d intrinsics;
 	cv::Mat distortion; // size may vary
-	cv::Vec4d distortion_fisheye;
-	bool use_fisheye;
+	enum t_camera_distortion_model distortion_model;
 
 	std::vector<cv::KeyPoint> keypoints;
 
@@ -143,8 +150,7 @@ struct View
 		CameraCalibrationWrapper wrap(calib);
 		intrinsics = wrap.intrinsics_mat;
 		distortion = wrap.distortion_mat.clone();
-		distortion_fisheye = wrap.distortion_fisheye_mat;
-		use_fisheye = wrap.use_fisheye;
+		distortion_model = wrap.distortion_model;
 
 		undistort_rectify_map_x = rectification.remap_x;
 		undistort_rectify_map_y = rectification.remap_y;
@@ -188,11 +194,11 @@ typedef struct model_vertex
 
 typedef struct match_data
 {
-	float angle = {};              // angle from reference vector
-	float distance = {};           // distance from base of reference vector
-	int32_t vertex_index = {};     // index aka tag
-	Eigen::Vector4f position = {}; // 3d position of vertex
-	blob_point_t src_blob = {};    // blob this vertex was derived from
+	float angle = {};                                   // angle from reference vector
+	float distance = {};                                // distance from base of reference vector
+	int32_t vertex_index = {};                          // index also known as tag
+	Eigen::Vector4f position = Eigen::Vector4f::Zero(); // 3d position of vertex
+	blob_point_t src_blob = {};                         // blob this vertex was derived from
 } match_data_t;
 
 typedef struct match_model
@@ -213,7 +219,7 @@ public:
 	struct xrt_frame_node node = {};
 
 	//! Logging stuff.
-	enum u_logging_level ll;
+	enum u_logging_level log_level;
 
 	//! Frame waiting to be processed.
 	struct xrt_frame *frame;
@@ -229,7 +235,7 @@ public:
 	struct
 	{
 		struct xrt_vec3 pos = {};
-		struct xrt_quat rot = {};
+		struct m_imu_3dof imu_3dof;
 	} fusion;
 
 	struct
@@ -307,7 +313,7 @@ dist_3d(Eigen::Vector4f a, Eigen::Vector4f b)
 }
 
 static float
-dist_3d_cv(cv::Point3f a, cv::Point3f b)
+dist_3d_cv(const cv::Point3f &a, const cv::Point3f &b)
 {
 	return sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) + (a.z - b.z) * (a.z - b.z));
 }
@@ -501,7 +507,7 @@ static void
 remove_outliers(std::vector<blob_point_t> *orig_points, std::vector<blob_point_t> *pruned_points, float outlier_thresh)
 {
 
-	if (orig_points->size() == 0) {
+	if (orig_points->empty()) {
 		return;
 	}
 
@@ -516,7 +522,7 @@ remove_outliers(std::vector<blob_point_t> *orig_points, std::vector<blob_point_t
 			temp_points.push_back(orig_points->at(i));
 		}
 	}
-	if (temp_points.size() == 0) {
+	if (temp_points.empty()) {
 		return;
 	}
 
@@ -613,12 +619,12 @@ merge_close_points(std::vector<blob_point_t> *orig_points, std::vector<blob_poin
 static void
 match_triangles(Eigen::Matrix4f *t1_mat,
                 Eigen::Matrix4f *t1_to_t2_mat,
-                Eigen::Vector4f t1_a,
-                Eigen::Vector4f t1_b,
-                Eigen::Vector4f t1_c,
-                Eigen::Vector4f t2_a,
-                Eigen::Vector4f t2_b,
-                Eigen::Vector4f t2_c)
+                const Eigen::Vector4f &t1_a,
+                const Eigen::Vector4f &t1_b,
+                const Eigen::Vector4f &t1_c,
+                const Eigen::Vector4f &t2_a,
+                const Eigen::Vector4f &t2_b,
+                const Eigen::Vector4f &t2_c)
 {
 	// given 3 vertices in 'model space', and a corresponding 3 vertices
 	// in 'world space', compute the transformation matrix to map one
@@ -827,7 +833,7 @@ solve_with_imu(TrackerPSVR &t,
 		proximity_data.push_back(p);
 	}
 
-	if (proximity_data.size() > 0) {
+	if (!proximity_data.empty()) {
 
 		// use the IMU rotation and the measured points in
 		// world space to compute a transform from model to world space.
@@ -892,7 +898,7 @@ disambiguate(TrackerPSVR &t,
 	Eigen::Matrix4f imu_solved_pose =
 	    solve_with_imu(t, measured_points, last_measurement, solved, PSVR_SEARCH_RADIUS);
 
-	if (measured_points->size() < PSVR_OPTICAL_SOLVE_THRESH && last_measurement->size() > 0) {
+	if (measured_points->size() < PSVR_OPTICAL_SOLVE_THRESH && !last_measurement->empty()) {
 		return imu_solved_pose;
 	}
 
@@ -908,7 +914,7 @@ disambiguate(TrackerPSVR &t,
 	uint32_t matched_vertex_indices[PSVR_NUM_LEDS];
 
 	// we can early-out if we are 'close enough' to our last match model.
-	// if we just hold the previous led configuration, this increases
+	// if we hold the previous led configuration, this increases
 	// performance and should cut down on jitter.
 	if (t.last_optical_model > 0 && t.done_correction) {
 
@@ -991,7 +997,10 @@ disambiguate(TrackerPSVR &t,
 			float prev_diff = last_diff(t, &meas_solved, &t.last_vertices);
 			float imu_diff = last_diff(t, &meas_solved, solved);
 
-			Eigen::Vector4f tl_pos, tr_pos, bl_pos, br_pos;
+			Eigen::Vector4f tl_pos;
+			Eigen::Vector4f tr_pos;
+			Eigen::Vector4f bl_pos;
+			Eigen::Vector4f br_pos;
 			bool has_bl = false;
 			bool has_br = false;
 			bool has_tl = false;
@@ -1140,7 +1149,6 @@ public:
 	uint32_t indices[PSVR_NUM_LEDS];
 
 
-public:
 	~Helper()
 	{
 		m_permutator_reset(&mp);
@@ -1262,7 +1270,7 @@ typedef struct blob_data
 
 
 static void
-sample_line(cv::Mat &src, cv::Point2i start, cv::Point2i end, int *inside_length)
+sample_line(cv::Mat &src, const cv::Point2i &start, const cv::Point2i &end, int *inside_length)
 {
 	// use bresenhams algorithm to sample the
 	// pixels between two points in an image
@@ -1280,13 +1288,12 @@ sample_line(cv::Mat &src, cv::Point2i start, cv::Point2i end, int *inside_length
 
 	while (1) {
 		// sample our pixel and see if it is in the interior
-		if (curr_x > 0 && curr_y > 0) {
+		if (curr_x > 0 && curr_y > 0 && curr_x < src.cols && curr_y < src.rows) {
 			// cv is row, column
 			uint8_t *val = src.ptr(curr_y, curr_x);
 
-			// @todo: we are just counting pixels rather
-			// than measuring length - bresenhams may introduce some
-			// inaccuracy here.
+			/// @todo: we are counting pixels rather than measuring length - bresenhams may introduce some
+			/// inaccuracy here.
 			if (*val > 128) {
 				(*inside_length) += 1;
 			}
@@ -1582,7 +1589,7 @@ process(TrackerPSVR &t, struct xrt_frame *xf)
 	// Convert our 2d point + disparities into 3d points.
 	std::vector<blob_data_t> blob_datas;
 
-	if (t.l_blobs.size() > 0) {
+	if (!t.l_blobs.empty()) {
 		for (uint32_t i = 0; i < t.l_blobs.size(); i++) {
 			float disp = t.r_blobs[i].pt.x - t.l_blobs[i].pt.x;
 			cv::Vec4d xydw(t.l_blobs[i].pt.x, t.l_blobs[i].pt.y, disp, 1.0f);
@@ -1676,7 +1683,9 @@ process(TrackerPSVR &t, struct xrt_frame *xf)
 	// leds.
 	if (t.merged_points.size() >= PSVR_OPTICAL_SOLVE_THRESH) {
 		Eigen::Quaternionf correction =
-		    rot * Eigen::Quaternionf(t.fusion.rot.w, t.fusion.rot.x, t.fusion.rot.y, t.fusion.rot.z).inverse();
+		    rot * Eigen::Quaternionf(t.fusion.imu_3dof.rot.w, t.fusion.imu_3dof.rot.x, t.fusion.imu_3dof.rot.y,
+		                             t.fusion.imu_3dof.rot.z)
+		              .inverse();
 
 		float correction_magnitude = t.target_optical_rotation_correction.angularDistance(correction);
 
@@ -1776,7 +1785,7 @@ process(TrackerPSVR &t, struct xrt_frame *xf)
 		t.last_vertices.push_back(solved[i]);
 	}
 
-	if (t.last_vertices.size() > 0) {
+	if (!t.last_vertices.empty()) {
 		filter_update(&t.last_vertices, t.track_filters, dt / 1000.0f);
 	}
 
@@ -1813,13 +1822,17 @@ run(TrackerPSVR &t)
 	os_thread_helper_lock(&t.oth);
 
 	while (os_thread_helper_is_running_locked(&t.oth)) {
-		// No data
-		if (!t.has_imu || t.frame == NULL) {
-			os_thread_helper_wait_locked(&t.oth);
-		}
 
-		if (!os_thread_helper_is_running_locked(&t.oth)) {
-			break;
+		// No data
+		if (!t.has_imu && t.frame == NULL) {
+			os_thread_helper_wait_locked(&t.oth);
+
+			/*
+			 * Loop back to the top to check if we should stop,
+			 * also handles spurious wakeups by re-checking the
+			 * condition in the if case. Essentially two loops.
+			 */
+			continue;
 		}
 
 		// Take a reference on the current frame
@@ -1855,10 +1868,14 @@ get_pose(TrackerPSVR &t, timepoint_ns when_ns, struct xrt_space_relation *out_re
 
 	//! @todo assuming that orientation is actually
 	//! currently tracked.
-	out_relation->relation_flags = (enum xrt_space_relation_flags)(
-	    XRT_SPACE_RELATION_POSITION_VALID_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT |
-	    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
+	out_relation->relation_flags = (enum xrt_space_relation_flags)(XRT_SPACE_RELATION_POSITION_VALID_BIT |
+	                                                               XRT_SPACE_RELATION_POSITION_TRACKED_BIT |
+	                                                               XRT_SPACE_RELATION_ORIENTATION_VALID_BIT);
 
+	if (t.done_correction) {
+		out_relation->relation_flags = (enum xrt_space_relation_flags)(
+		    out_relation->relation_flags | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
+	}
 	os_thread_helper_unlock(&t.oth);
 }
 
@@ -1873,18 +1890,16 @@ imu_data(TrackerPSVR &t, timepoint_ns timestamp_ns, struct xrt_tracking_sample *
 		return;
 	}
 	if (t.last_imu != 0) {
-		time_duration_ns delta_ns = timestamp_ns - t.last_imu;
-		float dt = time_ns_to_s(delta_ns);
-		// Super simple fusion.
-		math_quat_integrate_velocity(&t.fusion.rot, &sample->gyro_rad_secs, dt, &t.fusion.rot);
+		// Update 3DOF fusion
+		m_imu_3dof_update(&t.fusion.imu_3dof, timestamp_ns, &sample->accel_m_s2, &sample->gyro_rad_secs);
 	}
 
 	// apply our optical correction to imu rotation
 	// data
 
 	Eigen::Quaternionf corrected_rot_q =
-	    t.optical_rotation_correction *
-	    Eigen::Quaternionf(t.fusion.rot.w, t.fusion.rot.x, t.fusion.rot.y, t.fusion.rot.z);
+	    t.optical_rotation_correction * Eigen::Quaternionf(t.fusion.imu_3dof.rot.w, t.fusion.imu_3dof.rot.x,
+	                                                       t.fusion.imu_3dof.rot.y, t.fusion.imu_3dof.rot.z);
 
 	Eigen::Matrix4f corrected_rot = Eigen::Matrix4f::Identity();
 	corrected_rot.block(0, 0, 3, 3) = corrected_rot_q.toRotationMatrix();
@@ -1936,9 +1951,12 @@ frame(TrackerPSVR &t, struct xrt_frame *xf)
 static void
 break_apart(TrackerPSVR &t)
 {
-	os_thread_helper_stop(&t.oth);
+	os_thread_helper_stop_and_wait(&t.oth);
 }
 
+} // namespace xrt::auxiliary::tracking::psvr
+
+using xrt::auxiliary::tracking::psvr::TrackerPSVR;
 
 /*
  *
@@ -1985,9 +2003,11 @@ t_psvr_node_break_apart(struct xrt_frame_node *node)
 extern "C" void
 t_psvr_node_destroy(struct xrt_frame_node *node)
 {
-	auto t_ptr = container_of(node, TrackerPSVR, node);
+	auto *t_ptr = container_of(node, TrackerPSVR, node);
 
 	os_thread_helper_destroy(&t_ptr->oth);
+
+	m_imu_3dof_close(&t_ptr->fusion.imu_3dof);
 
 	delete t_ptr;
 }
@@ -2029,10 +2049,12 @@ t_psvr_create(struct xrt_frame_context *xfctx,
               struct xrt_frame_sink **out_sink)
 {
 	auto &t = *(new TrackerPSVR());
-	t.ll = debug_get_log_option_psvr_log();
+	t.log_level = debug_get_log_option_psvr_log();
 
 	PSVR_INFO("%s", __func__);
 	int ret;
+
+	using xrt::auxiliary::tracking::psvr::init_filter;
 
 	for (uint32_t i = 0; i < PSVR_NUM_LEDS; i++) {
 		init_filter(t.track_filters[i], PSVR_BLOB_PROCESS_NOISE, PSVR_BLOB_MEASUREMENT_NOISE, 1.0f);
@@ -2058,7 +2080,7 @@ t_psvr_create(struct xrt_frame_context *xfctx,
 	blob_params.filterByInertia = false;
 	blob_params.filterByColor = true;
 	blob_params.blobColor = 255; // 0 or 255 - color comes from binarized image?
-	blob_params.minArea = 0;
+	blob_params.minArea = 1;
 	blob_params.maxArea = 1000;
 	blob_params.maxThreshold = 51; // using a wide threshold span slows things down bigtime
 	blob_params.minThreshold = 50;
@@ -2095,7 +2117,6 @@ t_psvr_create(struct xrt_frame_context *xfctx,
 	t.sink.push_frame = t_psvr_sink_push_frame;
 	t.node.break_apart = t_psvr_node_break_apart;
 	t.node.destroy = t_psvr_node_destroy;
-	t.fusion.rot.w = 1.0f;
 
 	ret = os_thread_helper_init(&t.oth);
 	if (ret != 0) {
@@ -2107,17 +2128,19 @@ t_psvr_create(struct xrt_frame_context *xfctx,
 	t.fusion.pos.y = 0.0f;
 	t.fusion.pos.z = 0.0f;
 
-	t.fusion.rot.x = 0.0f;
-	t.fusion.rot.y = 0.0f;
-	t.fusion.rot.z = 0.0f;
-	t.fusion.rot.w = 1.0f;
+	m_imu_3dof_init(&t.fusion.imu_3dof, M_IMU_3DOF_USE_GRAVITY_DUR_20MS);
+
+	t.fusion.imu_3dof.rot.x = 0.0f;
+	t.fusion.imu_3dof.rot.y = 0.0f;
+	t.fusion.imu_3dof.rot.z = 0.0f;
+	t.fusion.imu_3dof.rot.w = 1.0f;
 
 	xrt_frame_context_add(xfctx, &t.node);
 
 	// Everything is safe, now setup the variable tracking.
 	u_var_add_root(&t, "PSVR Tracker", true);
-	u_var_add_log_level(&t, &t.ll, "Log level");
-	u_var_add_sink(&t, &t.debug.sink, "Debug");
+	u_var_add_log_level(&t, &t.log_level, "Log level");
+	u_var_add_sink_debug(&t, &t.debug.usd, "Debug");
 
 	*out_sink = &t.sink;
 	*out_xtvr = &t.base;

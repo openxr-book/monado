@@ -1,11 +1,12 @@
-# Copyright 2019-2020, Collabora, Ltd.
+# Copyright 2019-2022, Collabora, Ltd.
 # SPDX-License-Identifier: BSL-1.0
 
 ###
 # Main code
 #
 
-set(OXR_SOURCE_FILES
+add_library(
+	st_oxr STATIC
 	oxr_api_action.c
 	oxr_api_funcs.h
 	oxr_api_instance.c
@@ -17,6 +18,7 @@ set(OXR_SOURCE_FILES
 	oxr_api_verify.h
 	oxr_binding.c
 	oxr_chain.h
+	oxr_dpad.c
 	oxr_event.c
 	oxr_extension_support.h
 	oxr_handle_base.c
@@ -28,7 +30,10 @@ set(OXR_SOURCE_FILES
 	oxr_logger.h
 	oxr_objects.h
 	oxr_path.c
+	oxr_pretty_print.c
+	oxr_pretty_print.h
 	oxr_session.c
+	oxr_session_frame_end.c
 	oxr_space.c
 	oxr_swapchain.c
 	oxr_system.c
@@ -38,68 +43,93 @@ set(OXR_SOURCE_FILES
 	)
 
 if(XRT_HAVE_VULKAN)
-	list(APPEND OXR_SOURCE_FILES
-		oxr_session_vk.c
-		oxr_swapchain_vk.c
-		oxr_vulkan.c
-		)
+	target_compile_definitions(st_oxr PRIVATE XR_USE_GRAPHICS_API_VULKAN)
+	target_sources(st_oxr PRIVATE oxr_session_gfx_vk.c oxr_swapchain_vk.c oxr_vulkan.c)
+	target_link_libraries(st_oxr PUBLIC Vulkan::Vulkan)
 endif()
 
 if(XRT_HAVE_OPENGL)
-	add_definitions(-DXR_USE_GRAPHICS_API_OPENGL)
+	target_compile_definitions(st_oxr PRIVATE XR_USE_GRAPHICS_API_OPENGL)
 endif()
 if(XRT_HAVE_OPENGLES)
-	add_definitions(-DXR_USE_GRAPHICS_API_OPENGL_ES)
+	target_compile_definitions(st_oxr PRIVATE XR_USE_GRAPHICS_API_OPENGL_ES)
 endif()
 
 if(XRT_HAVE_OPENGL OR XRT_HAVE_OPENGLES)
-	list(APPEND OXR_SOURCE_FILES
-		oxr_session_gl.c
-		oxr_swapchain_gl.c
-		)
+	target_sources(st_oxr PRIVATE oxr_swapchain_gl.c)
+	target_link_libraries(st_oxr PUBLIC aux_ogl)
 endif()
 
-if(XRT_HAVE_XLIB)
-	add_definitions(-DXR_USE_PLATFORM_XLIB)
+if(XRT_HAVE_OPENGL_GLX AND XRT_HAVE_XLIB)
+	target_compile_definitions(st_oxr PRIVATE XR_USE_PLATFORM_XLIB)
+	target_sources(st_oxr PRIVATE oxr_session_gfx_gl_xlib.c)
 endif()
 
 if(XRT_HAVE_EGL)
-	add_definitions(-DXR_USE_PLATFORM_EGL)
-	list(APPEND OXR_SOURCE_FILES oxr_session_egl.c)
+	target_compile_definitions(st_oxr PRIVATE XR_USE_PLATFORM_EGL)
+	target_sources(st_oxr PRIVATE oxr_session_gfx_egl.c)
 endif()
 
+if(XRT_HAVE_D3D11 OR XRT_HAVE_D3D12)
+	target_sources(st_oxr PRIVATE oxr_d3d.cpp)
+	target_link_libraries(st_oxr PRIVATE aux_d3d)
+endif()
+
+if(XRT_HAVE_D3D11)
+	target_compile_definitions(st_oxr PRIVATE XR_USE_GRAPHICS_API_D3D11)
+	target_sources(st_oxr PRIVATE oxr_session_gfx_d3d11.c oxr_swapchain_d3d11.c oxr_d3d11.cpp)
+endif()
+
+if(XRT_HAVE_D3D12)
+	target_compile_definitions(st_oxr PRIVATE XR_USE_GRAPHICS_API_D3D12)
+	target_sources(st_oxr PRIVATE oxr_session_gfx_d3d12.c oxr_swapchain_d3d12.c oxr_d3d12.cpp)
+	target_link_libraries(st_oxr PRIVATE aux_d3d)
+endif()
 
 if(ANDROID)
-	add_definitions(-DXR_USE_PLATFORM_ANDROID)
-	list(APPEND OXR_SOURCE_FILES
-		oxr_session_gles_android.c
-		)
-endif()
-
-add_library(st_oxr STATIC ${OXR_SOURCE_FILES})
-target_link_libraries(st_oxr PRIVATE
-	xrt-interfaces
-	xrt-external-openxr
-	aux_util
-	aux_math
-	aux_generated_bindings
-	comp_client
-	aux-includes
-	PUBLIC
-	aux_os
-	Vulkan::Vulkan
-	)
-if(XRT_HAVE_VULKAN)
-	target_link_libraries(st_oxr PRIVATE Vulkan::Vulkan)
-endif()
-if(XRT_HAVE_OPENGL OR XRT_HAVE_OPENGLES)
-	target_link_libraries(st_oxr PRIVATE aux_ogl)
-endif()
-if(ANDROID)
+	target_compile_definitions(st_oxr PRIVATE XR_USE_PLATFORM_ANDROID)
+	target_sources(st_oxr PRIVATE oxr_session_gfx_gles_android.c)
 	target_link_libraries(st_oxr PRIVATE aux_android)
 endif()
-target_include_directories(st_oxr
+if(WIN32)
+	target_link_libraries(st_oxr PRIVATE kernel32)
+	target_compile_definitions(st_oxr PRIVATE XR_USE_PLATFORM_WIN32)
+endif()
+
+if(WIN32 AND XRT_HAVE_OPENGL)
+	target_sources(st_oxr PRIVATE oxr_session_gfx_gl_win32.c)
+endif()
+
+if(WIN32)
+	target_compile_definitions(st_oxr PRIVATE XR_USE_PLATFORM_WIN32)
+endif()
+
+if(XRT_FEATURE_OPENXR_LAYER_PASSTHROUGH)
+	target_sources(st_oxr PRIVATE oxr_api_passthrough.c oxr_passthrough.c)
+endif()
+
+target_link_libraries(
+	st_oxr
 	PRIVATE
-	${CMAKE_CURRENT_BINARY_DIR}
-	INTERFACE
-	${CMAKE_CURRENT_SOURCE_DIR}/..)
+		xrt-interfaces
+		xrt-external-openxr
+		aux_util
+		aux_math
+		aux_generated_bindings
+		comp_client
+		aux-includes
+	PUBLIC aux_os
+	)
+
+if(XRT_FEATURE_RENDERDOC)
+	target_link_libraries(st_oxr PUBLIC xrt-external-renderdoc)
+	if(XRT_HAVE_LINUX)
+		target_link_libraries(st_oxr PRIVATE ${CMAKE_DL_LIBS})
+	endif()
+endif()
+
+target_include_directories(
+	st_oxr
+	PRIVATE ${CMAKE_CURRENT_BINARY_DIR}
+	INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/..
+	)

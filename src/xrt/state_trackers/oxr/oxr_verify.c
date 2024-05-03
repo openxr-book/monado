@@ -1,19 +1,16 @@
-// Copyright 2018-2020, Collabora, Ltd.
+// Copyright 2018-2022, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  File for verifying app input into api functions.
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @ingroup oxr_main
  * @ingroup oxr_api
  */
 
-#include <assert.h>
-#include <stdio.h>
-#include <string.h>
-
 #include "xrt/xrt_compiler.h"
+#include "math/m_mathinclude.h"
 #include "util/u_debug.h"
 
 #include "oxr_objects.h"
@@ -21,6 +18,10 @@
 #include "oxr_api_verify.h"
 #include "oxr_chain.h"
 #include "oxr_subaction.h"
+
+#include <assert.h>
+#include <stdio.h>
+#include <string.h>
 
 
 /*
@@ -67,7 +68,7 @@ oxr_verify_fixed_size_single_level_path(struct oxr_logger *log, const char *path
 	}
 
 	if (path[0] == '\0') {
-		return oxr_error(log, XR_ERROR_NAME_INVALID, "(%s) can not be empty", name);
+		return oxr_error(log, XR_ERROR_NAME_INVALID, "(%s) cannot be empty", name);
 	}
 
 	if (!contains_zero(path, array_size)) {
@@ -98,7 +99,7 @@ oxr_verify_localized_name(struct oxr_logger *log, const char *string, uint32_t a
 	}
 
 	if (string[0] == '\0') {
-		return oxr_error(log, XR_ERROR_LOCALIZED_NAME_INVALID, "(%s) can not be empty", name);
+		return oxr_error(log, XR_ERROR_LOCALIZED_NAME_INVALID, "(%s) cannot be empty", name);
 	}
 
 	if (!contains_zero(string, array_size)) {
@@ -106,7 +107,7 @@ oxr_verify_localized_name(struct oxr_logger *log, const char *string, uint32_t a
 		                 name);
 	}
 
-	// Future work: validate well-formed UTF-8?
+	/// @todo validate well-formed UTF-8?
 	return XR_SUCCESS;
 }
 
@@ -209,9 +210,9 @@ oxr_verify_full_path(struct oxr_logger *log, const char *path, size_t length, co
 		// Empty string
 		return oxr_error(log, XR_ERROR_PATH_FORMAT_INVALID, "(%s) a empty string is not a valid path", name);
 	case VERIFY_SLASH:
-		// Is this '/foo/' or '/'
+		// Is this '/path_component/' or '/'
 		if (length > 1) {
-			// It was '/foo/'
+			// It was '/path_component/'
 			return XR_SUCCESS;
 		}
 		// It was '/'
@@ -223,7 +224,7 @@ oxr_verify_full_path(struct oxr_logger *log, const char *path, size_t length, co
 		                 name);
 
 	case VERIFY_MIDDLE:
-		// '/foo/bar' okay!
+		// '/path_component/trailing_path_component' okay!
 		return XR_SUCCESS;
 	default:
 		// We should not end up here.
@@ -268,7 +269,7 @@ subaction_path_no_dups(struct oxr_logger *log,
 
 	OXR_FOR_EACH_VALID_SUBACTION_PATH(HANDLE_SUBACTION_PATH)
 	{
-		// else clasue
+		// else clause
 		const char *str = NULL;
 		size_t length = 0;
 
@@ -316,28 +317,33 @@ oxr_verify_subaction_paths_create(struct oxr_logger *log,
 }
 
 XrResult
-oxr_verify_subaction_path_sync(struct oxr_logger *log, struct oxr_instance *inst, XrPath path, uint32_t index)
+oxr_verify_subaction_path_sync(struct oxr_logger *log,
+                               const struct oxr_instance *inst,
+                               const struct oxr_action_set *act_set,
+                               XrPath path,
+                               uint32_t index)
 {
-#define VERIFY_PATH(X)                                                                                                 \
-	else if (path == inst->path_cache.X)                                                                           \
-	{                                                                                                              \
-		return XR_SUCCESS;                                                                                     \
-	}
 	if (path == XR_NULL_PATH) {
 		return XR_SUCCESS;
 	}
-	OXR_FOR_EACH_SUBACTION_PATH(VERIFY_PATH)
+	struct oxr_subaction_paths subaction_paths = {0};
+	if (!oxr_classify_subaction_paths(log, inst, 1, &path, &subaction_paths)) {
+		const char *str = NULL;
+		size_t length = 0;
 
-#undef VERIFY_PATH
-
-	const char *str = NULL;
-	size_t length = 0;
-
-	oxr_path_get_string(log, inst, path, &str, &length);
-	return oxr_error(log, XR_ERROR_PATH_INVALID,
-	                 "(actionSets[%i].subactionPath == '%s') path "
-	                 "is not a valid subaction path.",
-	                 index, str);
+		oxr_path_get_string(log, inst, path, &str, &length);
+		return oxr_error(log, XR_ERROR_PATH_INVALID,
+		                 "(actionSets[%i].subactionPath == '%s') path "
+		                 "is not a valid subaction path.",
+		                 index, str);
+	}
+	if (!oxr_subaction_paths_is_subset_of(&subaction_paths, &(act_set->data->permitted_subaction_paths))) {
+		return oxr_error(log, XR_ERROR_PATH_UNSUPPORTED,
+		                 "(actionSets[%i].subactionPath) action set '%s' has no "
+		                 "actions defined with the specified subaction path",
+		                 index, act_set != NULL ? act_set->data->name : "NULL");
+	}
+	return XR_SUCCESS;
 }
 
 XrResult
@@ -406,6 +412,27 @@ oxr_verify_subaction_path_get(struct oxr_logger *log,
  */
 
 XrResult
+oxr_verify_extensions(struct oxr_logger *log, const struct oxr_extension_status *extensions)
+{
+#ifdef XR_USE_GRAPHICS_API_VULKAN
+	if ((extensions->KHR_swapchain_usage_input_attachment_bit ||
+	     extensions->MND_swapchain_usage_input_attachment_bit) &&
+	    !extensions->KHR_vulkan_enable2 && !extensions->KHR_vulkan_enable) {
+		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,
+		                 "Using [KHR|MND]_swapchain_usage_input_attachment_bit doesn't make sense without "
+		                 "KHR_vulkan_enable[2].");
+	}
+#endif
+
+	if (extensions->EXT_dpad_binding && !extensions->KHR_binding_modification) {
+		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,
+		                 "XR_EXT_dpad_binding requires XR_KHR_binding_modification");
+	}
+
+	return XR_SUCCESS;
+}
+
+XrResult
 oxr_verify_view_config_type(struct oxr_logger *log,
                             struct oxr_instance *inst,
                             XrViewConfigurationType view_conf,
@@ -448,6 +475,15 @@ oxr_verify_XrSessionCreateInfo(struct oxr_logger *log,
 	}
 #endif // defined(OXR_HAVE_KHR_opengl_enable) && defined(XR_USE_PLATFORM_XLIB)
 
+#if defined(OXR_HAVE_KHR_opengl_enable) && defined(XR_USE_PLATFORM_WIN32)
+	XrGraphicsBindingOpenGLWin32KHR const *opengl_win32 = OXR_GET_INPUT_FROM_CHAIN(
+	    createInfo, XR_TYPE_GRAPHICS_BINDING_OPENGL_WIN32_KHR, XrGraphicsBindingOpenGLWin32KHR);
+	if (opengl_win32 != NULL) {
+		OXR_VERIFY_EXTENSION(log, inst, KHR_opengl_enable);
+		return oxr_verify_XrGraphicsBindingOpenGLWin32KHR(log, opengl_win32);
+	}
+#endif // defined(OXR_HAVE_KHR_opengl_enable) && defined(XR_USE_PLATFORM_WIN32)
+
 #if defined(OXR_HAVE_KHR_vulkan_enable) || defined(OXR_HAVE_KHR_vulkan_enable2)
 	/* XR_TYPE_GRAPHICS_BINDING_VULKAN2_KHR aliased to
 	 * XR_TYPE_GRAPHICS_BINDING_VULKAN_KHR */
@@ -476,7 +512,26 @@ oxr_verify_XrSessionCreateInfo(struct oxr_logger *log,
 		OXR_VERIFY_EXTENSION(log, inst, KHR_opengl_es_enable);
 		return oxr_verify_XrGraphicsBindingOpenGLESAndroidKHR(log, opengles_android);
 	}
-#endif // OXR_HAVE_KHR_vulkan_enable
+#endif // defined(XR_USE_PLATFORM_ANDROID) && defined(XR_USE_GRAPHICS_API_OPENGL_ES)
+
+#if defined(XR_USE_GRAPHICS_API_D3D11)
+	XrGraphicsBindingD3D11KHR const *d3d11 =
+	    OXR_GET_INPUT_FROM_CHAIN(createInfo, XR_TYPE_GRAPHICS_BINDING_D3D11_KHR, XrGraphicsBindingD3D11KHR);
+	if (d3d11 != NULL) {
+		OXR_VERIFY_EXTENSION(log, inst, KHR_D3D11_enable);
+		return oxr_verify_XrGraphicsBindingD3D11KHR(log, d3d11);
+	}
+#endif // XR_USE_GRAPHICS_API_D3D11
+
+
+#if defined(XR_USE_GRAPHICS_API_D3D12)
+	XrGraphicsBindingD3D12KHR const *d3d12 =
+	    OXR_GET_INPUT_FROM_CHAIN(createInfo, XR_TYPE_GRAPHICS_BINDING_D3D12_KHR, XrGraphicsBindingD3D12KHR);
+	if (d3d12 != NULL) {
+		OXR_VERIFY_EXTENSION(log, inst, KHR_D3D12_enable);
+		return oxr_verify_XrGraphicsBindingD3D12KHR(log, d3d12);
+	}
+#endif // XR_USE_GRAPHICS_API_D3D12
 
 	/*
 	 * Add any new graphics binding structs here - before the headless
@@ -489,9 +544,11 @@ oxr_verify_XrSessionCreateInfo(struct oxr_logger *log,
 	/* We didn't recognize any graphics binding structs in the chain - our
 	 * last hope is headless. */
 
+#ifdef OXR_HAVE_MND_headless
 	if (inst->extensions.MND_headless) {
 		return XR_SUCCESS;
 	}
+#endif // OXR_HAVE_MND_headless
 
 	return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID,
 	                 "(createInfo->next) Argument chain does not contain "
@@ -525,6 +582,28 @@ oxr_verify_XrGraphicsBindingOpenGLXlibKHR(struct oxr_logger *log, const XrGraphi
 }
 
 #endif // defined(XR_USE_PLATFORM_XLIB) && defined(XR_USE_GRAPHICS_API_OPENGL)
+
+#if defined(XR_USE_PLATFORM_WIN32) && defined(XR_USE_GRAPHICS_API_OPENGL)
+
+XrResult
+oxr_verify_XrGraphicsBindingOpenGLWin32KHR(struct oxr_logger *log, const XrGraphicsBindingOpenGLWin32KHR *next)
+{
+	if (next->type != XR_TYPE_GRAPHICS_BINDING_OPENGL_WIN32_KHR) {
+		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE, "Graphics binding has invalid type");
+	}
+
+	if (next->hDC == NULL) {
+		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID, "hDC is NULL");
+	}
+
+	if (next->hGLRC == NULL) {
+		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID, "hGLRC is NULL");
+	}
+
+	return XR_SUCCESS;
+}
+
+#endif // defined(XR_USE_PLATFORM_WIN32) && defined(XR_USE_GRAPHICS_API_OPENGL)
 
 
 #ifdef XR_USE_GRAPHICS_API_VULKAN
@@ -564,9 +643,7 @@ oxr_verify_XrGraphicsBindingEGLMNDX(struct oxr_logger *log, const XrGraphicsBind
 		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE, "XrGraphicsBindingEGLMNDX::display cannot be NULL");
 	}
 
-	if (next->config == NULL) {
-		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE, "XrGraphicsBindingEGLMNDX::config cannot be NULL");
-	}
+	// The next->config field can be NULL if EGL_KHR_no_config_context is supported by the display.
 
 	if (next->context == NULL) {
 		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE, "XrGraphicsBindingEGLMNDX::context cannot be NULL");
@@ -589,3 +666,78 @@ oxr_verify_XrGraphicsBindingOpenGLESAndroidKHR(struct oxr_logger *log, const XrG
 }
 #endif // defined(XR_USE_PLATFORM_ANDROID) &&
        // defined(XR_USE_GRAPHICS_API_OPENGL_ES)
+
+#if defined(XR_USE_GRAPHICS_API_D3D11)
+XrResult
+oxr_verify_XrGraphicsBindingD3D11KHR(struct oxr_logger *log, const XrGraphicsBindingD3D11KHR *next)
+{
+	if (next->type != XR_TYPE_GRAPHICS_BINDING_D3D11_KHR) {
+		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE, "Graphics binding has invalid type");
+	}
+	if (next->device == NULL) {
+		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID,
+		                 "XrGraphicsBindingD3D11KHR::device cannot be NULL");
+	}
+	return XR_SUCCESS;
+}
+#endif // defined(XR_USE_GRAPHICS_API_D3D11)
+
+#if defined(XR_USE_GRAPHICS_API_D3D12)
+XrResult
+oxr_verify_XrGraphicsBindingD3D12KHR(struct oxr_logger *log, const XrGraphicsBindingD3D12KHR *next)
+{
+	if (next->type != XR_TYPE_GRAPHICS_BINDING_D3D12_KHR) {
+		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE, "Graphics binding has invalid type");
+	}
+	if (next->device == NULL) {
+		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID,
+		                 "XrGraphicsBindingD3D12KHR::device cannot be NULL");
+	}
+	if (next->queue == NULL) {
+		// not specified in spec nor cts, so assume it's this
+		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE, "XrGraphicsBindingD3D12KHR::queue cannot be NULL");
+	}
+	return XR_SUCCESS;
+}
+#endif // defined(XR_USE_GRAPHICS_API_D3D12)
+
+#ifdef XR_EXT_dpad_binding
+XrResult
+oxr_verify_XrInteractionProfileDpadBindingEXT(struct oxr_logger *log,
+                                              const XrInteractionProfileDpadBindingEXT *dpad,
+                                              const char *error_prefix)
+{
+	if (dpad->forceThreshold <= 0.0 || dpad->forceThreshold > 1.0) {
+		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,
+		                 "(%s->forceThreshold == %f) is not within range of (0.0 .. 1.0].", error_prefix,
+		                 dpad->forceThreshold);
+	}
+
+	if (dpad->forceThresholdReleased <= 0.0 || dpad->forceThresholdReleased > 1.0) {
+		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,
+		                 "(%s->forceThresholdReleased == %f) is not within range of (0.0 .. 1.0].",
+		                 error_prefix, dpad->forceThresholdReleased);
+	}
+
+	if (dpad->forceThreshold < dpad->forceThresholdReleased) {
+		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,
+		                 "(%s->[forceThreshold '%f' < forceThresholdReleased '%f']) forceThreshold is not "
+		                 "equal or greater than forceThresholdReleased.",
+		                 error_prefix, dpad->forceThreshold, dpad->forceThresholdReleased);
+	}
+
+	if (dpad->centerRegion <= 0.0 || dpad->centerRegion >= 1.0) {
+		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,
+		                 "(%s->centerRegion == %f) is outside the exclusive range (0.0 .. 1.0).", error_prefix,
+		                 dpad->centerRegion);
+	}
+
+	if (dpad->wedgeAngle < 0 || dpad->wedgeAngle >= M_PI) {
+		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,
+		                 "(%s->wedgeAngle == %f) is outside the half-open range [0.0 .. π).", error_prefix,
+		                 dpad->wedgeAngle);
+	}
+
+	return XR_SUCCESS;
+}
+#endif // XR_EXT_dpad_binding

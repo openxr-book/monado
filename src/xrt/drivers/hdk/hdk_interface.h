@@ -4,7 +4,7 @@
  * @file
  * @brief  Interface to direct OSVR HDK driver code.
  * @author Jakob Bornecrantz <jakob@collabora.com>
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup drv_hdk
  */
 
@@ -31,11 +31,12 @@ extern "C" {
  * Probing function for HDK devices.
  *
  * @ingroup drv_hdk
+ * @see xrt_prober_found_func_t
  */
 int
 hdk_found(struct xrt_prober *xp,
           struct xrt_prober_device **devices,
-          size_t num_devices,
+          size_t device_count,
           size_t index,
           cJSON *attached_data,
           struct xrt_device **out_xdev);

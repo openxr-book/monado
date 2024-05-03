@@ -4,11 +4,12 @@
 /*!
  * @file
  * @brief  Base implementations for math library.
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup aux_math
  *
  * Based in part on inc/osvr/Util/EigenQuatExponentialMap.h in OSVR-Core
  */
+// IWYU pragma: no_include "src/Core/MatrixBase.h"
 
 #include "math/m_api.h"
 #include "math/m_eigen_interop.hpp"
@@ -22,6 +23,7 @@
 // anonymous namespace for internal types
 namespace {
 template <typename Scalar> struct FourthRootMachineEps;
+
 template <> struct FourthRootMachineEps<double>
 {
 	/// machine epsilon is 1e-53, so fourth root is roughly 1e-13
@@ -80,6 +82,9 @@ quat_exp(Eigen::MatrixBase<Derived> const &vec)
 	/// whose absence thus distinguishes this implementation. Without
 	/// that factor of 1/2, the exp and ln functions successfully
 	/// round-trip and match other implementations.
+	///
+	/// @todo That 1/2 term is important, fix it and enable disabled test on
+	/// tests_quatexpmap.cpp
 	Scalar theta = vec.norm();
 	Scalar vecscale = sinc(theta);
 	Eigen::Quaternion<Scalar> ret;
@@ -88,7 +93,7 @@ quat_exp(Eigen::MatrixBase<Derived> const &vec)
 	return ret.normalized();
 }
 
-/// Taylor series expansion of theta over sin(theta), aka cosecant, for
+/// Taylor series expansion of theta over sin(theta), also known as cosecant, for
 /// use near 0 when you want continuity and validity at 0.
 template <typename Scalar>
 inline Scalar
@@ -112,7 +117,7 @@ quat_ln(Eigen::Quaternion<Scalar> const &quat)
 {
 	// ln q = ( (phi)/(norm of vec) vec, ln(norm of quat))
 	// When we assume a unit quaternion, ln(norm of quat) = 0
-	// so then we just scale the vector part by phi/sin(phi) to get the
+	// so then we scale the vector part by phi/sin(phi) to get the
 	// result (i.e., ln(qv, qw) = (phi/sin(phi)) * qv )
 	Scalar vecnorm = quat.vec().norm();
 
@@ -129,6 +134,8 @@ quat_ln(Eigen::Quaternion<Scalar> const &quat)
 }
 
 } // namespace
+
+using namespace xrt::auxiliary::math;
 
 extern "C" void
 math_quat_integrate_velocity(const struct xrt_quat *quat,
@@ -160,5 +167,18 @@ math_quat_finite_difference(const struct xrt_quat *quat0,
 
 
 	Eigen::Quaternionf inc_quat = map_quat(*quat1) * map_quat(*quat0).conjugate();
-	map_vec3(*out_ang_vel) = 2.f * quat_ln(inc_quat);
+	map_vec3(*out_ang_vel) = 2.f * quat_ln(inc_quat) / dt;
+}
+
+extern "C" void
+math_quat_exp(const struct xrt_vec3 *axis_angle, struct xrt_quat *out_quat)
+{
+	map_quat(*out_quat) = quat_exp(map_vec3(*axis_angle));
+}
+
+extern "C" void
+math_quat_ln(const struct xrt_quat *quat, struct xrt_vec3 *out_axis_angle)
+{
+	Eigen::Quaternionf eigen_quat = map_quat(*quat);
+	map_vec3(*out_axis_angle) = quat_ln(eigen_quat);
 }

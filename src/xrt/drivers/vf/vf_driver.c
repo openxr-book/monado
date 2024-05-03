@@ -1,4 +1,4 @@
-// Copyright 2020, Collabora, Ltd.
+// Copyright 2020-2021, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -9,25 +9,29 @@
  * @ingroup drv_vf
  */
 
+#include "vf_interface.h" // IWYU pragma: associated
+
 #include "os/os_time.h"
 #include "os/os_threading.h"
 
+#include "util/u_trace_marker.h"
 #include "util/u_var.h"
 #include "util/u_misc.h"
 #include "util/u_debug.h"
 #include "util/u_format.h"
 #include "util/u_frame.h"
 #include "util/u_logging.h"
+#include "util/u_trace_marker.h"
 
 
 #include <stdio.h>
 #include <assert.h>
 
-#include "vf_interface.h"
-
+#include <glib.h>
 #include <gst/gst.h>
 #include <gst/app/gstappsink.h>
-#include <glib.h>
+#include <gst/video/video-frame.h>
+
 
 /*
  *
@@ -41,11 +45,11 @@
  *
  */
 
-#define VF_TRACE(d, ...) U_LOG_IFL_T(d->ll, __VA_ARGS__)
-#define VF_DEBUG(d, ...) U_LOG_IFL_D(d->ll, __VA_ARGS__)
-#define VF_INFO(d, ...) U_LOG_IFL_I(d->ll, __VA_ARGS__)
-#define VF_WARN(d, ...) U_LOG_IFL_W(d->ll, __VA_ARGS__)
-#define VF_ERROR(d, ...) U_LOG_IFL_E(d->ll, __VA_ARGS__)
+#define VF_TRACE(d, ...) U_LOG_IFL_T(d->log_level, __VA_ARGS__)
+#define VF_DEBUG(d, ...) U_LOG_IFL_D(d->log_level, __VA_ARGS__)
+#define VF_INFO(d, ...) U_LOG_IFL_I(d->log_level, __VA_ARGS__)
+#define VF_WARN(d, ...) U_LOG_IFL_W(d->log_level, __VA_ARGS__)
+#define VF_ERROR(d, ...) U_LOG_IFL_E(d->log_level, __VA_ARGS__)
 
 DEBUG_GET_ONCE_LOG_OPTION(vf_log, "VF_LOG", U_LOGGING_WARN)
 
@@ -61,7 +65,6 @@ struct vf_fs
 
 	struct os_thread_helper play_thread;
 
-	const char *path;
 	GMainLoop *loop;
 	GstElement *source;
 	GstElement *testsink;
@@ -88,8 +91,29 @@ struct vf_fs
 
 	bool is_configured;
 	bool is_running;
-	enum u_logging_level ll;
+	enum u_logging_level log_level;
 };
+
+/*!
+ * Frame wrapping a GstSample/GstBuffer.
+ *
+ * @implements xrt_frame
+ */
+struct vf_frame
+{
+	struct xrt_frame base;
+
+	GstSample *sample;
+
+	GstVideoFrame frame;
+};
+
+
+/*
+ *
+ * Cast helpers.
+ *
+ */
 
 /*!
  * Cast to derived type.
@@ -100,6 +124,40 @@ vf_fs(struct xrt_fs *xfs)
 	return (struct vf_fs *)xfs;
 }
 
+/*!
+ * Cast to derived type.
+ */
+static inline struct vf_frame *
+vf_frame(struct xrt_frame *xf)
+{
+	return (struct vf_frame *)xf;
+}
+
+
+/*
+ *
+ * Frame methods.
+ *
+ */
+
+static void
+vf_frame_destroy(struct xrt_frame *xf)
+{
+	SINK_TRACE_MARKER();
+
+	struct vf_frame *vff = vf_frame(xf);
+
+	gst_video_frame_unmap(&vff->frame);
+
+	if (vff->sample != NULL) {
+		gst_sample_unref(vff->sample);
+		vff->sample = NULL;
+	}
+
+	free(vff);
+}
+
+
 /*
  *
  * Misc helper functions
@@ -107,9 +165,158 @@ vf_fs(struct xrt_fs *xfs)
  */
 
 
+static void
+vf_fs_frame(struct vf_fs *vid, GstSample *sample)
+{
+	SINK_TRACE_MARKER();
+
+	// Noop.
+	if (!vid->sink) {
+		return;
+	}
+
+	GstVideoInfo info;
+	GstBuffer *buffer;
+	GstCaps *caps;
+	buffer = gst_sample_get_buffer(sample);
+	caps = gst_sample_get_caps(sample);
+
+	gst_video_info_init(&info);
+	gst_video_info_from_caps(&info, caps);
+
+	static int seq = 0;
+	struct vf_frame *vff = U_TYPED_CALLOC(struct vf_frame);
+
+	if (!gst_video_frame_map(&vff->frame, &info, buffer, GST_MAP_READ)) {
+		VF_ERROR(vid, "Failed to map frame %d", seq);
+		// Yes, we should do this here because we don't want the destroy function to run.
+		free(vff);
+		return;
+	}
+
+	// We now want to hold onto the sample for as long as the frame lives.
+	gst_sample_ref(sample);
+	vff->sample = sample;
+
+	// Hardcoded first plane.
+	int plane = 0;
+
+	struct xrt_frame *xf = &vff->base;
+	xf->reference.count = 1;
+	xf->destroy = vf_frame_destroy;
+	xf->width = vid->width;
+	xf->height = vid->height;
+	xf->format = vid->format;
+	xf->stride = info.stride[plane];
+	xf->data = vff->frame.data[plane];
+	xf->stereo_format = vid->stereo_format;
+	xf->size = info.size;
+	xf->source_id = vid->base.source_id;
+
+	//! @todo Proper sequence number and timestamp.
+	xf->source_sequence = seq;
+	xf->timestamp = os_monotonic_get_ns();
+
+	xrt_sink_push_frame(vid->sink, &vff->base);
+
+	xrt_frame_reference(&xf, NULL);
+	vff = NULL;
+
+	seq++;
+}
+
+static GstFlowReturn
+on_new_sample_from_sink(GstElement *elt, struct vf_fs *vid)
+{
+	SINK_TRACE_MARKER();
+	GstSample *sample;
+	sample = gst_app_sink_pull_sample(GST_APP_SINK(elt));
+
+	if (!vid->got_sample) {
+		gint width;
+		gint height;
+
+		GstCaps *caps = gst_sample_get_caps(sample);
+		GstStructure *structure = gst_caps_get_structure(caps, 0);
+
+		gst_structure_get_int(structure, "width", &width);
+		gst_structure_get_int(structure, "height", &height);
+
+		VF_DEBUG(vid, "video size is %dx%d", width, height);
+		vid->got_sample = true;
+		vid->width = width;
+		vid->height = height;
+
+		// first sample is only used for getting metadata
+		return GST_FLOW_OK;
+	}
+
+	// Takes ownership of the sample.
+	vf_fs_frame(vid, sample);
+
+	// Done with sample now.
+	gst_sample_unref(sample);
+
+	return GST_FLOW_OK;
+}
+
+static void
+print_gst_error(GstMessage *message)
+{
+	GError *err = NULL;
+	gchar *dbg_info = NULL;
+
+	gst_message_parse_error(message, &err, &dbg_info);
+	U_LOG_E("ERROR from element %s: %s", GST_OBJECT_NAME(message->src), err->message);
+	U_LOG_E("Debugging info: %s", (dbg_info) ? dbg_info : "none");
+	g_error_free(err);
+	g_free(dbg_info);
+}
+
+static gboolean
+on_source_message(GstBus *bus, GstMessage *message, struct vf_fs *vid)
+{
+	/* nil */
+	switch (GST_MESSAGE_TYPE(message)) {
+	case GST_MESSAGE_EOS:
+		VF_DEBUG(vid, "Finished playback.");
+		g_main_loop_quit(vid->loop);
+		break;
+	case GST_MESSAGE_ERROR:
+		VF_ERROR(vid, "Received error.");
+		print_gst_error(message);
+		g_main_loop_quit(vid->loop);
+		break;
+	default: break;
+	}
+	return TRUE;
+}
+
+static void *
+vf_fs_mainloop(void *ptr)
+{
+	SINK_TRACE_MARKER();
+
+	struct vf_fs *vid = (struct vf_fs *)ptr;
+
+	VF_DEBUG(vid, "Let's run!");
+	g_main_loop_run(vid->loop);
+	VF_DEBUG(vid, "Going out!");
+
+	gst_object_unref(vid->testsink);
+	gst_element_set_state(vid->source, GST_STATE_NULL);
+
+
+	gst_object_unref(vid->source);
+	g_main_loop_unref(vid->loop);
+
+	return NULL;
+}
+
+
 /*
  *
- * Exported functions.
+ * Frame server methods.
  *
  */
 
@@ -195,11 +402,18 @@ vf_fs_destroy(struct vf_fs *vid)
 {
 	g_main_loop_quit(vid->loop);
 
-	os_thread_helper_stop(&vid->play_thread);
+	// Destroy also stops the thread.
 	os_thread_helper_destroy(&vid->play_thread);
 
 	free(vid);
 }
+
+
+/*
+ *
+ * Node methods.
+ *
+ */
 
 static void
 vf_fs_node_break_apart(struct xrt_frame_node *node)
@@ -215,188 +429,42 @@ vf_fs_node_destroy(struct xrt_frame_node *node)
 	vf_fs_destroy(vid);
 }
 
-#include <gst/video/video-frame.h>
 
-void
-vf_fs_frame(struct vf_fs *vid, GstSample *sample)
+/*
+ *
+ * Exported create functions and helper.
+ *
+ */
+
+static struct xrt_fs *
+alloc_and_init_common(struct xrt_frame_context *xfctx,      //
+                      enum xrt_format format,               //
+                      enum xrt_stereo_format stereo_format, //
+                      gchar *pipeline_string)               //
 {
-	GstBuffer *buffer;
-	buffer = gst_sample_get_buffer(sample);
-	GstCaps *caps = gst_sample_get_caps(sample);
-
-	static int seq = 0;
-
-	GstVideoFrame frame;
-	GstVideoInfo info;
-	gst_video_info_init(&info);
-	gst_video_info_from_caps(&info, caps);
-	if (gst_video_frame_map(&frame, &info, buffer, GST_MAP_READ)) {
-
-		int plane = 0;
-
-		struct xrt_frame *xf = NULL;
-
-		u_frame_create_one_off(vid->format, vid->width, vid->height, &xf);
-
-		//! @todo Sequence number and timestamp.
-		xf->width = vid->width;
-		xf->height = vid->height;
-		xf->format = vid->format;
-		xf->stereo_format = vid->stereo_format;
-
-		xf->data = frame.data[plane];
-		xf->stride = info.stride[plane];
-		xf->size = info.size;
-		xf->source_id = vid->base.source_id;
-		xf->source_sequence = seq;
-		xf->timestamp = os_monotonic_get_ns();
-		if (vid->sink) {
-			vid->sink->push_frame(vid->sink, xf);
-			// The frame is requeued as soon as the refcount reaches
-			// zero, this can be done safely from another thread.
-			// xrt_frame_reference(&xf, NULL);
-		}
-		gst_video_frame_unmap(&frame);
-	} else {
-		VF_ERROR(vid, "Failed to map frame %d", seq);
-	}
-
-	seq++;
-}
-
-static GstFlowReturn
-on_new_sample_from_sink(GstElement *elt, struct vf_fs *vid)
-{
-	GstSample *sample;
-	sample = gst_app_sink_pull_sample(GST_APP_SINK(elt));
-
-	if (!vid->got_sample) {
-		gint width;
-		gint height;
-
-		GstCaps *caps = gst_sample_get_caps(sample);
-		GstStructure *structure = gst_caps_get_structure(caps, 0);
-
-		gst_structure_get_int(structure, "width", &width);
-		gst_structure_get_int(structure, "height", &height);
-
-		VF_DEBUG(vid, "video size is %dx%d\n", width, height);
-		vid->got_sample = true;
-		vid->width = width;
-		vid->height = height;
-
-		// first sample is only used for getting metadata
-		return GST_FLOW_OK;
-	}
-
-	vf_fs_frame(vid, sample);
-
-	gst_sample_unref(sample);
-
-	return GST_FLOW_OK;
-}
-
-static void
-print_gst_error(GstMessage *message)
-{
-	GError *err = NULL;
-	gchar *dbg_info = NULL;
-
-	gst_message_parse_error(message, &err, &dbg_info);
-	U_LOG_E("ERROR from element %s: %s\n", GST_OBJECT_NAME(message->src), err->message);
-	U_LOG_E("Debugging info: %s\n", (dbg_info) ? dbg_info : "none");
-	g_error_free(err);
-	g_free(dbg_info);
-}
-
-static gboolean
-on_source_message(GstBus *bus, GstMessage *message, struct vf_fs *vid)
-{
-	/* nil */
-	switch (GST_MESSAGE_TYPE(message)) {
-	case GST_MESSAGE_EOS:
-		VF_DEBUG(vid, "Finished playback\n");
-		g_main_loop_quit(vid->loop);
-		break;
-	case GST_MESSAGE_ERROR:
-		VF_ERROR(vid, "Received error\n");
-		print_gst_error(message);
-		g_main_loop_quit(vid->loop);
-		break;
-	default: break;
-	}
-	return TRUE;
-}
-
-static void *
-run_play_thread(void *ptr)
-{
-	struct vf_fs *vid = (struct vf_fs *)ptr;
-
-	VF_DEBUG(vid, "Let's run!\n");
-	g_main_loop_run(vid->loop);
-	VF_DEBUG(vid, "Going out\n");
-
-	gst_object_unref(vid->testsink);
-	gst_element_set_state(vid->source, GST_STATE_NULL);
-
-
-	gst_object_unref(vid->source);
-	g_main_loop_unref(vid->loop);
-
-	return NULL;
-}
-
-struct xrt_fs *
-vf_fs_create(struct xrt_frame_context *xfctx, const char *path)
-{
-	if (path == NULL) {
-		U_LOG_E("No path given");
-		return NULL;
-	}
-
-
 	struct vf_fs *vid = U_TYPED_CALLOC(struct vf_fs);
-	vid->path = path;
 	vid->got_sample = false;
+	vid->format = format;
+	vid->stereo_format = stereo_format;
 
-	gchar *loop = "false";
-
-	gchar *string = NULL;
 	GstBus *bus = NULL;
 
-
-	gst_init(0, NULL);
-
-	if (!g_file_test(path, G_FILE_TEST_EXISTS)) {
-		VF_ERROR(vid, "File %s does not exist\n", path);
+	int ret = os_thread_helper_init(&vid->play_thread);
+	if (ret < 0) {
+		VF_ERROR(vid, "Failed to init thread");
+		g_free(pipeline_string);
+		free(vid);
 		return NULL;
 	}
 
 	vid->loop = g_main_loop_new(NULL, FALSE);
+	VF_DEBUG(vid, "Pipeline: %s", pipeline_string);
 
-#if 0
-	const gchar *caps = "video/x-raw,format=RGB";
-	vid->format = XRT_FORMAT_R8G8B8;
-	vid->stereo_format = XRT_STEREO_FORMAT_SBS;
-#endif
-
-#if 1
-	const gchar *caps = "video/x-raw,format=YUY2";
-	vid->format = XRT_FORMAT_YUYV422;
-	vid->stereo_format = XRT_STEREO_FORMAT_SBS;
-#endif
-
-	string = g_strdup_printf(
-	    "multifilesrc location=\"%s\" loop=%s ! decodebin ! videoconvert ! "
-	    "appsink caps=\"%s\" name=testsink",
-	    path, loop, caps);
-	VF_DEBUG(vid, "Pipeline: %s\n", string);
-	vid->source = gst_parse_launch(string, NULL);
-	g_free(string);
+	vid->source = gst_parse_launch(pipeline_string, NULL);
+	g_free(pipeline_string);
 
 	if (vid->source == NULL) {
-		VF_ERROR(vid, "Bad source\n");
+		VF_ERROR(vid, "Bad source");
 		g_main_loop_unref(vid->loop);
 		free(vid);
 		return NULL;
@@ -410,16 +478,21 @@ vf_fs_create(struct xrt_frame_context *xfctx, const char *path)
 	gst_bus_add_watch(bus, (GstBusFunc)on_source_message, vid);
 	gst_object_unref(bus);
 
-	int ret = os_thread_helper_start(&vid->play_thread, run_play_thread, vid);
-	if (!ret) {
-		VF_ERROR(vid, "Failed to start thread");
+	ret = os_thread_helper_start(&vid->play_thread, vf_fs_mainloop, vid);
+	if (ret != 0) {
+		VF_ERROR(vid, "Failed to start thread '%i'", ret);
+		g_main_loop_unref(vid->loop);
+		free(vid);
+		return NULL;
 	}
 
-	// we need one sample to determine frame size
+	// We need one sample to determine frame size.
+	VF_DEBUG(vid, "Waiting for frame");
 	gst_element_set_state(vid->source, GST_STATE_PLAYING);
 	while (!vid->got_sample) {
 		os_nanosleep(100 * 1000 * 1000);
 	}
+	VF_DEBUG(vid, "Got first sample");
 	gst_element_set_state(vid->source, GST_STATE_PAUSED);
 
 	vid->base.enumerate_modes = vf_fs_enumerate_modes;
@@ -429,7 +502,7 @@ vf_fs_create(struct xrt_frame_context *xfctx, const char *path)
 	vid->base.is_running = vf_fs_is_running;
 	vid->node.break_apart = vf_fs_node_break_apart;
 	vid->node.destroy = vf_fs_node_destroy;
-	vid->ll = debug_get_log_option_vf_log();
+	vid->log_level = debug_get_log_option_vf_log();
 
 	// It's now safe to add it to the context.
 	xrt_frame_context_add(xfctx, &vid->node);
@@ -438,8 +511,74 @@ vf_fs_create(struct xrt_frame_context *xfctx, const char *path)
 	// clang-format off
 	u_var_add_root(vid, "Video File Frameserver", true);
 	u_var_add_ro_text(vid, vid->base.name, "Card");
-	u_var_add_ro_u32(vid, &vid->ll, "Log Level");
+	u_var_add_log_level(vid, &vid->log_level, "Log Level");
 	// clang-format on
 
 	return &(vid->base);
+}
+
+struct xrt_fs *
+vf_fs_videotestsource(struct xrt_frame_context *xfctx, uint32_t width, uint32_t height)
+{
+	gst_init(0, NULL);
+
+	enum xrt_format format = XRT_FORMAT_R8G8B8;
+	enum xrt_stereo_format stereo_format = XRT_STEREO_FORMAT_NONE;
+
+	gchar *pipeline_string = g_strdup_printf(
+	    "videotestsrc name=source ! "
+	    "clockoverlay ! "
+	    "videoconvert ! "
+	    "videoscale ! "
+	    "video/x-raw,format=RGB,width=%u,height=%u ! "
+	    "appsink name=testsink",
+	    width, height);
+
+	return alloc_and_init_common(xfctx, format, stereo_format, pipeline_string);
+}
+
+struct xrt_fs *
+vf_fs_open_file(struct xrt_frame_context *xfctx, const char *path)
+{
+	if (path == NULL) {
+		U_LOG_E("No path given");
+		return NULL;
+	}
+
+	gst_init(0, NULL);
+
+	if (!g_file_test(path, G_FILE_TEST_EXISTS)) {
+		U_LOG_E("File %s does not exist", path);
+		return NULL;
+	}
+
+#if 0
+	const gchar *caps = "video/x-raw,format=RGB";
+	enum xrt_format format = XRT_FORMAT_R8G8B8;
+	enum xrt_stereo_format stereo_format = XRT_STEREO_FORMAT_NONE;
+#endif
+
+#if 0
+	// For hand tracking
+	const gchar *caps = "video/x-raw,format=RGB";
+	enum xrt_format format = XRT_FORMAT_R8G8B8;
+	enum xrt_stereo_format stereo_format = XRT_STEREO_FORMAT_SBS;
+#endif
+
+#if 1
+	const gchar *caps = "video/x-raw,format=YUY2";
+	enum xrt_format format = XRT_FORMAT_YUYV422;
+	enum xrt_stereo_format stereo_format = XRT_STEREO_FORMAT_SBS;
+#endif
+
+	gchar *loop = "false";
+
+	gchar *pipeline_string = g_strdup_printf(
+	    "multifilesrc location=\"%s\" loop=%s ! "
+	    "decodebin ! "
+	    "videoconvert ! "
+	    "appsink caps=\"%s\" name=testsink",
+	    path, loop, caps);
+
+	return alloc_and_init_common(xfctx, format, stereo_format, pipeline_string);
 }

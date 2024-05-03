@@ -1,6 +1,7 @@
-// Copyright 2020, Collabora, Ltd.
+// Copyright 2020-2021, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
-// Author: Ryan Pavlik <ryan.pavlik@collabora.com>
+// Author: Rylie Pavlik <rylie.pavlik@collabora.com>
+// Inline implementations: do not include on its own!
 
 #pragma once
 
@@ -10,9 +11,9 @@
 namespace wrap {
 namespace android::app {
 
-inline jni::Object Activity::getSystemService(std::string const &name) {
+inline jni::Object Activity::getWindow() {
     assert(!isNull());
-    return object().call<jni::Object>(Meta::data().getSystemService, name);
+    return object().call<jni::Object>(Meta::data().getWindow);
 }
 
 inline void
@@ -22,5 +23,6 @@ Activity::setVrModeEnabled(bool enabled,
     return object().call<void>(Meta::data().setVrModeEnabled, enabled,
                                requestedComponent.object());
 }
+
 } // namespace android::app
 } // namespace wrap

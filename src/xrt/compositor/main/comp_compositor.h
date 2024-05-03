@@ -1,4 +1,4 @@
-// Copyright 2019-2020, Collabora, Ltd.
+// Copyright 2019-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -16,23 +16,45 @@
 #include "util/u_threading.h"
 #include "util/u_index_fifo.h"
 #include "util/u_logging.h"
+#include "util/u_frame_times_widget.h"
+#include "util/u_native_images_debug.h"
 
-#include "vk/vk_image_allocator.h"
+#include "util/comp_base.h"
+#include "util/comp_sync.h"
+#include "util/comp_scratch.h"
+#include "util/comp_swapchain.h"
 
-#include "main/comp_settings.h"
-#include "main/comp_window.h"
-#include "main/comp_renderer.h"
+#include "render/render_interface.h"
+
 #include "main/comp_target.h"
+#include "main/comp_window.h"
+#include "main/comp_settings.h"
+#include "main/comp_renderer.h"
 
-#include "render/comp_render.h"
-
+struct comp_window_peek;
+struct comp_target_factory;
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define NUM_FRAME_TIMES 50
-#define COMP_MAX_LAYERS 16
+
+/*
+ *
+ * Defines
+ *
+ */
+
+// clang-format off
+#define COMP_INSTANCE_EXTENSIONS_COMMON                         \
+	VK_EXT_DEBUG_REPORT_EXTENSION_NAME,                     \
+	VK_KHR_EXTERNAL_FENCE_CAPABILITIES_EXTENSION_NAME,      \
+	VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME,     \
+	VK_KHR_EXTERNAL_SEMAPHORE_CAPABILITIES_EXTENSION_NAME,  \
+	VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME, \
+	VK_KHR_SURFACE_EXTENSION_NAME
+// clang-format on
+
 
 /*
  *
@@ -41,155 +63,64 @@ extern "C" {
  */
 
 /*!
- * A single swapchain image, holds the needed state for tracking image usage.
- *
- * @ingroup comp_main
- * @see comp_swapchain
+ * Tracking frame state.
  */
-struct comp_swapchain_image
+struct comp_frame
 {
-	//! Sampler used by the renderer and distortion code.
-	VkSampler sampler;
-	VkSampler repeat_sampler;
-	//! Views used by the renderer and distortion code, for each array
-	//! layer.
-	struct
-	{
-		VkImageView *alpha;
-		VkImageView *no_alpha;
-	} views;
-	//! The number of array slices in a texture, 1 == regular 2D texture.
-	size_t array_size;
-};
-
-/*!
- * A swapchain that is almost a one to one mapping to a OpenXR swapchain.
- *
- * Not used by the window backend that uses the vk_swapchain to render to.
- *
- * @ingroup comp_main
- * @implements xrt_swapchain_native
- * @see comp_compositor
- */
-struct comp_swapchain
-{
-	struct xrt_swapchain_native base;
-
-	struct comp_compositor *c;
-
-	struct vk_image_collection vkic;
-	struct comp_swapchain_image images[XRT_MAX_SWAPCHAIN_IMAGES];
-
-	/*!
-	 * This fifo is used to always give out the oldest image to acquire
-	 * image, this should probably be made even smarter.
-	 */
-	struct u_index_fifo fifo;
-};
-
-/*!
- * A single layer.
- *
- * @ingroup comp_main
- * @see comp_layer_slot
- */
-struct comp_layer
-{
-	/*!
-	 * Up to two compositor swapchains referenced per layer.
-	 *
-	 * Unused elements should be set to null.
-	 */
-	struct comp_swapchain *scs[2];
-
-	/*!
-	 * All basic (trivially-serializable) data associated with a layer.
-	 */
-	struct xrt_layer_data data;
-};
-
-/*!
- * A stack of layers.
- *
- * @ingroup comp_main
- * @see comp_compositor
- */
-struct comp_layer_slot
-{
-	enum xrt_blend_mode env_blend_mode;
-
-	struct comp_layer layers[COMP_MAX_LAYERS];
-
-	uint32_t num_layers;
-};
-
-/*!
- * State to emulate state transitions correctly.
- *
- * @ingroup comp_main
- */
-enum comp_state
-{
-	COMP_STATE_UNINITIALIZED = 0,
-	COMP_STATE_READY = 1,
-	COMP_STATE_PREPARED = 2,
-	COMP_STATE_VISIBLE = 3,
-	COMP_STATE_FOCUSED = 4,
-};
-
-struct comp_shaders
-{
-	VkShaderModule mesh_vert;
-	VkShaderModule mesh_frag;
-
-	VkShaderModule equirect1_vert;
-	VkShaderModule equirect1_frag;
-
-	VkShaderModule equirect2_vert;
-	VkShaderModule equirect2_frag;
-
-	VkShaderModule layer_vert;
-	VkShaderModule layer_frag;
+	int64_t id;
+	uint64_t predicted_display_time_ns;
+	uint64_t desired_present_time_ns;
+	uint64_t present_slop_ns;
 };
 
 /*!
  * Main compositor struct tying everything in the compositor together.
  *
+ *
+ * This ultimately implements @ref xrt_compositor_native but does so by
+ * extending @ref comp_base. Yes, it looks like a little bit of "code reuse
+ * through inheritance," but it is useful here to avoid lots of boilerplate
+ * due to the use of C.
+ *
  * @ingroup comp_main
- * @implements xrt_compositor_native
+ * @extends comp_base
  */
 struct comp_compositor
 {
-	struct xrt_compositor_native base;
-
-	struct xrt_system_compositor system;
-
-	//! Renderer helper.
-	struct comp_renderer *r;
-
-	//! The target we are displaying to.
-	struct comp_target *target;
-
-	//! The device we are displaying to.
-	struct xrt_device *xdev;
+	struct comp_base base;
 
 	//! The settings.
 	struct comp_settings settings;
 
-	//! Vulkan bundle of things.
-	struct vk_bundle vk;
+	//! The device we are displaying to.
+	struct xrt_device *xdev;
 
-	//! Vulkan shaders that the compositor uses.
-	struct comp_shaders shaders;
+	//! Vulkan shaders that the compositor (renderer) uses.
+	struct render_shaders shaders;
+
+	//! Vulkan resources that the compositor (renderer) uses.
+	struct render_resources nr;
+
+	//! The selected target factory that we create our target from.
+	const struct comp_target_factory *target_factory;
+
+	//! The target we are displaying to.
+	struct comp_target *target;
+
+	//! Renderer helper.
+	struct comp_renderer *r;
 
 	//! Timestamp of last-rendered (immersive) frame.
 	int64_t last_frame_time_ns;
 
-	//! State for generating the correct set of events.
-	enum comp_state state;
+	// Extents of one view, in pixels.
+	VkExtent2D view_extents;
 
-	//! Triple buffered layer stacks.
-	struct comp_layer_slot slots[3];
+	//! Are we mirroring any of the views to the debug gui? If so, turn off the fast path.
+	bool mirroring_to_debug_gui;
+
+	//! On screen window to display the content of the HMD.
+	struct comp_window_peek *peek;
 
 	/*!
 	 * @brief Data exclusive to the begin_frame/end_frame for computing an
@@ -201,48 +132,33 @@ struct comp_compositor
 		int64_t last_end;
 	} app_profiling;
 
-	//! The time our compositor needs to do rendering
-	int64_t frame_overhead_ns;
+	struct u_frame_times_widget compositor_frame_times;
 
 	struct
 	{
-		//! Current Index for times_ns.
-		int index;
-
-		//! Timestamps of last-rendered (immersive) frames.
-		int64_t times_ns[NUM_FRAME_TIMES];
-
-		//! Frametimes between last-rendered (immersive) frames.
-		float timings_ms[NUM_FRAME_TIMES];
-
-		//! Average FPS of last NUM_FRAME_TIMES rendered frames.
-		float fps;
-
-		struct u_var_timing *debug_var;
-	} compositor_frame_times;
-
-	/*!
-	 * @brief Estimated rendering time per frame of the application.
-	 *
-	 * Set by the begin_frame/end_frame code.
-	 *
-	 * @todo make this atomic.
-	 */
-	int64_t expected_app_duration_ns;
-	//! The last time we provided in the results of wait_frame
-	int64_t last_next_display_time;
+		struct comp_frame waited;
+		struct comp_frame rendering;
+	} frame;
 
 	struct
 	{
-		//! Thread object for safely destroying swapchain.
-		struct u_threading_stack destroy_swapchains;
-	} threading;
+		// Per-view scratch images.
+		struct comp_scratch_single_images views[2];
+	} scratch;
 
+	struct
+	{
+		//! Temporarily disable ATW
+		bool atw_off;
 
-	struct comp_resources nr;
+		//! Should the fast path be disabled.
+		bool disable_fast_path;
 
-	//! To insure only one compositor is created.
-	bool compositor_created;
+		struct u_swapchain_debug sc;
+	} debug;
+
+	//! If true, part of the compositor startup will be delayed until a session is started
+	bool deferred_surface;
 };
 
 
@@ -251,23 +167,6 @@ struct comp_compositor
  * Functions and helpers.
  *
  */
-
-/*!
- * Check if the compositor can create swapchains with this format.
- */
-bool
-comp_is_format_supported(struct comp_compositor *c, VkFormat format);
-
-/*!
- * Convenience function to convert a xrt_swapchain to a comp_swapchain.
- *
- * @private @memberof comp_swapchain
- */
-static inline struct comp_swapchain *
-comp_swapchain(struct xrt_swapchain *xsc)
-{
-	return (struct comp_swapchain *)xsc;
-}
 
 /*!
  * Convenience function to convert a xrt_compositor to a comp_compositor.
@@ -281,57 +180,11 @@ comp_compositor(struct xrt_compositor *xc)
 }
 
 /*!
- * Do garbage collection, destroying any resources that has been scheduled for
- * destruction from other threads.
+ * Helper define for printing Vulkan errors.
  *
- * @public @memberof comp_compositor
+ * @relates comp_compositor
  */
-void
-comp_compositor_garbage_collect(struct comp_compositor *c);
-
-/*!
- * A compositor function that is implemented in the swapchain code.
- *
- * @public @memberof comp_compositor
- */
-xrt_result_t
-comp_swapchain_create(struct xrt_compositor *xc,
-                      const struct xrt_swapchain_create_info *info,
-                      struct xrt_swapchain **out_xsc);
-
-/*!
- * A compositor function that is implemented in the swapchain code.
- *
- * @public @memberof comp_compositor
- */
-xrt_result_t
-comp_swapchain_import(struct xrt_compositor *xc,
-                      const struct xrt_swapchain_create_info *info,
-                      struct xrt_image_native *native_images,
-                      uint32_t num_images,
-                      struct xrt_swapchain **out_xsc);
-
-/*!
- * Swapchain destruct is delayed until it is safe to destroy them, this function
- * does the actual destruction and is called from @ref
- * comp_compositor_garbage_collect.
- *
- * @private @memberof comp_swapchain
- */
-void
-comp_swapchain_really_destroy(struct comp_swapchain *sc);
-
-/*!
- * Loads all of the shaders that the compositor uses.
- */
-bool
-comp_shaders_load(struct vk_bundle *vk, struct comp_shaders *s);
-
-/*!
- * Loads all of the shaders that the compositor uses.
- */
-void
-comp_shaders_close(struct vk_bundle *vk, struct comp_shaders *s);
+#define CVK_ERROR(C, FUNC, MSG, RET) COMP_ERROR(C, FUNC ": %s\n\t" MSG, vk_result_string(RET));
 
 /*!
  * Spew level logging.

@@ -1,17 +1,21 @@
-// Copyright 2019-2020, Collabora, Ltd.
+// Copyright 2019-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Tracking API interface.
  * @author Pete Black <pblack@collabora.com>
  * @author Jakob Bornecrantz <jakob@collabora.com>
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
+ * @author Moses Turner <moses@collabora.com>
  * @ingroup aux_tracking
  */
 
 #pragma once
 
+#include "util/u_logging.h"
+#include "xrt/xrt_defines.h"
 #include "xrt/xrt_frame.h"
+#include "xrt/xrt_tracking.h"
 #include "util/u_misc.h"
 
 #include <stdio.h>
@@ -21,44 +25,8 @@
 extern "C" {
 #endif
 
-
 /*!
- * @defgroup aux_tracking Tracking
- * @ingroup aux
- * @brief Trackers, filters and associated helper code.
- *
- *
- * ### Coordinate system
- *
- * Right now there is no specific convention on where a tracking systems
- * coordinate system is centered, and is something we probably need to figure
- * out. Right now the stereo based tracking system used by the PSVR and PSMV
- * tracking system is centered on the camera that OpenCV decided is origin.
- *
- * To go a bit further on the PSVR/PSMV case. Think about a idealized start up
- * case, the user is wearing the HMD headset and holding two PSMV controllers.
- * The HMD's coordinate system axis are perfectly parallel with the user
- * coordinate with the user's coordinate system. Where -Z is forward. The user
- * holds the controllers with the ball pointing up and the buttons on the back
- * pointing forward. Which if you read the documentation of @ref psmv_device
- * will that the axis of the PSMV are also perfectly aligned with the users
- * coordinate system. So everything "attached" to the user have it's coordinate
- * system parallel to the user's.
- *
- * The camera on the other hand is looking directly at the user, it's Z-axis and
- * X-axis is flipped in relation to the user's. So to compare what is sees to
- * what the user sees, everything is rotated 180° around the Y-axis.
- */
-
-/*!
- * @dir auxiliary/tracking
- * @ingroup aux
- *
- * @brief Trackers, filters and associated helper code.
- */
-
-/*!
- * @ingroup aux_tracking
+ * @addtogroup aux_tracking
  * @{
  */
 
@@ -69,9 +37,11 @@ extern "C" {
  *
  */
 
+typedef struct cJSON cJSON;
+struct xrt_slam_sinks;
 struct xrt_tracked_psmv;
 struct xrt_tracked_psvr;
-struct xrt_tracked_hand;
+struct xrt_tracked_slam;
 
 
 /*
@@ -81,7 +51,169 @@ struct xrt_tracked_hand;
  */
 
 //! Maximum size of rectilinear distortion coefficient array
-#define XRT_DISTORTION_MAX_DIM (5)
+#define XRT_DISTORTION_MAX_DIM (14)
+
+/*!
+ * @brief The distortion model this camera calibration falls under.
+ * @todo Add RiftS's Fisheye62 to this enumerator once we have native support for it in our hand tracking and SLAM.
+ * @todo Feel free to add support for T_DISTORTION_OPENCV_RADTAN_4 or T_DISTORTION_OPENCV_RADTAN_12 whenever you have a
+ * camera that uses those.
+ */
+enum t_camera_distortion_model
+{
+	/*!
+	 * OpenCV's radial-tangential distortion model. Exactly equivalent to the distortion model from OpenCV's calib3d
+	 * module with just the first five parameters. This may be reinterpreted as RT8 with the last three parameters
+	 * zeroed out, which is 100% valid and results in exactly equivalent (un)projections.
+	 *
+	 * Parameters:
+	 *
+	 * \f[(k_1, k_2, p_1, p_2, k_3)\f]
+	 */
+	T_DISTORTION_OPENCV_RADTAN_5,
+
+	/*!
+	 * OpenCV's radial-tangential distortion model. Exactly equivalent to the distortion model from OpenCV's calib3d
+	 * module, with just the first 8 parameters.
+	 * Parameters:
+	 *
+	 * \f[(k_1, k_2, p_1, p_2, k_3, k_4, k_5, k_6)\f]
+	 */
+	T_DISTORTION_OPENCV_RADTAN_8,
+
+	/*!
+	 * OpenCV's radial-tangential distortion model. Exactly equivalent to the distortion model from OpenCV's calib3d
+	 * module, with all 14 parameters.
+	 *
+	 * In practice this is reinterpreted as RT8 because the last 6 parameters are almost always approximately 0.
+	 *
+	 * @todo Feel free to implement RT14 (un)projection functions if you have a camera that actually has a tilted
+	 * sensor.
+	 *
+	 * Parameters:
+	 *
+	 * \f[(k_1, k_2, p_1, p_2, k_3, k_4, k_5, k_6, s_1, s_2, s_3, s_4, \tau_x, \tau_y)\f]
+	 *
+	 * All known factory-calibrated Luxonis cameras use this distortion model, and in all known cases their last 6
+	 * parameters are approximately 0.
+	 *
+	 */
+	T_DISTORTION_OPENCV_RADTAN_14,
+
+	/*!
+	 * Juho Kannalla and Sami Sebastian Brandt's fisheye distortion model. Exactly equivalent to the distortion
+	 * model from OpenCV's calib3d/fisheye module.
+	 *
+	 * Parameters:
+	 *
+	 * \f[(k_1, k_2, k_3, k_4)\f]
+	 *
+	 * Many cameras use this model. Here's a non-exhaustive list of cameras Monado knows about that fall under this
+	 * model:
+	 * * Intel T265
+	 * * Valve Index
+	 */
+	T_DISTORTION_FISHEYE_KB4,
+
+	/*!
+	 * Windows Mixed Reality headsets' camera model.
+	 *
+	 * The model is listed as CALIBRATION_LensDistortionModelRational6KT in the WMR json files, which seems to be
+	 * equivalent to Azure-Kinect-Sensor-SDK's K4A_CALIBRATION_LENS_DISTORTION_MODEL_RATIONAL_6KT.
+	 *
+	 * The only difference between this model and RT8 are codx, cody, and the way p1 and p2 are interpreted. In
+	 * practice we reinterpret this as RT8 because those values are almost always approximately 0 for WMR headsets.
+	 *
+	 * Parameters:
+	 *
+	 * \f[(k_1, k_2, p_1, p_2, k_3, k_4, k_5, k_6, cod_x, cod_y, rpmax)\f]
+	 */
+	T_DISTORTION_WMR,
+};
+
+
+/*!
+ * Stringifies a @ref t_camera_distortion_model
+ * @param model The distortion model to be stringified
+ * @return The distortion model as a string
+ */
+static inline const char *
+t_stringify_camera_distortion_model(const enum t_camera_distortion_model model)
+{
+	switch (model) {
+	case T_DISTORTION_OPENCV_RADTAN_5: return "T_DISTORTION_OPENCV_RADTAN_5"; break;
+	case T_DISTORTION_OPENCV_RADTAN_8: return "T_DISTORTION_OPENCV_RADTAN_8"; break;
+	case T_DISTORTION_OPENCV_RADTAN_14: return "T_DISTORTION_OPENCV_RADTAN_14"; break;
+	case T_DISTORTION_WMR: return "T_DISTORTION_WMR"; break;
+	case T_DISTORTION_FISHEYE_KB4: return "T_DISTORTION_FISHEYE_KB4"; break;
+	default: U_LOG_E("Invalid distortion_model! %d", model); return "INVALID";
+	}
+}
+
+/*!
+ * Returns the number of parameters needed for this @ref t_camera_distortion_model to be held by an OpenCV Mat and
+ * correctly interpreted by OpenCV's (un)projection functions.
+ *
+ * @param model The distortion model in question
+ * @return The number of distortion coefficients, or 0 if this model cannot be represented inside OpenCV.
+ */
+static inline size_t
+t_num_params_from_distortion_model(const enum t_camera_distortion_model model)
+{
+	switch (model) {
+	case T_DISTORTION_OPENCV_RADTAN_5: return 5; break;
+	case T_DISTORTION_OPENCV_RADTAN_8: return 8; break;
+	case T_DISTORTION_OPENCV_RADTAN_14: return 14; break;
+	case T_DISTORTION_WMR: return 11; break;
+	case T_DISTORTION_FISHEYE_KB4: return 4; break;
+	default: U_LOG_E("Invalid distortion_model! %d", model); return 0;
+	}
+}
+
+/*!
+ * Parameters for @ref T_DISTORTION_OPENCV_RADTAN_5
+ * @ingroup aux_tracking
+ */
+struct t_camera_calibration_rt5_params
+{
+	double k1, k2, p1, p2, k3;
+};
+
+/*!
+ * Parameters for @ref T_DISTORTION_OPENCV_RADTAN_8
+ * @ingroup aux_tracking
+ */
+struct t_camera_calibration_rt8_params
+{
+	double k1, k2, p1, p2, k3, k4, k5, k6;
+};
+
+/*!
+ * Parameters for @ref T_DISTORTION_OPENCV_RADTAN_14
+ * @ingroup aux_tracking
+ */
+struct t_camera_calibration_rt14_params
+{
+	double k1, k2, p1, p2, k3, k4, k5, k6, s1, s2, s3, s4, tx, ty;
+};
+
+/*!
+ * Parameters for @ref T_DISTORTION_FISHEYE_KB4
+ * @ingroup aux_tracking
+ */
+struct t_camera_calibration_kb4_params
+{
+	double k1, k2, k3, k4;
+};
+
+/*!
+ * Parameters for @ref T_DISTORTION_WMR
+ * @ingroup aux_tracking
+ */
+struct t_camera_calibration_wmr_params
+{
+	double k1, k2, p1, p2, k3, k4, k5, k6, codx, cody, rpmax;
+};
 
 /*!
  * @brief Essential calibration data for a single camera, or single lens/sensor
@@ -95,15 +227,18 @@ struct t_camera_calibration
 	//! Camera intrinsics matrix
 	double intrinsics[3][3];
 
-	//! Rectilinear distortion coefficients: k1, k2, p1, p2[, k3[, k4, k5,
-	//! k6[, s1, s2, s3, s4]]
-	double distortion[XRT_DISTORTION_MAX_DIM];
+	union {
+		struct t_camera_calibration_rt5_params rt5;
+		struct t_camera_calibration_rt8_params rt8;
+		struct t_camera_calibration_rt14_params rt14;
+		struct t_camera_calibration_kb4_params kb4;
+		struct t_camera_calibration_wmr_params wmr;
+		double distortion_parameters_as_array[XRT_DISTORTION_MAX_DIM];
+	};
 
-	//! Fisheye camera distortion coefficients
-	double distortion_fisheye[4];
 
-	//! Is the camera fisheye?
-	bool use_fisheye;
+	//! Distortion model that this camera uses.
+	enum t_camera_distortion_model distortion_model;
 };
 
 /*!
@@ -129,12 +264,13 @@ struct t_stereo_camera_calibration
 };
 
 /*!
- * Allocates a new stereo calibration data, unreferences the old @p calib.
+ * Allocates a new stereo calibration data, unreferences the old data pointed to by @p out_c.
  *
  * @public @memberof t_stereo_camera_calibration
  */
 void
-t_stereo_camera_calibration_alloc(struct t_stereo_camera_calibration **calib);
+t_stereo_camera_calibration_alloc(struct t_stereo_camera_calibration **out_c,
+                                  const enum t_camera_distortion_model distortion_model);
 
 /*!
  * Only to be called by @p t_stereo_camera_calibration_reference.
@@ -147,11 +283,11 @@ t_stereo_camera_calibration_destroy(struct t_stereo_camera_calibration *c);
 /*!
  * Update the reference counts on a stereo calibration data(s).
  *
- * @param     dst Pointer to a object reference, if the object reference is
- *                non-null will decrement it's counter. The reference that
+ * @param[in,out] dst Pointer to a object reference: if the object reference is
+ *                non-null will decrement its counter. The reference that
  *                @p dst points to will be set to @p src.
- * @param[in] src Object to be have it's refcount increased @p dst is set to
- *                this.
+ * @param[in] src New object for @p dst to refer to (may be null).
+ *                If non-null, will have its refcount increased.
  *
  * @relates t_stereo_camera_calibration
  */
@@ -171,23 +307,129 @@ t_stereo_camera_calibration_reference(struct t_stereo_camera_calibration **dst, 
 	*dst = src;
 
 	if (old_dst) {
-		if (xrt_reference_dec(&old_dst->reference)) {
+		if (xrt_reference_dec_and_is_zero(&old_dst->reference)) {
 			t_stereo_camera_calibration_destroy(old_dst);
 		}
 	}
 }
 
 /*!
- * Load stereo calibration data from a given file.
+ * Small helper function that dumps one camera calibration data to logging.
+ *
+ * @relates t_camera_calibration
+ */
+void
+t_camera_calibration_dump(struct t_camera_calibration *c);
+
+/*!
+ * Small helper function that dumps the stereo calibration data to logging.
+ *
+ * @relates t_stereo_camera_calibration
+ */
+void
+t_stereo_camera_calibration_dump(struct t_stereo_camera_calibration *c);
+
+/*!
+ * Load stereo calibration data from a given file in v1 format (binary).
+ *
+ * @relates t_stereo_camera_calibration
  */
 bool
 t_stereo_camera_calibration_load_v1(FILE *calib_file, struct t_stereo_camera_calibration **out_data);
 
 /*!
- * Save the given stereo calibration data to the given file.
+ * Save the given stereo calibration data to the given file in v1 format (binary).
+ *
+ * @relates t_stereo_camera_calibration
  */
 bool
 t_stereo_camera_calibration_save_v1(FILE *calib_file, struct t_stereo_camera_calibration *data);
+
+/*!
+ * Parse the json object in v2 format into stereo calibration data.
+ *
+ * @relates t_stereo_camera_calibration
+ */
+bool
+t_stereo_camera_calibration_from_json_v2(cJSON *json, struct t_stereo_camera_calibration **out_stereo);
+
+/*!
+ * Convert the given stereo calibration data into a json object in v2 format.
+ *
+ * @relates t_stereo_camera_calibration
+ */
+bool
+t_stereo_camera_calibration_to_json_v2(cJSON **out_cjson, struct t_stereo_camera_calibration *data);
+
+
+/*!
+ * Load stereo calibration data from a given file path.
+ *
+ * @relates t_stereo_camera_calibration
+ */
+bool
+t_stereo_camera_calibration_load(const char *calib_path, struct t_stereo_camera_calibration **out_data);
+
+/*!
+ * Save the given stereo calibration data to the given file path.
+ *
+ * @relates t_stereo_camera_calibration
+ */
+bool
+t_stereo_camera_calibration_save(const char *calib_path, struct t_stereo_camera_calibration *data);
+
+
+/*
+ *
+ * IMU calibration data.
+ *
+ */
+
+/*!
+ * @brief Parameters for accelerometer and gyroscope calibration.
+ * @see slam_tracker::imu_calibration for a more detailed description and references.
+ */
+struct t_inertial_calibration
+{
+	//! Linear transformation for raw measurements alignment and scaling.
+	double transform[3][3];
+
+	//! Offset to apply to raw measurements.
+	double offset[3];
+
+	//! Modeled sensor bias. @see slam_tracker::imu_calibration.
+	double bias_std[3];
+
+	//! Modeled measurement noise. @see slam_tracker::imu_calibration.
+	double noise_std[3];
+};
+
+/*!
+ * @brief Combined IMU calibration data.
+ */
+struct t_imu_calibration
+{
+	//! Accelerometer calibration data.
+	struct t_inertial_calibration accel;
+
+	//! Gyroscope calibration data.
+	struct t_inertial_calibration gyro;
+};
+/*!
+ * Prints a @ref t_inertial_calibration struct
+ *
+ * @relates t_camera_calibration
+ */
+void
+t_inertial_calibration_dump(struct t_inertial_calibration *c);
+
+/*!
+ * Small helper function that dumps the imu calibration data to logging.
+ *
+ * @relates t_camera_calibration
+ */
+void
+t_imu_calibration_dump(struct t_imu_calibration *c);
 
 
 /*
@@ -198,7 +440,7 @@ t_stereo_camera_calibration_save_v1(FILE *calib_file, struct t_stereo_camera_cal
 
 struct t_convert_table
 {
-	uint8_t v[256][256][256][3];
+	uint8_t v[256][256][256][3]; // nolint(readability-magic-numbers)
 };
 
 void
@@ -296,7 +538,7 @@ t_hsv_filter_sample(struct t_hsv_filter_optimized_table *t, uint32_t y, uint32_t
  * Construct an HSV filter sink.
  * @public @memberof t_hsv_filter
  *
- * @relates xrt_frame_context
+ * @see xrt_frame_context
  */
 int
 t_hsv_filter_create(struct xrt_frame_context *xfctx,
@@ -342,20 +584,107 @@ t_psvr_create(struct xrt_frame_context *xfctx,
               struct xrt_tracked_psvr **out_xtvr,
               struct xrt_frame_sink **out_sink);
 
-/*!
- * @public @memberof xrt_tracked_hand
- */
-int
-t_hand_create(struct xrt_frame_context *xfctx,
-              struct t_stereo_camera_calibration *data,
-              struct xrt_tracked_hand **out_xth,
-              struct xrt_frame_sink **out_sink);
+
 
 /*!
- * @public @memberof xrt_tracked_hand
+ * SLAM prediction type. Naming scheme as follows:
+ * P: position, O: orientation, A: angular velocity, L: linear velocity
+ * S: From SLAM poses (slow, precise), I: From IMU data (fast, noisy)
+ *
+ * @see xrt_tracked_slam
+ */
+enum t_slam_prediction_type
+{
+	SLAM_PRED_NONE = 0,    //!< No prediction, always return the last SLAM tracked pose
+	SLAM_PRED_SP_SO_SA_SL, //!< Predicts from last two SLAM poses only
+	SLAM_PRED_SP_SO_IA_SL, //!< Predicts from last SLAM pose with angular velocity computed from IMU
+	SLAM_PRED_SP_SO_IA_IL, //!< Predicts from last SLAM pose with angular and linear velocity computed from IMU
+	SLAM_PRED_IP_IO_IA_IL, //!< Predicts from a pose that is the last SLAM pose with the IMU samples that came after
+	                       //!< it integrated on top; velocities from latest IMU sample.
+	SLAM_PRED_COUNT,
+};
+
+/*!
+ * Extension to camera calibration for SLAM tracking
+ *
+ * @see xrt_tracked_slam
+ */
+struct t_slam_camera_calibration
+{
+	struct t_camera_calibration base;
+	struct xrt_matrix_4x4 T_imu_cam; //!< Transform IMU to camera. Column major.
+	double frequency;                //!< Camera FPS
+};
+
+/*!
+ * Extension to IMU calibration for SLAM tracking
+ *
+ * @see xrt_tracked_slam
+ */
+struct t_slam_imu_calibration
+{
+	struct t_imu_calibration base;
+	double frequency;
+};
+
+/*!
+ * Calibration information necessary for SLAM tracking.
+ *
+ * @see xrt_tracked_slam
+ */
+struct t_slam_calibration
+{
+	struct t_slam_imu_calibration imu;                                 //!< IMU calibration data
+	struct t_slam_camera_calibration cams[XRT_TRACKING_MAX_SLAM_CAMS]; //!< Calib data of `cam_count` cams
+	int cam_count;                                                     //!< Number of cameras
+};
+
+/*!
+ * SLAM tracker configuration.
+ *
+ * @see xrt_tracked_slam
+ */
+struct t_slam_tracker_config
+{
+	enum u_logging_level log_level;      //!< SLAM tracking logging level
+	const char *vit_system_library_path; //!< Path to the VIT system library
+	const char *slam_config;             //!< Config file path, format is specific to the SLAM implementation in use
+	int cam_count;                       //!< Number of cameras in use
+	bool slam_ui;                        //!< Whether to open the external UI of the external SLAM system
+	bool submit_from_start;              //!< Whether to submit data to the SLAM tracker without user action
+	int openvr_groundtruth_device;       //!< If >0, use lighthouse as groundtruth, see @ref openvr_device
+	enum t_slam_prediction_type prediction; //!< Which level of prediction to use
+	bool write_csvs;                        //!< Whether to enable CSV writers from the start for later analysis
+	const char *csv_path;                   //!< Path to write CSVs to
+	bool timing_stat;                       //!< Enable timing metric in external system
+	bool features_stat;                     //!< Enable feature metric in external system
+
+	//!< Instead of a slam_config file you can set custom calibration data
+	const struct t_slam_calibration *slam_calib;
+};
+
+/*!
+ * Fills in a @ref t_slam_tracker_config with default values.
+ *
+ * @see xrt_tracked_Slam
+ */
+void
+t_slam_fill_default_config(struct t_slam_tracker_config *config);
+
+/*!
+ * @public @memberof xrt_tracked_slam
  */
 int
-t_hand_start(struct xrt_tracked_hand *xth);
+t_slam_create(struct xrt_frame_context *xfctx,
+              struct t_slam_tracker_config *config,
+              struct xrt_tracked_slam **out_xts,
+              struct xrt_slam_sinks **out_sink);
+
+/*!
+ * @public @memberof xrt_tracked_slam
+ */
+int
+t_slam_start(struct xrt_tracked_slam *xts);
 
 /*
  *
@@ -369,6 +698,8 @@ t_hand_start(struct xrt_tracked_hand *xth);
 enum t_board_pattern
 {
 	T_BOARD_CHECKERS,
+	//! Sector based checker board, using `cv::findChessboardCornersSB`.
+	T_BOARD_SB_CHECKERS,
 	T_BOARD_CIRCLES,
 	T_BOARD_ASYMMETRIC_CIRCLES,
 };
@@ -412,6 +743,16 @@ struct t_calibration_params
 	{
 		int cols;
 		int rows;
+		float size_meters;
+
+		bool marker;
+		bool normalize_image;
+	} sb_checkers;
+
+	struct
+	{
+		int cols;
+		int rows;
 		float distance_meters;
 	} circles;
 
@@ -447,47 +788,17 @@ struct t_calibration_params
  * Sets the calibration parameters to the their default values.
  * @public @memberof t_calibration_params
  */
-static inline void
-t_calibration_params_default(struct t_calibration_params *p)
-{
-	// Camera config.
-	p->use_fisheye = false;
-	p->stereo_sbs = true;
+void
+t_calibration_gui_params_default(struct t_calibration_params *p);
 
-	// Which board should we calibrate against.
-	p->pattern = T_BOARD_CHECKERS;
+void
+t_calibration_gui_params_load_or_default(struct t_calibration_params *p);
 
-	// Checker board.
-	p->checkers.cols = 9;
-	p->checkers.rows = 7;
-	p->checkers.size_meters = 0.025f;
-	p->checkers.subpixel_enable = true;
-	p->checkers.subpixel_size = 5;
+void
+t_calibration_gui_params_to_json(cJSON **out_json, struct t_calibration_params *p);
 
-	// Symmetrical circles.
-	p->circles.cols = 9;
-	p->circles.rows = 7;
-	p->circles.distance_meters = 0.025f;
-
-	// Asymmetrical circles.
-	p->asymmetric_circles.cols = 5;
-	p->asymmetric_circles.rows = 17;
-	p->asymmetric_circles.diagonal_distance_meters = 0.02f;
-
-	// Loading of images.
-	p->load.enabled = false;
-	p->load.num_images = 20;
-
-	// Frame collection info.
-	p->num_cooldown_frames = 20;
-	p->num_wait_for = 5;
-	p->num_collect_total = 20;
-	p->num_collect_restart = 1;
-
-	// Misc.
-	p->mirror_rgb_image = false;
-	p->save_images = true;
-}
+void
+t_calibration_gui_params_parse_from_json(const cJSON *params, struct t_calibration_params *p);
 
 /*!
  * @brief Create the camera calibration frame sink.
@@ -500,7 +811,7 @@ t_calibration_params_default(struct t_calibration_params *p)
  * @param gui Frame sink
  * @param out_sink Output: created frame sink.
  *
- * @relates xrt_frame_context
+ * @see xrt_frame_context
  */
 int
 t_calibration_stereo_create(struct xrt_frame_context *xfctx,
@@ -517,7 +828,7 @@ t_calibration_stereo_create(struct xrt_frame_context *xfctx,
  */
 
 /*!
- * @relates xrt_frame_context
+ * @see xrt_frame_context
  */
 int
 t_convert_yuv_or_yuyv_create(struct xrt_frame_sink *next, struct xrt_frame_sink **out_sink);
@@ -525,7 +836,7 @@ t_convert_yuv_or_yuyv_create(struct xrt_frame_sink *next, struct xrt_frame_sink 
 
 
 /*!
- * @relates xrt_frame_context
+ * @see xrt_frame_context
  */
 int
 t_debug_hsv_picker_create(struct xrt_frame_context *xfctx,
@@ -533,7 +844,7 @@ t_debug_hsv_picker_create(struct xrt_frame_context *xfctx,
                           struct xrt_frame_sink **out_sink);
 
 /*!
- * @relates xrt_frame_context
+ * @see xrt_frame_context
  */
 int
 t_debug_hsv_viewer_create(struct xrt_frame_context *xfctx,
@@ -541,7 +852,7 @@ t_debug_hsv_viewer_create(struct xrt_frame_context *xfctx,
                           struct xrt_frame_sink **out_sink);
 
 /*!
- * @relates xrt_frame_context
+ * @see xrt_frame_context
  */
 int
 t_debug_hsv_filter_create(struct xrt_frame_context *xfctx,

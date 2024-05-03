@@ -4,7 +4,7 @@
  * @file
  * @brief  Tiny JSON wrapper around cJSON header.
  * @author Jakob Bornecrantz <jakob@collabora.com>
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup aux_util
  */
 
@@ -13,7 +13,7 @@
 #include "xrt/xrt_compiler.h"
 #include "xrt/xrt_defines.h"
 
-#include "cjson/cJSON.h"
+#include <cjson/cJSON.h> // IWYU pragma: export
 
 
 #ifdef __cplusplus
@@ -70,7 +70,7 @@ bool
 u_json_get_double(const cJSON *json, double *out_double);
 
 /*!
- * @brief Parse a vec3 from a JSON object.
+ * @brief Parse an xrt_vec3 from a JSON object.
  *
  * @return true if successful, false if not.
  */
@@ -78,12 +78,20 @@ bool
 u_json_get_vec3(const cJSON *json, struct xrt_vec3 *out_vec3);
 
 /*!
- * @brief Parse a vec3 from a JSON array.
+ * @brief Parse an xrt_vec3 from a JSON array.
  *
  * @return true if successful, false if not.
  */
 bool
 u_json_get_vec3_array(const cJSON *json, struct xrt_vec3 *out_vec3);
+
+/*!
+ * @brief Parse an xrt_vec3_f64 from a JSON array.
+ *
+ * @return true if successful, false if not.
+ */
+bool
+u_json_get_vec3_f64_array(const cJSON *json, struct xrt_vec3_f64 *out_vec3);
 
 /*!
  * @brief Parse a quaternion from a JSON object.
@@ -92,6 +100,25 @@ u_json_get_vec3_array(const cJSON *json, struct xrt_vec3 *out_vec3);
  */
 bool
 u_json_get_quat(const cJSON *json, struct xrt_quat *out_quat);
+
+/*!
+ * @brief Parse a pose from a JSON object, composed of a vec3 named "position" and a quat named "orientation".
+ *
+ * @return true if successful, false if not.
+ */
+bool
+u_json_get_pose(const cJSON *json, struct xrt_pose *out_pose);
+
+
+/*!
+ * @brief Parse a pose from a JSON object, composed of
+ * a vec3 named "position", "translation", "location", "pos", or "loc"
+ * and a quat named "orientation". "rotation", or "rot"
+ *
+ * @return true if successful, false if not.
+ */
+bool
+u_json_get_pose_permissive(const cJSON *json, struct xrt_pose *out_pose);
 
 /*!
  * @brief Parse up to max_size floats from a JSON array.
@@ -108,6 +135,14 @@ u_json_get_float_array(const cJSON *json_array, float *out_array, size_t max_siz
  */
 size_t
 u_json_get_double_array(const cJSON *json_array, double *out_array, size_t max_size);
+
+/*!
+ * @brief Parse up to max_size int from a JSON array.
+ *
+ * @return the number of elements set.
+ */
+size_t
+u_json_get_int_array(const cJSON *json_array, int *out_array, size_t max_size);
 
 /*!
  * @brief Parse a matrix_3x3 from a JSON object.

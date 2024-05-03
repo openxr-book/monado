@@ -3,7 +3,7 @@
 /*!
  * @file
  * @brief  A minimal way to include Windows.h.
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup xrt_iface
  */
 
@@ -19,10 +19,6 @@
 #ifndef NODRAWTEXT
 #define NODRAWTEXT
 #endif // !NODRAWTEXT
-
-#ifndef NOGDI
-#define NOGDI
-#endif // !NOGDI
 
 #ifndef NOHELP
 #define NOHELP

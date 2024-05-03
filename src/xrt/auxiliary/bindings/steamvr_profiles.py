@@ -33,15 +33,7 @@ def open_file(args, fname):
     f = open(fname, "w")
     return f
 
-
-def steamvr_subpath_name(sub_path_name, sub_path_obj):
-    if sub_path_obj["type"] == "pose":
-        return sub_path_name.replace("/input/", "/pose/")
-
-    return sub_path_name
-
-
-def get_required_features(path_type):
+def get_required_components(path_type):
     if path_type == "button":
         return ["click", "touch"]
     if path_type == "trigger":
@@ -62,6 +54,9 @@ def main():
         'bindings', help='Bindings file to use')
     parser.add_argument(
         'output', type=str, help='Output directory')
+    parser.add_argument(
+        '-s', '--steamvr', action='store_true',
+        help='Use SteamVR standard controller type names')
     args = parser.parse_args()
 
     bindings = Bindings.load_and_parse(args.bindings)
@@ -69,39 +64,42 @@ def main():
     for p in bindings.profiles:
 
         device_class = ""
-        if p.hw_type == "tracked_controller":
+        if p.profile_type == "tracked_controller":
             device_class = "TrackedDeviceClass_Controller"
         else:
             # TODO: profile for non-controller hw
             continue
 
-        hw_name, vendor_name, fname = names(p)
+        profile_type, vendor_name, fname = names(p)
+
+        controller_type = "monado_" + vendor_name + "_" + profile_type
+        if args.steamvr == True and p.steamvr_controller_type is not None:
+            controller_type = p.steamvr_controller_type
 
         input_source = {}
 
-        feature: Feature
-        for idx, feature in enumerate(p.features):
-            sp_name = steamvr_subpath_name(feature.sub_path_name, feature.sub_path_obj)
-            sp = feature.sub_path_obj
+        component: Component
+        for idx, component in enumerate(p.components):
+            subpath_name = component.steamvr_path
 
-            input_source[sp_name] = {
-                "type": sp["type"],
+            input_source[subpath_name] = {
+                "type": component.subpath_type,
                 "binding_image_point": [0, 0],  # TODO
                 "order": idx
             }
 
-            for req in get_required_features(sp["type"]):
-                input_source[sp_name][req] = req in sp["features"]
+            for req in get_required_components(component.subpath_type):
+                input_source[subpath_name][req] = req in component.components_for_subpath
 
         j = {
             "json_id": "input_profile",
-            "controller_type": "monado_" + vendor_name + "_" + hw_name,
+            "controller_type": controller_type,
             "device_class": device_class,
             "resource_root": "steamvr-monado",
             "driver_name": "monado",
             # "legacy_binding": None, # TODO
             "input_bindingui_mode": "controller_handed",
-            "should_show_binidng_errors": True,
+            "should_show_binding_errors": True,
             "input_bindingui_left": {
                 "image": "{indexcontroller}/icons/indexcontroller_left.svg"  # TODO
             },

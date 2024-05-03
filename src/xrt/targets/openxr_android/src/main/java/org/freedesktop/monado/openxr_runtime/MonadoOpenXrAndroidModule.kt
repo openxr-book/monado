@@ -1,9 +1,9 @@
-// Copyright 2020, Collabora, Ltd.
+// Copyright 2020-2021, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Module that binds all the dependencies we inject with Hilt.
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  */
 
 package org.freedesktop.monado.openxr_runtime
@@ -11,7 +11,7 @@ package org.freedesktop.monado.openxr_runtime
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
-import dagger.hilt.android.components.ApplicationComponent
+import dagger.hilt.components.SingletonComponent
 import org.freedesktop.monado.android_common.NoticeFragmentProvider
 import org.freedesktop.monado.android_common.ServiceNotificationImpl
 import org.freedesktop.monado.auxiliary.IServiceNotification
@@ -25,17 +25,22 @@ import org.freedesktop.monado.auxiliary.UiProvider
  * base/interface to use for each thing it must inject.
  */
 @Module
-@InstallIn(ApplicationComponent::class)
+@InstallIn(SingletonComponent::class)
 abstract class MonadoOpenXrAndroidModule {
-    @Binds
-    abstract fun bindUiProvider(uiProvider: MonadoOpenXrUiProvider): UiProvider
+    @Binds abstract fun bindUiProvider(uiProvider: MonadoOpenXrUiProvider): UiProvider
 
     @Binds
-    abstract fun bindNameAndLogo(monadoOpenXrBrandingUiProvider: MonadoOpenXrBrandingUiProvider): NameAndLogoProvider
+    abstract fun bindNameAndLogo(
+        monadoOpenXrBrandingUiProvider: MonadoOpenXrBrandingUiProvider
+    ): NameAndLogoProvider
 
     @Binds
-    abstract fun bindNoticeFragment(noticeFragmentProvider: AboutLibrariesNoticeFragmentProvider): NoticeFragmentProvider
+    abstract fun bindNoticeFragment(
+        noticeFragmentProvider: AboutLibrariesNoticeFragmentProvider
+    ): NoticeFragmentProvider
 
     @Binds
-    abstract fun bindServiceNotification(serviceNotificationImpl: ServiceNotificationImpl): IServiceNotification
+    abstract fun bindServiceNotification(
+        serviceNotificationImpl: ServiceNotificationImpl
+    ): IServiceNotification
 }

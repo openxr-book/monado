@@ -6,7 +6,7 @@
  *
  * Typically built as a part of t_kalman.cpp to reduce incremental build times.
  *
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @author Pete Black <pblack@collabora.com>
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @ingroup aux_tracking
@@ -28,17 +28,21 @@
 #include "flexkalman/PoseState.h"
 
 
-using State = flexkalman::pose_externalized_rotation::State;
-using ProcessModel = flexkalman::PoseSeparatelyDampedConstantVelocityProcessModel<State>;
+namespace xrt::auxiliary::tracking {
 
-namespace xrt_fusion {
+using namespace xrt::auxiliary::math;
 
-struct TrackingInfo
-{
-	bool valid{false};
-	bool tracked{false};
-};
+//! Anonymous namespace to hide implementation names
 namespace {
+
+	using State = flexkalman::pose_externalized_rotation::State;
+	using ProcessModel = flexkalman::PoseSeparatelyDampedConstantVelocityProcessModel<State>;
+
+	struct TrackingInfo
+	{
+		bool valid{false};
+		bool tracked{false};
+	};
 	class PSMVFusion : public PSMVFusionInterface
 	{
 	public:
@@ -70,7 +74,7 @@ namespace {
 		State filter_state;
 		ProcessModel process_model;
 
-		xrt_fusion::SimpleIMUFusion imu;
+		xrt::auxiliary::tracking::SimpleIMUFusion imu;
 
 		timepoint_ns filter_time_ns{0};
 		bool tracked{false};
@@ -115,7 +119,7 @@ namespace {
 		imu.handleGyro(map_vec3(sample->gyro_rad_secs).cast<double>(), timestamp_ns);
 		imu.postCorrect();
 
-		//! @todo use better measurements instead of the above "simple
+		//! @todo use better measurements instead of the preceding "simple
 		//! fusion"
 		if (filter_time_ns != 0 && filter_time_ns != timestamp_ns) {
 			float dt = time_ns_to_s(timestamp_ns - filter_time_ns);
@@ -162,8 +166,8 @@ namespace {
 		if (lever_arm_optional) {
 			lever_arm = map_vec3(*lever_arm_optional).cast<double>();
 		}
-		auto measurement =
-		    xrt_fusion::AbsolutePositionLeverArmMeasurement{pos.cast<double>(), lever_arm, variance};
+		auto measurement = xrt::auxiliary::tracking::AbsolutePositionLeverArmMeasurement{pos.cast<double>(),
+		                                                                                 lever_arm, variance};
 		double resid = measurement.getResidual(filter_state).norm();
 
 		if (resid > residual_limit) {
@@ -233,4 +237,4 @@ PSMVFusionInterface::create()
 	auto ret = std::make_unique<PSMVFusion>();
 	return ret;
 }
-} // namespace xrt_fusion
+} // namespace xrt::auxiliary::tracking

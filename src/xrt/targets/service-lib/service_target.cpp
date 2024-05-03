@@ -3,11 +3,9 @@
 /*!
  * @file
  * @brief  Library exposing IPC server.
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup ipc_android
  */
-
-#include "target_lists.h"
 
 #include "jnipp.h"
 #include "jni.h"
@@ -15,6 +13,8 @@
 #include "wrap/android.view.h"
 
 #include "server/ipc_server.h"
+#include "server/ipc_server_interface.h"
+#include "server/ipc_server_mainloop_android.h"
 #include "util/u_logging.h"
 
 #include <android/native_window.h>
@@ -22,19 +22,150 @@
 
 #include "android/android_globals.h"
 
-using wrap::android::view::Surface;
+#include <chrono>
+#include <memory>
+#include <thread>
 
-extern "C" void
+using wrap::android::view::Surface;
+using namespace std::chrono_literals;
+
+namespace {
+struct IpcServerHelper
+{
+public:
+	static IpcServerHelper &
+	instance()
+	{
+		static IpcServerHelper instance;
+		return instance;
+	}
+
+	void
+	signalStartupComplete()
+	{
+		std::unique_lock<std::mutex> lock{server_mutex};
+		startup_complete = true;
+		startup_cond.notify_all();
+	}
+
+	void
+	startServer()
+	{
+		std::unique_lock lock(server_mutex);
+		if (!server && !server_thread) {
+			server_thread = std::make_unique<std::thread>(
+			    [&]() { ipc_server_main_android(&server, signalStartupCompleteTrampoline, this); });
+		}
+	}
+
+	static void
+	signalStartupCompleteTrampoline(void *data)
+	{
+		static_cast<IpcServerHelper *>(data)->signalStartupComplete();
+	}
+
+	int32_t
+	addClient(int fd)
+	{
+		if (!waitForStartupComplete()) {
+			return -1;
+		}
+		return ipc_server_mainloop_add_fd(server, &server->ml, fd);
+	}
+
+	int32_t
+	shutdownServer()
+	{
+		if (!server || !server_thread) {
+			// Should not happen.
+			U_LOG_E("service: shutdownServer called before server started up!");
+			return -1;
+		}
+
+		{
+			// Wait until IPC server stop
+			std::unique_lock lock(server_mutex);
+			ipc_server_handle_shutdown_signal(server);
+			server_thread->join();
+			server_thread.reset(nullptr);
+			server = NULL;
+			startup_complete = false;
+		}
+
+		return 0;
+	}
+
+private:
+	IpcServerHelper() {}
+
+	bool
+	waitForStartupComplete()
+	{
+		std::unique_lock<std::mutex> lock{server_mutex};
+		bool completed = startup_cond.wait_for(lock, START_TIMEOUT_SECONDS, [&]() { return startup_complete; });
+
+		if (!server) {
+			U_LOG_E("Failed to create ipc server");
+		}
+
+		if (!completed) {
+			U_LOG_E("Server startup timeout!");
+		}
+		return server && completed;
+	}
+
+	//! Reference to the ipc_server, managed by ipc_server_process
+	struct ipc_server *server = NULL;
+
+	//! Mutex for starting thread
+	std::mutex server_mutex;
+
+	//! Server thread
+	std::unique_ptr<std::thread> server_thread{};
+
+	//! Condition variable for starting thread
+	std::condition_variable startup_cond;
+
+	//! Server startup state
+	bool startup_complete = false;
+
+	//! Timeout duration in seconds
+	static constexpr std::chrono::seconds START_TIMEOUT_SECONDS = 40s;
+};
+} // namespace
+
+extern "C" JNIEXPORT void JNICALL
+Java_org_freedesktop_monado_ipc_MonadoImpl_nativeStartServer(JNIEnv *env, jobject thiz, jobject context)
+{
+	JavaVM *jvm = nullptr;
+	jint result = env->GetJavaVM(&jvm);
+	assert(result == JNI_OK);
+	assert(jvm);
+
+	jni::init(env);
+	jni::Object monadoImpl(thiz);
+	U_LOG_D("service: Called nativeStartServer");
+
+	android_globals_store_vm_and_context(jvm, context);
+
+	IpcServerHelper::instance().startServer();
+}
+
+extern "C" JNIEXPORT jint JNICALL
 Java_org_freedesktop_monado_ipc_MonadoImpl_nativeAddClient(JNIEnv *env, jobject thiz, int fd)
 {
 	jni::init(env);
 	jni::Object monadoImpl(thiz);
 	U_LOG_D("service: Called nativeAddClient with fd %d", fd);
-	// "entry point" of the native code
-	ipc_server_main_android(fd);
+
+	int native_fd = dup(fd);
+	U_LOG_D("service: transfer ownership to native and native_fd %d", native_fd);
+
+	// We try pushing the fd number to the server. If and only if we get a 0 return, has the server taken ownership.
+	return IpcServerHelper::instance().addClient(native_fd);
 }
 
-extern "C" void
+extern "C" JNIEXPORT void JNICALL
 Java_org_freedesktop_monado_ipc_MonadoImpl_nativeAppSurface(JNIEnv *env, jobject thiz, jobject surface)
 {
 	jni::init(env);
@@ -43,5 +174,14 @@ Java_org_freedesktop_monado_ipc_MonadoImpl_nativeAppSurface(JNIEnv *env, jobject
 
 	ANativeWindow *nativeWindow = ANativeWindow_fromSurface(env, surface);
 	android_globals_store_window((struct _ANativeWindow *)nativeWindow);
-	U_LOG_D("Stored ANativeWindow: %p", nativeWindow);
+	U_LOG_D("Stored ANativeWindow: %p", (void *)nativeWindow);
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_org_freedesktop_monado_ipc_MonadoImpl_nativeShutdownServer(JNIEnv *env, jobject thiz)
+{
+	jni::init(env);
+	jni::Object monadoImpl(thiz);
+
+	return IpcServerHelper::instance().shutdownServer();
 }

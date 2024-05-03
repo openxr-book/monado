@@ -13,4 +13,4 @@ this runtime installed on multiple architectures and have them all work
 (assuming dependencies permit). However, you'd switch between Monado and some
 other runtime for all architectures at once.
 
- -- Ryan Pavlik <ryan@ryanpavlik.com>  Thu, 26 Mar 2020 09:36:58 -0500
+ -- Rylie Pavlik <rylie@ryliepavlik.com>  Thu, 26 Mar 2020 09:36:58 -0500

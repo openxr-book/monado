@@ -1,6 +1,6 @@
-// Copyright 2020, Collabora, Ltd.
+// Copyright 2020-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
-// Author: Ryan Pavlik <ryan.pavlik@collabora.com>
+// Author: Rylie Pavlik <rylie.pavlik@collabora.com>
 
 #include "android.content.pm.h"
 
@@ -12,7 +12,9 @@ PackageItemInfo::Meta::Meta()
       packageName(classRef(), "packageName") {
     MetaBaseDroppable::dropClassRef();
 }
-ComponentInfo::Meta::Meta() : MetaBaseDroppable(ComponentInfo::getTypeName()) {
+ComponentInfo::Meta::Meta()
+    : MetaBaseDroppable(ComponentInfo::getTypeName()),
+      applicationInfo(classRef(), "applicationInfo") {
     MetaBaseDroppable::dropClassRef();
 }
 ServiceInfo::Meta::Meta() : MetaBaseDroppable(ServiceInfo::getTypeName()) {
@@ -40,9 +42,6 @@ PackageManager::Meta::Meta()
       getPackageInfo(classRef().getMethod(
           "getPackageInfo",
           "(Ljava/lang/String;I)Landroid/content/pm/PackageInfo;")),
-      getPackageInfo1(classRef().getMethod(
-          "getPackageInfo", "(Landroid/content/pm/VersionedPackage;I)Landroid/"
-                            "content/pm/PackageInfo;")),
       getApplicationInfo(classRef().getMethod(
           "getApplicationInfo",
           "(Ljava/lang/String;I)Landroid/content/pm/ApplicationInfo;")),

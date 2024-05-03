@@ -3,91 +3,62 @@
 /*!
  * @file
  * @brief  Class to inject a custom surface into an activity.
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup aux_android_java
  */
 
 package org.freedesktop.monado.auxiliary;
 
 import android.app.Activity;
-import android.os.Build;
+import android.content.Context;
+import android.hardware.display.DisplayManager;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.SystemClock;
 import android.util.DisplayMetrics;
 import android.util.Log;
+import android.view.Display;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
-import android.view.View;
 import android.view.WindowManager;
-
+import androidx.annotation.GuardedBy;
 import androidx.annotation.Keep;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.annotation.RequiresApi;
-
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.util.Calendar;
 
 @Keep
-public class MonadoView extends SurfaceView implements SurfaceHolder.Callback, SurfaceHolder.Callback2 {
+public class MonadoView extends SurfaceView
+        implements SurfaceHolder.Callback, SurfaceHolder.Callback2 {
     private static final String TAG = "MonadoView";
-    @SuppressWarnings("deprecation")
-    private static final int sysUiVisFlags = 0
-            // Give us a stable view of content insets
-            | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-            // Be able to do fullscreen and hide navigation
-            | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-            | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-            | View.SYSTEM_UI_FLAG_FULLSCREEN
-            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-            // we want sticky immersive
-            | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY;
-    /// The activity we've connected to.
-    private final Activity activity;
 
-    /// Guards currentSurfaceHolder
     private final Object currentSurfaceHolderSync = new Object();
-    private final Method viewSetSysUiVis;
-    private NativeCounterpart nativeCounterpart;
 
     public int width = -1;
     public int height = -1;
     public int format = -1;
 
-    /// Guarded by currentSurfaceHolderSync
-    private SurfaceHolder currentSurfaceHolder = null;
+    private NativeCounterpart nativeCounterpart;
 
-    public MonadoView(Activity activity) {
-        super(activity);
-        this.activity = activity;
-        Method method;
-        try {
-            method = activity.getWindow().getDecorView().getClass().getMethod("setSystemUiVisibility", int.class);
-        } catch (NoSuchMethodException e) {
-            // ok
-            method = null;
+    @GuardedBy("currentSurfaceHolderSync") @Nullable private SurfaceHolder currentSurfaceHolder = null;
+
+    private SystemUiController systemUiController = null;
+
+    public MonadoView(Context context) {
+        super(context);
+
+        if (context instanceof Activity) {
+            Activity activity = (Activity) context;
+            systemUiController = new SystemUiController(activity.getWindow().getDecorView());
+            systemUiController.hide();
         }
-        viewSetSysUiVis = method;
+        SurfaceHolder surfaceHolder = getHolder();
+        surfaceHolder.addCallback(this);
     }
 
-    private MonadoView(Activity activity, long nativePointer) {
-        this(activity);
+    private MonadoView(Context context, long nativePointer) {
+        this(context);
+
         nativeCounterpart = new NativeCounterpart(nativePointer);
-    }
-
-    private void createSurface() {
-        Log.i(TAG, "Starting to add a new surface!");
-        activity.runOnUiThread(() -> {
-            Log.i(TAG, "Starting runOnUiThread");
-            activity.getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-
-            WindowManager windowManager = activity.getWindowManager();
-            windowManager.addView(this, new WindowManager.LayoutParams(WindowManager.LayoutParams.FLAG_FULLSCREEN));
-
-            requestFocus();
-            SurfaceHolder surfaceHolder = getHolder();
-            surfaceHolder.addCallback(this);
-            Log.i(TAG, "Registered callbacks!");
-        });
     }
 
     /**
@@ -96,44 +67,161 @@ public class MonadoView extends SurfaceView implements SurfaceHolder.Callback, S
      * @param activity The activity to attach to.
      * @return The MonadoView instance created and asynchronously attached.
      */
-    @NonNull
-    @Keep
-    @SuppressWarnings("deprecation")
-    public static MonadoView attachToActivity(@NonNull final Activity activity, long nativePointer) {
-        final MonadoView view = new MonadoView(activity, nativePointer);
-        view.createSurface();
+    @NonNull @Keep
+    public static MonadoView attachToActivity(@NonNull final Activity activity) {
+        final MonadoView view = new MonadoView(activity);
+        WindowManager.LayoutParams lp = new WindowManager.LayoutParams();
+        lp.flags =
+                WindowManager.LayoutParams.FLAG_FULLSCREEN
+                        | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
+        attachToWindow(activity, view, lp);
         return view;
     }
 
-    @NonNull
-    @Keep
-    public static MonadoView attachToActivity(@NonNull final Activity activity) {
-        final MonadoView view = new MonadoView(activity);
-        view.createSurface();
+    /**
+     * Construct and start attaching a MonadoView to window.
+     *
+     * @param displayContext Display context used for looking for target window.
+     * @param nativePointer The native android_custom_surface pointer, cast to a long.
+     * @param lp Layout parameters associated with view.
+     * @return The MonadoView instance created and asynchronously attached.
+     */
+    @NonNull @Keep
+    public static MonadoView attachToWindow(
+            @NonNull final Context displayContext,
+            long nativePointer,
+            WindowManager.LayoutParams lp)
+            throws IllegalArgumentException {
+        final MonadoView view = new MonadoView(displayContext, nativePointer);
+        attachToWindow(displayContext, view, lp);
         return view;
+    }
+
+    private static void attachToWindow(
+            @NonNull final Context context,
+            @NonNull MonadoView view,
+            @NonNull WindowManager.LayoutParams lp) {
+        Handler handler = new Handler(Looper.getMainLooper());
+        handler.post(
+                () -> {
+                    Log.d(TAG, "Start adding view to window");
+                    WindowManager wm =
+                            (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
+                    wm.addView(view, lp);
+
+                    SystemUiController systemUiController = new SystemUiController(view);
+                    systemUiController.hide();
+                });
+    }
+
+    /**
+     * Remove given MonadoView from window.
+     *
+     * @param view The view to remove.
+     */
+    @Keep
+    public static void removeFromWindow(@NonNull MonadoView view) {
+        Handler handler = new Handler(Looper.getMainLooper());
+        handler.post(
+                () -> {
+                    Log.d(TAG, "Start removing view from window");
+                    WindowManager wm =
+                            (WindowManager)
+                                    view.getContext().getSystemService(Context.WINDOW_SERVICE);
+                    wm.removeView(view);
+                });
+    }
+
+    @NonNull @Keep
+    public static DisplayMetrics getDisplayMetrics(@NonNull Context context) {
+        DisplayMetrics displayMetrics = new DisplayMetrics();
+        WindowManager wm = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
+        wm.getDefaultDisplay().getMetrics(displayMetrics);
+        return displayMetrics;
+    }
+
+    @Keep
+    public static float getDisplayRefreshRate(@NonNull Context context) {
+        WindowManager wm = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
+        return wm.getDefaultDisplay().getRefreshRate();
+    }
+
+    /**
+     * Get the width of the specified display mode on the specified display ID
+     *
+     * <p>If the specified mode ID is not in the list of supported mode IDs for the specified
+     * display ID, then a value of 0 is returned.
+     *
+     * @param context Display context used for looking for target window.
+     * @param display The display ID for which the mode is to be queried.
+     * @param displayModeId The display mode ID for which the width is returned. This is a
+     *     zero-indexed mode ID.
+     * @return The width in pixels for the specified mode ID on the specified display.
+     */
+    @Keep
+    public static int getDisplayModeIdWidth(
+            @NonNull final Context context, int display, int displayModeId) {
+        DisplayManager dm = (DisplayManager) context.getSystemService(Context.DISPLAY_SERVICE);
+        Display dp = dm.getDisplay(display);
+        Display.Mode[] modes = dp.getSupportedModes();
+        if (modes.length > displayModeId) {
+            return modes[displayModeId].getPhysicalWidth();
+        }
+        return 0;
+    }
+
+    /**
+     * Get the height of the specified display mode on the specified display ID
+     *
+     * <p>If the specified mode ID is not in the list of supported mode IDs for the specified
+     * display ID, then a value of 0 is returned.
+     *
+     * @param context Display context used for looking for target window.
+     * @param display The display ID for which the mode is to be queried.
+     * @param displayModeId The display mode ID for which the height is returned. This is a
+     *     zero-indexed mode ID.
+     * @return The height in pixels for the specified mode ID on the specified display.
+     */
+    @Keep
+    public static int getDisplayModeIdHeight(
+            @NonNull final Context context, int display, int displayModeId) {
+        DisplayManager dm = (DisplayManager) context.getSystemService(Context.DISPLAY_SERVICE);
+        Display dp = dm.getDisplay(display);
+        Display.Mode[] modes = dp.getSupportedModes();
+        if (modes.length > displayModeId) {
+            return modes[displayModeId].getPhysicalHeight();
+        }
+        return 0;
+    }
+
+    @Keep
+    public long getNativePointer() {
+        if (nativeCounterpart == null) {
+            return 0;
+        }
+        return nativeCounterpart.getNativePointer();
     }
 
     /**
      * Block up to a specified amount of time, waiting for the surfaceCreated callback to be fired
      * and populate the currentSurfaceHolder.
-     * <p>
-     * If it returns a SurfaceHolder, the `usedByNativeCode` flag will be set.
-     * <p>
-     * Called by native code!
      *
-     * @param wait_ms Max duration you prefer to wait, in millseconds. Spurious wakeups mean this
-     *                not be totally precise.
+     * <p>If it returns a SurfaceHolder, the `usedByNativeCode` flag will be set.
+     *
+     * <p>Called by native code!
+     *
+     * @param wait_ms Max duration you prefer to wait, in milliseconds. Spurious wakeups mean this
+     *     not be totally precise.
      * @return A SurfaceHolder or null.
      */
     @Keep
-    public @Nullable
-    SurfaceHolder waitGetSurfaceHolder(int wait_ms) {
-        long currentTime = Calendar.getInstance().getTimeInMillis();
+    public @Nullable SurfaceHolder waitGetSurfaceHolder(int wait_ms) {
+        long currentTime = SystemClock.uptimeMillis();
         long timeout = currentTime + wait_ms;
         SurfaceHolder ret = null;
         synchronized (currentSurfaceHolderSync) {
-            while (currentSurfaceHolder == null
-                    && Calendar.getInstance().getTimeInMillis() < timeout) {
+            ret = currentSurfaceHolder;
+            while (currentSurfaceHolder == null && SystemClock.uptimeMillis() < timeout) {
                 try {
                     currentSurfaceHolderSync.wait(wait_ms, 0);
                     ret = currentSurfaceHolder;
@@ -144,8 +232,7 @@ public class MonadoView extends SurfaceView implements SurfaceHolder.Callback, S
             }
         }
         if (ret != null) {
-            if (nativeCounterpart != null)
-                nativeCounterpart.markAsUsedByNativeCode();
+            if (nativeCounterpart != null) nativeCounterpart.markAsUsedByNativeCode();
         }
         return ret;
     }
@@ -153,48 +240,12 @@ public class MonadoView extends SurfaceView implements SurfaceHolder.Callback, S
     /**
      * Change the flag and notify those waiting on it, to indicate that native code is done with
      * this object.
-     * <p>
-     * Called by native code!
+     *
+     * <p>Called by native code!
      */
     @Keep
     public void markAsDiscardedByNative() {
-        if (nativeCounterpart != null)
-            nativeCounterpart.markAsDiscardedByNative(TAG);
-    }
-
-    private boolean makeFullscreen() {
-        if (activity == null) {
-            return false;
-        }
-        if (viewSetSysUiVis == null) {
-            return false;
-        }
-        View decorView = activity.getWindow().getDecorView();
-        //! @todo implement with WindowInsetsController to ward off the stink of deprecation
-        try {
-            viewSetSysUiVis.invoke(decorView, sysUiVisFlags);
-        } catch (IllegalAccessException e) {
-            return false;
-        } catch (InvocationTargetException e) {
-            return false;
-        }
-        return true;
-    }
-
-
-    /**
-     * Add a listener so that if our system UI display state doesn't include all we want, we re-apply.
-     */
-    @RequiresApi(api = Build.VERSION_CODES.HONEYCOMB)
-    @SuppressWarnings("deprecation")
-    private void setSystemUiVisChangeListener() {
-        activity.getWindow().getDecorView().setOnSystemUiVisibilityChangeListener(visibility -> {
-            // If not fullscreen, fix it.
-            if (0 == (visibility & View.SYSTEM_UI_FLAG_FULLSCREEN)) {
-                makeFullscreen();
-            }
-        });
-
+        if (nativeCounterpart != null) nativeCounterpart.markAsDiscardedByNative(TAG);
     }
 
     @Override
@@ -204,15 +255,11 @@ public class MonadoView extends SurfaceView implements SurfaceHolder.Callback, S
             currentSurfaceHolderSync.notifyAll();
         }
         Log.i(TAG, "surfaceCreated: Got a surface holder!");
-
-        if (makeFullscreen()) {
-            // If we could make it full screen, make it really stick.
-            setSystemUiVisChangeListener();
-        }
     }
 
     @Override
-    public void surfaceChanged(@NonNull SurfaceHolder surfaceHolder, int format, int width, int height) {
+    public void surfaceChanged(
+            @NonNull SurfaceHolder surfaceHolder, int format, int width, int height) {
 
         synchronized (currentSurfaceHolderSync) {
             currentSurfaceHolder = surfaceHolder;
@@ -221,7 +268,14 @@ public class MonadoView extends SurfaceView implements SurfaceHolder.Callback, S
             this.height = height;
             currentSurfaceHolderSync.notifyAll();
         }
-        Log.i(TAG, "surfaceChanged");
+        Log.i(
+                TAG,
+                "surfaceChanged, w = "
+                        + this.width
+                        + " h = "
+                        + this.height
+                        + " holder "
+                        + currentSurfaceHolder.toString());
     }
 
     @Override
@@ -235,26 +289,19 @@ public class MonadoView extends SurfaceView implements SurfaceHolder.Callback, S
             }
         }
         if (lost) {
-            //! @todo this function should notify native code that the surface is gone.
+            // ! @todo this function should notify native code that the surface is gone.
             if (nativeCounterpart != null && !nativeCounterpart.blockUntilNativeDiscard(TAG)) {
-                Log.i(TAG,
-                        "Interrupted in surfaceDestroyed while waiting for native code to finish up.");
+                Log.i(
+                        TAG,
+                        "Interrupted in surfaceDestroyed while waiting for native code to finish"
+                                + " up.");
             }
         }
     }
 
     @Override
     public void surfaceRedrawNeeded(@NonNull SurfaceHolder surfaceHolder) {
-//        currentSurfaceHolder = surfaceHolder;
+        //        currentSurfaceHolder = surfaceHolder;
         Log.i(TAG, "surfaceRedrawNeeded");
     }
-
-    @NonNull
-    @Keep
-    public static DisplayMetrics getDisplayMetrics(Activity activity) {
-        DisplayMetrics displayMetrics = new DisplayMetrics();
-        activity.getWindowManager().getDefaultDisplay().getMetrics(displayMetrics);
-        return displayMetrics;
-    }
-
 }

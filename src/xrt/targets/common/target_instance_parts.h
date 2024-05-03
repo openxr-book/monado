@@ -14,6 +14,7 @@
 #include "xrt/xrt_instance.h"
 
 #include "util/u_misc.h"
+#include "util/u_trace_marker.h"
 
 
 /*
@@ -25,7 +26,7 @@
 /*!
  * Main "real" instance implementation.
  *
- * Used in instances both with and without compositor access.
+ * Used in instances both with and without compositor usage.
  *
  * @implements xrt_instance
  */
@@ -48,32 +49,27 @@ t_instance(struct xrt_instance *xinst)
  *
  */
 
-static int
-t_instance_select(struct xrt_instance *xinst, struct xrt_device **xdevs, size_t num_xdevs)
-{
-	struct t_instance *tinst = t_instance(xinst);
-
-	int ret = xrt_prober_probe(tinst->xp);
-	if (ret < 0) {
-		return ret;
-	}
-
-	return xrt_prober_select(tinst->xp, xdevs, num_xdevs);
-}
-
-static int
+static xrt_result_t
 t_instance_get_prober(struct xrt_instance *xinst, struct xrt_prober **out_xp)
 {
+	XRT_TRACE_MARKER();
+
 	struct t_instance *tinst = t_instance(xinst);
+
+	if (tinst->xp == NULL) {
+		return XRT_ERROR_PROBER_NOT_SUPPORTED;
+	}
 
 	*out_xp = tinst->xp;
 
-	return 0;
+	return XRT_SUCCESS;
 }
 
 static void
 t_instance_destroy(struct xrt_instance *xinst)
 {
+	XRT_TRACE_MARKER();
+
 	struct t_instance *tinst = t_instance(xinst);
 
 	xrt_prober_destroy(&tinst->xp);

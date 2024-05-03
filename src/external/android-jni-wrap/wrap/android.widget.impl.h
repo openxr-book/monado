@@ -1,6 +1,7 @@
-// Copyright 2020, Collabora, Ltd.
+// Copyright 2020-2021, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
-// Author: Ryan Pavlik <ryan.pavlik@collabora.com>
+// Author: Rylie Pavlik <rylie.pavlik@collabora.com>
+// Inline implementations: do not include on its own!
 
 #pragma once
 
@@ -27,10 +28,11 @@ inline Toast Toast::makeText(content::Context const &context,
         Meta::data().makeText, context.object(), stringParam, duration));
 }
 
-inline Toast Toast::makeText(content::Context &context, int32_t resId,
+inline Toast Toast::makeText(content::Context const &context, int32_t resId,
                              int32_t duration) {
     return Toast(Meta::data().clazz().call<jni::Object>(
         Meta::data().makeText1, context.object(), resId, duration));
 }
+
 } // namespace android::widget
 } // namespace wrap

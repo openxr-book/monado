@@ -7,15 +7,22 @@
  * @ingroup gui
  */
 
-#include "util/u_misc.h"
-#include "util/u_format.h"
-
 #include "xrt/xrt_prober.h"
 #include "xrt/xrt_settings.h"
 #include "xrt/xrt_frameserver.h"
+#include "xrt/xrt_config_drivers.h"
+#include "xrt/xrt_config_os.h"
+
+#include "util/u_misc.h"
+#include "util/u_format.h"
+#include "util/u_logging.h"
 
 #include "gui_common.h"
 #include "gui_imgui.h"
+
+#ifdef XRT_BUILD_DRIVER_DEPTHAI
+#include "depthai/depthai_interface.h"
+#endif
 
 
 /*!
@@ -44,6 +51,50 @@ static ImVec2 button_dims = {256 + 64, 0};
  *
  */
 
+#ifdef XRT_BUILD_DRIVER_DEPTHAI
+static void
+create_depthai_monocular(struct video_select *vs)
+{
+	vs->xfctx = U_TYPED_CALLOC(struct xrt_frame_context);
+
+	vs->xfs = depthai_fs_monocular_rgb(vs->xfctx);
+	if (vs->xfs == NULL) {
+		U_LOG_E("Failed to open DepthAI camera!");
+		free(vs->xfctx);
+		vs->xfctx = NULL;
+		return;
+	}
+
+	xrt_fs_enumerate_modes(vs->xfs, &vs->modes, &vs->num_modes);
+}
+
+static void
+create_depthai_stereo(struct video_select *vs)
+{
+	vs->xfctx = U_TYPED_CALLOC(struct xrt_frame_context);
+
+
+	struct depthai_slam_startup_settings settings = {0};
+	settings.frames_per_second = 60;
+	settings.half_size_ov9282 = false;
+	settings.want_cameras = true;
+	settings.want_imu = false;
+
+
+	vs->xfs = depthai_fs_slam(vs->xfctx, &settings);
+	if (vs->xfs == NULL) {
+		U_LOG_E("Failed to open DepthAI camera!");
+		free(vs->xfctx);
+		vs->xfctx = NULL;
+		return;
+	}
+	vs->settings->camera_type = XRT_SETTINGS_CAMERA_TYPE_SLAM;
+
+
+	xrt_fs_enumerate_modes(vs->xfs, &vs->modes, &vs->num_modes);
+}
+#endif /* XRT_BUILD_DRIVER_DEPTHAI */
+
 static void
 on_video_device(struct xrt_prober *xp,
                 struct xrt_prober_device *pdev,
@@ -59,7 +110,9 @@ on_video_device(struct xrt_prober *xp,
 	}
 
 	char buf[256] = {0};
-	snprintf(buf, sizeof(buf), "%04x:%04x '%s' '%s'\n", pdev->vendor_id, pdev->product_id, product, serial);
+	uint16_t vendor_id = pdev ? pdev->vendor_id : -1;
+	uint16_t product_id = pdev ? pdev->product_id : -1;
+	snprintf(buf, sizeof(buf), "%04x:%04x '%s' '%s'\n", vendor_id, product_id, product, serial);
 	if (!igButton(buf, button_dims)) {
 		return;
 	}
@@ -67,7 +120,18 @@ on_video_device(struct xrt_prober *xp,
 	snprintf(vs->settings->camera_name, sizeof(vs->settings->camera_name), "%s", product);
 
 	vs->xfctx = U_TYPED_CALLOC(struct xrt_frame_context);
+
 	xrt_prober_open_video_device(xp, pdev, vs->xfctx, &vs->xfs);
+	if (vs->xfs == NULL) {
+		U_LOG_E("Failed to open camera!");
+#if defined(XRT_OS_LINUX) && !defined(XRT_HAVE_V4L2)
+		U_LOG_E("Monado was built with the v4l driver disabled. Most video devices require this driver!");
+#endif
+		free(vs->xfctx);
+		vs->xfctx = NULL;
+		return;
+	}
+
 	xrt_fs_enumerate_modes(vs->xfs, &vs->modes, &vs->num_modes);
 }
 
@@ -81,6 +145,21 @@ render_mode(struct xrt_fs_mode *mode)
 	return igButton(tmp, button_dims);
 }
 
+void
+mode_selected_so_continue(struct gui_scene *scene, struct gui_program *p)
+{
+	struct video_select *vs = (struct video_select *)scene;
+	gui_scene_calibrate(p, vs->xfctx, vs->xfs, vs->settings);
+
+	// We should not clean these up, zero them out.
+	vs->settings = NULL;
+	vs->xfctx = NULL;
+	vs->xfs = NULL;
+
+	// Schedule us to be deleted when it's safe.
+	gui_scene_delete_me(p, scene);
+}
+
 static void
 scene_render(struct gui_scene *scene, struct gui_program *p)
 {
@@ -91,29 +170,36 @@ scene_render(struct gui_scene *scene, struct gui_program *p)
 	// If we have not found any modes keep showing the devices.
 	if (vs->xfs == NULL) {
 		xrt_prober_list_video_devices(p->xp, on_video_device, vs);
+
+#ifdef XRT_BUILD_DRIVER_DEPTHAI
+		igSeparator();
+		if (igButton("DepthAI (Monocular)", button_dims)) {
+			create_depthai_monocular(vs);
+		}
+		if (igButton("DepthAI (Stereo)", button_dims)) {
+			create_depthai_stereo(vs);
+		}
+#endif
 	} else if (vs->num_modes == 0) {
 		// No modes on it :(
 		igText("No modes found on '%s'!", vs->xfs->name);
 	}
 
-	// We have selected a stream device and it has modes.
-	for (size_t i = 0; i < vs->num_modes; i++) {
-		if (!render_mode(&vs->modes[i])) {
-			continue;
+	// We have selected a stream device and it has only one mode - user doesn't need to care what that is; proceed
+	// immediately
+	if (vs->num_modes == 1) {
+		vs->settings->camera_mode = 0;
+		mode_selected_so_continue(scene, p);
+	} else {
+		// We have selected a stream device and it has multiple modes - let user decide which to use
+		for (uint32_t i = 0; i < vs->num_modes; i++) {
+			if (!render_mode(&vs->modes[i])) {
+				continue;
+			}
+
+			vs->settings->camera_mode = (int)i;
+			mode_selected_so_continue(scene, p);
 		}
-
-		vs->settings->camera_mode = i;
-
-		// User selected this mode, create the next scene.
-		gui_scene_calibrate(p, vs->xfctx, vs->xfs, vs->settings);
-
-		// We should not clean these up, zero them out.
-		vs->settings = NULL;
-		vs->xfctx = NULL;
-		vs->xfs = NULL;
-
-		// Schedule us to be deleted when it's safe.
-		gui_scene_delete_me(p, scene);
 	}
 
 	igSeparator();

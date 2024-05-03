@@ -4,7 +4,7 @@
  * @file
  * @brief  Tiny JSON wrapper around cJSON.
  * @author Jakob Bornecrantz <jakob@collabora.com>
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup aux_util
  */
 
@@ -21,6 +21,9 @@
 #include <stdio.h>
 
 #ifndef XRT_HAVE_SYSTEM_CJSON
+#if defined(_MSC_VER) && !defined(_CRT_SECURE_NO_WARNINGS)
+#define _CRT_SECURE_NO_WARNINGS
+#endif
 // This includes the c file completely.
 #include "cjson/cJSON.c"
 #endif
@@ -77,7 +80,7 @@ u_json_get_bool(const cJSON *json, bool *out_bool)
 		return false;
 	}
 
-	*out_bool = json->valueint;
+	*out_bool = cJSON_IsTrue(json);
 
 	return true;
 }
@@ -193,6 +196,42 @@ u_json_get_vec3_array(const cJSON *json, struct xrt_vec3 *out_vec3)
 }
 
 bool
+u_json_get_vec3_f64_array(const cJSON *json, struct xrt_vec3_f64 *out_vec3)
+{
+	assert(out_vec3 != NULL);
+
+	if (!json) {
+		return false;
+	}
+	if (!cJSON_IsArray(json)) {
+		return false;
+	}
+
+	if (cJSON_GetArraySize(json) != 3) {
+		return false;
+	}
+
+	double array[3] = {0, 0, 0};
+	const cJSON *item = NULL;
+	size_t i = 0;
+	cJSON_ArrayForEach(item, json)
+	{
+		assert(cJSON_IsNumber(item));
+		array[i] = item->valuedouble;
+		++i;
+		if (i == 3) {
+			break;
+		}
+	}
+
+	out_vec3->x = array[0];
+	out_vec3->y = array[1];
+	out_vec3->z = array[2];
+
+	return true;
+}
+
+bool
 u_json_get_quat(const cJSON *json, struct xrt_quat *out_quat)
 {
 	assert(out_quat != NULL);
@@ -222,6 +261,59 @@ u_json_get_quat(const cJSON *json, struct xrt_quat *out_quat)
 
 	return true;
 }
+
+// note: you should be using "position" and "orientation" and lower-case xyz(w)
+bool
+u_json_get_pose(const cJSON *json, struct xrt_pose *out_pose)
+{
+	struct xrt_pose tmp;
+
+	bool good = true;
+	good = good && u_json_get_vec3(u_json_get(json, "position"), &tmp.position);
+	good = good && u_json_get_quat(u_json_get(json, "orientation"), &tmp.orientation);
+
+	if (good) {
+		*out_pose = tmp;
+	}
+	return good;
+}
+
+bool
+u_json_get_pose_permissive(const cJSON *json, struct xrt_pose *out_pose)
+{
+	struct xrt_pose tmp;
+
+	const char *position_names[] = {"position", "translation", "location", "pos", "loc"};
+	const char *orientation_names[] = {"orientation", "rotation", "rot"};
+
+	bool found_position = false;
+
+	for (uint32_t i = 0; i < ARRAY_SIZE(position_names); i++) {
+		found_position = u_json_get_vec3(u_json_get(json, position_names[i]), &tmp.position);
+		if (found_position) {
+			break;
+		}
+	}
+	if (!found_position) {
+		return false;
+	}
+
+	bool found_orientation = false;
+
+	for (uint32_t i = 0; i < ARRAY_SIZE(orientation_names); i++) {
+		found_orientation = u_json_get_vec3(u_json_get(json, orientation_names[i]), &tmp.position);
+		if (found_orientation) {
+			break;
+		}
+	}
+	if (!found_orientation) {
+		return false;
+	}
+
+
+	return true;
+}
+
 
 size_t
 u_json_get_float_array(const cJSON *json_array, float *out_array, size_t max_size)
@@ -279,6 +371,39 @@ u_json_get_double_array(const cJSON *json_array, double *out_array, size_t max_s
 		if (!u_json_get_double(elt, &out_array[i])) {
 			U_LOG_W(
 			    "u_json_get_double_array got a non-number in a "
+			    "numeric array");
+			return i;
+		}
+
+		i++;
+	}
+
+	return i;
+}
+
+size_t
+u_json_get_int_array(const cJSON *json_array, int *out_array, size_t max_size)
+{
+	assert(out_array != NULL);
+
+	if (!json_array) {
+		return 0;
+	}
+	if (!cJSON_IsArray(json_array)) {
+		return 0;
+	}
+
+	size_t i = 0;
+	const cJSON *elt;
+	cJSON_ArrayForEach(elt, json_array)
+	{
+		if (i >= max_size) {
+			break;
+		}
+
+		if (!u_json_get_int(elt, &out_array[i])) {
+			U_LOG_W(
+			    "u_json_get_int got a non-number in a "
 			    "numeric array");
 			return i;
 		}

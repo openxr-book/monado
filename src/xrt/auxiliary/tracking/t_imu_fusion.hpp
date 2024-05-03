@@ -3,7 +3,7 @@
 /*!
  * @file
  * @brief  C++ sensor fusion/filtering code that uses flexkalman
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup aux_tracking
  */
 
@@ -13,8 +13,8 @@
 #error "This header is C++-only."
 #endif
 
-#include "tracking/t_lowpass.hpp"
-#include "tracking/t_lowpass_vector.hpp"
+#include "math/m_lowpass_float.hpp"
+#include "math/m_lowpass_float_vector.hpp"
 #include "math/m_api.h"
 #include "util/u_time.h"
 #include "util/u_debug.h"
@@ -27,13 +27,17 @@
 
 DEBUG_GET_ONCE_LOG_OPTION(simple_imu_log, "SIMPLE_IMU_LOG", U_LOGGING_WARN)
 
-#define SIMPLE_IMU_TRACE(...) U_LOG_IFL_T(ll, __VA_ARGS__)
-#define SIMPLE_IMU_DEBUG(...) U_LOG_IFL_D(ll, __VA_ARGS__)
-#define SIMPLE_IMU_INFO(...) U_LOG_IFL_I(ll, __VA_ARGS__)
-#define SIMPLE_IMU_WARN(...) U_LOG_IFL_W(ll, __VA_ARGS__)
-#define SIMPLE_IMU_ERROR(...) U_LOG_IFL_E(ll, __VA_ARGS__)
+#define SIMPLE_IMU_TRACE(...) U_LOG_IFL_T(log_level, __VA_ARGS__)
+#define SIMPLE_IMU_DEBUG(...) U_LOG_IFL_D(log_level, __VA_ARGS__)
+#define SIMPLE_IMU_INFO(...) U_LOG_IFL_I(log_level, __VA_ARGS__)
+#define SIMPLE_IMU_WARN(...) U_LOG_IFL_W(log_level, __VA_ARGS__)
+#define SIMPLE_IMU_ERROR(...) U_LOG_IFL_E(log_level, __VA_ARGS__)
 
-namespace xrt_fusion {
+namespace xrt::auxiliary::tracking {
+
+/*!
+ * @brief A simple IMU fusion class.
+ */
 class SimpleIMUFusion
 {
 public:
@@ -43,7 +47,7 @@ public:
 	 * accelerometer should affect the orientation each second.
 	 */
 	explicit SimpleIMUFusion(double gravity_rate = 0.9)
-	    : gravity_scale_(gravity_rate), ll(debug_get_log_option_simple_imu_log())
+	    : gravity_scale_(gravity_rate), log_level(debug_get_log_option_simple_imu_log())
 	{
 		SIMPLE_IMU_DEBUG("Creating instance");
 	}
@@ -183,7 +187,7 @@ private:
 	 * user-caused acceleration, and do not reflect the direction of
 	 * gravity.
 	 */
-	LowPassIIRVectorFilter<3, double> accel_filter_{200 /* hz cutoff frequency */};
+	math::LowPassIIRVectorFilter<3, double> accel_filter_{200 /* hz cutoff frequency */};
 
 	/*!
 	 * @brief Even-lower low pass filter on the length of the acceleration
@@ -193,12 +197,12 @@ private:
 	 * Over time, the length of the accelerometer data will average out to
 	 * be the acceleration due to gravity.
 	 */
-	LowPassIIRFilter<double> gravity_filter_{1 /* hz cutoff frequency */};
+	math::LowPassIIRFilter<double> gravity_filter_{1 /* hz cutoff frequency */};
 	uint64_t last_accel_timestamp_{0};
 	uint64_t last_gyro_timestamp_{0};
 	double gyro_min_squared_length_{1.e-8};
 	bool started_{false};
-	enum u_logging_level ll;
+	enum u_logging_level log_level;
 };
 
 inline Eigen::Quaterniond
@@ -210,7 +214,7 @@ SimpleIMUFusion::getPredictedQuat(timepoint_ns timestamp) const
 		return Eigen::Quaterniond::Identity();
 	}
 	time_duration_ns delta_ns = timestamp - state_time;
-	float dt = time_ns_to_s(delta_ns);
+	double dt = time_ns_to_s(delta_ns);
 	return quat_ * flexkalman::util::quat_exp(angVel_ * dt * 0.5);
 }
 inline bool
@@ -223,13 +227,14 @@ SimpleIMUFusion::handleGyro(Eigen::Vector3d const &gyro, timepoint_ns timestamp)
 		    "report");
 		return false;
 	}
-	time_duration_ns delta_ns = (last_gyro_timestamp_ == 0) ? 1e6 : timestamp - last_gyro_timestamp_;
+	time_duration_ns delta_ns =
+	    (last_gyro_timestamp_ == 0) ? (time_duration_ns)1e6 : timestamp - last_gyro_timestamp_;
 	if (delta_ns > 1e10) {
 
 		SIMPLE_IMU_DEBUG("Clamping integration period");
 		// Limit integration to 1/10th of a second
 		// Does not affect updating the last gyro timestamp.
-		delta_ns = 1e10;
+		delta_ns = (time_duration_ns)1e10;
 	}
 	float dt = time_ns_to_s(delta_ns);
 	last_gyro_timestamp_ = timestamp;
@@ -263,7 +268,7 @@ SimpleIMUFusion::handleAccel(Eigen::Vector3d const &accel, timepoint_ns timestam
 			return false;
 		}
 
-		// Initially, just set it to totally trust gravity.
+		// Initially, set it to totally trust gravity.
 		started_ = true;
 		quat_ = Eigen::Quaterniond::FromTwoVectors(accel.normalized(), Eigen::Vector3d::UnitY());
 		accel_filter_.addSample(accel, timestamp);
@@ -304,4 +309,4 @@ SimpleIMUFusion::handleAccel(Eigen::Vector3d const &accel, timepoint_ns timestam
 	return true;
 }
 
-} // namespace xrt_fusion
+} // namespace xrt::auxiliary::tracking

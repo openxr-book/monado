@@ -1,9 +1,12 @@
 // Copyright 2019, Collabora, Ltd.
+// Copyright 2020, Nova King.
+// Copyright 2021, Moses Turner.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Interface between North Star distortion and HMD code.
  * @author Nova King <technobaboo@gmail.com>
+ * @author Moses Turner <mosesturner@protonmail.com>
  * @ingroup drv_ns
  */
 
@@ -15,6 +18,10 @@
 #include "xrt/xrt_defines.h"
 #include "xrt/xrt_device.h"
 #include "util/u_logging.h"
+#include "os/os_threading.h"
+#include "util/u_distortion_mesh.h"
+
+#include <stdio.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -22,19 +29,8 @@ extern "C" {
 
 /*
  *
- * Printing functions.
- *
- */
-
-#define NS_TRACE(d, ...) U_LOG_XDEV_IFL_T(&d->base, d->ll, __VA_ARGS__)
-#define NS_DEBUG(d, ...) U_LOG_XDEV_IFL_D(&d->base, d->ll, __VA_ARGS__)
-#define NS_INFO(d, ...) U_LOG_XDEV_IFL_I(&d->base, d->ll, __VA_ARGS__)
-#define NS_WARN(d, ...) U_LOG_XDEV_IFL_W(&d->base, d->ll, __VA_ARGS__)
-#define NS_ERROR(d, ...) U_LOG_XDEV_IFL_E(&d->base, d->ll, __VA_ARGS__)
-
-/*
- *
- * Structs
+ * 3D distortion structs
+ * Sometimes known as "v1", config file name is often "Calibration.json"
  *
  */
 
@@ -43,38 +39,14 @@ extern "C" {
  *
  * @ingroup drv_ns
  */
-struct ns_optical_system;
-
-/*!
- * Simple UV struct.
- *
- * @ingroup drv_ns
- */
-struct ns_uv
-{
-	float u;
-	float v;
-};
-
-/*!
- * Configuration information about the LMC or Rigel sensor according to the
- * configuration file.
- *
- * @ingroup drv_ns
- */
-struct ns_leap
-{
-	const char *name;
-	const char *serial;
-	struct xrt_pose pose;
-};
+struct ns_3d_optical_system;
 
 /*!
  * Distortion information about an eye parsed from the configuration file.
  *
  * @ingroup drv_ns
  */
-struct ns_v1_eye
+struct ns_3d_eye
 {
 	float ellipse_minor_axis;
 	float ellipse_major_axis;
@@ -84,6 +56,7 @@ struct ns_v1_eye
 
 	struct xrt_pose eye_pose;
 
+	// This is more of a vec4 than a quat
 	struct xrt_quat camera_projection;
 
 	struct xrt_matrix_4x4 sphere_to_world_space;
@@ -92,13 +65,36 @@ struct ns_v1_eye
 	struct ns_optical_system *optical_system;
 };
 
-struct ns_v2_eye
+struct ns_3d_values
 {
-	float x_coefficients[16];
-	float y_coefficients[16];
-	struct xrt_pose eye_pose;
-	struct xrt_fov fov;
+	struct ns_3d_eye eyes[2];
 };
+
+enum ns_distortion_type
+{
+	NS_DISTORTION_TYPE_INVALID,
+	NS_DISTORTION_TYPE_GEOMETRIC_3D,
+	NS_DISTORTION_TYPE_POLYNOMIAL_2D,
+	NS_DISTORTION_TYPE_MOSHI_MESHGRID,
+};
+
+// The config json data gets dumped in here.
+// In general, `target_builder_north_star.c` sets up tracking, and `ns_hmd.c` sets up distortion/optics.
+struct ns_optics_config
+{
+	struct xrt_pose head_pose_to_eye[2]; // left, right
+	struct xrt_fov fov[2];               // left,right
+
+
+
+	enum ns_distortion_type distortion_type;
+	union {
+		struct ns_3d_values dist_3d;
+		struct u_ns_p2d_values dist_p2d;
+		struct u_ns_meshgrid_values dist_meshgrid;
+	};
+};
+
 
 /*!
  * Information about the whole North Star headset.
@@ -109,23 +105,12 @@ struct ns_v2_eye
 
 struct ns_hmd
 {
-
 	struct xrt_device base;
-	struct xrt_pose pose;
+	struct xrt_space_relation no_tracker_relation;
+	const cJSON *config_json;
+	struct ns_optics_config config;
 
-	const char *config_path;
-
-	struct ns_v1_eye eye_configs_v1[2]; // will be NULL if is_v2.
-	struct ns_v2_eye eye_configs_v2[2]; // will be NULL if !is_v2
-	float ipd;
-
-	struct ns_leap leap_config; // will be NULL if is_v2
-
-	struct xrt_device *tracker;
-
-	enum u_logging_level ll;
-	bool is_v2; // True if V2, false if V1. If we ever get a v3 this should
-	            // be an enum or something
+	enum u_logging_level log_level;
 };
 
 /*
@@ -145,16 +130,21 @@ ns_hmd(struct xrt_device *xdev)
 	return (struct ns_hmd *)xdev;
 }
 
+
 /*!
  * Convert the display UV to the render UV using the distortion mesh.
  *
  * @ingroup drv_ns
  */
+
 void
-ns_display_uv_to_render_uv(struct ns_uv in, struct ns_uv *out, struct ns_v1_eye *eye);
+ns_3d_display_uv_to_render_uv(struct xrt_vec2 in, struct xrt_vec2 *out, struct ns_3d_eye *eye);
 
 struct ns_optical_system *
-ns_create_optical_system(struct ns_v1_eye *eye);
+ns_3d_create_optical_system(struct ns_3d_eye *eye);
+
+void
+ns_3d_free_optical_system(struct ns_optical_system **system);
 
 
 #ifdef __cplusplus

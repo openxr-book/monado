@@ -10,16 +10,17 @@ Files: doc/changes/drivers/*
   doc/changes/xrt/*
   doc/changes/auxiliary/*
   doc/changes/compositor/*
-Copyright: 2020, Collabora, Ltd. and the Monado contributors
+  doc/changes/doc/*
+  doc/changes/big/*
+  doc/changes/tracking/*
+Copyright: 2020-2021, Collabora, Ltd. and the Monado contributors
 License: CC0-1.0
 Comment: Prevents needing a license header per fragment between releases.
 
-Files: src/external/flexkalman/.clang-format
-       src/external/flexkalman/flexkalman/README.md
-Copyright: 2015, 2016, Sensics, Inc.
- 2019, Collabora, Ltd.
-License: Apache-2.0
-Comment: Copyright statement and license identifier missing.
+Files: doc/doxygen-awesome-css/*
+Copyright: 2021-2023, jothepro
+License: MIT
+Comment: SPDX-License-Identifier missing.
 
 Files: src/external/cjson/*
 Copyright: 2009-2017, Dave Gamble and cJSON contributors
@@ -32,14 +33,6 @@ Copyright: 2020, Two Blue Cubes Ltd.
 License: BSL-1.0
 Comment: SPDX-License-Identifier missing.
 
-Files: src/external/openxr_includes/loader_interfaces.h
-Copyright: 2017, LunarG, Inc.
- 2017, Valve Corporation
- 2017-2019, The Khronos Group Inc.
-License: Apache-2.0
-Comment: SPDX-License-Identifier missing.
-
-
 Files: src/external/jnipp/*
 Copyright: 2016-2020, Mitchell Dowd
  2020, Collabora, Ltd.
@@ -51,6 +44,11 @@ Files: src/external/hungarian/*
 Copyright: 2016, mcximing
 License: BSD-2-Clause
 Comment: SPDX-License-Identifier missing.
+
+Files: src/external/openvr_includes/*
+Copyright: 2015-2020, Valve Corporation
+License: BSD-3-Clause
+Comment: License identifier missing.
 
 Files: src/external/imgui/imgui*
  src/external/imgui/imconfig.h
@@ -89,14 +87,45 @@ Comment: SPDX-License-Identifier missing.
 Files: src/external/glad/include/glad/egl.h
 Copyright: 2013-2020, The Khronos Group, Inc.
 License: Apache-2.0
-Comment: This is generated from the specification XML (licensed as above) by GLAD2.
+Comment: This is generated from the specification XML (licensed as indicated earlier) by GLAD2:
+ https://github.com/KhronosGroup/EGL-Registry/blob/main/api/egl.xml
+ Specification copyright statement last updated 2020 though file itself updated more recently.
 
 Files: src/external/glad/include/glad/gl.h
-Copyright: 2013-2020, The Khronos Group, Inc.
+Copyright: 2013-2022, The Khronos Group, Inc.
 License: Apache-2.0
-Comment: This is generated from the specification XML (licensed as above) by GLAD2.
+Comment: This is generated from the specification XML (licensed as indicated earlier) by GLAD2:
+ https://raw.githubusercontent.com/KhronosGroup/OpenGL-Registry/main/xml/gl.xml
+ Specification copyright statement last updated 2020 though file itself updated more recently.
+
+Files: src/external/glad/include/glad/glx.h
+Copyright: 2013-2022, The Khronos Group, Inc.
+License: Apache-2.0
+Comment: This is generated from the specification XML (licensed as indicated earlier) by GLAD2:
+ https://github.com/KhronosGroup/OpenGL-Registry/blob/main/xml/glx.xml
+
+Files: src/external/glad/include/glad/wgl.h
+Copyright: 2013-2022, The Khronos Group, Inc.
+License: Apache-2.0
+Comment: This is generated from the specification XML (licensed as indicated earlier) by GLAD2:
+ https://github.com/KhronosGroup/OpenGL-Registry/blob/main/xml/wgl.xml
 
 Files:  src/external/glad/src/*
-Copyright: 2013-2020, David Herberth
+Copyright: 2013-2022, David Herberth
+License: MIT
+Comment: SPDX-License-Identifier missing.
+
+Files: src/external/nanopb/*
+Copyright: 2011-2022, Petteri Aimonen
+License: Zlib
+Comment: License information global from repository.
+
+Files:  src/external/tracy/*
+Copyright: 2017-2022, Bartosz Taudul
+License: BSD-3-Clause
+Comment: SPDX-License-Identifier missing.
+
+Files:  src/external/valve-file-vdf/*
+Copyright: 2016-2023, Matthias Moeller
 License: MIT
 Comment: SPDX-License-Identifier missing.

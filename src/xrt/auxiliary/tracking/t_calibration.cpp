@@ -5,7 +5,7 @@
  * @brief  Calibration code.
  * @author Pete Black <pblack@collabora.com>
  * @author Jakob Bornecrantz <jakob@collabora.com>
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup aux_tracking
  */
 
@@ -14,6 +14,7 @@
 #include "util/u_debug.h"
 #include "util/u_frame.h"
 #include "util/u_format.h"
+#include "util/u_logging.h"
 
 #include "tracking/t_tracking.h"
 #include "tracking/t_calibration_opencv.hpp"
@@ -22,12 +23,19 @@
 #include <sys/stat.h>
 #include <utility>
 
+#if CV_MAJOR_VERSION >= 4
+#define SB_CHEESBOARD_CORNERS_SUPPORTED
+#if CV_MINOR_VERSION >= 3 || CV_MAJOR_VERSION > 4
+#define SB_CHEESBOARD_CORNERS_MARKER_SUPPORTED
+#endif
+#endif
+
 
 DEBUG_GET_ONCE_BOOL_OPTION(hsv_filter, "T_DEBUG_HSV_FILTER", false)
 DEBUG_GET_ONCE_BOOL_OPTION(hsv_picker, "T_DEBUG_HSV_PICKER", false)
 DEBUG_GET_ONCE_BOOL_OPTION(hsv_viewer, "T_DEBUG_HSV_VIEWER", false)
 
-
+namespace xrt::auxiliary::tracking {
 /*
  *
  * Structs
@@ -99,6 +107,8 @@ public:
 		cv::Size dims = {8, 6};
 		enum t_board_pattern pattern = T_BOARD_CHECKERS;
 		float spacing_meters = 0.05;
+		bool marker;          //!< Center board marker for sb_checkers.
+		bool normalize_image; //!< For SB checkers.
 	} board;
 
 	struct
@@ -199,7 +209,7 @@ ensure_buffers_are_allocated(class Calibration &c, int rows, int cols)
 	}
 
 	// If our rgb is not allocated but our gray already is, alloc our rgb
-	// now. We will hit this path if we receive L8 format.
+	// now. We will end up in this path if we receive L8 format.
 	if (c.gray.cols == cols && c.gray.rows == rows) {
 		refresh_gui_frame(c, rows, cols);
 		return;
@@ -325,6 +335,45 @@ do_view_chess(class Calibration &c, struct ViewState &view, cv::Mat &gray, cv::M
 	return found;
 }
 
+#ifdef SB_CHEESBOARD_CORNERS_SUPPORTED
+static bool
+do_view_sb_checkers(class Calibration &c, struct ViewState &view, cv::Mat &gray, cv::Mat &rgb)
+{
+	/*
+	 * Fisheye requires measurement and model to be double, other functions
+	 * requires them to be floats (like cornerSubPix). So we give in
+	 * current_f32 here and convert below.
+	 */
+
+	int flags = 0;
+	if (c.board.normalize_image) {
+		flags += cv::CALIB_CB_NORMALIZE_IMAGE;
+	}
+
+#ifdef SB_CHEESBOARD_CORNERS_MARKER_SUPPORTED
+	if (c.board.marker) {
+		// Only available in OpenCV 4.3 and newer.
+		flags += cv::CALIB_CB_MARKER;
+	}
+#endif
+
+	bool found = cv::findChessboardCornersSB(gray,             // Image
+	                                         c.board.dims,     // patternSize
+	                                         view.current_f32, // corners
+	                                         flags);           // flags
+
+	// Do the conversion here.
+	view.current_f64.clear(); // Doesn't effect capacity.
+	for (const cv::Point2f &p : view.current_f32) {
+		view.current_f64.emplace_back(double(p.x), double(p.y));
+	}
+
+	do_view_coverage(c, view, gray, rgb, found);
+
+	return found;
+}
+#endif
+
 static bool
 do_view_circles(class Calibration &c, struct ViewState &view, cv::Mat &gray, cv::Mat &rgb)
 {
@@ -364,6 +413,11 @@ do_view(class Calibration &c, struct ViewState &view, cv::Mat &gray, cv::Mat &rg
 	case T_BOARD_CHECKERS: //
 		found = do_view_chess(c, view, gray, rgb);
 		break;
+#ifdef SB_CHEESBOARD_CORNERS_SUPPORTED
+	case T_BOARD_SB_CHECKERS: //
+		found = do_view_sb_checkers(c, view, gray, rgb);
+		break;
+#endif
 	case T_BOARD_CIRCLES: //
 		found = do_view_circles(c, view, gray, rgb);
 		break;
@@ -405,6 +459,7 @@ build_board_position(class Calibration &c)
 
 	switch (c.board.pattern) {
 	case T_BOARD_CHECKERS:
+	case T_BOARD_SB_CHECKERS:
 	case T_BOARD_CIRCLES:
 		// Nothing to do.
 		break;
@@ -416,6 +471,7 @@ build_board_position(class Calibration &c)
 
 	switch (c.board.pattern) {
 	case T_BOARD_CHECKERS:
+	case T_BOARD_SB_CHECKERS:
 	case T_BOARD_CIRCLES:
 		c.board.model_f32.reserve(rows_num * cols_num);
 		c.board.model_f64.reserve(rows_num * cols_num);
@@ -519,13 +575,10 @@ process_stereo_samples(class Calibration &c, int cols, int rows)
 	cv::Size image_size(cols, rows);
 	cv::Size new_image_size(cols, rows);
 
-	StereoCameraCalibrationWrapper wrapped = {};
+	StereoCameraCalibrationWrapper wrapped(c.use_fisheye ? T_DISTORTION_FISHEYE_KB4 : T_DISTORTION_OPENCV_RADTAN_5);
 	wrapped.view[0].image_size_pixels.w = image_size.width;
 	wrapped.view[0].image_size_pixels.h = image_size.height;
 	wrapped.view[1].image_size_pixels = wrapped.view[0].image_size_pixels;
-
-	wrapped.view[0].use_fisheye = c.use_fisheye;
-	wrapped.view[1].use_fisheye = c.use_fisheye;
 
 
 	float rp_error = 0.0f;
@@ -535,16 +588,16 @@ process_stereo_samples(class Calibration &c, int cols, int rows)
 		flags |= cv::fisheye::CALIB_RECOMPUTE_EXTRINSIC;
 
 		// fisheye version
-		rp_error = cv::fisheye::stereoCalibrate(c.state.board_models_f64,               // objectPoints
-		                                        c.state.view[0].measured_f64,           // inagePoints1
-		                                        c.state.view[1].measured_f64,           // imagePoints2
-		                                        wrapped.view[0].intrinsics_mat,         // cameraMatrix1
-		                                        wrapped.view[0].distortion_fisheye_mat, // distCoeffs1
-		                                        wrapped.view[1].intrinsics_mat,         // cameraMatrix2
-		                                        wrapped.view[1].distortion_fisheye_mat, // distCoeffs2
-		                                        image_size,                             // imageSize
-		                                        wrapped.camera_rotation_mat,            // R
-		                                        wrapped.camera_translation_mat,         // T
+		rp_error = cv::fisheye::stereoCalibrate(c.state.board_models_f64,       // objectPoints
+		                                        c.state.view[0].measured_f64,   // inagePoints1
+		                                        c.state.view[1].measured_f64,   // imagePoints2
+		                                        wrapped.view[0].intrinsics_mat, // cameraMatrix1
+		                                        wrapped.view[0].distortion_mat, // distCoeffs1
+		                                        wrapped.view[1].intrinsics_mat, // cameraMatrix2
+		                                        wrapped.view[1].distortion_mat, // distCoeffs2
+		                                        image_size,                     // imageSize
+		                                        wrapped.camera_rotation_mat,    // R
+		                                        wrapped.camera_translation_mat, // T
 		                                        flags);
 	} else {
 		// non-fisheye version
@@ -579,7 +632,6 @@ process_stereo_samples(class Calibration &c, int cols, int rows)
 	c.state.view[1].map2 = maps.view[1].rectify.remap_y;
 	c.state.view[1].maps_valid = true;
 
-	// clang-format off
 	std::cout << "#####\n";
 	std::cout << "calibration rp_error: " << rp_error << "\n";
 	to_stdout("camera_rotation", wrapped.camera_rotation_mat);
@@ -590,24 +642,15 @@ process_stereo_samples(class Calibration &c, int cols, int rows)
 	}
 	to_stdout("disparity_to_depth", maps.disparity_to_depth_mat);
 	std::cout << "#####\n";
-	if (c.use_fisheye) {
-		to_stdout("view[0].distortion_fisheye", wrapped.view[0].distortion_fisheye_mat);
-	} else {
-		to_stdout("view[0].distortion", wrapped.view[0].distortion_mat);
-	}
+	to_stdout("view[0].distortion", wrapped.view[0].distortion_mat);
 	to_stdout("view[0].intrinsics", wrapped.view[0].intrinsics_mat);
 	to_stdout("view[0].projection", maps.view[0].projection_mat);
 	to_stdout("view[0].rotation", maps.view[0].rotation_mat);
 	std::cout << "#####\n";
-	if (c.use_fisheye) {
-		to_stdout("view[1].distortion_fisheye", wrapped.view[1].distortion_fisheye_mat);
-	} else {
-		to_stdout("view[1].distortion", wrapped.view[1].distortion_mat);
-	}
+	to_stdout("view[1].distortion", wrapped.view[1].distortion_mat);
 	to_stdout("view[1].intrinsics", wrapped.view[1].intrinsics_mat);
 	to_stdout("view[1].projection", maps.view[1].projection_mat);
 	to_stdout("view[1].rotation", maps.view[1].rotation_mat);
-	// clang-format on
 
 	// Validate that nothing has been re-allocated.
 	assert(wrapped.isDataStorageValid());
@@ -627,7 +670,6 @@ process_view_samples(class Calibration &c, struct ViewState &view, int cols, int
 	cv::Mat intrinsics_mat = {};
 	cv::Mat new_intrinsics_mat = {};
 	cv::Mat distortion_mat = {};
-	cv::Mat distortion_fisheye_mat = {};
 
 	if (c.dump_measurements) {
 		U_LOG_RAW("...measured = (ArrayOfMeasurements){");
@@ -658,7 +700,7 @@ process_view_samples(class Calibration &c, struct ViewState &view, int cols, int
 		                                  view.measured_f64,        // imagePoints
 		                                  image_size,               // image_size
 		                                  intrinsics_mat,           // K (cameraMatrix 3x3)
-		                                  distortion_fisheye_mat,   // D (distCoeffs 4x1)
+		                                  distortion_mat,           // D (distCoeffs 4x1)
 		                                  cv::noArray(),            // rvecs
 		                                  cv::noArray(),            // tvecs
 		                                  flags,                    // flags
@@ -666,12 +708,12 @@ process_view_samples(class Calibration &c, struct ViewState &view, int cols, int
 
 		double balance = 0.1f;
 
-		cv::fisheye::estimateNewCameraMatrixForUndistortRectify(intrinsics_mat,         // K
-		                                                        distortion_fisheye_mat, // D
-		                                                        image_size,             // image_size
-		                                                        cv::Matx33d::eye(),     // R
-		                                                        new_intrinsics_mat,     // P
-		                                                        balance);               // balance
+		cv::fisheye::estimateNewCameraMatrixForUndistortRectify(intrinsics_mat,     // K
+		                                                        distortion_mat,     // D
+		                                                        image_size,         // image_size
+		                                                        cv::Matx33d::eye(), // R
+		                                                        new_intrinsics_mat, // P
+		                                                        balance);           // balance
 
 		// Probably a busted work-around for busted function.
 		new_intrinsics_mat.at<double>(0, 2) = (cols - 1) / 2.0;
@@ -714,22 +756,18 @@ process_view_samples(class Calibration &c, struct ViewState &view, int cols, int
 	std::cout << "rp_error: " << rp_error << "\n";
 	std::cout << "intrinsics_mat:\n" << intrinsics_mat << "\n";
 	std::cout << "new_intrinsics_mat:\n" << new_intrinsics_mat << "\n";
-	if (c.use_fisheye) {
-		std::cout << "distortion_fisheye_mat:\n" << distortion_fisheye_mat << "\n";
-	} else {
 		std::cout << "distortion_mat:\n" << distortion_mat << "\n";
-	}
 	// clang-format on
 
 	if (c.use_fisheye) {
-		cv::fisheye::initUndistortRectifyMap(intrinsics_mat,         // K
-		                                     distortion_fisheye_mat, // D
-		                                     cv::Matx33d::eye(),     // R
-		                                     new_intrinsics_mat,     // P
-		                                     image_size,             // size
-		                                     CV_32FC1,               // m1type
-		                                     view.map1,              // map1
-		                                     view.map2);             // map2
+		cv::fisheye::initUndistortRectifyMap(intrinsics_mat,     // K
+		                                     distortion_mat,     // D
+		                                     cv::Matx33d::eye(), // R
+		                                     new_intrinsics_mat, // P
+		                                     image_size,         // size
+		                                     CV_32FC1,           // m1type
+		                                     view.map1,          // map1
+		                                     view.map2);         // map2
 
 		// Set the maps as valid.
 		view.maps_valid = true;
@@ -1085,6 +1123,21 @@ process_frame_uyvy(class Calibration &c, struct xrt_frame *xf)
 }
 
 XRT_NO_INLINE static void
+process_frame_rgb(class Calibration &c, struct xrt_frame *xf)
+{
+
+	int w = (int)xf->width;
+	int h = (int)xf->height;
+
+	cv::Mat rgb_data(h, w, CV_8UC3, xf->data, xf->stride);
+	ensure_buffers_are_allocated(c, rgb_data.rows, rgb_data.cols);
+	c.gui.frame->source_sequence = xf->source_sequence;
+
+	cv::cvtColor(rgb_data, c.gray, cv::COLOR_RGB2GRAY);
+	rgb_data.copyTo(c.gui.rgb);
+}
+
+XRT_NO_INLINE static void
 process_load_image(class Calibration &c, struct xrt_frame *xf)
 {
 	char buf[512];
@@ -1099,7 +1152,7 @@ process_load_image(class Calibration &c, struct xrt_frame *xf)
 	std::swap(c.num_wait_for, num_wait_for);
 
 	for (uint32_t i = 0; i < c.load.num_images; i++) {
-		// Early out if the user requeted less images.
+		// Early out if the user requested less images.
 		if (c.state.calibrated) {
 			break;
 		}
@@ -1162,6 +1215,7 @@ t_calibration_frame(struct xrt_frame_sink *xsink, struct xrt_frame *xf)
 	case XRT_FORMAT_YUYV422: process_frame_yuyv(c, xf); break;
 	case XRT_FORMAT_UYVY422: process_frame_uyvy(c, xf); break;
 	case XRT_FORMAT_L8: process_frame_l8(c, xf); break;
+	case XRT_FORMAT_R8G8B8: process_frame_rgb(c, xf); break;
 	default:
 		P("ERROR: Bad format '%s'", u_format_str(xf->format));
 		make_gui_str(c);
@@ -1201,6 +1255,19 @@ t_calibration_stereo_create(struct xrt_frame_context *xfctx,
                             struct xrt_frame_sink *gui,
                             struct xrt_frame_sink **out_sink)
 {
+#ifndef SB_CHEESBOARD_CORNERS_SUPPORTED
+	if (params->pattern == T_BOARD_SB_CHECKERS) {
+		U_LOG_E("OpenCV %u.%u doesn't support SB chessboard!", CV_MAJOR_VERSION, CV_MINOR_VERSION);
+		return -1;
+	}
+#endif
+#ifndef SB_CHEESBOARD_CORNERS_MARKER_SUPPORTED
+	if (params->pattern == T_BOARD_SB_CHECKERS && params->sb_checkers.marker) {
+		U_LOG_W("OpenCV %u.%u doesn't support SB chessboard marker option!", CV_MAJOR_VERSION,
+		        CV_MINOR_VERSION);
+	}
+#endif
+
 	auto &c = *(new Calibration());
 
 	// Basic setup.
@@ -1221,6 +1288,15 @@ t_calibration_stereo_create(struct xrt_frame_context *xfctx,
 		c.board.spacing_meters = params->checkers.size_meters;
 		c.subpixel_enable = params->checkers.subpixel_enable;
 		c.subpixel_size = params->checkers.subpixel_size;
+		break;
+	case T_BOARD_SB_CHECKERS:
+		c.board.dims = {
+		    params->sb_checkers.cols,
+		    params->sb_checkers.rows,
+		};
+		c.board.spacing_meters = params->sb_checkers.size_meters;
+		c.board.marker = params->sb_checkers.marker;
+		c.board.normalize_image = params->sb_checkers.normalize_image;
 		break;
 	case T_BOARD_CIRCLES:
 		c.board.dims = {
@@ -1266,8 +1342,8 @@ t_calibration_stereo_create(struct xrt_frame_context *xfctx,
 		ret = t_debug_hsv_viewer_create(xfctx, *out_sink, out_sink);
 	}
 
-	// Ensure we only get yuv, yuyv, uyvy or l8 frames.
-	u_sink_create_to_yuv_yuyv_uyvy_or_l8(xfctx, *out_sink, out_sink);
+	// Ensure we only get rgb, yuv, yuyv, uyvy or l8 frames.
+	u_sink_create_to_rgb_yuv_yuyv_uyvy_or_l8(xfctx, *out_sink, out_sink);
 
 
 	// Build the board model.
@@ -1291,12 +1367,14 @@ t_calibration_stereo_create(struct xrt_frame_context *xfctx,
 		push_model(c);
 	}
 #endif
+
+
 	return ret;
 }
 
 //! Helper for NormalizedCoordsCache constructors
 static inline std::vector<cv::Vec2f>
-generateInputCoordsAndReserveOutputCoords(cv::Size size, std::vector<cv::Vec2f> &outputCoords)
+generateInputCoordsAndReserveOutputCoords(const cv::Size &size, std::vector<cv::Vec2f> &outputCoords)
 {
 	std::vector<cv::Vec2f> inputCoords;
 
@@ -1314,7 +1392,7 @@ generateInputCoordsAndReserveOutputCoords(cv::Size size, std::vector<cv::Vec2f> 
 
 //! Helper for NormalizedCoordsCache constructors
 static inline void
-populateCacheMats(cv::Size size,
+populateCacheMats(const cv::Size &size,
                   const std::vector<cv::Vec2f> &inputCoords,
                   const std::vector<cv::Vec2f> &outputCoords,
                   cv::Mat_<float> &cacheX,
@@ -1416,3 +1494,5 @@ NormalizedCoordsCache::getNormalizedVector(cv::Point2f origCoords) const
 	auto z = -std::sqrt(1.f - pt.dot(pt));
 	return {pt[0], pt[1], z};
 }
+
+} // namespace xrt::auxiliary::tracking

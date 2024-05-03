@@ -37,7 +37,7 @@ void
 oxr_xdev_update(struct xrt_device *xdev)
 {
 	if (xdev != NULL) {
-		xdev->update_inputs(xdev);
+		xrt_device_update_inputs(xdev);
 	}
 }
 
@@ -49,7 +49,7 @@ oxr_xdev_find_input(struct xrt_device *xdev, enum xrt_input_name name, struct xr
 		return false;
 	}
 
-	for (uint32_t i = 0; i < xdev->num_inputs; i++) {
+	for (uint32_t i = 0; i < xdev->input_count; i++) {
 		if (xdev->inputs[i].name != name) {
 			continue;
 		}
@@ -67,7 +67,7 @@ oxr_xdev_find_output(struct xrt_device *xdev, enum xrt_output_name name, struct 
 		return false;
 	}
 
-	for (uint32_t i = 0; i < xdev->num_outputs; i++) {
+	for (uint32_t i = 0; i < xdev->output_count; i++) {
 		if (xdev->outputs[i].name != name) {
 			continue;
 		}
@@ -79,24 +79,6 @@ oxr_xdev_find_output(struct xrt_device *xdev, enum xrt_output_name name, struct 
 }
 
 void
-oxr_xdev_get_space_graph(struct oxr_logger *log,
-                         struct oxr_instance *inst,
-                         struct xrt_device *xdev,
-                         enum xrt_input_name name,
-                         XrTime at_time,
-                         struct xrt_space_graph *xsg)
-{
-	// Convert at_time to monotonic and give to device.
-	uint64_t at_timestamp_ns = time_state_ts_to_monotonic_ns(inst->timekeeping, at_time);
-
-	struct xrt_space_relation *rel = m_space_graph_reserve(xsg);
-	xrt_device_get_tracked_pose(xdev, name, at_timestamp_ns, rel);
-
-	// Add in the offset from the tracking system.
-	m_space_graph_add_pose(xsg, &xdev->tracking_origin->offset);
-}
-
-void
 oxr_xdev_get_hand_tracking_at(struct oxr_logger *log,
                               struct oxr_instance *inst,
                               struct xrt_device *xdev,
@@ -104,24 +86,15 @@ oxr_xdev_get_hand_tracking_at(struct oxr_logger *log,
                               XrTime at_time,
                               struct xrt_hand_joint_set *out_value)
 {
+	//! @todo Moses doesn't know what he's doing here!
 	//! Convert at_time to monotonic and give to device.
 	uint64_t at_timestamp_ns = time_state_ts_to_monotonic_ns(inst->timekeeping, at_time);
 
 	struct xrt_hand_joint_set value;
 
-	xrt_device_get_hand_tracking(xdev, name, at_timestamp_ns, &value);
+	uint64_t ignored;
+
+	xrt_device_get_hand_tracking(xdev, name, at_timestamp_ns, &value, &ignored);
 
 	*out_value = value;
-}
-void
-oxr_xdev_get_space_relation(struct oxr_logger *log,
-                            struct oxr_instance *inst,
-                            struct xrt_device *xdev,
-                            enum xrt_input_name name,
-                            XrTime at_time,
-                            struct xrt_space_relation *out_relation)
-{
-	struct xrt_space_graph xsg = {0};
-	oxr_xdev_get_space_graph(log, inst, xdev, name, at_time, &xsg);
-	m_space_graph_resolve(&xsg, out_relation);
 }

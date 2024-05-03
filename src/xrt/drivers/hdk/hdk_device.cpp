@@ -1,4 +1,4 @@
-// Copyright 2019, Collabora, Ltd.
+// Copyright 2019-2023, Collabora, Ltd.
 // Copyright 2014, Kevin M. Godby
 // Copyright 2014-2018, Sensics, Inc.
 // SPDX-License-Identifier: BSL-1.0
@@ -9,7 +9,7 @@
  * Based in part on the corresponding VRPN driver,
  * available under BSL-1.0.
  *
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @author Kevin M. Godby <kevin@godby.org>
  * @ingroup drv_hdk
  */
@@ -99,6 +99,9 @@ hdk_device_destroy(struct xrt_device *xdev)
 
 	os_thread_helper_destroy(&hd->imu_thread);
 
+	// Now that the thread is not running we can destroy the lock.
+	os_mutex_destroy(&hd->lock);
+
 	if (hd->dev != NULL) {
 		os_hid_destroy(hd->dev);
 		hd->dev = NULL;
@@ -107,21 +110,15 @@ hdk_device_destroy(struct xrt_device *xdev)
 	free(hd);
 }
 
-static void
-hdk_device_update_inputs(struct xrt_device *xdev)
-{
-	// Empty
-}
-
 static constexpr uint8_t MSG_LEN_LARGE = 32;
 static constexpr uint8_t MSG_LEN_SMALL = 16;
 
 static int
 hdk_device_update(struct hdk_device *hd)
 {
-	uint8_t buffer[MSG_LEN_LARGE];
+	uint8_t buffer[MSG_LEN_LARGE]{};
 
-	auto bytesRead = os_hid_read(hd->dev, buffer, sizeof(buffer), 0);
+	auto bytesRead = os_hid_read(hd->dev, buffer, sizeof(buffer), 100);
 	if (bytesRead == -1) {
 		if (!hd->disconnect_notified) {
 			HDK_ERROR(hd,
@@ -132,6 +129,9 @@ hdk_device_update(struct hdk_device *hd)
 		}
 		hd->quat_valid = false;
 		return 0;
+	} else if (bytesRead == 0) {
+		HDK_WARN(hd, "Read 0 bytes from device");
+		return 1;
 	}
 	while (bytesRead > 0) {
 		if (bytesRead != MSG_LEN_LARGE && bytesRead != MSG_LEN_SMALL) {
@@ -152,7 +152,7 @@ hdk_device_update(struct hdk_device *hd)
 
 	// HDMI status only valid in reports version 3.
 	// Expecting either version 1 (100Hz) or 3 (400Hz):
-	// https://github.com/OSVR/OSVR-HDK-MCU-Firmware/blob/master/Source%20code/Embedded/src/DeviceDrivers/BNO070_using_hostif.c#L511
+	// https://github.com/OSVR/OSVR-HDK-MCU-Firmware/blob/main/Source%20code/Embedded/src/DeviceDrivers/BNO070_using_hostif.c#L511
 
 	// Next byte is sequence number, ignore
 	buf++;
@@ -188,7 +188,7 @@ hdk_device_update(struct hdk_device *hd)
 
 	// This is in the "world" coordinate system.
 
-	// Note that we must "rotate" this velocity by the first transform above
+	// Note that we must "rotate" this velocity by the first transform from earlier
 	// (90 about x), hence putting it in a pure quat.
 	struct xrt_quat ang_vel_quat;
 	ang_vel_quat.x = fromFixedPoint<6, 9>(hdk_get_le_int16(buf));
@@ -204,9 +204,12 @@ hdk_device_update(struct hdk_device *hd)
 	math_quat_rotate(&ang_vel_quat, &rot_90_about_x, &ang_vel_quat);
 	math_quat_rotate(&negative_90_about_x, &ang_vel_quat, &ang_vel_quat);
 
+	os_mutex_lock(&hd->lock);
 	hd->ang_vel_quat = ang_vel_quat;
 
 	hd->quat_valid = true;
+	os_mutex_unlock(&hd->lock);
+
 	return 1;
 }
 
@@ -223,18 +226,13 @@ hdk_device_get_tracked_pose(struct xrt_device *xdev,
 		return;
 	}
 
-	uint64_t now = os_monotonic_get_ns();
-
-	// Adjusting for latency - 14ms, found empirically.
-	now -= 14000000;
-
+	os_mutex_lock(&hd->lock);
 	if (!hd->quat_valid) {
 		out_relation->relation_flags = XRT_SPACE_RELATION_BITMASK_NONE;
 		HDK_TRACE(hd, "GET_TRACKED_POSE: No pose");
+		os_mutex_unlock(&hd->lock);
 		return;
 	}
-
-	os_thread_helper_lock(&hd->imu_thread);
 
 	out_relation->pose.orientation = hd->quat;
 
@@ -242,41 +240,14 @@ hdk_device_get_tracked_pose(struct xrt_device *xdev,
 	out_relation->angular_velocity.y = hd->ang_vel_quat.y;
 	out_relation->angular_velocity.z = hd->ang_vel_quat.z;
 
+	os_mutex_unlock(&hd->lock);
+
 	out_relation->relation_flags = xrt_space_relation_flags(XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
 	                                                        XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT |
 	                                                        XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
 
-	os_thread_helper_unlock(&hd->imu_thread);
-
 	HDK_TRACE(hd, "GET_TRACKED_POSE (%f, %f, %f, %f) ANG_VEL (%f, %f, %f)", hd->quat.x, hd->quat.y, hd->quat.z,
 	          hd->quat.w, hd->ang_vel_quat.x, hd->ang_vel_quat.y, hd->ang_vel_quat.z);
-}
-
-static void
-hdk_device_get_view_pose(struct xrt_device *xdev,
-                         struct xrt_vec3 *eye_relation,
-                         uint32_t view_index,
-                         struct xrt_pose *out_pose)
-{
-	struct xrt_pose pose = {{0.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 0.0f}};
-	bool adjust = view_index == 0;
-
-	pose.position.x = eye_relation->x / 2.0f;
-	pose.position.y = eye_relation->y / 2.0f;
-	pose.position.z = eye_relation->z / 2.0f;
-
-	// Adjust for left/right while also making sure there aren't any -0.f.
-	if (pose.position.x > 0.0f && adjust) {
-		pose.position.x = -pose.position.x;
-	}
-	if (pose.position.y > 0.0f && adjust) {
-		pose.position.y = -pose.position.y;
-	}
-	if (pose.position.z > 0.0f && adjust) {
-		pose.position.z = -pose.position.z;
-	}
-
-	*out_pose = pose;
 }
 
 static void *
@@ -315,17 +286,21 @@ hdk_device_create(struct os_hid_device *dev, enum HDK_VARIANT variant)
 	    (enum u_device_alloc_flags)(U_DEVICE_ALLOC_HMD | U_DEVICE_ALLOC_TRACKING_NONE);
 	struct hdk_device *hd = U_DEVICE_ALLOCATE(struct hdk_device, flags, 1, 0);
 
-	hd->base.hmd->blend_mode = XRT_BLEND_MODE_OPAQUE;
-	hd->base.update_inputs = hdk_device_update_inputs;
+	size_t idx = 0;
+	hd->base.hmd->blend_modes[idx++] = XRT_BLEND_MODE_OPAQUE;
+	hd->base.hmd->blend_mode_count = idx;
+
+	hd->base.update_inputs = u_device_noop_update_inputs;
 	hd->base.get_tracked_pose = hdk_device_get_tracked_pose;
-	hd->base.get_view_pose = hdk_device_get_view_pose;
+	hd->base.get_view_poses = u_device_get_view_poses;
 	hd->base.destroy = hdk_device_destroy;
 	hd->base.inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;
 	hd->base.name = XRT_DEVICE_GENERIC_HMD;
 	hd->dev = dev;
-	hd->ll = debug_get_log_option_hdk_log();
+	hd->log_level = debug_get_log_option_hdk_log();
 
 	snprintf(hd->base.str, XRT_DEVICE_NAME_LEN, "OSVR HDK-family Device");
+	snprintf(hd->base.serial, XRT_DEVICE_NAME_LEN, "OSVR HDK-family Device");
 
 	if (variant == HDK_UNKNOWN) {
 		HDK_ERROR(hd, "Don't know which HDK variant this is.");
@@ -368,15 +343,15 @@ hdk_device_create(struct os_hid_device *dev, enum HDK_VARIANT variant)
 	{
 		/* right eye */
 		math_compute_fovs(1.0, hCOP, hFOV * DEGREES_TO_RADIANS, 1, vCOP, vFOV * DEGREES_TO_RADIANS,
-		                  &hd->base.hmd->views[1].fov);
+		                  &hd->base.hmd->distortion.fov[1]);
 	}
 	{
 		/* left eye - just mirroring right eye now */
-		hd->base.hmd->views[0].fov.angle_up = hd->base.hmd->views[1].fov.angle_up;
-		hd->base.hmd->views[0].fov.angle_down = hd->base.hmd->views[1].fov.angle_down;
+		hd->base.hmd->distortion.fov[0].angle_up = hd->base.hmd->distortion.fov[1].angle_up;
+		hd->base.hmd->distortion.fov[0].angle_down = hd->base.hmd->distortion.fov[1].angle_down;
 
-		hd->base.hmd->views[0].fov.angle_left = -hd->base.hmd->views[1].fov.angle_right;
-		hd->base.hmd->views[0].fov.angle_right = -hd->base.hmd->views[1].fov.angle_left;
+		hd->base.hmd->distortion.fov[0].angle_left = -hd->base.hmd->distortion.fov[1].angle_right;
+		hd->base.hmd->distortion.fov[0].angle_right = -hd->base.hmd->distortion.fov[1].angle_left;
 	}
 
 	switch (variant) {
@@ -485,8 +460,23 @@ hdk_device_create(struct os_hid_device *dev, enum HDK_VARIANT variant)
 	// XRT_DISTORTION_MODEL_PANOTOOLS;
 	// }
 
+	int ret = os_thread_helper_init(&hd->imu_thread);
+	if (ret != 0) {
+		HDK_ERROR(hd, "Failed to start imu thread!");
+		hdk_device_destroy((struct xrt_device *)hd);
+		return 0;
+	}
+
 	if (hd->dev) {
-		int ret = os_thread_helper_start(&hd->imu_thread, hdk_device_run_thread, hd);
+		// Mutex before thread.
+		ret = os_mutex_init(&hd->lock);
+		if (ret != 0) {
+			HDK_ERROR(hd, "Failed to init mutex!");
+			hdk_device_destroy(&hd->base);
+			return NULL;
+		}
+
+		ret = os_thread_helper_start(&hd->imu_thread, hdk_device_run_thread, hd);
 		if (ret != 0) {
 			HDK_ERROR(hd, "Failed to start mainboard thread!");
 			hdk_device_destroy((struct xrt_device *)hd);
@@ -494,7 +484,7 @@ hdk_device_create(struct os_hid_device *dev, enum HDK_VARIANT variant)
 		}
 	}
 
-	if (hd->ll <= U_LOGGING_DEBUG) {
+	if (hd->log_level <= U_LOGGING_DEBUG) {
 		u_device_dump_config(&hd->base, __func__, hd->base.str);
 	}
 

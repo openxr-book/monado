@@ -12,7 +12,9 @@
             "enum": [
                 "uint32_t",
                 "int64_t",
-                "uint64_t"
+                "uint64_t",
+                "bool",
+                "float"
             ]
         },
         "aggregate": {

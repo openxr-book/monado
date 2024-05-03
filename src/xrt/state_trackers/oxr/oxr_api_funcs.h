@@ -1,9 +1,10 @@
-// Copyright 2018-2019, Collabora, Ltd.
+// Copyright 2018-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Header defining all API functions.
  * @author Jakob Bornecrantz <jakob@collabora.com>
+ * @author Korcan Hussein <korcan.hussein@collabora.com>
  * @ingroup oxr_api
  */
 
@@ -49,6 +50,12 @@ oxr_xrEnumerateApiLayerProperties(uint32_t propertyCapacityInput,
  * oxr_api_instance.c
  *
  */
+
+#ifdef OXR_HAVE_KHR_loader_init
+//! OpenXR API function @ep{xrInitializeLoaderKHR}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrInitializeLoaderKHR(const XrLoaderInitInfoBaseHeaderKHR *loaderInitInfo);
+#endif // OXR_HAVE_KHR_loader_init
 
 //! OpenXR API function @ep{xrEnumerateInstanceExtensionProperties}
 XRAPI_ATTR XrResult XRAPI_CALL
@@ -97,6 +104,18 @@ oxr_xrConvertTimespecTimeToTimeKHR(XrInstance instance, const struct timespec *t
 //! OpenXR API function @ep{xrConvertTimeToTimespecTimeKHR}
 XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrConvertTimeToTimespecTimeKHR(XrInstance instance, XrTime time, struct timespec *timespecTime);
+
+#ifdef XR_USE_PLATFORM_WIN32
+//! OpenXR API function @ep{xrConvertWin32PerformanceCounterToTimeKHR}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrConvertWin32PerformanceCounterToTimeKHR(XrInstance instance,
+                                              const LARGE_INTEGER *performanceCounter,
+                                              XrTime *time);
+
+//! OpenXR API function @ep{xrConvertTimeToWin32PerformanceCounterKHR}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrConvertTimeToWin32PerformanceCounterKHR(XrInstance instance, XrTime time, LARGE_INTEGER *performanceCounter);
+#endif // XR_USE_PLATFORM_WIN32
 
 /*
  *
@@ -218,6 +237,23 @@ oxr_xrCreateVulkanDeviceKHR(XrInstance instance,
                             VkResult *vulkanResult);
 #endif
 
+#ifdef XR_USE_GRAPHICS_API_D3D11
+
+//! OpenXR API function @ep{xrGetD3D11GraphicsRequirementsKHR}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrGetD3D11GraphicsRequirementsKHR(XrInstance instance,
+                                      XrSystemId systemId,
+                                      XrGraphicsRequirementsD3D11KHR *graphicsRequirements);
+#endif // XR_USE_GRAPHICS_API_D3D11
+
+#ifdef XR_USE_GRAPHICS_API_D3D12
+
+//! OpenXR API function @ep{xrGetD3D11GraphicsRequirementsKHR}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrGetD3D12GraphicsRequirementsKHR(XrInstance instance,
+                                      XrSystemId systemId,
+                                      XrGraphicsRequirementsD3D12KHR *graphicsRequirements);
+#endif // XR_USE_GRAPHICS_API_D3D12
 
 /*
  *
@@ -275,6 +311,12 @@ oxr_xrGetVisibilityMaskKHR(XrSession session,
                            XrVisibilityMaskTypeKHR visibilityMaskType,
                            XrVisibilityMaskKHR *visibilityMask);
 #endif // OXR_HAVE_KHR_visibility_mask
+
+#ifdef OXR_HAVE_KHR_android_thread_settings
+//! OpenXR API function @ep{xrSetAndroidApplicationThreadKHR}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrSetAndroidApplicationThreadKHR(XrSession session, XrAndroidThreadTypeKHR threadType, uint32_t threadId);
+#endif // OXR_HAVE_KHR_android_thread_settings
 
 #ifdef OXR_HAVE_EXT_performance_settings
 //! OpenXR API function @ep{xrPerfSettingsSetPerformanceLevelEXT}
@@ -508,6 +550,81 @@ XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrLocateHandJointsEXT(XrHandTrackerEXT handTracker,
                           const XrHandJointsLocateInfoEXT *locateInfo,
                           XrHandJointLocationsEXT *locations);
+
+//! OpenXR API function @ep{xrApplyForceFeedbackCurlMNDX}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrApplyForceFeedbackCurlMNDX(XrHandTrackerEXT handTracker, const XrForceFeedbackCurlApplyLocationsMNDX *locations);
+
+
+//! OpenXR API function @ep{xrEnumerateDisplayRefreshRatesFB}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrEnumerateDisplayRefreshRatesFB(XrSession session,
+                                     uint32_t displayRefreshRateCapacityInput,
+                                     uint32_t *displayRefreshRateCountOutput,
+                                     float *displayRefreshRates);
+
+//! OpenXR API function @ep{xrGetDisplayRefreshRateFB}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrGetDisplayRefreshRateFB(XrSession session, float *displayRefreshRate);
+
+//! OpenXR API function @ep{xrRequestDisplayRefreshRateFB}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrRequestDisplayRefreshRateFB(XrSession session, float displayRefreshRate);
+
+/*
+ *
+ * oxr_api_passthrough.c
+ *
+ */
+#ifdef OXR_HAVE_FB_passthrough
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrCreateGeometryInstanceFB(XrSession session,
+                               const XrGeometryInstanceCreateInfoFB *createInfo,
+                               XrGeometryInstanceFB *outGeometryInstance);
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrCreatePassthroughFB(XrSession session,
+                          const XrPassthroughCreateInfoFB *createInfo,
+                          XrPassthroughFB *outPassthrough);
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrCreatePassthroughLayerFB(XrSession session,
+                               const XrPassthroughLayerCreateInfoFB *createInfo,
+                               XrPassthroughLayerFB *outLayer);
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrDestroyGeometryInstanceFB(XrGeometryInstanceFB instance);
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrDestroyPassthroughFB(XrPassthroughFB passthrough);
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrDestroyPassthroughLayerFB(XrPassthroughLayerFB layer);
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrGeometryInstanceSetTransformFB(XrGeometryInstanceFB instance,
+                                     const XrGeometryInstanceTransformFB *transformation);
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrPassthroughLayerPauseFB(XrPassthroughLayerFB layer);
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrPassthroughLayerResumeFB(XrPassthroughLayerFB layer);
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrPassthroughLayerSetStyleFB(XrPassthroughLayerFB layer, const XrPassthroughStyleFB *style);
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrPassthroughPauseFB(XrPassthroughFB passthrough);
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrPassthroughStartFB(XrPassthroughFB passthrough);
+#endif
+
+#ifdef OXR_HAVE_HTC_facial_tracking
+//! OpenXR API function @ep{xrCreateFacialTrackerHTC}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrCreateFacialTrackerHTC(XrSession session,
+                             const XrFacialTrackerCreateInfoHTC *createInfo,
+                             XrFacialTrackerHTC *facialTracker);
+
+//! OpenXR API function @ep{xrDestroyFacialTrackerHTC}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrDestroyFacialTrackerHTC(XrFacialTrackerHTC facialTracker);
+
+//! OpenXR API function @ep{xrGetFacialExpressionsHTC}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrGetFacialExpressionsHTC(XrFacialTrackerHTC facialTracker, XrFacialExpressionsHTC *facialExpressions);
+#endif
 
 /*!
  * @}

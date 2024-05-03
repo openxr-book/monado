@@ -1,4 +1,4 @@
-// Copyright 2020, Collabora, Ltd.
+// Copyright 2020-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -8,6 +8,11 @@
  */
 
 #pragma once
+
+#include "xrt/xrt_compiler.h"
+
+#include <stdint.h>
+#include <stddef.h>
 
 
 #define U_MAX_FIFO_INDICES 16
@@ -24,9 +29,8 @@ u_index_fifo_is_empty(struct u_index_fifo *uif)
 {
 	if (uif->start == uif->end) {
 		return 1;
-	} else {
-		return 0;
 	}
+	return 0;
 }
 
 static inline int
@@ -34,9 +38,8 @@ u_index_fifo_is_full(struct u_index_fifo *uif)
 {
 	if (((uif->end + 1) % U_MAX_FIFO_INDICES) == uif->start) {
 		return 1;
-	} else {
-		return 0;
 	}
+	return 0;
 }
 
 static inline int

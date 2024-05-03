@@ -1,10 +1,11 @@
-// Copyright 2018-2019, Collabora, Ltd.
+// Copyright 2018-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  File for negotiating with the loader.
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @author Jakob Bornecrantz <jakob@collabora.com>
+ * @author Korcan Hussein <korcan.hussein@collabora.com>
  * @ingroup oxr_api
  */
 
@@ -13,6 +14,7 @@
 #include <string.h>
 
 #include "xrt/xrt_compiler.h"
+#include "xrt/xrt_config_os.h"
 #include "util/u_debug.h"
 
 #include "oxr_objects.h"
@@ -33,7 +35,7 @@ DEBUG_GET_ONCE_BOOL_OPTION(negotiate, "OXR_DEBUG_NEGOTIATE", false)
 	} while (false)
 
 
-#ifdef _WIN32
+#ifdef XRT_OS_WINDOWS
 __declspec(dllexport) XRAPI_ATTR XrResult XRAPI_CALL
     xrNegotiateLoaderRuntimeInterface(const XrNegotiateLoaderInfo *loaderInfo,
                                       XrNegotiateRuntimeRequest *runtimeRequest);
@@ -54,7 +56,7 @@ xrNegotiateLoaderRuntimeInterface(const XrNegotiateLoaderInfo *loaderInfo, XrNeg
 
 	// Make sure that we understand the structs passed to this function.
 	if (runtimeRequest->structType != XR_LOADER_INTERFACE_STRUCT_RUNTIME_REQUEST ||
-	    runtimeRequest->structVersion != XR_CURRENT_LOADER_RUNTIME_VERSION ||
+	    runtimeRequest->structVersion != XR_RUNTIME_INFO_STRUCT_VERSION ||
 	    runtimeRequest->structSize != sizeof(XrNegotiateRuntimeRequest)) {
 		PRINT_NEGOTIATE("\truntimeRequest bad!\n");
 		return XR_ERROR_INITIALIZATION_FAILED;
@@ -83,7 +85,7 @@ xrNegotiateLoaderRuntimeInterface(const XrNegotiateLoaderInfo *loaderInfo, XrNeg
 	return XR_SUCCESS;
 }
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrEnumerateApiLayerProperties(uint32_t propertyCapacityInput,
                                   uint32_t *propertyCountOutput,
                                   XrApiLayerProperties *properties)
@@ -212,6 +214,15 @@ handle_non_null(struct oxr_instance *inst, struct oxr_logger *log, const char *n
 	ENTRY_IF_EXT(xrConvertTimeToTimespecTimeKHR, KHR_convert_timespec_time);
 #endif // OXR_HAVE_KHR_convert_timespec_time
 
+#ifdef OXR_HAVE_KHR_win32_convert_performance_counter_time
+	ENTRY_IF_EXT(xrConvertWin32PerformanceCounterToTimeKHR, KHR_win32_convert_performance_counter_time);
+	ENTRY_IF_EXT(xrConvertTimeToWin32PerformanceCounterKHR, KHR_win32_convert_performance_counter_time);
+#endif // OXR_HAVE_KHR_win32_convert_performance_counter_time
+
+#ifdef OXR_HAVE_KHR_android_thread_settings
+	ENTRY_IF_EXT(xrSetAndroidApplicationThreadKHR, KHR_android_thread_settings);
+#endif // XR_HAVE_KHR_android_thread_settings
+
 #ifdef OXR_HAVE_EXT_performance_settings
 	ENTRY_IF_EXT(xrPerfSettingsSetPerformanceLevelEXT, EXT_performance_settings);
 #endif // OXR_HAVE_EXT_performance_settings
@@ -220,11 +231,37 @@ handle_non_null(struct oxr_instance *inst, struct oxr_logger *log, const char *n
 	ENTRY_IF_EXT(xrThermalGetTemperatureTrendEXT, EXT_thermal_query);
 #endif // OXR_HAVE_EXT_thermal_query
 
+#ifdef OXR_HAVE_EXT_hand_tracking
 	ENTRY_IF_EXT(xrCreateHandTrackerEXT, EXT_hand_tracking);
 	ENTRY_IF_EXT(xrDestroyHandTrackerEXT, EXT_hand_tracking);
 	ENTRY_IF_EXT(xrLocateHandJointsEXT, EXT_hand_tracking);
+#endif
 
-#if 0
+#ifdef OXR_HAVE_MNDX_force_feedback_curl
+	ENTRY_IF_EXT(xrApplyForceFeedbackCurlMNDX, MNDX_force_feedback_curl);
+#endif
+
+#ifdef OXR_HAVE_FB_display_refresh_rate
+	ENTRY_IF_EXT(xrEnumerateDisplayRefreshRatesFB, FB_display_refresh_rate);
+	ENTRY_IF_EXT(xrGetDisplayRefreshRateFB, FB_display_refresh_rate);
+	ENTRY_IF_EXT(xrRequestDisplayRefreshRateFB, FB_display_refresh_rate);
+#endif
+
+#ifdef OXR_HAVE_FB_passthrough
+	ENTRY_IF_EXT(xrCreateGeometryInstanceFB, FB_passthrough);
+	ENTRY_IF_EXT(xrCreatePassthroughFB, FB_passthrough);
+	ENTRY_IF_EXT(xrCreatePassthroughLayerFB, FB_passthrough);
+	ENTRY_IF_EXT(xrDestroyGeometryInstanceFB, FB_passthrough);
+	ENTRY_IF_EXT(xrDestroyPassthroughFB, FB_passthrough);
+	ENTRY_IF_EXT(xrDestroyPassthroughLayerFB, FB_passthrough);
+	ENTRY_IF_EXT(xrGeometryInstanceSetTransformFB, FB_passthrough);
+	ENTRY_IF_EXT(xrPassthroughLayerPauseFB, FB_passthrough);
+	ENTRY_IF_EXT(xrPassthroughLayerResumeFB, FB_passthrough);
+	ENTRY_IF_EXT(xrPassthroughLayerSetStyleFB, FB_passthrough);
+	ENTRY_IF_EXT(xrPassthroughPauseFB, FB_passthrough);
+	ENTRY_IF_EXT(xrPassthroughStartFB, FB_passthrough);
+#endif // OXR_HAVE_FB_passthrough
+
 #ifdef OXR_HAVE_EXT_debug_utils
 	ENTRY_IF_EXT(xrSetDebugUtilsObjectNameEXT, EXT_debug_utils);
 	ENTRY_IF_EXT(xrCreateDebugUtilsMessengerEXT, EXT_debug_utils);
@@ -234,7 +271,6 @@ handle_non_null(struct oxr_instance *inst, struct oxr_logger *log, const char *n
 	ENTRY_IF_EXT(xrSessionEndDebugUtilsLabelRegionEXT, EXT_debug_utils);
 	ENTRY_IF_EXT(xrSessionInsertDebugUtilsLabelEXT, EXT_debug_utils);
 #endif // OXR_HAVE_EXT_debug_utils
-#endif
 
 #ifdef OXR_HAVE_KHR_opengl_enable
 	ENTRY_IF_EXT(xrGetOpenGLGraphicsRequirementsKHR, KHR_opengl_enable);
@@ -243,6 +279,10 @@ handle_non_null(struct oxr_instance *inst, struct oxr_logger *log, const char *n
 #ifdef OXR_HAVE_KHR_opengl_es_enable
 	ENTRY_IF_EXT(xrGetOpenGLESGraphicsRequirementsKHR, KHR_opengl_es_enable);
 #endif // OXR_HAVE_KHR_opengl_es_enable
+
+#ifdef OXR_HAVE_KHR_visibility_mask
+	ENTRY_IF_EXT(xrGetVisibilityMaskKHR, KHR_visibility_mask);
+#endif // OXR_HAVE_KHR_visibility_mask
 
 #ifdef OXR_HAVE_KHR_vulkan_enable
 	ENTRY_IF_EXT(xrGetVulkanInstanceExtensionsKHR, KHR_vulkan_enable);
@@ -257,6 +297,20 @@ handle_non_null(struct oxr_instance *inst, struct oxr_logger *log, const char *n
 	ENTRY_IF_EXT(xrGetVulkanGraphicsRequirements2KHR, KHR_vulkan_enable2);
 	ENTRY_IF_EXT(xrCreateVulkanInstanceKHR, KHR_vulkan_enable2);
 #endif // OXR_HAVE_KHR_vulkan_enable2
+
+#ifdef OXR_HAVE_KHR_D3D11_enable
+	ENTRY_IF_EXT(xrGetD3D11GraphicsRequirementsKHR, KHR_D3D11_enable);
+#endif // OXR_HAVE_KHR_D3D11_enable
+
+#ifdef OXR_HAVE_KHR_D3D12_enable
+	ENTRY_IF_EXT(xrGetD3D12GraphicsRequirementsKHR, KHR_D3D12_enable);
+#endif // OXR_HAVE_KHR_D3D12_enable
+
+#ifdef OXR_HAVE_HTC_facial_tracking
+	ENTRY_IF_EXT(xrCreateFacialTrackerHTC, HTC_facial_tracking);
+	ENTRY_IF_EXT(xrDestroyFacialTrackerHTC, HTC_facial_tracking);
+	ENTRY_IF_EXT(xrGetFacialExpressionsHTC, HTC_facial_tracking);
+#endif
 
 	/*
 	 * Not logging here because there's no need to loudly advertise
@@ -276,6 +330,10 @@ handle_null(struct oxr_logger *log, const char *name, PFN_xrVoidFunction *out_fu
 	ENTRY(xrEnumerateInstanceExtensionProperties);
 	ENTRY(xrEnumerateApiLayerProperties);
 
+#ifdef OXR_HAVE_KHR_loader_init
+	ENTRY(xrInitializeLoaderKHR);
+#endif // OXR_HAVE_KHR_loader_init
+
 	/*
 	 * This is fine to log, since there should not be other
 	 * null-instance calls.
@@ -283,7 +341,7 @@ handle_null(struct oxr_logger *log, const char *name, PFN_xrVoidFunction *out_fu
 	return oxr_error(log, XR_ERROR_FUNCTION_UNSUPPORTED, "(name = \"%s\")", name);
 }
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrGetInstanceProcAddr(XrInstance instance, const char *name, PFN_xrVoidFunction *function)
 {
 	struct oxr_logger log;

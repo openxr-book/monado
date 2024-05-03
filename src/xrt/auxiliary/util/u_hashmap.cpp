@@ -4,6 +4,7 @@
  * @file
  * @brief  Hashmap for integer values header.
  * @author Jakob Bornecrantz <jakob@collabora.com>
+ * @author Korcan Hussein <korcan.hussein@collabora.com>
  * @ingroup aux_util
  */
 
@@ -34,7 +35,7 @@ struct u_hashmap_int
 extern "C" int
 u_hashmap_int_create(struct u_hashmap_int **out_hashmap_int)
 {
-	auto hs = new u_hashmap_int;
+	auto *hs = new u_hashmap_int;
 	*out_hashmap_int = hs;
 	return 0;
 }
@@ -79,6 +80,16 @@ u_hashmap_int_empty(const struct u_hashmap_int *hmi)
 	return hmi->map.empty();
 }
 
+void
+u_hashmap_int_for_each(const struct u_hashmap_int *hmi, u_hashmap_int_foreach_callback cb, void *priv_ctx)
+{
+	if (hmi == NULL || cb == NULL)
+		return;
+	for (const auto &keyval : hmi->map) {
+		cb(keyval.first, keyval.second, priv_ctx);
+	}
+}
+
 extern "C" void
 u_hashmap_int_clear_and_call_for_each(struct u_hashmap_int *hmi, u_hashmap_int_callback cb, void *priv)
 {
@@ -91,7 +102,7 @@ u_hashmap_int_clear_and_call_for_each(struct u_hashmap_int *hmi, u_hashmap_int_c
 
 	hmi->map.clear();
 
-	for (auto n : tmp) {
+	for (auto *n : tmp) {
 		cb(n, priv);
 	}
 }

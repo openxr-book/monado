@@ -1,47 +1,68 @@
-# Copyright 2018-2020, Collabora, Ltd.
+# Copyright 2018-2024, Collabora, Ltd.
 # SPDX-License-Identifier: BSL-1.0
 
 cmake_minimum_required(VERSION 3.10.2)
-project(XRT VERSION 21.0.0)
+project(
+	XRT
+	VERSION 21.0.0
+	LANGUAGES C CXX
+	DESCRIPTION "Monado(XRT) by Collabora et al"
+	)
 
 # CMake 3.11 introduced CMP0072 - Prefer GLVND
 if(POLICY CMP0072)
 	cmake_policy(SET CMP0072 NEW)
 endif()
 
-option(XRT_OPENXR_INSTALL_ABSOLUTE_RUNTIME_PATH "Use the absolute path to the runtime in the installed manifest, rather than a bare filename." ON)
-option(XRT_OPENXR_INSTALL_ACTIVE_RUNTIME "Make Monado the default OpenXR runtime on install" ON)
+set(_default_absolute ON)
+if(WIN32)
+	set(_default_absolute OFF)
+endif()
+option(
+	XRT_OPENXR_INSTALL_ABSOLUTE_RUNTIME_PATH
+	"Use the absolute path to the runtime in the installed manifest, rather than a bare filename."
+	OFF
+	)
+option(
+	XRT_OPENXR_INSTALL_MANIFEST_RELATIVE_RUNTIME_PATH
+	"If XRT_OPENXR_INSTALL_ABSOLUTE_RUNTIME_PATH is off, use a relative path from the manifest to the runtime."
+	ON
+	)
+if(NOT WIN32 AND NOT ANDROID)
+	option(
+		XRT_OPENXR_INSTALL_ACTIVE_RUNTIME
+		"Make Monado the system-wide default OpenXR runtime on install (requires superuser permissions)"
+		OFF
+		)
+endif()
+
+# We use C11
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+
+# We use C++17
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# So that clangd/Intellisense/Sourcetrail know how to parse our code.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 ###
 # Dependencies
 ###
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
-include(CMakeDependentOption)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/sanitizers")
+include(OptionWithDeps)
 include(SPIR-V)
 include(GNUInstallDirs)
-include(GetGitRevisionDescription)
-git_describe(GIT_DESC "--always")
+if(NOT GIT_DESC)
+	include(GetGitRevisionDescription)
+	git_describe(GIT_DESC "--always")
+endif()
 if(NOT ${CMAKE_VERSION} VERSION_LESS 3.9)
 	include(CheckIPOSupported)
 	check_ipo_supported(RESULT HAS_IPO)
 endif()
-
-# Redundant mention of version is required because module defaults to looking for 2.91-compatible,
-# which the config file for a 3.x says it's not compatible with.
-find_package(Eigen3 3 REQUIRED)
-find_package(Vulkan)
-find_package(EGL)
-find_package(HIDAPI)
-find_package(OpenHMD)
-find_package(OpenCV COMPONENTS core calib3d highgui imgproc imgcodecs features2d video CONFIG)
-find_package(Libusb1)
-find_package(JPEG)
-find_package(realsense2 CONFIG)
-find_package(SDL2 CONFIG)
-find_package(ZLIB)
-find_package(cJSON)
-find_package(Systemd)
-find_package(OpenGLES COMPONENTS V3)
 
 # Android SDK doesn't look for 3.8 and 3.9, which is what new distros ship with.
 set(Python_ADDITIONAL_VERSIONS 3.8 3.9)
@@ -49,37 +70,92 @@ if(NOT CMAKE_VERSION VERSION_LESS 3.12)
 	find_package(Python3 REQUIRED Interpreter)
 	set(PYTHON_EXECUTABLE Python3::Interpreter)
 else()
-	find_package(PythonInterp REQUIRED VERSION 3)
+	find_program(PYTHON_EXECUTABLE python3)
 	if(PYTHON_EXECUTABLE MATCHES "WindowsApps")
-		# If you hit this error, you will have to install Python 3 or try harder to tell CMake where it is.
-		message(FATAL_ERROR "Found WindowsApps alias for Python. Make sure Python3 is installed, then choose 'Manage App Execution Aliases' in Start and disable the aliases for Python.")
+		# If you receive this error, you will have to install Python 3 or try harder to tell CMake where it is.
+		message(
+			FATAL_ERROR
+				"Found WindowsApps alias for Python. Make sure Python3 is installed, then choose 'Manage App Execution Aliases' in Start and disable the aliases for Python."
+			)
 	endif()
 endif()
 
+# Redundant mention of version is required because module defaults to looking for 2.91-compatible,
+# which the config file for a 3.x says it's not compatible with.
+find_package(Eigen3 3 REQUIRED)
+find_package(Vulkan MODULE)
+find_package(HIDAPI MODULE)
+find_package(bluetooth MODULE)
+find_package(OpenHMD MODULE)
+find_package(
+	OpenCV
+	COMPONENTS
+		core
+		calib3d
+		highgui
+		imgproc
+		imgcodecs
+		features2d
+		video
+		CONFIG
+	)
+find_package(Libusb1 MODULE)
+find_package(JPEG MODULE)
+find_package(realsense2 CONFIG)
+find_package(depthai CONFIG)
+find_package(SDL2 CONFIG)
+find_package(ZLIB MODULE)
+find_package(cJSON MODULE)
+find_package(LeapV2 MODULE)
+find_package(LeapSDK 5 CONFIG)
+find_package(ONNXRuntime MODULE)
+if(NOT WIN32)
+	find_package(EGL MODULE)
+	find_package(Percetto MODULE)
+	find_package(Systemd MODULE)
+	find_package(OpenGLES MODULE COMPONENTS V3)
+	find_library(RT_LIBRARY rt)
+endif()
+if(NOT ANDROID AND NOT MSVC)
+	find_package(PkgConfig MODULE)
+endif()
+if(ANDROID)
+	find_library(ANDROID_LIBRARY android)
+	find_library(ANDROID_LOG_LIBRARY log)
+endif()
+if(MSVC)
+	find_package(wil CONFIG)
+	find_library(D3D11_LIBRARY d3d11)
+	find_library(D3D12_LIBRARY d3d12)
+	find_library(DXGI_LIBRARY dxgi)
+	find_library(WINDOWSAPP_LIBRARY WindowsApp)
+endif()
+
+#https://github.com/arsenm/sanitizers-cmake
+find_package(Sanitizers MODULE)
+
 add_library(xrt-pthreads INTERFACE)
-if(WIN32)
+if(MSVC)
 	find_package(pthreads_windows REQUIRED)
 	target_link_libraries(xrt-pthreads INTERFACE PThreads4W::PThreads4W_CXXEXC)
 else()
 	set(CMAKE_THREAD_PREFER_PTHREAD ON)
 	find_package(Threads)
 	target_link_libraries(xrt-pthreads INTERFACE Threads::Threads)
+	target_compile_definitions(xrt-pthreads INTERFACE _GNU_SOURCE)
 endif()
 
-if(NOT ANDROID)
+if(PKGCONFIG_FOUND AND NOT ANDROID)
 	# @TODO Turn into a find_package LIBUVC file.
 	pkg_check_modules(LIBUVC libuvc)
-
-	# @TODO Turn into a find_package FFMPEG file.
-	pkg_check_modules(FFMPEG libavcodec)
 endif()
 
-
+find_package(OpenGL)
+set(OPENGL_WITHOUT_GLX_FOUND ${OPENGL_FOUND})
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 	set(XRT_HAVE_LINUX YES)
 	# Compositor backend
 	find_package(X11)
-	find_package(PkgConfig)
 
 	find_package(udev REQUIRED)
 	set(XRT_HAVE_V4L2 TRUE)
@@ -91,54 +167,239 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 		pkg_search_module(WAYLAND wayland-client)
 		pkg_search_module(WAYLAND_SCANNER wayland-scanner)
 		pkg_search_module(WAYLAND_PROTOCOLS wayland-protocols)
+		pkg_search_module(LIBDRM IMPORTED_TARGET libdrm)
 	endif()
 	find_package(OpenGL COMPONENTS GLX)
 	pkg_search_module(DBUS dbus-1)
+	pkg_search_module(LIBBSD libbsd)
+endif()
 
-	pkg_check_modules(GST
-		gstreamer-1.0
-		gstreamer-app-1.0
-		gstreamer-video-1.0
-	)
-
+if(XRT_HAVE_LINUX OR MINGW)
+	pkg_check_modules(GST gstreamer-1.0 gstreamer-app-1.0 gstreamer-video-1.0)
 	pkg_check_modules(SURVIVE IMPORTED_TARGET survive)
-else()
-	find_package(OpenGL)
 endif()
 
-find_library(RT_LIBRARY rt)
-if(ANDROID)
-	find_library(ANDROID_LIBRARY android)
-	find_library(ANDROID_LOG_LIBRARY log)
+# Find openvr library
+find_library(OPENVR_LIBRARIES NAMES openvr_api)
+if(OPENVR_LIBRARIES)
+	set(OPENVR_FOUND on)
+	message(STATUS "Found OpenVR: " ${OPENVR_LIBRARIES})
+else()
+	set(OPENVR_FOUND off)
+	message(STATUS "OpenVR not found")
 endif()
+
+# ILLIXR
+set(ILLIXR_PATH
+    ""
+    CACHE PATH "Path to ILLIXR headers"
+	)
 
 # This one is named differently because that's what CTest uses
 option(BUILD_TESTING "Enable building of the test suite?" ON)
 
-option(XRT_FEATURE_COLOR_LOG "Enable logging in color on supported platforms" ON)
+# Check if Steam's root folder exists
+if(EXISTS "$ENV{HOME}/.steam/root")
+	set(XRT_HAVE_STEAM YES)
+endif()
 
-cmake_dependent_option(CMAKE_INTERPROCEDURAL_OPTIMIZATION "Enable inter-procedural (link-time) optimization" OFF "HAS_IPO" OFF)
-cmake_dependent_option(XRT_HAVE_WAYLAND "Enable Wayland support" ON "WAYLAND_FOUND AND WAYLAND_SCANNER_FOUND AND WAYLAND_PROTOCOLS_FOUND" OFF)
-cmake_dependent_option(XRT_HAVE_XLIB "Enable xlib support" ON "X11_FOUND" OFF)
-cmake_dependent_option(XRT_HAVE_XRANDR "Enable xlib-xrandr support" ON "XRANDR_FOUND" OFF)
-cmake_dependent_option(XRT_HAVE_XCB "Enable xcb support" ON "XCB_FOUND" OFF)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+	set(XRT_HAVE_INTERNAL_HID ON)
+endif()
 
-cmake_dependent_option(XRT_HAVE_VULKAN "Enable Vulkan Graphics API support (also needed for compositor)" ON "VULKAN_FOUND" OFF)
-cmake_dependent_option(XRT_HAVE_OPENGL "Enable OpenGL Graphics API support" ON "OPENGL_FOUND" OFF)
-cmake_dependent_option(XRT_HAVE_OPENGLES "Enable OpenGL-ES Graphics API support" ON "OpenGLES_FOUND" OFF)
-cmake_dependent_option(XRT_HAVE_EGL "Enable OpenGL on EGL Graphics API support" ON "EGL_FOUND; XRT_HAVE_OPENGL OR XRT_HAVE_OPENGLES" OFF)
-cmake_dependent_option(XRT_HAVE_DBUS "Enable dbus support (for BLE support)" ON "DBUS_FOUND" OFF)
-cmake_dependent_option(XRT_HAVE_VF "Enable gstreamer support (for video file support)" ON "GST_FOUND" OFF)
-cmake_dependent_option(XRT_FEATURE_COMPOSITOR_MAIN "Build main compositor host functionality" ON "XRT_HAVE_VULKAN; XRT_HAVE_WAYLAND OR XRT_HAVE_XCB OR ANDROID OR WIN32" OFF)
-cmake_dependent_option(XRT_FEATURE_OPENXR "Build OpenXR runtime target" ON "XRT_FEATURE_COMPOSITOR_MAIN" OFF)
-cmake_dependent_option(XRT_FEATURE_SERVICE "Enable separate service module for OpenXR runtime" ON "NOT WIN32" OFF)
-cmake_dependent_option(XRT_HAVE_SYSTEMD "Enable systemd support (for socket activation of service)" ON "Systemd_FOUND AND XRT_FEATURE_SERVICE" OFF)
-cmake_dependent_option(XRT_INSTALL_SYSTEMD_UNIT_FILES "Install user unit files for systemd socket activation on installation" ON "XRT_HAVE_SYSTEMD" OFF)
-cmake_dependent_option(XRT_INSTALL_ABSOLUTE_SYSTEMD_UNIT_FILES "Use an absolute path to monado-system in installed user unit files for systemd socket activation" ON "XRT_INSTALL_SYSTEMD_UNIT_FILES" OFF)
-cmake_dependent_option(XRT_FEATURE_STEAMVR_PLUGIN "Build SteamVR plugin" ON "NOT ANDROID" OFF)
+# cmake-format: off
+option_with_deps(CMAKE_INTERPROCEDURAL_OPTIMIZATION "Enable inter-procedural (link-time) optimization" DEFAULT OFF DEPENDS HAS_IPO)
+option(XRT_HAVE_TRACY "Enable Tracy support for tracing, make sure to set XRT_FEATURE_TRACING as well." OFF)
 
+# Graphics deps to use (sorted in each group, groups thematic and ordered to handle internal deps: e.g. EGL and SDL2 need OpenGL/GLES)
+option_with_deps(XRT_HAVE_OPENGL "Enable OpenGL Graphics API support" DEPENDS OPENGL_WITHOUT_GLX_FOUND)
+option_with_deps(XRT_HAVE_OPENGL_GLX "Enable OpenGL Graphics API support on X11 (GLX)" DEPENDS XRT_HAVE_OPENGL OpenGL_GLX_FOUND)
+option_with_deps(XRT_HAVE_OPENGLES "Enable OpenGL-ES Graphics API support" DEPENDS OpenGLES_FOUND)
+
+option_with_deps(XRT_HAVE_EGL "Enable OpenGL(-ES) on EGL Graphics API support" DEPENDS EGL_FOUND "XRT_HAVE_OPENGL OR XRT_HAVE_OPENGLES")
+option_with_deps(XRT_HAVE_SDL2 "Enable use of SDL2" DEPENDS SDL2_FOUND XRT_HAVE_OPENGL)
+
+option_with_deps(XRT_HAVE_DXGI "Use DXGI APIs for some Windows-specific functionality" DEPENDS DXGI_LIBRARY)
+option_with_deps(XRT_HAVE_WIL "Use WIL for Windows-specific functionality" DEPENDS wil_FOUND)
+option_with_deps(XRT_HAVE_WINRT "Use WinRT APIs for some Windows-specific functionality" DEPENDS WINDOWSAPP_LIBRARY)
+
+option_with_deps(XRT_HAVE_VULKAN "Enable Vulkan Graphics API support (also needed for compositor)" DEPENDS VULKAN_FOUND)
+option_with_deps(XRT_HAVE_D3D11 "Enable Direct3D 11 Graphics API support" DEPENDS D3D11_LIBRARY XRT_HAVE_VULKAN XRT_HAVE_DXGI XRT_HAVE_WIL)
+option_with_deps(XRT_HAVE_D3D12 "Enable Direct3D 12 Graphics API support" DEPENDS D3D12_LIBRARY XRT_HAVE_D3D11 XRT_HAVE_VULKAN XRT_HAVE_DXGI XRT_HAVE_WIL)
+option_with_deps(XRT_HAVE_WAYLAND "Enable Wayland support" DEPENDS WAYLAND_FOUND WAYLAND_SCANNER_FOUND WAYLAND_PROTOCOLS_FOUND LIBDRM_FOUND)
+option_with_deps(XRT_HAVE_WAYLAND_DIRECT "Enable Wayland direct support" DEPENDS XRT_HAVE_WAYLAND LIBDRM_FOUND "WAYLAND_PROTOCOLS_VERSION VERSION_GREATER_EQUAL 1.22")
+option_with_deps(XRT_HAVE_XCB "Enable xcb support" DEPENDS XCB_FOUND)
+option_with_deps(XRT_HAVE_XLIB "Enable xlib support" DEPENDS X11_FOUND)
+option_with_deps(XRT_HAVE_XRANDR "Enable xlib-xrandr support" DEPENDS XRANDR_FOUND)
+
+# System deps to use (sorted)
+option_with_deps(XRT_HAVE_OPENCV "Enable OpenCV backend" DEPENDS OpenCV_FOUND)
+option_with_deps(XRT_HAVE_DBUS "Enable dbus support (for BLE support)" DEPENDS DBUS_FOUND)
+option_with_deps(XRT_HAVE_LIBBSD "Enable libbsd support" DEPENDS LIBBSD_FOUND)
+option_with_deps(XRT_HAVE_LIBUDEV "Enable libudev (used for device probing on Linux)" DEPENDS UDEV_FOUND)
+option_with_deps(XRT_HAVE_PERCETTO "Enable percetto support" DEPENDS PERCETTO_FOUND)
+option_with_deps(XRT_HAVE_SYSTEMD "Enable systemd support" DEPENDS Systemd_FOUND)
+
+# Only use system cJSON if it includes https://github.com/DaveGamble/cJSON/pull/377
+option_with_deps(XRT_HAVE_SYSTEM_CJSON "Enable cJSON from system, instead of bundled source" DEPENDS CJSON_FOUND "cJSON_VERSION VERSION_GREATER_EQUAL 1.7.13")
+
+# Hand tracking deps
+option_with_deps(XRT_HAVE_ONNXRUNTIME "Enable ONNX runtime support" DEPENDS ONNXRUNTIME_FOUND)
+
+option(XRT_MODULE_IPC "Enable the build of the IPC layer" ON)
+option(XRT_MODULE_COMPOSITOR "Enable the compositor at all" ON)
+option_with_deps(XRT_MODULE_COMPOSITOR_MAIN "Build main compositor host functionality" DEPENDS
+	XRT_MODULE_COMPOSITOR
+	XRT_HAVE_VULKAN
+	"XRT_HAVE_WAYLAND OR XRT_HAVE_XCB OR ANDROID OR WIN32"
+	)
+option_with_deps(XRT_MODULE_COMPOSITOR_NULL "Build testing null compositor" DEPENDS XRT_MODULE_COMPOSITOR XRT_HAVE_VULKAN)
+option_with_deps(XRT_MODULE_MERCURY_HANDTRACKING "Enable Mercury hand tracking" DEPENDS XRT_HAVE_OPENCV XRT_HAVE_ONNXRUNTIME)
+
+option(XRT_MODULE_MONADO_CLI "Build monado-cli" ON)
+option_with_deps(XRT_MODULE_MONADO_GUI "Build monado-gui" DEPENDS XRT_HAVE_SDL2)
+option(XRT_MODULE_AUX_VIVE "Build aux_vive" ON)
+
+# Feature configuration (sorted)
+option_with_deps(XRT_FEATURE_COLOR_LOG "Enable logging in color on supported platforms" DEPENDS XRT_HAVE_LINUX)
+option_with_deps(XRT_FEATURE_OPENXR "Build OpenXR runtime target" DEPENDS "XRT_MODULE_COMPOSITOR_MAIN OR XRT_MODULE_COMPOSITOR_NULL")
+set(XRT_FEATURE_OPENXR_DEBUG_UTILS OFF) # Has never been enabled
+option_with_deps(XRT_FEATURE_RENDERDOC "Enable RenderDoc API" DEPENDS "RT_LIBRARY OR WIN32 OR ANDROID")
+option_with_deps(XRT_FEATURE_SERVICE "Enable separate service module for OpenXR runtime" DEPENDS XRT_MODULE_IPC XRT_FEATURE_OPENXR)
+option_with_deps(XRT_FEATURE_SERVICE_SYSTEMD "Enable systemd socket activation of the service" DEPENDS XRT_HAVE_SYSTEMD XRT_FEATURE_SERVICE)
+option_with_deps(XRT_FEATURE_SLAM "Enable SLAM tracking support" DEPENDS XRT_HAVE_OPENCV XRT_HAVE_LINUX)
+option(XRT_FEATURE_SSE2 "Build using SSE2 instructions, if building for 32-bit x86" ON)
+option_with_deps(XRT_FEATURE_STEAMVR_PLUGIN "Build SteamVR plugin" DEPENDS "NOT ANDROID")
+option_with_deps(XRT_FEATURE_TRACING "Enable debug tracing on supported platforms" DEFAULT OFF DEPENDS "XRT_HAVE_PERCETTO OR XRT_HAVE_TRACY")
+option_with_deps(XRT_FEATURE_WINDOW_PEEK "Enable a window that displays the content of the HMD on screen" DEPENDS XRT_HAVE_SDL2)
+option_with_deps(XRT_FEATURE_DEBUG_GUI "Enable debug window to be used" DEPENDS XRT_HAVE_SDL2)
+
+if (XRT_FEATURE_SERVICE)
+	# Disable the client debug gui by default for out-of-proc -
+	# too many clients have problems with depending on SDL/GStreamer/etc and we rarely use it in this configuration
+	option_with_deps(XRT_FEATURE_CLIENT_DEBUG_GUI "Allow clients to have their own instances of the debug gui" DEFAULT OFF DEPENDS XRT_FEATURE_DEBUG_GUI)
+else()
+	# Enable the client debug gui by default for in-proc -
+	# In in-proc, the client debug gui is the same as the server debug gui, and we use it a lot in this configuration
+	option_with_deps(XRT_FEATURE_CLIENT_DEBUG_GUI "Allow clients to have their own instances of the debug gui" DEFAULT ON DEPENDS XRT_FEATURE_DEBUG_GUI)
+endif()
+
+# systemd detailed config
+option_with_deps(XRT_INSTALL_SYSTEMD_UNIT_FILES "Install user unit files for systemd socket activation on installation" DEPENDS XRT_HAVE_SYSTEMD)
+option_with_deps(XRT_INSTALL_ABSOLUTE_SYSTEMD_UNIT_FILES "Use an absolute path to monado-system in installed user unit files for systemd socket activation" DEPENDS XRT_HAVE_SYSTEMD)
+
+# Driver deps to use (sorted, though there are some internal dependencies)
+option_with_deps(XRT_HAVE_BLUETOOTH "Enable Bluetooth (legacy, non-ble)" DEPENDS BLUETOOTH_FOUND)
+option_with_deps(XRT_HAVE_GST "Enable gstreamer" DEPENDS GST_FOUND)
+option_with_deps(XRT_HAVE_HIDAPI "Enable libhidapi (used for PSVR)" DEPENDS HIDAPI_FOUND)
+option_with_deps(XRT_HAVE_JPEG "Enable jpeg code (used for some video drivers)" DEPENDS JPEG_FOUND)
+option_with_deps(XRT_HAVE_LIBUSB "Enable libusb (used for most drivers)" DEPENDS LIBUSB1_FOUND)
+option_with_deps(XRT_HAVE_LIBUVC "Enable libuvc video driver" DEPENDS LIBUVC_FOUND XRT_HAVE_LIBUSB)
+option_with_deps(XRT_HAVE_REALSENSE "Enable RealSense support" DEPENDS realsense2_FOUND)
+option_with_deps(XRT_HAVE_OPENVR "Enable OpenVR support" DEPENDS OPENVR_FOUND)
+
+# Drivers to build (sorted)
+option_with_deps(XRT_BUILD_DRIVER_ANDROID "Enable Android sensors driver" DEPENDS ANDROID)
+option_with_deps(XRT_BUILD_DRIVER_ARDUINO "Enable Arduino input device with BLE" DEPENDS XRT_HAVE_DBUS)
+option_with_deps(XRT_BUILD_DRIVER_DAYDREAM "Enable the Google Daydream View controller driver (BLE)" DEPENDS XRT_HAVE_DBUS)
+option_with_deps(XRT_BUILD_DRIVER_DEPTHAI "DepthAI" DEPENDS depthai_FOUND)
+option_with_deps(XRT_BUILD_DRIVER_EUROC "Enable EuRoC dataset driver for SLAM evaluation" DEPENDS XRT_HAVE_OPENCV "NOT MSVC")
+option_with_deps(XRT_BUILD_DRIVER_HANDTRACKING "Enable Camera Hand Tracking driver" DEPENDS XRT_MODULE_MERCURY_HANDTRACKING)
+option_with_deps(XRT_BUILD_DRIVER_TWRAP "Enable Tracking Wrapper drivers" ON) # only depends on imu
+option_with_deps(XRT_BUILD_DRIVER_HDK "Enable HDK driver" DEPENDS XRT_HAVE_INTERNAL_HID)
+option_with_deps(XRT_BUILD_DRIVER_HYDRA "Enable Hydra driver" DEPENDS XRT_HAVE_INTERNAL_HID)
+option_with_deps(XRT_BUILD_DRIVER_ILLIXR "Enable ILLIXR driver" DEPENDS ILLIXR_PATH)
+option(XRT_BUILD_DRIVER_NS "Enable North Star driver" ON)
+option_with_deps(XRT_BUILD_DRIVER_OHMD "Enable OpenHMD driver" DEPENDS OPENHMD_FOUND)
+option_with_deps(XRT_BUILD_DRIVER_OPENGLOVES "Enable OpenGloves driver" DEPENDS XRT_HAVE_LIBUDEV XRT_HAVE_BLUETOOTH)
+option_with_deps(XRT_BUILD_DRIVER_PSMV "Enable Playstation Move driver" DEPENDS XRT_HAVE_INTERNAL_HID "NOT MSVC")
+option_with_deps(XRT_BUILD_DRIVER_PSSENSE "Enable PlayStation Sense driver" DEPENDS XRT_HAVE_INTERNAL_HID)
+option_with_deps(XRT_BUILD_DRIVER_PSVR "Enable PSVR HMD driver" DEPENDS XRT_HAVE_HIDAPI)
+option_with_deps(XRT_BUILD_DRIVER_QWERTY "Enable Qwerty driver" DEPENDS XRT_HAVE_SDL2)
+option_with_deps(XRT_BUILD_DRIVER_REALSENSE "Enable RealSense device driver" DEPENDS XRT_HAVE_REALSENSE)
+option_with_deps(XRT_BUILD_DRIVER_REMOTE "Enable remote debugging driver" DEPENDS "XRT_HAVE_LINUX OR ANDROID OR WIN32")
+option_with_deps(XRT_BUILD_DRIVER_RIFT_S "Enable Oculus Rift S device driver" DEPENDS XRT_HAVE_HIDAPI XRT_HAVE_V4L2)
+option_with_deps(XRT_BUILD_DRIVER_ROKID "Enable Rokid driver" DEPENDS "XRT_HAVE_LIBUSB")
+option_with_deps(XRT_BUILD_DRIVER_STEAMVR_LIGHTHOUSE "Enable SteamVR Lighthouse driver" DEPENDS XRT_HAVE_LINUX XRT_HAVE_STEAM XRT_MODULE_AUX_VIVE)
+option_with_deps(XRT_BUILD_DRIVER_SURVIVE "Enable libsurvive driver" DEPENDS SURVIVE_FOUND XRT_MODULE_AUX_VIVE)
+option_with_deps(XRT_BUILD_DRIVER_ULV2 "Enable Ultraleap v2 driver" DEPENDS LeapV2_FOUND)
+option_with_deps(XRT_BUILD_DRIVER_ULV5 "Enable Ultraleap v5 driver" DEPENDS LeapSDK_FOUND)
+option_with_deps(XRT_BUILD_DRIVER_VF "Build video frame driver (for video file support, uses gstreamer)" DEPENDS XRT_HAVE_GST)
+option_with_deps(XRT_BUILD_DRIVER_VIVE "Enable driver for HTC Vive, Vive Pro, Valve Index, and their controllers" DEPENDS ZLIB_FOUND XRT_HAVE_LINUX XRT_MODULE_AUX_VIVE)
+option_with_deps(XRT_BUILD_DRIVER_WMR "Enable Windows Mixed Reality driver" DEPENDS "NOT WIN32")
+option_with_deps(XRT_BUILD_DRIVER_XREAL_AIR "Enable Xreal Air HMD driver" DEPENDS XRT_HAVE_HIDAPI)
+option_with_deps(XRT_BUILD_DRIVER_SIMULAVR "Enable simula driver" DEPENDS XRT_HAVE_REALSENSE)
+option(XRT_BUILD_DRIVER_SIMULATED "Enable simulated driver" ON)
+
+option(XRT_BUILD_SAMPLES "Enable compiling sample code implementations that will not be linked into any final targets" ON)
+set(XRT_IPC_MSG_SOCK_FILENAME monado_comp_ipc CACHE STRING "Service socket filename")
+set(XRT_IPC_SERVICE_PID_FILENAME monado.pid CACHE STRING "Service pidfile filename")
+set(XRT_OXR_RUNTIME_SUFFIX monado CACHE STRING "OpenXR client library suffix")
+
+# cmake-format: on
+
+# Most users won't touch these.
+mark_as_advanced(XRT_MODULE_COMPOSITOR_MAIN XRT_MODULE_COMPOSITOR_NULL XRT_FEATURE_OPENXR)
+
+# Misc extension support.
+if(NOT DEFINED XRT_FEATURE_OPENXR_DISPLAY_REFRESH_RATE)
+	set(XRT_FEATURE_OPENXR_DISPLAY_REFRESH_RATE ON)
+endif()
+if(NOT DEFINED XRT_FEATURE_OPENXR_FORCE_FEEDBACK_CURL)
+	set(XRT_FEATURE_OPENXR_FORCE_FEEDBACK_CURL ON)
+endif()
+if(NOT DEFINED XRT_FEATURE_OPENXR_HEADLESS)
+	set(XRT_FEATURE_OPENXR_HEADLESS ON)
+endif()
+if(NOT DEFINED XRT_FEATURE_OPENXR_OVERLAY)
+	set(XRT_FEATURE_OPENXR_OVERLAY ON)
+endif()
+if(NOT DEFINED XRT_FEATURE_OPENXR_VISIBILITY_MASK)
+	set(XRT_FEATURE_OPENXR_VISIBILITY_MASK ON)
+endif()
+if(NOT DEFINED XRT_FEATURE_OPENXR_PERFORMANCE_SETTINGS)
+	set(XRT_FEATURE_OPENXR_PERFORMANCE_SETTINGS OFF)
+endif()
+option(
+	XRT_FEATURE_OPENXR_VULKAN_SWAPCHAIN_FORMAT_LIST
+	"Enable support for the XR_KHR_vulkan_swapchain_format_list extension" ON
+	)
+if(NOT DEFINED XRT_FEATURE_OPENXR_FACIAL_TRACKING_HTC)
+	set(XRT_FEATURE_OPENXR_FACIAL_TRACKING_HTC OFF)
+endif()
+
+# Interaction extension support.
+if(NOT DEFINED XRT_FEATURE_OPENXR_INTERACTION_EXT_EYE_GAZE)
+	set(XRT_FEATURE_OPENXR_INTERACTION_EXT_EYE_GAZE ON)
+endif()
+if(NOT DEFINED XRT_FEATURE_OPENXR_INTERACTION_EXT_HAND)
+	set(XRT_FEATURE_OPENXR_INTERACTION_EXT_HAND ON)
+endif()
+if(NOT DEFINED XRT_FEATURE_OPENXR_INTERACTION_EXT_PALM_POSE)
+	set(XRT_FEATURE_OPENXR_INTERACTION_EXT_PALM_POSE OFF)
+endif()
+if(NOT DEFINED XRT_FEATURE_OPENXR_INTERACTION_ML2)
+	set(XRT_FEATURE_OPENXR_INTERACTION_ML2 ON)
+endif()
+if(NOT DEFINED XRT_FEATURE_OPENXR_INTERACTION_MNDX)
+	set(XRT_FEATURE_OPENXR_INTERACTION_MNDX ON)
+endif()
+if(NOT DEFINED XRT_FEATURE_OPENXR_INTERACTION_MSFT_HAND)
+	set(XRT_FEATURE_OPENXR_INTERACTION_MSFT_HAND OFF)
+endif()
+if(NOT DEFINED XRT_FEATURE_OPENXR_INTERACTION_OPPO)
+	set(XRT_FEATURE_OPENXR_INTERACTION_OPPO ON)
+endif()
+if(NOT DEFINED XRT_FEATURE_OPENXR_INTERACTION_WINMR)
+	set(XRT_FEATURE_OPENXR_INTERACTION_WINMR ON)
+endif()
+
+# Defaults for OpenXR layer support
 if(NOT DEFINED XRT_FEATURE_OPENXR_LAYER_DEPTH)
 	set(XRT_FEATURE_OPENXR_LAYER_DEPTH ON)
+endif()
+if(NOT DEFINED XRT_FEATURE_OPENXR_LAYER_COLOR_SCALE_BIAS)
+	set(XRT_FEATURE_OPENXR_LAYER_COLOR_SCALE_BIAS OFF)
 endif()
 if(NOT DEFINED XRT_FEATURE_OPENXR_LAYER_CUBE)
 	set(XRT_FEATURE_OPENXR_LAYER_CUBE OFF)
@@ -150,75 +411,70 @@ if(NOT DEFINED XRT_FEATURE_OPENXR_LAYER_EQUIRECT2)
 	set(XRT_FEATURE_OPENXR_LAYER_EQUIRECT2 ON)
 endif()
 if(NOT DEFINED XRT_FEATURE_OPENXR_LAYER_EQUIRECT1)
-	set(XRT_FEATURE_OPENXR_LAYER_EQUIRECT1 ON)
+	set(XRT_FEATURE_OPENXR_LAYER_EQUIRECT1 OFF)
+endif()
+if(NOT DEFINED XRT_FEATURE_OPENXR_LAYER_FB_ALPHA_BLEND)
+	set(XRT_FEATURE_OPENXR_LAYER_FB_ALPHA_BLEND OFF)
+endif()
+if(NOT DEFINED XRT_FEATURE_OPENXR_LAYER_FB_IMAGE_LAYOUT)
+	set(XRT_FEATURE_OPENXR_LAYER_FB_IMAGE_LAYOUT ON)
+endif()
+if(NOT DEFINED XRT_FEATURE_OPENXR_LAYER_FB_SETTINGS)
+	set(XRT_FEATURE_OPENXR_LAYER_FB_SETTINGS OFF)
+endif()
+if(NOT DEFINED XRT_FEATURE_OPENXR_LAYER_FB_DEPTH_TEST)
+	set(XRT_FEATURE_OPENXR_LAYER_FB_DEPTH_TEST OFF)
+endif()
+if(NOT DEFINED XRT_FEATURE_OPENXR_LAYER_PASSTHROUGH)
+	set(XRT_FEATURE_OPENXR_LAYER_PASSTHROUGH OFF)
 endif()
 
-# Most users won't touch these.
-mark_as_advanced(XRT_FEATURE_COMPOSITOR_MAIN XRT_FEATURE_OPENXR)
-
-# ILLIXR
-set(ILLIXR_PATH "" CACHE PATH "Path to ILLIXR headers")
-
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-	set(XRT_HAVE_LIBUDEV ON)
-	set(XRT_HAVE_INTERNAL_HID ON)
-else()
-	cmake_dependent_option(XRT_HAVE_LIBUDEV "Enable libudev (used for device probing on Linux)" ON "UDEV_FOUND" OFF)
+# Defaults for OpenXR spaces
+if(NOT DEFINED XRT_FEATURE_OPENXR_SPACE_LOCAL_FLOOR)
+	set(XRT_FEATURE_OPENXR_SPACE_LOCAL_FLOOR ON)
 endif()
-cmake_dependent_option(XRT_HAVE_LIBUSB "Enable libusb (used for most drivers)" ON "LIBUSB1_FOUND" OFF)
-cmake_dependent_option(XRT_HAVE_JPEG "Enable jpeg code (used for some video drivers)" ON "JPEG_FOUND" OFF)
-cmake_dependent_option(XRT_HAVE_OPENCV "Enable OpenCV backend" ON "OpenCV_FOUND" OFF)
-cmake_dependent_option(XRT_HAVE_LIBUVC "Enable libuvc video driver" ON "LIBUVC_FOUND AND XRT_HAVE_LIBUSB" OFF)
-cmake_dependent_option(XRT_HAVE_FFMPEG "Enable ffmpeg testing video driver" ON "FFMPEG_FOUND" OFF)
-cmake_dependent_option(XRT_HAVE_SDL2 "Enable use of SDL2" ON "SDL2_FOUND AND XRT_HAVE_OPENGL" OFF)
-cmake_dependent_option(XRT_HAVE_SYSTEM_CJSON "Enable cJSON from system, instead of bundled source" ON "CJSON_FOUND" OFF)
-
-
-cmake_dependent_option(XRT_BUILD_DRIVER_PSVR "Enable PSVR HMD driver" ON "HIDAPI_FOUND" OFF)
-cmake_dependent_option(XRT_BUILD_DRIVER_RS "Enable RealSense device driver" ON "realsense2_FOUND" OFF)
-cmake_dependent_option(XRT_BUILD_DRIVER_VIVE "Enable driver for HTC Vive, Vive Pro, Valve Index, and their controllers" ON "ZLIB_FOUND AND XRT_HAVE_LINUX" OFF)
-cmake_dependent_option(XRT_BUILD_DRIVER_OHMD "Enable OpenHMD driver" ON "OPENHMD_FOUND" OFF)
-cmake_dependent_option(XRT_BUILD_DRIVER_HANDTRACKING "Enable Camera Hand Tracking driver" ON "XRT_HAVE_V4L2" OFF)
-cmake_dependent_option(XRT_BUILD_DRIVER_DAYDREAM "Enable the Google Daydream View controller driver (BLE, via D-Bus)" ON "XRT_HAVE_DBUS" OFF)
-cmake_dependent_option(XRT_BUILD_DRIVER_ARDUINO "Enable Arduino input device with BLE via via D-Bus" ON "XRT_HAVE_DBUS" OFF)
-cmake_dependent_option(XRT_BUILD_DRIVER_ILLIXR "Enable ILLIXR driver" ON "ILLIXR_PATH" OFF)
-
-option(XRT_BUILD_DRIVER_DUMMY "Enable dummy driver" ON)
-cmake_dependent_option(XRT_BUILD_DRIVER_REMOTE "Enable remote debugging driver" ON "XRT_HAVE_LINUX OR ANDROID" OFF)
-
-# These all use the Monado internal hid wrapper.
-cmake_dependent_option(XRT_BUILD_DRIVER_HDK "Enable HDK driver" ON "XRT_HAVE_INTERNAL_HID" OFF)
-cmake_dependent_option(XRT_BUILD_DRIVER_PSMV "Enable Playstation Move driver" ON "XRT_HAVE_INTERNAL_HID" OFF)
-cmake_dependent_option(XRT_BUILD_DRIVER_HYDRA "Enable Hydra driver" ON "XRT_HAVE_INTERNAL_HID" OFF)
-cmake_dependent_option(XRT_BUILD_DRIVER_NS "Enable North Star driver" ON "XRT_HAVE_INTERNAL_HID" OFF)
-
-# This one defaults to off, even if we find the deps.
-cmake_dependent_option(XRT_BUILD_DRIVER_SURVIVE "Enable libsurvive driver" ON "SURVIVE_FOUND" OFF)
-
-cmake_dependent_option(XRT_BUILD_DRIVER_ANDROID "Enable Android sensors driver" ON "ANDROID" OFF)
+if(NOT DEFINED XRT_FEATURE_OPENXR_SPACE_UNBOUNDED)
+	set(XRT_FEATURE_OPENXR_SPACE_UNBOUNDED ON)
+endif()
 
 # You can set this from a superproject to add a driver
 # All drivers must be listed in here to be included in the generated header!
-list(APPEND AVAILABLE_DRIVERS
+list(
+	APPEND
+	AVAILABLE_DRIVERS
 	"ANDROID"
 	"ARDUINO"
 	"DAYDREAM"
-	"DUMMY"
+	"SIMULATED"
 	"HANDTRACKING"
 	"HDK"
 	"HYDRA"
 	"ILLIXR"
 	"NS"
 	"OHMD"
+	"OPENGLOVES"
 	"PSMV"
+	"PSSENSE"
 	"PSVR"
-	"RS"
+	"REALSENSE"
 	"REMOTE"
+	"RIFT_S"
+	"ROKID"
 	"SURVIVE"
 	"V4L2"
+	"ULV2"
+	"ULV5"
+	"VF"
+	"DEPTHAI"
 	"VIVE"
+	"QWERTY"
+	"WMR"
+	"EUROC"
+	"SIMULAVR"
+	"TWRAP"
+	"XREAL_AIR"
+	"STEAMVR_LIGHTHOUSE"
 	)
-
 
 # Package name needs to be known by the native code itself.
 # Can be overridden from outside/command line
@@ -234,6 +490,10 @@ endif()
 # Flags
 ###
 
+if(XRT_HAVE_TRACY AND XRT_HAVE_PERCETTO)
+	message(FATAL_ERROR "Max one tracing backend, XRT_HAVE_TRACY and XRT_HAVE_PERCETTO enabled")
+endif()
+
 if(XRT_HAVE_XLIB AND NOT XRT_HAVE_XRANDR)
 	message(WARNING "XRT_HAVE_XLIB requires XRT_HAVE_XRANDR but XRT_HAVE_XRANDR is disabled")
 endif()
@@ -243,12 +503,10 @@ if(XRT_HAVE_OPENGLES AND NOT XRT_HAVE_EGL)
 endif()
 
 if(XRT_HAVE_SDL2)
-	if(NOT DEFINED SDL2_LIBRARIES)
-		if(TARGET SDL2::SDL2-static)
-			set(SDL2_LIBRARIES SDL2::SDL2-static)
-		elseif(TARGET SDL2::SDL2)
-			set(SDL2_LIBRARIES SDL2::SDL2)
-		endif()
+	if(NOT TARGET SDL2::SDL2 AND DEFINED SDL2_LIBRARIES)
+		add_library(SDL2::SDL2 INTERFACE IMPORTED)
+		target_include_directories(SDL2::SDL2 SYSTEM INTERFACE "${SDL2_INCLUDE_DIRS}")
+		target_link_libraries(SDL2::SDL2 INTERFACE "${SDL2_LIBRARIES}")
 	endif()
 endif()
 
@@ -256,7 +514,10 @@ endif()
 if(XRT_HAVE_XCB)
 	set(VK_USE_PLATFORM_XCB_KHR TRUE)
 endif()
-if(XRT_HAVE_XCB AND XRT_HAVE_XLIB AND XRT_HAVE_XRANDR)
+if(XRT_HAVE_XCB
+   AND XRT_HAVE_XLIB
+   AND XRT_HAVE_XRANDR
+	)
 	set(VK_USE_PLATFORM_XLIB_XRANDR_EXT TRUE)
 endif()
 if(XRT_HAVE_WAYLAND)
@@ -268,19 +529,11 @@ endif()
 if(WIN32)
 	set(VK_USE_PLATFORM_WIN32_KHR TRUE)
 endif()
-if (XRT_HAVE_VULKAN AND NOT ANDROID)
+if(XRT_HAVE_VULKAN AND NOT ANDROID)
 	set(VK_USE_PLATFORM_DISPLAY_KHR TRUE)
 endif()
 
-if(NOT MSVC)
-	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -pedantic -Wall -Wextra -Wno-unused-parameter")
-	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror-implicit-function-declaration -Werror=incompatible-pointer-types")
-	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror=int-conversion")
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pedantic -Wall -Wextra -Wno-unused-parameter")
-
-	set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--no-undefined")
-	set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -Wl,--no-undefined")
-endif()
+include(CompilerFlags.cmake)
 
 # Default to PIC code
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -290,63 +543,175 @@ if(CMAKE_INTERPROCEDURAL_OPTIMIZATION)
 	message(STATUS "Inter-procedural optimization enabled")
 endif()
 
+# Make sure we have pretty colours
+option(DISABLE_COLORED_OUTPUT "Always produce ANSI-colored output (GNU/Clang only)." OFF)
+
+if(NOT DISABLE_COLORED_OUTPUT)
+	if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+		add_compile_options(-fdiagnostics-color=always)
+	elseif(
+		"${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL
+							       "AppleClang"
+		)
+		add_compile_options(-fcolor-diagnostics)
+	endif()
+endif()
+
 ###
-# Decend into madness.
+# Descend into the source
 ###
 
 add_subdirectory(src)
 add_subdirectory(doc)
 
 if(BUILD_TESTING)
-    include(CTest)
-    add_subdirectory(tests)
+	include(CTest)
+	add_subdirectory(tests)
 endif()
 
+###
+# Keep these lists sorted
+###
+# cmake-format: off
 message(STATUS "#####----- Config -----#####")
-message(STATUS "#    GIT_DESC:     ${GIT_DESC}")
+message(STATUS "#    GIT_DESC:        ${GIT_DESC}")
 message(STATUS "#")
-message(STATUS "#    WAYLAND:      ${XRT_HAVE_WAYLAND}")
-message(STATUS "#    XLIB:         ${XRT_HAVE_XLIB}")
-message(STATUS "#    XRANDR:       ${XRT_HAVE_XRANDR}")
-message(STATUS "#    XCB:          ${XRT_HAVE_XCB}")
-message(STATUS "#    OPENGL:       ${XRT_HAVE_OPENGL}")
-message(STATUS "#    OPENGLES:     ${XRT_HAVE_OPENGLES}")
-message(STATUS "#    VULKAN:       ${XRT_HAVE_VULKAN}")
-message(STATUS "#    EGL:          ${XRT_HAVE_EGL}")
-message(STATUS "#    DBUS:         ${XRT_HAVE_DBUS}")
-message(STATUS "#    VF:           ${XRT_HAVE_VF}")
-message(STATUS "#    LIBUSB:       ${XRT_HAVE_LIBUSB}")
-message(STATUS "#    JPEG:         ${XRT_HAVE_JPEG}")
-message(STATUS "#    OPENCV:       ${XRT_HAVE_OPENCV}")
-message(STATUS "#    LIBUVC:       ${XRT_HAVE_LIBUVC}")
-message(STATUS "#    FFMPEG:       ${XRT_HAVE_FFMPEG}")
-message(STATUS "#    SDL2:         ${XRT_HAVE_SDL2}")
-message(STATUS "#    SYSTEM_CJSON: ${XRT_HAVE_SYSTEM_CJSON}")
+message(STATUS "#    BLUETOOTH:       ${XRT_HAVE_BLUETOOTH}")
+message(STATUS "#    D3D11:           ${XRT_HAVE_D3D11}")
+message(STATUS "#    D3D12:           ${XRT_HAVE_D3D12}")
+message(STATUS "#    DBUS:            ${XRT_HAVE_DBUS}")
+message(STATUS "#    EGL:             ${XRT_HAVE_EGL}")
+message(STATUS "#    GST (GStreamer): ${XRT_HAVE_GST}")
+message(STATUS "#    HIDAPI:          ${XRT_HAVE_HIDAPI}")
+message(STATUS "#    JPEG:            ${XRT_HAVE_JPEG}")
+message(STATUS "#    LIBBSD:          ${XRT_HAVE_LIBBSD}")
+message(STATUS "#    LIBUSB:          ${XRT_HAVE_LIBUSB}")
+message(STATUS "#    LIBUVC:          ${XRT_HAVE_LIBUVC}")
+message(STATUS "#    ONNXRUNTIME:     ${XRT_HAVE_ONNXRUNTIME}")
+message(STATUS "#    OPENCV:          ${XRT_HAVE_OPENCV}")
+message(STATUS "#    OPENGL:          ${XRT_HAVE_OPENGL}")
+message(STATUS "#    OPENGLES:        ${XRT_HAVE_OPENGLES}")
+message(STATUS "#    OPENGL_GLX:      ${XRT_HAVE_OPENGL_GLX}")
+message(STATUS "#    PERCETTO:        ${XRT_HAVE_PERCETTO}")
+message(STATUS "#    REALSENSE:       ${XRT_HAVE_REALSENSE}")
+message(STATUS "#    OPENVR:          ${XRT_HAVE_OPENVR}")
+message(STATUS "#    SDL2:            ${XRT_HAVE_SDL2}")
+message(STATUS "#    SYSTEM_CJSON:    ${XRT_HAVE_SYSTEM_CJSON}")
+message(STATUS "#    SYSTEMD:         ${XRT_HAVE_SYSTEMD}")
+message(STATUS "#    TRACY:           ${XRT_HAVE_TRACY}")
+message(STATUS "#    VULKAN:          ${XRT_HAVE_VULKAN}")
+message(STATUS "#    WAYLAND:         ${XRT_HAVE_WAYLAND}")
+message(STATUS "#    WAYLAND_DIRECT:  ${XRT_HAVE_WAYLAND_DIRECT}")
+message(STATUS "#    XCB:             ${XRT_HAVE_XCB}")
+message(STATUS "#    XLIB:            ${XRT_HAVE_XLIB}")
+message(STATUS "#    XRANDR:          ${XRT_HAVE_XRANDR}")
 message(STATUS "#")
-message(STATUS "#    FEATURE_COMPOSITOR_MAIN:              ${XRT_FEATURE_COMPOSITOR_MAIN}")
-message(STATUS "#    FEATURE_SERVICE:                      ${XRT_FEATURE_SERVICE}")
-message(STATUS "#    FEATURE_OPENXR:                       ${XRT_FEATURE_OPENXR}")
-message(STATUS "#    FEATURE_OPENXR_LAYER_DEPTH:           ${XRT_FEATURE_OPENXR_LAYER_DEPTH}")
-message(STATUS "#    FEATURE_OPENXR_LAYER_CUBE:            ${XRT_FEATURE_OPENXR_LAYER_CUBE}")
-message(STATUS "#    FEATURE_OPENXR_LAYER_CYLINDER:        ${XRT_FEATURE_OPENXR_LAYER_CYLINDER}")
-message(STATUS "#    FEATURE_OPENXR_LAYER_EQUIRECT2:       ${XRT_FEATURE_OPENXR_LAYER_EQUIRECT2}")
-message(STATUS "#    FEATURE_OPENXR_LAYER_EQUIRECT1:       ${XRT_FEATURE_OPENXR_LAYER_EQUIRECT1}")
-message(STATUS "#    FEATURE_STEAMVR_PLUGIN:               ${XRT_FEATURE_STEAMVR_PLUGIN}")
+message(STATUS "#    MODULE_AUX_VIVE:             ${XRT_MODULE_AUX_VIVE}")
+message(STATUS "#    MODULE_COMPOSITOR:           ${XRT_MODULE_COMPOSITOR}")
+message(STATUS "#    MODULE_COMPOSITOR_MAIN:      ${XRT_MODULE_COMPOSITOR_MAIN}")
+message(STATUS "#    MODULE_COMPOSITOR_NULL:      ${XRT_MODULE_COMPOSITOR_NULL}")
+message(STATUS "#    MODULE_MERCURY_HANDTRACKING: ${XRT_MODULE_MERCURY_HANDTRACKING}")
+message(STATUS "#    MODULE_IPC:                  ${XRT_MODULE_IPC}")
+message(STATUS "#    MODULE_MONADO_GUI:           ${XRT_MODULE_MONADO_GUI}")
+message(STATUS "#    MODULE_MONADO_CLI:           ${XRT_MODULE_MONADO_CLI}")
 message(STATUS "#")
-message(STATUS "#    DRIVER_ANDROID:      ${XRT_BUILD_DRIVER_ANDROID}")
-message(STATUS "#    DRIVER_ARDUINO:      ${XRT_BUILD_DRIVER_ARDUINO}")
-message(STATUS "#    DRIVER_DAYDREAM:     ${XRT_BUILD_DRIVER_DAYDREAM}")
-message(STATUS "#    DRIVER_DUMMY:        ${XRT_BUILD_DRIVER_DUMMY}")
-message(STATUS "#    DRIVER_HANDTRACKING: ${XRT_BUILD_DRIVER_HANDTRACKING}")
-message(STATUS "#    DRIVER_HDK:          ${XRT_BUILD_DRIVER_HDK}")
-message(STATUS "#    DRIVER_HYDRA:        ${XRT_BUILD_DRIVER_HYDRA}")
-message(STATUS "#    DRIVER_ILLIXR:       ${XRT_BUILD_DRIVER_ILLIXR}")
-message(STATUS "#    DRIVER_NS:           ${XRT_BUILD_DRIVER_NS}")
-message(STATUS "#    DRIVER_OHMD:         ${XRT_BUILD_DRIVER_OHMD}")
-message(STATUS "#    DRIVER_PSMV:         ${XRT_BUILD_DRIVER_PSMV}")
-message(STATUS "#    DRIVER_PSVR:         ${XRT_BUILD_DRIVER_PSVR}")
-message(STATUS "#    DRIVER_RS:           ${XRT_BUILD_DRIVER_RS}")
-message(STATUS "#    DRIVER_REMOTE:       ${XRT_BUILD_DRIVER_REMOTE}")
-message(STATUS "#    DRIVER_SURVIVE:      ${XRT_BUILD_DRIVER_SURVIVE}")
-message(STATUS "#    DRIVER_VIVE:         ${XRT_BUILD_DRIVER_VIVE}")
+message(STATUS "#    FEATURE_CLIENT_DEBUG_GUI:                     ${XRT_FEATURE_CLIENT_DEBUG_GUI}")
+message(STATUS "#    FEATURE_COLOR_LOG:                            ${XRT_FEATURE_COLOR_LOG}")
+message(STATUS "#    FEATURE_DEBUG_GUI:                            ${XRT_FEATURE_DEBUG_GUI}")
+message(STATUS "#    FEATURE_OPENXR:                               ${XRT_FEATURE_OPENXR}")
+message(STATUS "#    FEATURE_OPENXR_DEBUG_UTILS:                   ${XRT_FEATURE_OPENXR_DEBUG_UTILS}")
+message(STATUS "#    FEATURE_OPENXR_DISPLAY_REFRESH_RATE:          ${XRT_FEATURE_OPENXR_DISPLAY_REFRESH_RATE}")
+message(STATUS "#    FEATURE_OPENXR_FACIAL_TRACKING_HTC:           ${XRT_FEATURE_OPENXR_FACIAL_TRACKING_HTC}")
+message(STATUS "#    FEATURE_OPENXR_FORCE_FEEDBACK_CURL:           ${XRT_FEATURE_OPENXR_FORCE_FEEDBACK_CURL}")
+message(STATUS "#    FEATURE_OPENXR_HEADLESS:                      ${XRT_FEATURE_OPENXR_HEADLESS}")
+message(STATUS "#    FEATURE_OPENXR_INTERACTION_EXT_EYE_GAZE:      ${XRT_FEATURE_OPENXR_INTERACTION_EXT_EYE_GAZE}")
+message(STATUS "#    FEATURE_OPENXR_INTERACTION_EXT_HAND:          ${XRT_FEATURE_OPENXR_INTERACTION_EXT_HAND}")
+message(STATUS "#    FEATURE_OPENXR_INTERACTION_EXT_PALM_POSE:     ${XRT_FEATURE_OPENXR_INTERACTION_EXT_PALM_POSE}")
+message(STATUS "#    FEATURE_OPENXR_INTERACTION_ML2:               ${XRT_FEATURE_OPENXR_INTERACTION_ML2}")
+message(STATUS "#    FEATURE_OPENXR_INTERACTION_MNDX:              ${XRT_FEATURE_OPENXR_INTERACTION_MNDX}")
+message(STATUS "#    FEATURE_OPENXR_INTERACTION_MSFT_HAND:         ${XRT_FEATURE_OPENXR_INTERACTION_MSFT_HAND}")
+message(STATUS "#    FEATURE_OPENXR_INTERACTION_OPPO:              ${XRT_FEATURE_OPENXR_INTERACTION_OPPO}")
+message(STATUS "#    FEATURE_OPENXR_INTERACTION_WINMR:             ${XRT_FEATURE_OPENXR_INTERACTION_WINMR}")
+message(STATUS "#    FEATURE_OPENXR_LAYER_COLOR_SCALE_BIAS:        ${XRT_FEATURE_OPENXR_LAYER_COLOR_SCALE_BIAS}")
+message(STATUS "#    FEATURE_OPENXR_LAYER_CUBE:                    ${XRT_FEATURE_OPENXR_LAYER_CUBE}")
+message(STATUS "#    FEATURE_OPENXR_LAYER_CYLINDER:                ${XRT_FEATURE_OPENXR_LAYER_CYLINDER}")
+message(STATUS "#    FEATURE_OPENXR_LAYER_DEPTH:                   ${XRT_FEATURE_OPENXR_LAYER_DEPTH}")
+message(STATUS "#    FEATURE_OPENXR_LAYER_EQUIRECT1:               ${XRT_FEATURE_OPENXR_LAYER_EQUIRECT1}")
+message(STATUS "#    FEATURE_OPENXR_LAYER_EQUIRECT2:               ${XRT_FEATURE_OPENXR_LAYER_EQUIRECT2}")
+message(STATUS "#    FEATURE_OPENXR_LAYER_FB_ALPHA_BLEND:          ${XRT_FEATURE_OPENXR_LAYER_FB_ALPHA_BLEND}")
+message(STATUS "#    FEATURE_OPENXR_LAYER_PASSTHROUGH:             ${XRT_FEATURE_OPENXR_LAYER_PASSTHROUGH}")
+message(STATUS "#    FEATURE_OPENXR_LAYER_FB_IMAGE_LAYOUT          ${XRT_FEATURE_OPENXR_LAYER_FB_IMAGE_LAYOUT}")
+message(STATUS "#    FEATURE_OPENXR_LAYER_FB_SETTINGS:             ${XRT_FEATURE_OPENXR_LAYER_FB_SETTINGS}")
+message(STATUS "#    FEATURE_OPENXR_LAYER_FB_DEPTH_TEST:           ${XRT_FEATURE_OPENXR_LAYER_FB_DEPTH_TEST}")
+message(STATUS "#    FEATURE_OPENXR_OVERLAY:                       ${XRT_FEATURE_OPENXR_OVERLAY}")
+message(STATUS "#    FEATURE_OPENXR_PERFORMANCE_SETTINGS:          ${XRT_FEATURE_OPENXR_PERFORMANCE_SETTINGS}")
+message(STATUS "#    FEATURE_OPENXR_SPACE_LOCAL_FLOOR:             ${XRT_FEATURE_OPENXR_SPACE_LOCAL_FLOOR}")
+message(STATUS "#    FEATURE_OPENXR_SPACE_UNBOUNDED:               ${XRT_FEATURE_OPENXR_SPACE_UNBOUNDED}")
+message(STATUS "#    FEATURE_OPENXR_VISIBILITY_MASK                ${XRT_FEATURE_OPENXR_VISIBILITY_MASK}")
+message(STATUS "#    FEATURE_OPENXR_VULKAN_SWAPCHAIN_FORMAT_LIST   ${XRT_FEATURE_OPENXR_VULKAN_SWAPCHAIN_FORMAT_LIST}")
+message(STATUS "#    FEATURE_RENDERDOC:                            ${XRT_FEATURE_RENDERDOC}")
+message(STATUS "#    FEATURE_SERVICE:                              ${XRT_FEATURE_SERVICE}")
+message(STATUS "#    FEATURE_SERVICE_SYSTEMD:                      ${XRT_FEATURE_SERVICE_SYSTEMD}")
+message(STATUS "#    FEATURE_SLAM:                                 ${XRT_FEATURE_SLAM}")
+message(STATUS "#    FEATURE_SSE2:                                 ${XRT_FEATURE_SSE2}")
+message(STATUS "#    FEATURE_STEAMVR_PLUGIN:                       ${XRT_FEATURE_STEAMVR_PLUGIN}")
+message(STATUS "#    FEATURE_TRACING:                              ${XRT_FEATURE_TRACING}")
+message(STATUS "#    FEATURE_WINDOW_PEEK:                          ${XRT_FEATURE_WINDOW_PEEK}")
+message(STATUS "#")
+message(STATUS "#    DRIVER_ANDROID:              ${XRT_BUILD_DRIVER_ANDROID}")
+message(STATUS "#    DRIVER_ARDUINO:              ${XRT_BUILD_DRIVER_ARDUINO}")
+message(STATUS "#    DRIVER_DAYDREAM:             ${XRT_BUILD_DRIVER_DAYDREAM}")
+message(STATUS "#    DRIVER_DEPTHAI:              ${XRT_BUILD_DRIVER_DEPTHAI}")
+message(STATUS "#    DRIVER_EUROC:                ${XRT_BUILD_DRIVER_EUROC}")
+message(STATUS "#    DRIVER_HANDTRACKING:         ${XRT_BUILD_DRIVER_HANDTRACKING}")
+message(STATUS "#    DRIVER_HDK:                  ${XRT_BUILD_DRIVER_HDK}")
+message(STATUS "#    DRIVER_HYDRA:                ${XRT_BUILD_DRIVER_HYDRA}")
+message(STATUS "#    DRIVER_ILLIXR:               ${XRT_BUILD_DRIVER_ILLIXR}")
+message(STATUS "#    DRIVER_NS:                   ${XRT_BUILD_DRIVER_NS}")
+message(STATUS "#    DRIVER_OHMD:                 ${XRT_BUILD_DRIVER_OHMD}")
+message(STATUS "#    DRIVER_OPENGLOVES:           ${XRT_BUILD_DRIVER_OPENGLOVES}")
+message(STATUS "#    DRIVER_PSMV:                 ${XRT_BUILD_DRIVER_PSMV}")
+message(STATUS "#    DRIVER_PSSENSE:              ${XRT_BUILD_DRIVER_PSSENSE}")
+message(STATUS "#    DRIVER_PSVR:                 ${XRT_BUILD_DRIVER_PSVR}")
+message(STATUS "#    DRIVER_QWERTY:               ${XRT_BUILD_DRIVER_QWERTY}")
+message(STATUS "#    DRIVER_REALSENSE:            ${XRT_BUILD_DRIVER_REALSENSE}")
+message(STATUS "#    DRIVER_REMOTE:               ${XRT_BUILD_DRIVER_REMOTE}")
+message(STATUS "#    DRIVER_RIFT_S:               ${XRT_BUILD_DRIVER_RIFT_S}")
+message(STATUS "#    DRIVER_ROKID:                ${XRT_BUILD_DRIVER_ROKID}")
+message(STATUS "#    DRIVER_SIMULATED:            ${XRT_BUILD_DRIVER_SIMULATED}")
+message(STATUS "#    DRIVER_SIMULAVR:             ${XRT_BUILD_DRIVER_SIMULAVR}")
+message(STATUS "#    DRIVER_SURVIVE:              ${XRT_BUILD_DRIVER_SURVIVE}")
+message(STATUS "#    DRIVER_TWRAP:                ${XRT_BUILD_DRIVER_TWRAP}")
+message(STATUS "#    DRIVER_ULV2:                 ${XRT_BUILD_DRIVER_ULV2}")
+message(STATUS "#    DRIVER_ULV5:                 ${XRT_BUILD_DRIVER_ULV5}")
+message(STATUS "#    DRIVER_VF:                   ${XRT_BUILD_DRIVER_VF}")
+message(STATUS "#    DRIVER_VIVE:                 ${XRT_BUILD_DRIVER_VIVE}")
+message(STATUS "#    DRIVER_WMR:                  ${XRT_BUILD_DRIVER_WMR}")
+message(STATUS "#    DRIVER_XREAL_AIR:            ${XRT_BUILD_DRIVER_XREAL_AIR}")
+message(STATUS "#    DRIVER_STEAMVR_LIGHTHOUSE:   ${XRT_BUILD_DRIVER_STEAMVR_LIGHTHOUSE}")
 message(STATUS "#####----- Config -----#####")
+# cmake-format: on
+
+if(XRT_FEATURE_SERVICE AND NOT XRT_FEATURE_OPENXR)
+	message(FATAL_ERROR "XRT_FEATURE_SERVICE requires XRT_FEATURE_OPENXR to be enabled")
+endif()
+if(XRT_FEATURE_SERVICE AND NOT XRT_MODULE_IPC)
+	message(FATAL_ERROR "XRT_FEATURE_SERVICE requires XRT_MODULE_IPC to be enabled")
+endif()
+if(XRT_FEATURE_OPENXR_DEBUG_UTILS)
+	message(FATAL_ERROR "XRT_FEATURE_OPENXR_DEBUG_UTILS is not fully implemented")
+endif()
+if(XRT_MODULE_COMPOSITOR_MAIN AND NOT XRT_SILENCE_CMAKE_LAYER_ERRORS)
+	if(XRT_FEATURE_OPENXR_LAYER_CUBE)
+		message(
+			FATAL_ERROR "Main compositor doesn't support cube layer "
+				    "(set XRT_SILENCE_CMAKE_LAYER_ERRORS to silence)"
+			)
+	endif()
+	if(XRT_FEATURE_OPENXR_LAYER_EQUIRECT1)
+		message(
+			FATAL_ERROR "Main compositor doesn't support equirect1 layer "
+				    "(set XRT_SILENCE_CMAKE_LAYER_ERRORS to silence)"
+			)
+	endif()
+endif()
