@@ -33,5 +33,11 @@ set -e
     UPSTREAM_VER=$(git describe --exclude "v0*" "$COMMIT_TO_PACKAGE" | sed -E -e 's/^v//' -e 's/-([0-9]+)-g([0-9a-f])/+git\1.\2/')
     echo "Computed package version ${UPSTREAM_VER}"
     git archive --format=tar "--prefix=monado_${UPSTREAM_VER}/" "${COMMIT_TO_PACKAGE}" | gzip -n > "../monado_${UPSTREAM_VER}.orig.tar.gz"
-    dch --newversion "${UPSTREAM_VER}-${PKG_REVISION}" --preserve "Automated CI build of commit ${COMMIT_TO_PACKAGE}"
+    sha256sum "../monado_${UPSTREAM_VER}.orig.tar.gz"
+    dch --newversion "${UPSTREAM_VER}-${PKG_REVISION}" \
+        --preserve \
+        --force-distribution \
+        --distribution focal \
+        --release \
+        "Automated CI build of commit ${COMMIT_TO_PACKAGE}"
 )
