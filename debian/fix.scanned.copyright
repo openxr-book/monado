@@ -1,5 +1,15 @@
 # Remove mistaken prefix.
 ! Files:~/.*/ Copyright=~"s/Text: //"
 
+# STB files
 ! Files:~/.*imstb_.*/ License short_name=~"s/and\/or/or/"
+! Files:~/.*stb_.*/ License short_name=~"s/and\/or/or/"
 
+# Fix stubborn guesses
+#! Files:~"/src\/external\/glad\/include.*/" License short_name=~"s/^Khronos/LicenseRef-Khronos-Free-Use-License-for-Software-and-Documentation/" full_license~
+
+# Normalize capitalization
+! Files:~/.*/ License short_name=~"s/BSD-3-Clause/BSD-3-clause/"
+
+# Dedupe this entry
+! Files:~"/src\/external\/jnipp\/.*/" Copyright=~"s/2016, Mitchell Dowd//"

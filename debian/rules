@@ -7,6 +7,11 @@
 # see FEATURE AREAS in dpkg-buildflags(1)
 export DEB_BUILD_MAINT_OPTIONS = hardening=+all reproducible=+all
 
+# see ENVIRONMENT in dpkg-buildflags(1)
+# package maintainers to append LDFLAGS
+# Not needed on Bullseye and newer
+export DEB_LDFLAGS_MAINT_APPEND = -Wl,--as-needed
+
 include /usr/share/dpkg/architecture.mk
 
 # We manage active runtime via update-alternatives
@@ -14,7 +19,7 @@ include /usr/share/dpkg/architecture.mk
 # We disable absolute systemd unit files too since we install to the path.
 # Don't waste time building the SteamVR driver, we don't package it.
 # Tell the version, instead of letting it guess from Git.
-CONFIG_ARGS := -DXRT_HAVE_SYSTEM_CJSON=ON \
+CONFIG_ARGS := \
 	  -DXRT_OPENXR_INSTALL_ACTIVE_RUNTIME=OFF \
 	  -DXRT_VULKAN_ENABLE_VALIDATION=OFF \
 	  -DBUILD_DOC=OFF \
@@ -28,6 +33,11 @@ CONFIG_ARGS := -DXRT_HAVE_SYSTEM_CJSON=ON \
 ifeq (,$(findstring linux,$(DEB_HOST_ARCH_OS)))
 # Disable service elsewhere
 CONFIG_ARGS += -DXRT_FEATURE_SERVICE=OFF
+endif
+
+ifneq (,$(filter $(DEB_HOST_ARCH_CPU), i386))
+export DEB_CFLAGS_MAINT_APPEND += -ffloat-store
+export DEB_CXXFLAGS_MAINT_APPEND += -ffloat-store
 endif
 
 %:
@@ -47,8 +57,3 @@ ifneq (,$(findstring linux,$(DEB_HOST_ARCH_OS)))
 	sed -i "s/%N/monado/" debian/tmp/usr/lib/systemd/user/monado.service
 endif
 	dh_install
-
-# Remove imgui config file if it's there.
-override_dh_auto_clean:
-	-rm -f imgui.ini
-	dh_auto_clean

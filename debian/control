@@ -1,6 +1,5 @@
 Source: monado
-Maintainer: Ryan Pavlik <ryan@ryanpavlik.com>
-Uploaders: Andrew Lee (李健秋) <ajqlee@debian.org>
+Maintainer: Rylie Pavlik <rylie@ryliepavlik.com>
 Section: libs
 Priority: optional
 Build-Depends: debhelper-compat (= 12),
@@ -8,7 +7,6 @@ Build-Depends: debhelper-compat (= 12),
                glslang-tools,
                libavcodec-dev [!hppa !sh4],
                libbsd-dev [linux-any],
-               libcjson-dev,
                libdbus-1-dev [linux-any],
                libegl1-mesa-dev,
                libeigen3-dev,
@@ -33,9 +31,9 @@ Build-Depends: debhelper-compat (= 12),
                libxxf86vm-dev,
                pandoc <!nodoc>,
                pkg-config
-Standards-Version: 4.6.0
-Vcs-Browser: https://gitlab.freedesktop.org/monado/monado/-/tree/ubuntu/jammy
-Vcs-Git: https://gitlab.freedesktop.org/monado/monado.git -b ubuntu/jammy
+Standards-Version: 4.6.2
+Vcs-Browser: https://gitlab.freedesktop.org/monado/monado/-/tree/ubuntu/focal
+Vcs-Git: https://gitlab.freedesktop.org/monado/monado.git -b ubuntu/focal
 Homepage: https://monado.freedesktop.org/
 Rules-Requires-Root: no
 

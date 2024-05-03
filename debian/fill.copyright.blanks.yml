@@ -6,7 +6,7 @@ doc/CHANGELOG.md:
   license: CC0-1.0
   skip: false
 doc/changes/:
-  copyright: 2020, Collabora, Ltd. and the Monado contributors
+  copyright: 2020-2023, Collabora, Ltd. and the Monado contributors
   license: CC0-1.0
   skip: true
 doc/changes/README.md:
@@ -36,6 +36,17 @@ src/external/imgui/imgui_monado/:
   skip: false
 src/external/openvr_includes/openvr_driver.h:
   override-copyright: 2015-2020, Valve Corporation
+  skip: false
+src/external/stb:
+  override-license: Expat or Unlicense
+  skip: false
+src/external/tracy/client/tracy_rpmalloc:
+  override-license: Expat or Unlicense
+  skip: false
+src/external/nanopb/pb_common.c:
+  override-copyright: |
+    2014, Petteri Aimonen
+    2005, Markus Kuhn
   skip: false
 src/xrt:
   license: BSL-1.0
