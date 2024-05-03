@@ -26,7 +26,7 @@ extern "C" {
  *
  */
 
-struct u_frame_timing;
+struct u_pacing_compositor;
 
 /*!
  * Wraps and manage VkSwapchainKHR and VkSurfaceKHR, used by @ref comp code.
@@ -38,14 +38,30 @@ struct comp_target_swapchain
 	//! Base target.
 	struct comp_target base;
 
-	//! Frame timing tracker.
-	struct u_frame_timing *uft;
+	//! Compositor frame pacing helper
+	struct u_pacing_compositor *upc;
 
 	//! If we should use display timing.
 	enum comp_target_display_timing_usage timing_usage;
 
 	//! Also works as a frame index.
 	int64_t current_frame_id;
+
+	struct
+	{
+		/*!
+		 * Should we ignore the compositor's preferred extents. Some
+		 * targets, like the direct mode ones, requires a particular
+		 * set of dimensions.
+		 */
+		bool compositor_extent;
+
+		/*!
+		 * The extents that a sub-class wants us to use,
+		 * see @p ignore_compositor_extent above.
+		 */
+		VkExtent2D extent;
+	} override;
 
 	struct
 	{
@@ -56,6 +72,9 @@ struct comp_target_swapchain
 	{
 		VkSurfaceKHR handle;
 		VkSurfaceFormatKHR format;
+#ifdef VK_EXT_display_surface_counter
+		VkSurfaceCounterFlagsEXT surface_counter_flags;
+#endif
 	} surface;
 
 	struct
@@ -66,6 +85,30 @@ struct comp_target_swapchain
 
 	//! Present mode that the system must support.
 	VkPresentModeKHR present_mode;
+
+	//! The current display used for direct mode, VK_NULL_HANDLE else.
+	VkDisplayKHR display;
+
+	struct
+	{
+		//! Must only be accessed from main compositor thread.
+		bool has_started;
+
+		//! Protected by event_thread lock.
+		bool should_wait;
+
+		//! Protected by event_thread lock.
+		uint64_t last_vblank_ns;
+
+		//! Thread waiting on vblank_event_fence (first pixel out).
+		struct os_thread_helper event_thread;
+	} vblank;
+
+	/*!
+	 * We print swapchain info as INFO the first time we create a
+	 * VkSWapchain, this keeps track if we have done it.
+	 */
+	bool has_logged_info;
 };
 
 
@@ -88,7 +131,7 @@ struct comp_target_swapchain
  * - comp_target::has_images
  * - comp_target::acquire
  * - comp_target::present
- * - comp_target::calc_frame_timings
+ * - comp_target::calc_frame_pacing
  * - comp_target::mark_timing_point
  * - comp_target::update_timings
  *
@@ -101,6 +144,17 @@ struct comp_target_swapchain
 void
 comp_target_swapchain_init_and_set_fnptrs(struct comp_target_swapchain *cts,
                                           enum comp_target_display_timing_usage timing_usage);
+
+/*!
+ * Set that any size from the compositor should be ignored and that given size
+ * must be used for the @p VkSwapchain the helper code creates.
+ *
+ * @protected @memberof comp_target_swapchain
+ *
+ * @ingroup comp_main
+ */
+void
+comp_target_swapchain_override_extents(struct comp_target_swapchain *cts, VkExtent2D extent);
 
 /*!
  * Free all managed resources on the given @ref comp_target_swapchain,

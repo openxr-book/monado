@@ -4,7 +4,7 @@
  * @file
  * @brief  Interface to @ref drv_vive
  * @author Christoph Haag <christoph.haag@collabora.com>
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup drv_vive
  */
 
@@ -53,12 +53,27 @@ struct vive_controller_device
 
 	struct
 	{
-		uint64_t time_ns;
-		uint32_t last_sample_time_raw;
-		timepoint_ns ts_received_ns;
+		timepoint_ns last_sample_ts_ns;
+		uint32_t last_sample_ticks;
 	} imu;
 
-	struct m_imu_3dof fusion;
+	struct
+	{
+		struct u_var_button reset_pose_btn;
+	} gui;
+
+	// struct m_imu_3dof fusion;
+	struct
+	{
+		//! Protects all members of the `fusion` substruct.
+		struct os_mutex mutex;
+
+		//! Main fusion calculator.
+		struct m_imu_3dof i3dof;
+
+		//! Prediction
+		struct m_relation_history *relation_hist;
+	} fusion;
 
 	struct
 	{
@@ -66,9 +81,7 @@ struct vive_controller_device
 		struct xrt_vec3 gyro;
 	} last;
 
-	struct xrt_quat rot_filtered;
-
-	enum u_logging_level ll;
+	enum u_logging_level log_level;
 
 	uint32_t last_ticks;
 
@@ -102,6 +115,12 @@ struct vive_controller_device
 	struct u_hand_tracking hand_tracking;
 
 	struct vive_controller_config config;
+
+	//! Last tracked pose
+	struct xrt_pose pose;
+
+	//! Additional offset to apply to `pose`
+	struct xrt_pose offset;
 };
 
 struct vive_controller_device *

@@ -22,14 +22,21 @@ extern "C" {
 #define ULV2_VID 0xf182
 #define ULV2_PID 0x0003
 
-int
-ulv2_found(struct xrt_prober *xp,
-           struct xrt_prober_device **devices,
-           size_t num_devices,
-           size_t index,
-           cJSON *attached_data,
-           struct xrt_device **out_xdev);
+/*!
+ * @defgroup drv_ulv2 Leap Motion Controller driver
+ * @ingroup drv
+ *
+ * @brief Leap Motion Controller driver using Ultraleap's V2 API
+ */
 
+/*!
+ * Probing function for Leap Motion Controller.
+ *
+ * @ingroup drv_ulv2
+ * @see xrt_prober_found_func_t
+ */
+xrt_result_t
+ulv2_create_device(struct xrt_device **out_xdev);
 #ifdef __cplusplus
 }
 #endif

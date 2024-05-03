@@ -39,7 +39,7 @@
 	{XR_TYPE_EXTENSION_PROPERTIES, NULL, XR_##all_caps##_EXTENSION_NAME, XR_##mixed_case##_SPEC_VERSION},
 static const XrExtensionProperties extension_properties[] = {OXR_EXTENSION_SUPPORT_GENERATE(MAKE_EXTENSION_PROPERTIES)};
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrEnumerateInstanceExtensionProperties(const char *layerName,
                                            uint32_t propertyCapacityInput,
                                            uint32_t *propertyCountOutput,
@@ -55,7 +55,7 @@ oxr_xrEnumerateInstanceExtensionProperties(const char *layerName,
 }
 
 #ifdef OXR_HAVE_KHR_loader_init
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrInitializeLoaderKHR(const XrLoaderInitInfoBaseHeaderKHR *loaderInitInfo)
 {
 	struct oxr_logger log;
@@ -92,17 +92,12 @@ oxr_xrInitializeLoaderKHR(const XrLoaderInitInfoBaseHeaderKHR *loaderInitInfo)
 
 #ifdef XRT_OS_ANDROID
 static XrResult
-oxr_check_android_extensions(struct oxr_logger *log, const XrInstanceCreateInfo *createInfo)
+oxr_check_android_extensions(struct oxr_logger *log,
+                             const XrInstanceCreateInfo *createInfo,
+                             const struct oxr_extension_status *extensions)
 {
-
-	bool foundAndroidExtension = false;
-	for (uint32_t i = 0; i < createInfo->enabledExtensionCount; ++i) {
-		if (strcmp(createInfo->enabledExtensionNames[i], XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME) == 0) {
-			foundAndroidExtension = true;
-			break;
-		}
-	}
-	if (!foundAndroidExtension) {
+	// We need the XR_KHR_android_create_instance extension.
+	if (!extensions->KHR_android_create_instance) {
 		return oxr_error(log, XR_ERROR_INITIALIZATION_FAILED,
 		                 "(createInfo->enabledExtensionNames) "
 		                 "Mandatory platform-specific extension " XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME
@@ -134,7 +129,7 @@ oxr_check_android_extensions(struct oxr_logger *log, const XrInstanceCreateInfo 
 }
 #endif // XRT_OS_ANDROID
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrCreateInstance(const XrInstanceCreateInfo *createInfo, XrInstance *out_instance)
 {
 	OXR_TRACE_MARKER();
@@ -166,33 +161,43 @@ oxr_xrCreateInstance(const XrInstanceCreateInfo *createInfo, XrInstance *out_ins
 		                 "Cannot satisfy request for version: too high");
 	}
 
+	// To be passed into verify and instance creation.
+	struct oxr_extension_status extensions;
+	U_ZERO(&extensions);
+
 	/*
 	 * Check that all extension names are recognized, so oxr_instance_create
 	 * doesn't need to check for bad extension names.
+	 *
+	 * Also fill out the oxr_extension_status struct at the same time.
 	 */
 #define CHECK_EXT_NAME(mixed_case, all_caps)                                                                           \
 	if (strcmp(createInfo->enabledExtensionNames[i], XR_##all_caps##_EXTENSION_NAME) == 0) {                       \
+		extensions.mixed_case = true;                                                                          \
 		continue;                                                                                              \
 	}
 	for (uint32_t i = 0; i < createInfo->enabledExtensionCount; ++i) {
 		OXR_EXTENSION_SUPPORT_GENERATE(CHECK_EXT_NAME)
 
 		return oxr_error(&log, XR_ERROR_EXTENSION_NOT_PRESENT,
-		                 "(createInfo->enabledExtensionNames[%d]) "
-		                 "Unrecognized extension name",
-		                 i);
+		                 "(createInfo->enabledExtensionNames[%d]) Unrecognized extension name '%s'", i,
+		                 createInfo->enabledExtensionNames[i]);
 	}
 
+	ret = oxr_verify_extensions(&log, &extensions);
+	if (ret != XR_SUCCESS) {
+		return ret;
+	}
 
 #ifdef XRT_OS_ANDROID
-	ret = oxr_check_android_extensions(&log, createInfo);
+	ret = oxr_check_android_extensions(&log, createInfo, &extensions);
 	if (ret != XR_SUCCESS) {
 		return ret;
 	}
 #endif
 	struct oxr_instance *inst = NULL;
 
-	ret = oxr_instance_create(&log, createInfo, &inst);
+	ret = oxr_instance_create(&log, createInfo, &extensions, &inst);
 	if (ret != XR_SUCCESS) {
 		return ret;
 	}
@@ -202,7 +207,7 @@ oxr_xrCreateInstance(const XrInstanceCreateInfo *createInfo, XrInstance *out_ins
 	return XR_SUCCESS;
 }
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrDestroyInstance(XrInstance instance)
 {
 	OXR_TRACE_MARKER();
@@ -214,7 +219,7 @@ oxr_xrDestroyInstance(XrInstance instance)
 	return oxr_handle_destroy(&log, &inst->handle);
 }
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrGetInstanceProperties(XrInstance instance, XrInstanceProperties *instanceProperties)
 {
 	OXR_TRACE_MARKER();
@@ -226,7 +231,7 @@ oxr_xrGetInstanceProperties(XrInstance instance, XrInstanceProperties *instanceP
 	return oxr_instance_get_properties(&log, inst, instanceProperties);
 }
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrPollEvent(XrInstance instance, XrEventDataBuffer *eventData)
 {
 	OXR_TRACE_MARKER();
@@ -239,7 +244,7 @@ oxr_xrPollEvent(XrInstance instance, XrEventDataBuffer *eventData)
 	return oxr_poll_event(&log, inst, eventData);
 }
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrResultToString(XrInstance instance, XrResult value, char buffer[XR_MAX_RESULT_STRING_SIZE])
 {
 	OXR_TRACE_MARKER();
@@ -249,19 +254,20 @@ oxr_xrResultToString(XrInstance instance, XrResult value, char buffer[XR_MAX_RES
 	OXR_VERIFY_INSTANCE_AND_INIT_LOG(&log, instance, inst, "xrResultToString");
 
 #define MAKE_RESULT_CASE(VAL, _)                                                                                       \
-	case VAL: strncpy(buffer, #VAL, XR_MAX_RESULT_STRING_SIZE); break;
+	case VAL: snprintf(buffer, XR_MAX_RESULT_STRING_SIZE, #VAL); break;
+
 	switch (value) {
 		XR_LIST_ENUM_XrResult(MAKE_RESULT_CASE);
 	default:
 		snprintf(buffer, XR_MAX_RESULT_STRING_SIZE, "XR_UNKNOWN_%s_%d", value < 0 ? "FAILURE" : "SUCCESS",
 		         value);
 	}
-	buffer[XR_MAX_RESULT_STRING_SIZE - 1] = '\0';
+	// The function snprintf always null terminates.
 
 	return XR_SUCCESS;
 }
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrStructureTypeToString(XrInstance instance, XrStructureType value, char buffer[XR_MAX_STRUCTURE_NAME_SIZE])
 {
 	OXR_TRACE_MARKER();
@@ -271,17 +277,18 @@ oxr_xrStructureTypeToString(XrInstance instance, XrStructureType value, char buf
 	OXR_VERIFY_INSTANCE_AND_INIT_LOG(&log, instance, inst, "xrStructureTypeToString");
 
 #define MAKE_TYPE_CASE(VAL, _)                                                                                         \
-	case VAL: strncpy(buffer, #VAL, XR_MAX_RESULT_STRING_SIZE); break;
+	case VAL: snprintf(buffer, XR_MAX_RESULT_STRING_SIZE, #VAL); break;
+
 	switch (value) {
 		XR_LIST_ENUM_XrStructureType(MAKE_TYPE_CASE);
 	default: snprintf(buffer, XR_MAX_RESULT_STRING_SIZE, "XR_UNKNOWN_STRUCTURE_TYPE_%d", value);
 	}
-	buffer[XR_MAX_RESULT_STRING_SIZE - 1] = '\0';
+	// The function snprintf always null terminates.
 
 	return XR_SUCCESS;
 }
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrStringToPath(XrInstance instance, const char *pathString, XrPath *out_path)
 {
 	OXR_TRACE_MARKER();
@@ -307,7 +314,7 @@ oxr_xrStringToPath(XrInstance instance, const char *pathString, XrPath *out_path
 	return XR_SUCCESS;
 }
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrPathToString(
     XrInstance instance, XrPath path, uint32_t bufferCapacityInput, uint32_t *bufferCountOutput, char *buffer)
 {
@@ -333,13 +340,11 @@ oxr_xrPathToString(
 	// null termination character (but a extra null byte is always
 	// reserved).
 	OXR_TWO_CALL_HELPER(&log, bufferCapacityInput, bufferCountOutput, buffer, length + 1, str, XR_SUCCESS);
-
-	return XR_SUCCESS;
 }
 
 // ---- XR_KHR_convert_timespec_time extension
-#ifdef XR_USE_TIMESPEC
-XrResult
+#ifdef OXR_HAVE_KHR_convert_timespec_time
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrConvertTimespecTimeToTimeKHR(XrInstance instance, const struct timespec *timespecTime, XrTime *time)
 {
 	OXR_TRACE_MARKER();
@@ -355,7 +360,7 @@ oxr_xrConvertTimespecTimeToTimeKHR(XrInstance instance, const struct timespec *t
 	return oxr_instance_convert_timespec_to_time(&log, inst, timespecTime, time);
 }
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrConvertTimeToTimespecTimeKHR(XrInstance instance, XrTime time, struct timespec *timespecTime)
 {
 	OXR_TRACE_MARKER();
@@ -373,4 +378,51 @@ oxr_xrConvertTimeToTimespecTimeKHR(XrInstance instance, XrTime time, struct time
 	return oxr_instance_convert_time_to_timespec(&log, inst, time, timespecTime);
 }
 
-#endif // XR_USE_TIMESPEC
+#endif // OXR_HAVE_KHR_convert_timespec_time
+
+// ---- XR_KHR_win32_convert_performance_counter_time extension
+#ifdef XR_USE_PLATFORM_WIN32
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrConvertWin32PerformanceCounterToTimeKHR(XrInstance instance,
+                                              const LARGE_INTEGER *performanceCounter,
+                                              XrTime *time)
+{
+	OXR_TRACE_MARKER();
+
+	//! @todo do we need to check and see if this extension was
+	//! enabled first?
+	struct oxr_instance *inst;
+	struct oxr_logger log;
+	OXR_VERIFY_INSTANCE_AND_INIT_LOG(&log, instance, inst, "xrConvertWin32PerformanceCounterToTimeKHR");
+	OXR_VERIFY_EXTENSION(&log, inst, KHR_win32_convert_performance_counter_time);
+	OXR_VERIFY_ARG_NOT_NULL(&log, performanceCounter);
+	OXR_VERIFY_ARG_NOT_NULL(&log, time);
+
+	if (performanceCounter->QuadPart <= 0) {
+		return oxr_error(&log, XR_ERROR_TIME_INVALID,
+		                 "(time == %" PRIi64 ") is not a valid performance counter time.",
+		                 performanceCounter->QuadPart);
+	}
+
+	return oxr_instance_convert_win32perfcounter_to_time(&log, inst, performanceCounter, time);
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrConvertTimeToWin32PerformanceCounterKHR(XrInstance instance, XrTime time, LARGE_INTEGER *performanceCounter)
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_instance *inst;
+	struct oxr_logger log;
+	OXR_VERIFY_INSTANCE_AND_INIT_LOG(&log, instance, inst, "xrConvertTimeToWin32PerformanceCounterKHR");
+	OXR_VERIFY_EXTENSION(&log, inst, KHR_win32_convert_performance_counter_time);
+	OXR_VERIFY_ARG_NOT_NULL(&log, performanceCounter);
+
+	if (time <= (XrTime)0) {
+		return oxr_error(&log, XR_ERROR_TIME_INVALID, "(time == %" PRIi64 ") is not a valid time.", time);
+	}
+
+	return oxr_instance_convert_time_to_win32perfcounter(&log, inst, time, performanceCounter);
+}
+
+#endif // XR_USE_PLATFORM_WIN32

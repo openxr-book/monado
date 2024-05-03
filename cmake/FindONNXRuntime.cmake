@@ -1,12 +1,14 @@
-# Copyright 2021, Collabora, Ltd.
+# Copyright 2021-2022, Collabora, Ltd.
+#
 # SPDX-License-Identifier: BSL-1.0
+#
 # Distributed under the Boost Software License, Version 1.0.
 # (See accompanying file LICENSE_1_0.txt or copy at
 # http://www.boost.org/LICENSE_1_0.txt)
 #
 # Original Author:
 # 2021 Moses Turner <moses@collabora.com>
-# 2021 Ryan Pavlik <ryan.pavlik@collabora.com>
+# 2021 Rylie Pavlik <rylie.pavlik@collabora.com>
 
 #.rst:
 # FindONNXRuntime
@@ -50,9 +52,10 @@ find_library(
     PATH_SUFFIXES lib
     HINTS ${PC_ONNXRuntime_LIBRARY_DIRS})
 find_path(
-    ONNXRuntime_INCLUDE_DIR core/session/onnxruntime_cxx_api.h
+    ONNXRuntime_INCLUDE_DIR onnxruntime_cxx_api.h
     PATHS ${ONNXRuntime_ROOT_DIR}
-    PATH_SUFFIXES onnxruntime include/onnxruntime
+    PATH_SUFFIXES onnxruntime include include/onnxruntime onnxruntime/core/session
+                  include/onnxruntime/core/session
     HINTS ${PC_ONNXRuntime_INCLUDE_DIRS})
 
 include(FindPackageHandleStandardArgs)

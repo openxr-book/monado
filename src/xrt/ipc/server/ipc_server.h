@@ -1,26 +1,29 @@
-// Copyright 2020-2021, Collabora, Ltd.
+// Copyright 2020-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Common server side code.
  * @author Pete Black <pblack@collabora.com>
  * @author Jakob Bornecrantz <jakob@collabora.com>
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup ipc_server
  */
 
 #pragma once
 
 #include "xrt/xrt_compiler.h"
-
-#include "util/u_logging.h"
+#include "xrt/xrt_system.h"
+#include "xrt/xrt_space.h"
 
 #include "os/os_threading.h"
 
+#include "util/u_logging.h"
+
 #include "shared/ipc_protocol.h"
-#include "shared/ipc_utils.h"
+#include "shared/ipc_message_channel.h"
 
 #include <stdio.h>
+
 
 #ifdef __cplusplus
 extern "C" {
@@ -32,11 +35,12 @@ extern "C" {
  *
  */
 
-#define IPC_TRACE(d, ...) U_LOG_IFL_T(d->ll, __VA_ARGS__)
-#define IPC_DEBUG(d, ...) U_LOG_IFL_D(d->ll, __VA_ARGS__)
-#define IPC_INFO(d, ...) U_LOG_IFL_I(d->ll, __VA_ARGS__)
-#define IPC_WARN(d, ...) U_LOG_IFL_W(d->ll, __VA_ARGS__)
-#define IPC_ERROR(d, ...) U_LOG_IFL_E(d->ll, __VA_ARGS__)
+#define IPC_TRACE(d, ...) U_LOG_IFL_T(d->log_level, __VA_ARGS__)
+#define IPC_DEBUG(d, ...) U_LOG_IFL_D(d->log_level, __VA_ARGS__)
+#define IPC_INFO(d, ...) U_LOG_IFL_I(d->log_level, __VA_ARGS__)
+#define IPC_WARN(d, ...) U_LOG_IFL_W(d->log_level, __VA_ARGS__)
+#define IPC_ERROR(d, ...) U_LOG_IFL_E(d->log_level, __VA_ARGS__)
+
 
 /*
  *
@@ -44,9 +48,9 @@ extern "C" {
  *
  */
 
-#define IPC_SERVER_NUM_XDEVS 8
+#define IPC_MAX_CLIENT_SEMAPHORES 8
 #define IPC_MAX_CLIENT_SWAPCHAINS 32
-//#define IPC_MAX_CLIENTS 8
+#define IPC_MAX_CLIENT_SPACES 128
 
 struct xrt_instance;
 struct xrt_compositor;
@@ -63,7 +67,7 @@ struct ipc_swapchain_data
 	uint32_t width;
 	uint32_t height;
 	uint64_t format;
-	uint32_t num_images;
+	uint32_t image_count;
 
 	bool active;
 };
@@ -78,6 +82,9 @@ struct ipc_client_state
 	//! Link back to the main server.
 	struct ipc_server *server;
 
+	//! Session for this client.
+	struct xrt_session *xs;
+
 	//! Compositor for this client.
 	struct xrt_compositor *xc;
 
@@ -85,13 +92,36 @@ struct ipc_client_state
 	bool io_active;
 
 	//! Number of swapchains in use by client
-	uint32_t num_swapchains;
+	uint32_t swapchain_count;
 
 	//! Ptrs to the swapchains
 	struct xrt_swapchain *xscs[IPC_MAX_CLIENT_SWAPCHAINS];
 
 	//! Data for the swapchains.
 	struct ipc_swapchain_data swapchain_data[IPC_MAX_CLIENT_SWAPCHAINS];
+
+	//! Number of compositor semaphores in use by client
+	uint32_t compositor_semaphore_count;
+
+	//! Ptrs to the semaphores.
+	struct xrt_compositor_semaphore *xcsems[IPC_MAX_CLIENT_SEMAPHORES];
+
+	struct
+	{
+		uint32_t root;
+		uint32_t local;
+		uint32_t stage;
+		uint32_t unbounded;
+	} semantic_spaces;
+
+	//! Number of spaces.
+	uint32_t space_count;
+
+	//! Ptrs to the spaces.
+	struct xrt_space *xspcs[IPC_MAX_CLIENT_SPACES];
+
+	//! Which of the references spaces is the client using.
+	bool ref_space_used[XRT_SPACE_REFERENCE_TYPE_COUNT];
 
 	//! Socket fd used for client comms
 	struct ipc_message_channel imc;
@@ -229,6 +259,23 @@ struct ipc_server_mainloop
 #define XRT_IPC_GOT_IMPL
 #endif
 
+#if defined(XRT_OS_WINDOWS) || defined(XRT_DOXYGEN)
+	/*!
+	 * @name Desktop Windows Mainloop Members
+	 * @{
+	 */
+
+	//! Named Pipe that we accept connections on.
+	HANDLE pipe_handle;
+
+	//! Name of the Pipe that we accept connections on.
+	char *pipe_name;
+
+	/*! @} */
+
+#define XRT_IPC_GOT_IMPL
+#endif
+
 #ifndef XRT_IPC_GOT_IMPL
 #error "Need port"
 #endif
@@ -271,16 +318,22 @@ struct ipc_server
 	//! Handle for the current process, e.g. pidfile on linux
 	struct u_process *process;
 
-	/* ---- HACK ---- */
-	void *hack;
-	/* ---- HACK ---- */
+	struct u_debug_gui *debug_gui;
 
+	//! The @ref xrt_iface level system.
+	struct xrt_system *xsys;
+
+	//! System devices.
+	struct xrt_system_devices *xsysd;
+
+	//! Space overseer.
+	struct xrt_space_overseer *xso;
 
 	//! System compositor.
 	struct xrt_system_compositor *xsysc;
 
-	struct ipc_device idevs[IPC_SERVER_NUM_XDEVS];
-	struct xrt_tracking_origin *xtracks[IPC_SERVER_NUM_XDEVS];
+	struct ipc_device idevs[XRT_SYSTEM_MAX_DEVICES];
+	struct xrt_tracking_origin *xtracks[XRT_SYSTEM_MAX_DEVICES];
 
 	struct ipc_shared_memory *ism;
 	xrt_shmem_handle_t ism_handle;
@@ -293,11 +346,14 @@ struct ipc_server
 	// Should we exit when a client disconnects.
 	bool exit_on_disconnect;
 
-	enum u_logging_level ll;
+	enum u_logging_level log_level;
 
 	struct ipc_thread threads[IPC_MAX_CLIENTS];
 
 	volatile uint32_t current_slot_index;
+
+	//! Generator for IDs.
+	uint32_t id_generator;
 
 	struct
 	{
@@ -309,38 +365,29 @@ struct ipc_server
 };
 
 
-#ifndef XRT_OS_ANDROID
 /*!
- * Main entrypoint to the compositor process.
+ * Get the current state of a client.
  *
  * @ingroup ipc_server
  */
-int
-ipc_server_main(int argc, char **argv);
-#endif
-
-#ifdef XRT_OS_ANDROID
-/*!
- * Main entrypoint to the server process.
- *
- * @param ps Pointer to populate with the server struct.
- * @param startup_complete_callback Function to call upon completing startup and populating *ps, but before entering the
- * mainloop.
- * @param data user data to pass to your callback.
- *
- * @ingroup ipc_server
- */
-int
-ipc_server_main_android(struct ipc_server **ps, void (*startup_complete_callback)(void *data), void *data);
-#endif
+xrt_result_t
+ipc_server_get_client_app_state(struct ipc_server *s, uint32_t client_id, struct ipc_app_state *out_ias);
 
 /*!
  * Set the new active client.
  *
  * @ingroup ipc_server
  */
-void
-ipc_server_set_active_client(struct ipc_server *s, int active_client_index);
+xrt_result_t
+ipc_server_set_active_client(struct ipc_server *s, uint32_t client_id);
+
+/*!
+ * Toggle the io for this client.
+ *
+ * @ingroup ipc_server
+ */
+xrt_result_t
+ipc_server_toggle_io_client(struct ipc_server *s, uint32_t client_id);
 
 /*!
  * Called by client threads to set a session to active.
@@ -372,14 +419,14 @@ ipc_server_update_state(struct ipc_server *s);
  * @ingroup ipc_server
  */
 void *
-ipc_server_client_thread(void *_cs);
+ipc_server_client_thread(void *_ics);
 
 /*!
- * This destroyes the native compositor for this client and any extra objects
+ * This destroys the native compositor for this client and any extra objects
  * created from it, like all of the swapchains.
  */
 void
-ipc_server_client_destroy_compositor(volatile struct ipc_client_state *ics);
+ipc_server_client_destroy_session_and_compositor(volatile struct ipc_client_state *ics);
 
 /*!
  * @defgroup ipc_server_internals Server Internals
@@ -388,11 +435,16 @@ ipc_server_client_destroy_compositor(volatile struct ipc_client_state *ics);
  * @{
  */
 /*!
- * Start a thread for a client connected at the other end of the file descriptor @p fd.
+ * Called when a client has connected, it takes the client's ipc handle.
+ * Handles all things needed to be done for a client connecting, like starting
+ * it's thread.
+ *
+ * @param vs         The IPC server.
+ * @param ipc_handle Handle to communicate over.
  * @memberof ipc_server
  */
 void
-ipc_server_start_client_listener_thread(struct ipc_server *vs, int fd);
+ipc_server_handle_client_connected(struct ipc_server *vs, xrt_ipc_handle_t ipc_handle);
 
 /*!
  * Perform whatever needs to be done when the mainloop polling encounters a failure.
@@ -409,6 +461,9 @@ ipc_server_handle_failure(struct ipc_server *vs);
  */
 void
 ipc_server_handle_shutdown_signal(struct ipc_server *vs);
+
+xrt_result_t
+ipc_server_get_system_properties(struct ipc_server *vs, struct xrt_system_properties *out_properties);
 //! @}
 
 /*

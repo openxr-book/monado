@@ -1,5 +1,5 @@
 // Copyright 2016, Joey Ferwerda.
-// Copyright 2019-2021, Collabora, Ltd.
+// Copyright 2019-2022, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -23,6 +23,7 @@
 #include "util/u_time.h"
 #include "util/u_debug.h"
 #include "util/u_device.h"
+#include "util/u_trace_marker.h"
 #include "util/u_distortion_mesh.h"
 
 #include "math/m_imu_3dof.h"
@@ -58,12 +59,19 @@ struct psvr_device
 {
 	struct xrt_device base;
 
+	//! Owned by the @ref oth thread.
 	hid_device *hid_sensor;
+
+	//! Owned and protected by the device_mutex.
 	hid_device *hid_control;
 	struct os_mutex device_mutex;
 
+	//! Used to read sensor packets.
+	struct os_thread_helper oth;
+
 	struct xrt_tracked_psvr *tracker;
 
+	//! Only touched from the sensor thread.
 	timepoint_ns last_sensor_time;
 
 	struct psvr_parsed_sensor last;
@@ -230,18 +238,18 @@ send_request_data(struct psvr_device *psvr, uint8_t id, uint8_t num)
 	return send_to_control(psvr, data, sizeof(data));
 }
 
-
-/*
- *
- * Packet reading code.
- *
- */
-
 static uint8_t
 scale_led_power(uint8_t power)
 {
 	return (uint8_t)((power / 255.0f) * 100.0f);
 }
+
+
+/*
+ *
+ * Sensor functions.
+ *
+ */
 
 static void
 read_sample_and_apply_calibration(struct psvr_device *psvr,
@@ -266,13 +274,13 @@ read_sample_and_apply_calibration(struct psvr_device *psvr,
 	    raw_gyro.z * 0.00105f,
 	};
 
-	float ax = 2.0 / (psvr->calibration.accel_pos_x.x - psvr->calibration.accel_neg_x.x);
-	float ay = 2.0 / (psvr->calibration.accel_pos_y.y - psvr->calibration.accel_neg_y.y);
-	float az = 2.0 / (psvr->calibration.accel_pos_z.z - psvr->calibration.accel_neg_z.z);
+	float ax = 2.0f / (psvr->calibration.accel_pos_x.x - psvr->calibration.accel_neg_x.x);
+	float ay = 2.0f / (psvr->calibration.accel_pos_y.y - psvr->calibration.accel_neg_y.y);
+	float az = 2.0f / (psvr->calibration.accel_pos_z.z - psvr->calibration.accel_neg_z.z);
 
-	float ox = (psvr->calibration.accel_pos_x.x + psvr->calibration.accel_neg_x.x) / 2.0;
-	float oy = (psvr->calibration.accel_pos_y.y + psvr->calibration.accel_neg_y.y) / 2.0;
-	float oz = (psvr->calibration.accel_pos_z.z + psvr->calibration.accel_neg_z.z) / 2.0;
+	float ox = (psvr->calibration.accel_pos_x.x + psvr->calibration.accel_neg_x.x) / 2.0f;
+	float oy = (psvr->calibration.accel_pos_y.y + psvr->calibration.accel_neg_y.y) / 2.0f;
+	float oz = (psvr->calibration.accel_pos_z.z + psvr->calibration.accel_neg_z.z) / 2.0f;
 
 	accel.x -= ox;
 	accel.y -= oy;
@@ -282,9 +290,9 @@ read_sample_and_apply_calibration(struct psvr_device *psvr,
 	accel.z *= az;
 
 	// Go from Gs to m/s2 and flip the Z-axis.
-	accel.x *= +MATH_GRAVITY_M_S2;
-	accel.y *= +MATH_GRAVITY_M_S2;
-	accel.z *= -MATH_GRAVITY_M_S2;
+	accel.x *= (float)+MATH_GRAVITY_M_S2;
+	accel.y *= (float)+MATH_GRAVITY_M_S2;
+	accel.z *= (float)-MATH_GRAVITY_M_S2;
 
 	// Flip the Z-axis.
 	gyro.x *= +1.0;
@@ -296,7 +304,7 @@ read_sample_and_apply_calibration(struct psvr_device *psvr,
 }
 
 static void
-update_fusion(struct psvr_device *psvr, struct psvr_parsed_sample *sample, uint64_t timestamp_ns)
+update_fusion_locked(struct psvr_device *psvr, struct psvr_parsed_sample *sample, uint64_t timestamp_ns)
 {
 	struct xrt_vec3 mag = {0.0f, 0.0f, 0.0f};
 	(void)mag;
@@ -312,6 +320,14 @@ update_fusion(struct psvr_device *psvr, struct psvr_parsed_sample *sample, uint6
 	} else {
 		m_imu_3dof_update(&psvr->fusion, timestamp_ns, &psvr->read.accel, &psvr->read.gyro);
 	}
+}
+
+static void
+update_fusion(struct psvr_device *psvr, struct psvr_parsed_sample *sample, uint64_t timestamp_ns)
+{
+	os_mutex_lock(&psvr->device_mutex);
+	update_fusion_locked(psvr, sample, timestamp_ns);
+	os_mutex_unlock(&psvr->device_mutex);
 }
 
 static uint32_t
@@ -381,6 +397,9 @@ handle_tracker_sensor_msg(struct psvr_device *psvr, unsigned char *buffer, int s
 
 	time_duration_ns inter_sample_duration_ns = tick_delta2 * PSVR_NS_PER_TICK;
 
+	// If this is larger then one second something bad is going on.
+	assert(inter_sample_duration_ns < U_TIME_1S_IN_NS);
+
 	// Move it back in time.
 	timepoint_ns timestamp_ns = (uint64_t)now_ns - (uint64_t)inter_sample_duration_ns;
 
@@ -396,6 +415,65 @@ handle_tracker_sensor_msg(struct psvr_device *psvr, unsigned char *buffer, int s
 	// Update the fusion with second sample.
 	update_fusion(psvr, &s->samples[1], timestamp_ns);
 }
+
+static void
+sensor_clear_queue(struct psvr_device *psvr)
+{
+	uint8_t buffer[FEATURE_BUFFER_SIZE];
+
+	while (hid_read(psvr->hid_sensor, buffer, FEATURE_BUFFER_SIZE) > 0) {
+		// Just drop the packets.
+	}
+}
+
+static int
+sensor_read_one_packet(struct psvr_device *psvr)
+{
+	uint8_t buffer[FEATURE_BUFFER_SIZE];
+
+	// Try for one second to get packates.
+	int size = hid_read_timeout(psvr->hid_sensor, buffer, FEATURE_BUFFER_SIZE, 1000);
+	if (size <= 0) {
+		return size;
+	}
+
+	handle_tracker_sensor_msg(psvr, buffer, size);
+
+	return 0;
+}
+
+static void *
+sensor_thread(void *ptr)
+{
+	U_TRACE_SET_THREAD_NAME("PS VR");
+
+	struct psvr_device *psvr = (struct psvr_device *)ptr;
+	int ret = 0;
+
+	// Empty the queue.
+	sensor_clear_queue(psvr);
+
+	os_thread_helper_lock(&psvr->oth);
+
+	while (os_thread_helper_is_running_locked(&psvr->oth) && ret >= 0) {
+		os_thread_helper_unlock(&psvr->oth);
+
+		ret = sensor_read_one_packet(psvr);
+
+		os_thread_helper_lock(&psvr->oth);
+	}
+
+	os_thread_helper_unlock(&psvr->oth);
+
+	return NULL;
+}
+
+
+/*
+ *
+ * Control device handling.
+ *
+ */
 
 static void
 handle_control_status_msg(struct psvr_device *psvr, unsigned char *buffer, int size)
@@ -461,7 +539,7 @@ handle_calibration_msg(struct psvr_device *psvr, const unsigned char *buffer, si
 		return;
 	}
 
-	size_t which = buffer[1];
+	uint16_t which = buffer[1];
 	size_t dst = data_length * which;
 	for (size_t src = data_start; src < size; src++, dst++) {
 		psvr->calibration.data[dst] = buffer[src];
@@ -501,25 +579,6 @@ handle_control_0xA0(struct psvr_device *psvr, unsigned char *buffer, int size)
 	}
 
 	PSVR_DEBUG(psvr, "%02x %02x %02x %02x", buffer[0], buffer[1], buffer[2], buffer[3]);
-}
-
-static int
-read_sensor_packets(struct psvr_device *psvr)
-{
-	uint8_t buffer[FEATURE_BUFFER_SIZE];
-	int size = 0;
-
-	do {
-		size = hid_read(psvr->hid_sensor, buffer, FEATURE_BUFFER_SIZE);
-		if (size == 0) {
-			return 0;
-		}
-		if (size < 0) {
-			return -1;
-		}
-
-		handle_tracker_sensor_msg(psvr, buffer, size);
-	} while (true);
 }
 
 static int
@@ -644,7 +703,6 @@ static int
 wait_for_power(struct psvr_device *psvr, bool on)
 {
 	for (int i = 0; i < 5000; i++) {
-		read_sensor_packets(psvr);
 		read_control_packets(psvr);
 
 		if (psvr->powered_on == on) {
@@ -661,7 +719,6 @@ static int
 wait_for_vr_mode(struct psvr_device *psvr, bool on)
 {
 	for (int i = 0; i < 5000; i++) {
-		read_sensor_packets(psvr);
 		read_control_packets(psvr);
 
 		if (psvr->in_vr_mode == on) {
@@ -686,6 +743,7 @@ control_power_and_wait(struct psvr_device *psvr, bool on)
 	if (ret < 0) {
 		PSVR_ERROR(psvr, "Failed to switch %s the headset! '%i'", status, ret);
 	}
+
 
 	ret = wait_for_power(psvr, on);
 	if (ret < 0) {
@@ -825,11 +883,6 @@ disco_leds(struct psvr_device *psvr)
 
 		// Sleep for a tenth of a second while polling for packages.
 		for (int k = 0; k < 100; k++) {
-			ret = read_sensor_packets(psvr);
-			if (ret < 0) {
-				return ret;
-			}
-
 			ret = read_control_packets(psvr);
 			if (ret < 0) {
 				return ret;
@@ -842,11 +895,21 @@ disco_leds(struct psvr_device *psvr)
 	return 0;
 }
 
+
+/*
+ *
+ * Misc functions.
+ *
+ */
+
 static void
 teardown(struct psvr_device *psvr)
 {
 	// Stop the variable tracking.
 	u_var_remove_root(psvr);
+
+	// Shutdown the sensor thread early.
+	os_thread_helper_stop_and_wait(&psvr->oth);
 
 	// Includes null check, and sets to null.
 	xrt_tracked_psvr_destroy(&psvr->tracker);
@@ -869,6 +932,7 @@ teardown(struct psvr_device *psvr)
 	// Destroy the fusion.
 	m_imu_3dof_close(&psvr->fusion);
 
+	os_thread_helper_destroy(&psvr->oth);
 	os_mutex_destroy(&psvr->device_mutex);
 }
 
@@ -884,8 +948,11 @@ psvr_device_update_inputs(struct xrt_device *xdev)
 {
 	struct psvr_device *psvr = psvr_device(xdev);
 
-	read_sensor_packets(psvr);
+	os_mutex_lock(&psvr->device_mutex);
+
 	update_leds_if_changed(psvr);
+
+	os_mutex_unlock(&psvr->device_mutex);
 }
 
 static void
@@ -904,7 +971,6 @@ psvr_device_get_tracked_pose(struct xrt_device *xdev,
 	os_mutex_lock(&psvr->device_mutex);
 
 	// Read all packets.
-	read_sensor_packets(psvr);
 	read_control_packets(psvr);
 
 	// Clear out the relation.
@@ -928,16 +994,6 @@ psvr_device_get_tracked_pose(struct xrt_device *xdev,
 }
 
 static void
-psvr_device_get_view_pose(struct xrt_device *xdev,
-                          const struct xrt_vec3 *eye_relation,
-                          uint32_t view_index,
-                          struct xrt_pose *out_pose)
-{
-	(void)xdev;
-	u_device_get_view_pose(eye_relation, view_index, out_pose);
-}
-
-static void
 psvr_device_destroy(struct xrt_device *xdev)
 {
 	struct psvr_device *psvr = psvr_device(xdev);
@@ -947,7 +1003,7 @@ psvr_device_destroy(struct xrt_device *xdev)
 }
 
 static bool
-psvr_compute_distortion(struct xrt_device *xdev, int view, float u, float v, struct xrt_uv_triplet *result)
+psvr_compute_distortion(struct xrt_device *xdev, uint32_t view, float u, float v, struct xrt_uv_triplet *result)
 {
 	struct psvr_device *psvr = psvr_device(xdev);
 
@@ -962,10 +1018,10 @@ psvr_compute_distortion(struct xrt_device *xdev, int view, float u, float v, str
  */
 
 struct xrt_device *
-psvr_device_create(struct hid_device_info *sensor_hid_info,
-                   struct hid_device_info *control_hid_info,
-                   struct xrt_prober *xp,
-                   enum u_logging_level log_level)
+psvr_device_create_auto_prober(struct hid_device_info *sensor_hid_info,
+                               struct hid_device_info *control_hid_info,
+                               struct xrt_tracked_psvr *tracker,
+                               enum u_logging_level log_level)
 {
 	enum u_device_alloc_flags flags =
 	    (enum u_device_alloc_flags)(U_DEVICE_ALLOC_HMD | U_DEVICE_ALLOC_TRACKING_NONE);
@@ -975,7 +1031,7 @@ psvr_device_create(struct hid_device_info *sensor_hid_info,
 	psvr->log_level = log_level;
 	psvr->base.update_inputs = psvr_device_update_inputs;
 	psvr->base.get_tracked_pose = psvr_device_get_tracked_pose;
-	psvr->base.get_view_pose = psvr_device_get_view_pose;
+	psvr->base.get_view_poses = u_device_get_view_poses;
 	psvr->base.compute_distortion = psvr_compute_distortion;
 	psvr->base.destroy = psvr_device_destroy;
 	psvr->base.inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;
@@ -984,19 +1040,19 @@ psvr_device_create(struct hid_device_info *sensor_hid_info,
 	{
 		struct u_panotools_values vals = {0};
 
-		vals.distortion_k[0] = 0.75;
-		vals.distortion_k[1] = -0.01;
-		vals.distortion_k[2] = 0.75;
-		vals.distortion_k[3] = 0.0;
-		vals.distortion_k[4] = 3.8;
-		vals.aberration_k[0] = 0.999;
-		vals.aberration_k[1] = 1.008;
-		vals.aberration_k[2] = 1.018;
-		vals.scale = 1.2 * (1980 / 2.0f);
+		vals.distortion_k[0] = 0.75f;
+		vals.distortion_k[1] = -0.01f;
+		vals.distortion_k[2] = 0.75f;
+		vals.distortion_k[3] = 0.0f;
+		vals.distortion_k[4] = 3.8f;
+		vals.aberration_k[0] = 0.999f;
+		vals.aberration_k[1] = 1.008f;
+		vals.aberration_k[2] = 1.018f;
+		vals.scale = 1.2f * (1980 / 2.0f);
 		vals.viewport_size.x = (1980 / 2.0f);
 		vals.viewport_size.y = (1080);
-		vals.lens_center.x = vals.viewport_size.x / 2.0;
-		vals.lens_center.y = vals.viewport_size.y / 2.0;
+		vals.lens_center.x = vals.viewport_size.x / 2.0f;
+		vals.lens_center.y = vals.viewport_size.y / 2.0f;
 
 		psvr->vals = vals;
 
@@ -1014,12 +1070,21 @@ psvr_device_create(struct hid_device_info *sensor_hid_info,
 	snprintf(psvr->base.str, XRT_DEVICE_NAME_LEN, "PS VR Headset");
 	snprintf(psvr->base.serial, XRT_DEVICE_NAME_LEN, "PS VR Headset");
 
+	// Do mutex and thread init before any call to teardown happens.
+	os_mutex_init(&psvr->device_mutex);
+	os_thread_helper_init(&psvr->oth);
+
 	ret = open_hid(psvr, sensor_hid_info, &psvr->hid_sensor);
 	if (ret != 0) {
 		goto cleanup;
 	}
 
 	ret = open_hid(psvr, control_hid_info, &psvr->hid_control);
+	if (ret < 0) {
+		goto cleanup;
+	}
+
+	ret = os_thread_helper_start(&psvr->oth, sensor_thread, (void *)psvr);
 	if (ret < 0) {
 		goto cleanup;
 	}
@@ -1056,8 +1121,8 @@ psvr_device_create(struct hid_device_info *sensor_hid_info,
 	info.display.h_meters = 0.07f;
 	info.lens_horizontal_separation_meters = 0.13f / 2.0f;
 	info.lens_vertical_position_meters = 0.07f / 2.0f;
-	info.views[0].fov = 85.0f * (M_PI / 180.0f);
-	info.views[1].fov = 85.0f * (M_PI / 180.0f);
+	info.fov[0] = (float)(85.0 * (M_PI / 180.0));
+	info.fov[1] = (float)(85.0 * (M_PI / 180.0));
 
 	if (!u_device_setup_split_side_by_side(&psvr->base, &info)) {
 		PSVR_ERROR(psvr, "Failed to setup basic device info");
@@ -1098,10 +1163,8 @@ psvr_device_create(struct hid_device_info *sensor_hid_info,
 		u_device_dump_config(&psvr->base, __func__, "Sony PSVR");
 	}
 
-	// If there is a tracking factory use it.
-	if (xp->tracking != NULL) {
-		xp->tracking->create_tracked_psvr(xp->tracking, &psvr->base, &psvr->tracker);
-	}
+	// Did we get a tracker, use it!
+	psvr->tracker = tracker;
 
 	// Use the new origin if we got a tracking system.
 	if (psvr->tracker != NULL) {
@@ -1109,12 +1172,10 @@ psvr_device_create(struct hid_device_info *sensor_hid_info,
 	}
 
 	psvr->base.orientation_tracking_supported = true;
-	psvr->base.position_tracking_supported = xp->tracking != NULL;
+	psvr->base.position_tracking_supported = psvr->tracker != NULL;
 	psvr->base.device_type = XRT_DEVICE_TYPE_HMD;
 
 	PSVR_DEBUG(psvr, "YES!");
-
-	os_mutex_init(&psvr->device_mutex);
 
 	return &psvr->base;
 

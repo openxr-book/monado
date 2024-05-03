@@ -1,4 +1,4 @@
-// Copyright 2019-2021, Collabora, Ltd.
+// Copyright 2019-2022, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -35,6 +35,7 @@ client_gl_memobj_swapchain(struct xrt_swapchain *xsc)
 	return (struct client_gl_memobj_swapchain *)xsc;
 }
 
+
 /*
  *
  * Swapchain functions.
@@ -46,13 +47,24 @@ client_gl_memobj_swapchain_destroy(struct xrt_swapchain *xsc)
 {
 	struct client_gl_memobj_swapchain *sc = client_gl_memobj_swapchain(xsc);
 
-	uint32_t num_images = sc->base.base.base.num_images;
-	if (num_images > 0) {
-		glDeleteTextures(num_images, &sc->base.base.images[0]);
+	uint32_t image_count = sc->base.base.base.image_count;
+
+	struct client_gl_compositor *c = sc->base.gl_compositor;
+	enum xrt_result xret = client_gl_compositor_context_begin(&c->base.base, CLIENT_GL_CONTEXT_REASON_OTHER);
+
+	if (image_count > 0) {
+		if (xret == XRT_SUCCESS) {
+			glDeleteTextures(image_count, &sc->base.base.images[0]);
+			glDeleteMemoryObjectsEXT(image_count, &sc->memory[0]);
+		}
+
 		U_ZERO_ARRAY(sc->base.base.images);
-		glDeleteMemoryObjectsEXT(num_images, &sc->memory[0]);
 		U_ZERO_ARRAY(sc->memory);
-		sc->base.base.base.num_images = 0;
+		sc->base.base.base.image_count = 0;
+	}
+
+	if (xret == XRT_SUCCESS) {
+		client_gl_compositor_context_end(&c->base.base, CLIENT_GL_CONTEXT_REASON_OTHER);
 	}
 
 	// Drop our reference, does NULL checking.
@@ -61,16 +73,33 @@ client_gl_memobj_swapchain_destroy(struct xrt_swapchain *xsc)
 	free(sc);
 }
 
+static bool
+client_gl_memobj_swapchain_import(GLuint memory, size_t size, xrt_graphics_buffer_handle_t handle)
+{
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
+	glImportMemoryFdEXT(memory, size, GL_HANDLE_TYPE_OPAQUE_FD_EXT, handle);
+	return true;
+#elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_WIN32_HANDLE)
+	glImportMemoryWin32HandleEXT(memory, size, GL_HANDLE_TYPE_OPAQUE_WIN32_EXT, handle);
+	return true;
+#else
+	(void)memory;
+	(void)size;
+	(void)handle;
+	return false;
+#endif
+}
+
 struct xrt_swapchain *
 client_gl_memobj_swapchain_create(struct xrt_compositor *xc,
                                   const struct xrt_swapchain_create_info *info,
                                   struct xrt_swapchain_native *xscn,
                                   struct client_gl_swapchain **out_cglsc)
 {
-#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
 	struct client_gl_compositor *c = client_gl_compositor(xc);
 	(void)c;
 
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD) || defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_WIN32_HANDLE)
 	if (xscn == NULL) {
 		return NULL;
 	}
@@ -83,22 +112,26 @@ client_gl_memobj_swapchain_create(struct xrt_compositor *xc,
 	struct client_gl_memobj_swapchain *sc = U_TYPED_CALLOC(struct client_gl_memobj_swapchain);
 	sc->base.base.base.destroy = client_gl_memobj_swapchain_destroy;
 	sc->base.base.base.reference.count = 1;
-	sc->base.base.base.num_images = native_xsc->num_images; // Fetch the number of images from the native swapchain.
+	sc->base.base.base.image_count =
+	    native_xsc->image_count; // Fetch the number of images from the native swapchain.
 	sc->base.xscn = xscn;
 	sc->base.tex_target = tex_target;
 
+	sc->base.gl_compositor = c;
+
 	struct xrt_swapchain_gl *xscgl = &sc->base.base;
+	glGenTextures(native_xsc->image_count, xscgl->images);
 
-	glGenTextures(native_xsc->num_images, xscgl->images);
-
-	glCreateMemoryObjectsEXT(native_xsc->num_images, &sc->memory[0]);
-	for (uint32_t i = 0; i < native_xsc->num_images; i++) {
+	glCreateMemoryObjectsEXT(native_xsc->image_count, &sc->memory[0]);
+	for (uint32_t i = 0; i < native_xsc->image_count; i++) {
 		glBindTexture(tex_target, xscgl->images[i]);
 
 		GLint dedicated = xscn->images[i].use_dedicated_allocation ? GL_TRUE : GL_FALSE;
 		glMemoryObjectParameterivEXT(sc->memory[i], GL_DEDICATED_MEMORY_OBJECT_EXT, &dedicated);
-		glImportMemoryFdEXT(sc->memory[i], xscn->images[i].size, GL_HANDLE_TYPE_OPAQUE_FD_EXT,
-		                    xscn->images[i].handle);
+
+		if (!client_gl_memobj_swapchain_import(sc->memory[i], xscn->images[i].size, xscn->images[i].handle)) {
+			continue;
+		}
 
 		// We have consumed this now, make sure it's not freed again.
 		xscn->images[i].handle = XRT_GRAPHICS_BUFFER_HANDLE_INVALID;

@@ -3,7 +3,7 @@
 /*!
  * @file
  * @brief  Simple main activity for Android.
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  */
 
 package org.freedesktop.monado.android_common;
@@ -13,30 +13,23 @@ import android.text.method.LinkMovementMethod;
 import android.view.View;
 import android.widget.ImageView;
 import android.widget.TextView;
-
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.app.AppCompatDelegate;
 import androidx.fragment.app.Fragment;
 import androidx.fragment.app.FragmentTransaction;
-
+import dagger.hilt.android.AndroidEntryPoint;
+import javax.inject.Inject;
 import org.freedesktop.monado.auxiliary.NameAndLogoProvider;
 import org.freedesktop.monado.auxiliary.UiProvider;
-
-import javax.inject.Inject;
-
-import dagger.hilt.android.AndroidEntryPoint;
 
 @AndroidEntryPoint
 public class AboutActivity extends AppCompatActivity {
 
-    @Inject
-    NoticeFragmentProvider noticeFragmentProvider;
+    @Inject NoticeFragmentProvider noticeFragmentProvider;
 
-    @Inject
-    UiProvider uiProvider;
+    @Inject UiProvider uiProvider;
 
-    @Inject
-    NameAndLogoProvider nameAndLogoProvider;
+    @Inject NameAndLogoProvider nameAndLogoProvider;
 
     private boolean isInProcessBuild() {
         try {
@@ -57,11 +50,14 @@ public class AboutActivity extends AppCompatActivity {
         AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES);
 
         // Make our Monado link clickable
-        ((TextView) findViewById(R.id.textPowered)).setMovementMethod(LinkMovementMethod.getInstance());
+        ((TextView) findViewById(R.id.textPowered))
+                .setMovementMethod(LinkMovementMethod.getInstance());
 
         // Branding from the branding provider
-        ((TextView) findViewById(R.id.textName)).setText(nameAndLogoProvider.getLocalizedRuntimeName());
-        ((ImageView) findViewById(R.id.imageView)).setImageDrawable(nameAndLogoProvider.getLogoDrawable());
+        ((TextView) findViewById(R.id.textName))
+                .setText(nameAndLogoProvider.getLocalizedRuntimeName());
+        ((ImageView) findViewById(R.id.imageView))
+                .setImageDrawable(nameAndLogoProvider.getLogoDrawable());
 
         boolean isInProcess = isInProcessBuild();
         if (!isInProcess) {
@@ -72,17 +68,18 @@ public class AboutActivity extends AppCompatActivity {
         FragmentTransaction fragmentTransaction = getSupportFragmentManager().beginTransaction();
 
         @VrModeStatus.Status
-        int status = VrModeStatus.detectStatus(this,
-                getApplicationContext().getApplicationInfo().packageName);
-
+        int status =
+                VrModeStatus.detectStatus(
+                        this, getApplicationContext().getApplicationInfo().packageName);
 
         VrModeStatus statusFrag = VrModeStatus.newInstance(status);
         fragmentTransaction.add(R.id.statusFrame, statusFrag, null);
 
         if (!isInProcess) {
             findViewById(R.id.drawOverOtherAppsFrame).setVisibility(View.VISIBLE);
-            DisplayOverOtherAppsStatusFragment drawOverFragment = new DisplayOverOtherAppsStatusFragment();
-            fragmentTransaction.add(R.id.drawOverOtherAppsFrame, drawOverFragment, null);
+            DisplayOverOtherAppsStatusFragment drawOverFragment =
+                    new DisplayOverOtherAppsStatusFragment();
+            fragmentTransaction.replace(R.id.drawOverOtherAppsFrame, drawOverFragment, null);
         }
 
         if (noticeFragmentProvider != null) {

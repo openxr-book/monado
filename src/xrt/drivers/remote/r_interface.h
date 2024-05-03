@@ -1,4 +1,4 @@
-// Copyright 2020, Collabora, Ltd.
+// Copyright 2020-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -9,14 +9,28 @@
 
 #pragma once
 
+// winsock2.h must be included before windows.h, or the winsock interface will be
+// defined instead of the winsock2 interface.
+// Given that some of the Monado headers could include windows.h, winsock2 is to be
+// included before anything else.
+// As a consequence, this header must also be the first included in the file using
+// it.
+#include "xrt/xrt_config_os.h"
+#ifdef XRT_OS_WINDOWS
+#include <winsock2.h> // For SOCKET
+#endif
+
 #include "xrt/xrt_defines.h"
+#include "util/u_logging.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 
-struct xrt_device;
+struct xrt_system_devices;
+struct xrt_space_overseer;
+struct xrt_session_event_sink;
 
 /*!
  * @defgroup drv_remote Remote debugging driver
@@ -31,12 +45,28 @@ struct xrt_device;
  * @brief @ref drv_remote files.
  */
 
+#ifdef XRT_OS_WINDOWS
+/*!
+ * The type for a socket descriptor
+ *
+ * On Windows, this is a SOCKET.
+ */
+typedef SOCKET r_socket_t;
+#else
+/*!
+ * The type for a socket descriptor
+ *
+ * On non-Windows, this is a file descriptor.
+ */
+typedef int r_socket_t;
+#endif
+
 /*!
  * Header value to be set in the packet.
  *
  * @ingroup drv_remote
  */
-#define R_HEADER_VALUE (*(uint64_t *)"mndrmt1\0")
+#define R_HEADER_VALUE (*(uint64_t *)"mndrmt3\0")
 
 /*!
  * Data per controller.
@@ -49,10 +79,55 @@ struct r_remote_controller_data
 
 	float hand_curl[5];
 
+	struct xrt_vec1 trigger_value;
+	struct xrt_vec1 squeeze_value;
+	struct xrt_vec1 squeeze_force;
+	struct xrt_vec2 thumbstick;
+	struct xrt_vec1 trackpad_force;
+	struct xrt_vec2 trackpad;
+
+	bool hand_tracking_active;
 	bool active;
-	bool select;
-	bool menu;
-	bool _pad;
+
+	bool system_click;
+	bool system_touch;
+	bool a_click;
+	bool a_touch;
+	bool b_click;
+	bool b_touch;
+	bool trigger_click;
+	bool trigger_touch;
+	bool thumbstick_click;
+	bool thumbstick_touch;
+	bool trackpad_touch;
+	bool _pad0;
+	bool _pad1;
+	bool _pad2;
+	// active(2) + bools(11) + pad(3) = 16
+};
+
+struct r_head_data
+{
+	struct
+	{
+		//! The field of view values of this view.
+		struct xrt_fov fov;
+
+		//! The pose of this view relative to @ref r_head_data::center.
+		struct xrt_pose pose;
+
+		//! Padded to fov(16) + pose(16 + 12) + 4 = 48
+		uint32_t _pad;
+	} views[2];
+
+	//! The center of the head, in OpenXR terms the view space.
+	struct xrt_pose center;
+
+	//! Is the per view data valid and should be used?
+	bool per_view_data_valid;
+
+	//! pose(16 + 12) bool(1) + pad(3) = 32.
+	bool _pad0, _pad1, _pad2;
 };
 
 /*!
@@ -64,10 +139,7 @@ struct r_remote_data
 {
 	uint64_t header;
 
-	struct
-	{
-		struct xrt_pose pose;
-	} hmd;
+	struct r_head_data head;
 
 	struct r_remote_controller_data left, right;
 };
@@ -79,26 +151,31 @@ struct r_remote_data
  */
 struct r_remote_connection
 {
-	int fd;
+	//! Logging level to be used.
+	enum u_logging_level log_level;
+
+	//! Socket.
+	r_socket_t fd;
 };
 
 /*!
- * Creates the remote devices.
+ * Creates the remote system devices.
  *
  * @ingroup drv_remote
  */
-int
+xrt_result_t
 r_create_devices(uint16_t port,
-                 struct xrt_device **out_hmd,
-                 struct xrt_device **out_controller_left,
-                 struct xrt_device **out_controller_right);
+                 uint32_t view_count,
+                 struct xrt_session_event_sink *broadcast,
+                 struct xrt_system_devices **out_xsysd,
+                 struct xrt_space_overseer **out_xso);
 
 /*!
  * Initializes and connects the connection.
  *
  * @ingroup drv_remote
  */
-int
+r_socket_t
 r_remote_connection_init(struct r_remote_connection *rc, const char *addr, uint16_t port);
 
 int

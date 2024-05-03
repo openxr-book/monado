@@ -3,7 +3,7 @@
 /*!
  * @file
  * @brief  Fragment to display the VR Mode status and actions.
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  */
 
 package org.freedesktop.monado.android_common;
@@ -26,27 +26,19 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.TextView;
-
 import androidx.annotation.IntDef;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
-
-import org.freedesktop.monado.auxiliary.NameAndLogoProvider;
-import org.freedesktop.monado.auxiliary.UiProvider;
-
+import dagger.hilt.android.AndroidEntryPoint;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.util.List;
-
 import javax.inject.Inject;
+import org.freedesktop.monado.auxiliary.NameAndLogoProvider;
+import org.freedesktop.monado.auxiliary.UiProvider;
 
-import dagger.hilt.android.AndroidEntryPoint;
-
-
-/**
- * A Fragment for displaying/affecting VR Listener status.
- */
+/** A Fragment for displaying/affecting VR Listener status. */
 @AndroidEntryPoint
 public class VrModeStatus extends Fragment {
     public static final int STATUS_UNKNOWN = -2;
@@ -56,14 +48,11 @@ public class VrModeStatus extends Fragment {
     private static final String TAG = "MonadoVrModeStatus";
     private static final String ARG_STATUS = "status";
 
-    @Inject
-    UiProvider uiProvider;
+    @Inject UiProvider uiProvider;
 
-    @Inject
-    NameAndLogoProvider nameAndLogoProvider;
+    @Inject NameAndLogoProvider nameAndLogoProvider;
 
-    private @Status
-    int status_ = STATUS_UNKNOWN;
+    private @Status int status_ = STATUS_UNKNOWN;
 
     public VrModeStatus() {
         // Required empty public constructor
@@ -73,8 +62,7 @@ public class VrModeStatus extends Fragment {
      * Get the ComponentName for a VrListenerService
      *
      * @param resolveInfo a ResolveInfo from PackageManager.queryIntentServices() with an
-     *                    android.service.vr.VrListenerService Intent and
-     *                    PackageManager.GET_META_DATA
+     *     android.service.vr.VrListenerService Intent and PackageManager.GET_META_DATA
      * @return the ComponentName, or null if resolveInfo.serviceInfo is null
      */
     private static ComponentName getVrListener(@NonNull ResolveInfo resolveInfo) {
@@ -85,8 +73,8 @@ public class VrModeStatus extends Fragment {
         return new ComponentName(serviceInfo.packageName, serviceInfo.name);
     }
 
-    private static @Nullable
-    ComponentName findOurselves(@NonNull List<ResolveInfo> resolutions, @NonNull String packageName) {
+    private static @Nullable ComponentName findOurselves(
+            @NonNull List<ResolveInfo> resolutions, @NonNull String packageName) {
         for (ResolveInfo resolveInfo : resolutions) {
             ComponentName componentName = getVrListener(resolveInfo);
             if (componentName == null) continue;
@@ -102,24 +90,26 @@ public class VrModeStatus extends Fragment {
     /**
      * Determine the VR mode status of this package.
      *
-     * @param context     A context to look up package manager info about this package.
+     * @param context A context to look up package manager info about this package.
      * @param packageName The current package name (usually BuildConfig.APPLICATION_ID)
      * @return the VR mode status
      */
-    public static @Status
-    int detectStatus(@NonNull Context context, @NonNull String packageName) {
+    public static @Status int detectStatus(@NonNull Context context, @NonNull String packageName) {
         Intent intent = new Intent(VrListenerService.SERVICE_INTERFACE);
         PackageManager packageManager = context.getPackageManager();
         // Suppression because we only care about finding out about our own package.
         @SuppressLint("QueryPermissionsNeeded")
-        List<ResolveInfo> resolutions = packageManager.queryIntentServices(intent,
-                PackageManager.GET_META_DATA);
+        List<ResolveInfo> resolutions =
+                packageManager.queryIntentServices(intent, PackageManager.GET_META_DATA);
         if (resolutions == null || resolutions.isEmpty()) {
             return STATUS_NOT_AVAIL;
         }
         ComponentName us = findOurselves(resolutions, packageName);
         if (us == null) {
-            Log.w(TAG, "Could not find ourselves in the list of VrListenerService implementations! " + packageName);
+            Log.w(
+                    TAG,
+                    "Could not find ourselves in the list of VrListenerService implementations! "
+                            + packageName);
             return STATUS_NOT_AVAIL;
         }
 
@@ -132,8 +122,8 @@ public class VrModeStatus extends Fragment {
     }
 
     /**
-     * Use this factory method to create a new instance of
-     * this fragment using the provided parameters.
+     * Use this factory method to create a new instance of this fragment using the provided
+     * parameters.
      *
      * @param status The VR Mode status. See detectStatus()
      * @return A new instance of fragment VrModeStatus.
@@ -151,7 +141,7 @@ public class VrModeStatus extends Fragment {
         try {
             context.startActivity(intent);
         } catch (AndroidRuntimeException exception) {
-            Log.w("Monado", "Got exception trying to start VR listener settings: " + exception.toString());
+            Log.w("Monado", "Got exception trying to start VR listener settings: " + exception);
         }
     }
 
@@ -180,7 +170,8 @@ public class VrModeStatus extends Fragment {
                 break;
             case STATUS_NOT_AVAIL:
                 textEnabledDisabled.setText(
-                        res.getString(R.string.vr_mode_not_avail,
+                        res.getString(
+                                R.string.vr_mode_not_avail,
                                 nameAndLogoProvider.getLocalizedRuntimeName()));
                 textEnabledDisabled.setVisibility(View.VISIBLE);
                 button.setVisibility(View.GONE);
@@ -196,18 +187,17 @@ public class VrModeStatus extends Fragment {
     }
 
     @Override
-    public View onCreateView(LayoutInflater inflater, ViewGroup container,
-                             Bundle savedInstanceState) {
+    public View onCreateView(
+            LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState) {
         // Inflate the layout for this fragment
         View view = inflater.inflate(R.layout.fragment_vr_mode_status, container, false);
         updateState(view);
-        view.findViewById(R.id.btnLaunchVrSettings).setOnClickListener(v -> launchVrSettings(v.getContext()));
+        view.findViewById(R.id.btnLaunchVrSettings)
+                .setOnClickListener(v -> launchVrSettings(v.getContext()));
         return view;
     }
 
     @IntDef(value = {STATUS_UNKNOWN, STATUS_DISABLED, STATUS_ENABLED, STATUS_NOT_AVAIL})
     @Retention(RetentionPolicy.SOURCE)
-    public @interface Status {
-    }
-
+    public @interface Status {}
 }

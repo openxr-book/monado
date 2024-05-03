@@ -1,4 +1,4 @@
-// Copyright 2020, Collabora, Ltd.
+// Copyright 2020-2023, Collabora, Ltd.
 // Copyright 2020, Nova King.
 // SPDX-License-Identifier: BSL-1.0
 /*!
@@ -7,7 +7,7 @@
  * @author Moses Turner <mosesturner@protonmail.com>
  * @author Nova King <technobaboo@gmail.com>
  * @author Jakob Bornecrantz <jakob@collabora.com>
- * @ingroup drv_rs
+ * @ingroup drv_realsense
  */
 
 #include "xrt/xrt_defines.h"
@@ -41,7 +41,7 @@
 
 
 /*!
- * Stupid convenience macro to print out a pose, only used for debugging
+ * Convenience macro to print out a pose, only used for debugging
  */
 #define print_pose(msg, pose)                                                                                          \
 	U_LOG_E(msg " %f %f %f  %f %f %f %f", pose.position.x, pose.position.y, pose.position.z, pose.orientation.x,   \
@@ -390,12 +390,6 @@ load_config(struct rs_ddev *rs)
  */
 
 static void
-rs_ddev_update_inputs(struct xrt_device *xdev)
-{
-	// Empty
-}
-
-static void
 rs_ddev_get_tracked_pose(struct xrt_device *xdev,
                          enum xrt_input_name name,
                          uint64_t at_timestamp_ns,
@@ -408,14 +402,17 @@ rs_ddev_get_tracked_pose(struct xrt_device *xdev,
 		return;
 	}
 
-	m_relation_history_get(rs->relation_hist, out_relation, at_timestamp_ns);
+	m_relation_history_get(rs->relation_hist, at_timestamp_ns, out_relation);
 }
 
 static void
-rs_ddev_get_view_pose(struct xrt_device *xdev,
-                      const struct xrt_vec3 *eye_relation,
-                      uint32_t view_index,
-                      struct xrt_pose *out_pose)
+rs_ddev_get_view_poses(struct xrt_device *xdev,
+                       const struct xrt_vec3 *default_eye_relation,
+                       uint64_t at_timestamp_ns,
+                       uint32_t view_count,
+                       struct xrt_space_relation *out_head_relation,
+                       struct xrt_fov *out_fovs,
+                       struct xrt_pose *out_poses)
 {
 	assert(false);
 }
@@ -429,6 +426,8 @@ rs_ddev_destroy(struct xrt_device *xdev)
 	os_thread_helper_destroy(&rs->oth);
 
 	close_ddev(rs);
+
+	m_relation_history_destroy(&rs->relation_hist);
 
 	free(rs);
 }
@@ -461,12 +460,13 @@ rs_ddev_create(int device_idx)
 
 	U_LOG_D("Realsense opts are %i %i %i %i %i\n", rs->enable_mapping, rs->enable_pose_jumping,
 	        rs->enable_relocalization, rs->enable_pose_prediction, rs->enable_pose_filtering);
-	rs->base.update_inputs = rs_ddev_update_inputs;
+	rs->base.update_inputs = u_device_noop_update_inputs;
 	rs->base.get_tracked_pose = rs_ddev_get_tracked_pose;
-	rs->base.get_view_pose = rs_ddev_get_view_pose;
+	rs->base.get_view_poses = rs_ddev_get_view_poses;
 	rs->base.destroy = rs_ddev_destroy;
 	rs->base.name = XRT_DEVICE_REALSENSE;
 	rs->base.tracking_origin->type = XRT_TRACKING_TYPE_EXTERNAL_SLAM;
+	rs->base.tracking_origin->offset = (struct xrt_pose)XRT_POSE_IDENTITY;
 
 	// Print name.
 	snprintf(rs->base.str, XRT_DEVICE_NAME_LEN, "Intel RealSense Device-SLAM");

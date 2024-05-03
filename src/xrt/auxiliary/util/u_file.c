@@ -1,4 +1,4 @@
-// Copyright 2019-2020, Collabora, Ltd.
+// Copyright 2019-2022, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -15,10 +15,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 
+
+#if defined(XRT_OS_WINDOWS) && !defined(XRT_ENV_MINGW)
+#define PATH_MAX MAX_PATH
+#endif
 
 #ifdef XRT_OS_LINUX
+#include <sys/stat.h>
 #include <linux/limits.h>
 
 static int
@@ -51,6 +55,17 @@ mkpath(const char *path)
 	return 0;
 }
 
+static bool
+is_dir(const char *path)
+{
+	struct stat st = {0};
+	if (!stat(path, &st)) {
+		return S_ISDIR(st.st_mode);
+	} else {
+		return false;
+	}
+}
+
 ssize_t
 u_file_get_config_dir(char *out_path, size_t out_path_size)
 {
@@ -66,7 +81,7 @@ u_file_get_config_dir(char *out_path, size_t out_path_size)
 }
 
 ssize_t
-u_file_get_path_in_config_dir(const char *filename, char *out_path, size_t out_path_size)
+u_file_get_path_in_config_dir(const char *suffix, char *out_path, size_t out_path_size)
 {
 	char tmp[PATH_MAX];
 	ssize_t i = u_file_get_config_dir(tmp, sizeof(tmp));
@@ -74,7 +89,7 @@ u_file_get_path_in_config_dir(const char *filename, char *out_path, size_t out_p
 		return -1;
 	}
 
-	return snprintf(out_path, out_path_size, "%s/%s", tmp, filename);
+	return snprintf(out_path, out_path_size, "%s/%s", tmp, suffix);
 }
 
 FILE *
@@ -104,6 +119,80 @@ u_file_open_file_in_config_dir(const char *filename, const char *mode)
 	return fopen(file_str, mode);
 }
 
+FILE *
+u_file_open_file_in_config_dir_subpath(const char *subpath, const char *filename, const char *mode)
+{
+	char tmp[PATH_MAX];
+	int i = u_file_get_config_dir(tmp, sizeof(tmp));
+	if (i < 0 || i >= (int)sizeof(tmp)) {
+		return NULL;
+	}
+
+	char fullpath[PATH_MAX];
+	i = snprintf(fullpath, sizeof(fullpath), "%s/%s", tmp, subpath);
+	if (i < 0 || i >= (int)sizeof(fullpath)) {
+		return NULL;
+	}
+
+	char file_str[PATH_MAX + 15];
+	i = snprintf(file_str, sizeof(file_str), "%s/%s", fullpath, filename);
+	if (i < 0 || i >= (int)sizeof(file_str)) {
+		return NULL;
+	}
+
+	FILE *file = fopen(file_str, mode);
+	if (file != NULL) {
+		return file;
+	}
+
+	// Try creating the path.
+	mkpath(fullpath);
+
+	// Do not report error.
+	return fopen(file_str, mode);
+}
+
+ssize_t
+u_file_get_hand_tracking_models_dir(char *out_path, size_t out_path_size)
+{
+	const char *suffix = "/monado/hand-tracking-models";
+	const char *xdg_data_home = getenv("XDG_DATA_HOME");
+	const char *home = getenv("HOME");
+	ssize_t ret = 0;
+
+	if (xdg_data_home != NULL) {
+		ret = snprintf(out_path, out_path_size, "%s%s", xdg_data_home, suffix);
+		if (ret > 0 && is_dir(out_path)) {
+			return ret;
+		}
+	}
+
+	if (home != NULL) {
+		ret = snprintf(out_path, out_path_size, "%s/.local/share%s", home, suffix);
+		if (ret > 0 && is_dir(out_path)) {
+			return ret;
+		}
+	}
+
+	ret = snprintf(out_path, out_path_size, "/usr/local/share%s", suffix);
+	if (ret > 0 && is_dir(out_path)) {
+		return ret;
+	}
+
+	ret = snprintf(out_path, out_path_size, "/usr/share%s", suffix);
+	if (ret > 0 && is_dir(out_path)) {
+		return ret;
+	}
+
+	if (out_path_size > 0) {
+		out_path[0] = '\0';
+	}
+
+	return -1;
+}
+
+#endif /* XRT_OS_LINUX */
+
 ssize_t
 u_file_get_runtime_dir(char *out_path, size_t out_path_size)
 {
@@ -117,7 +206,7 @@ u_file_get_runtime_dir(char *out_path, size_t out_path_size)
 }
 
 ssize_t
-u_file_get_path_in_runtime_dir(const char *filename, char *out_path, size_t out_path_size)
+u_file_get_path_in_runtime_dir(const char *suffix, char *out_path, size_t out_path_size)
 {
 	char tmp[PATH_MAX];
 	ssize_t i = u_file_get_runtime_dir(tmp, sizeof(tmp));
@@ -125,10 +214,8 @@ u_file_get_path_in_runtime_dir(const char *filename, char *out_path, size_t out_
 		return -1;
 	}
 
-	return snprintf(out_path, out_path_size, "%s/%s", tmp, filename);
+	return snprintf(out_path, out_path_size, "%s/%s", tmp, suffix);
 }
-
-#endif
 
 char *
 u_file_read_content(FILE *file)
@@ -153,4 +240,20 @@ u_file_read_content(FILE *file)
 	}
 
 	return buffer;
+}
+
+char *
+u_file_read_content_from_path(const char *path)
+{
+	FILE *file = fopen(path, "rb");
+	if (file == NULL) {
+		return NULL;
+	}
+	char *file_content = u_file_read_content(file);
+	int ret = fclose(file);
+	// We don't care about the return value since we're just reading
+	(void)ret;
+
+	// Either valid non-null or null
+	return file_content;
 }

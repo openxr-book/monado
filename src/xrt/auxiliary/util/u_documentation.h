@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  Header with just documentation.
+ * @brief  Header with only documentation.
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @ingroup aux_util
  */
@@ -56,7 +56,7 @@ namespace auxiliary {
 	 * @brief C++-only functionality from the miscellaneous "util" helper library
 	 */
 	namespace util {
-
+		// Empty
 	} // namespace util
 
 } // namespace auxiliary

@@ -18,16 +18,9 @@
 #include <stdbool.h>
 
 #ifdef _MSC_VER
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif // !WIN32_LEAN_AND_MEAN
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif // !NOMINMAX
-
 #include <intrin.h>
 // for atomic intrinsics
-#include <windows.h>
+#include "xrt_windows.h"
 #endif // _MSC_VER
 
 /*!
@@ -61,6 +54,18 @@
 #define XRT_MAYBE_UNUSED [[maybe_unused]]
 #else
 #define XRT_MAYBE_UNUSED
+#endif
+
+
+/*
+ * To make sure return values are checked.
+ */
+#if defined(__GNUC__) && (__GNUC__ >= 4)
+#define XRT_CHECK_RESULT __attribute__((warn_unused_result))
+#elif defined(_MSC_VER) && (_MSC_VER >= 1700)
+#define XRT_CHECK_RESULT _Check_return_
+#else
+#define XRT_CHECK_RESULT
 #endif
 
 
@@ -141,3 +146,31 @@ typedef intptr_t ssize_t;
  * @ingroup xrt_iface
  */
 #define container_of(ptr, type, field) (type *)((char *)ptr - offsetof(type, field))
+
+
+#ifdef XRT_DOXYGEN
+
+/*!
+ * Very small default init for structs that works in both C and C++. Helps with
+ * code that needs to be compiled with both C and C++.
+ *
+ * @ingroup xrt_iface
+ */
+
+// clang-format off
+#define XRT_STRUCT_INIT {}
+// clang-format on
+
+#elif defined(__cplusplus)
+
+// clang-format off
+#define XRT_STRUCT_INIT {}
+// clang-format on
+
+#else
+
+// clang-format off
+#define XRT_STRUCT_INIT {0}
+// clang-format on
+
+#endif

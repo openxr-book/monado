@@ -1,38 +1,52 @@
-// Copyright 2020, Collabora, Ltd.
+// Copyright 2020-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Client side wrapper of instance.
  * @author Jakob Bornecrantz <jakob@collabora.com>
+ * @author Korcan Hussein <korcan.hussein@collabora.com>
  * @ingroup ipc_client
  */
 
+#include "xrt/xrt_results.h"
+#if defined(_MSC_VER) && !defined(_CRT_SECURE_NO_WARNINGS)
+#define _CRT_SECURE_NO_WARNINGS
+#endif
+
 #include "xrt/xrt_instance.h"
-#include "xrt/xrt_gfx_native.h"
 #include "xrt/xrt_handles.h"
 #include "xrt/xrt_config_os.h"
 #include "xrt/xrt_config_android.h"
 
-#include "util/u_misc.h"
 #include "util/u_var.h"
+#include "util/u_misc.h"
+#include "util/u_file.h"
 #include "util/u_debug.h"
 #include "util/u_git_tag.h"
+#include "util/u_system_helpers.h"
 
 #include "shared/ipc_protocol.h"
+#include "shared/ipc_shmem.h"
 #include "client/ipc_client.h"
+#include "client/ipc_client_interface.h"
+#include "client/ipc_client_connection.h"
+
 #include "ipc_client_generated.h"
-#include "util/u_file.h"
+
 
 #include <stdio.h>
+#if defined(XRT_OS_WINDOWS)
+#include <timeapi.h>
+#else
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
-#include <sys/un.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
+#endif
 #include <limits.h>
 
 #ifdef XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER
@@ -45,7 +59,7 @@
 #endif // XRT_OS_ANDROID
 
 DEBUG_GET_ONCE_LOG_OPTION(ipc_log, "IPC_LOG", U_LOGGING_WARN)
-DEBUG_GET_ONCE_BOOL_OPTION(ipc_ignore_version, "IPC_IGNORE_VERSION", false)
+
 
 /*
  *
@@ -63,11 +77,11 @@ struct ipc_client_instance
 
 	struct ipc_connection ipc_c;
 
-	struct xrt_tracking_origin *xtracks[8];
-	size_t num_xtracks;
+	struct xrt_tracking_origin *xtracks[XRT_SYSTEM_MAX_DEVICES];
+	size_t xtrack_count;
 
-	struct xrt_device *xdevs[8];
-	size_t num_xdevs;
+	struct xrt_device *xdevs[XRT_SYSTEM_MAX_DEVICES];
+	size_t xdev_count;
 };
 
 static inline struct ipc_client_instance *
@@ -76,84 +90,38 @@ ipc_client_instance(struct xrt_instance *xinst)
 	return (struct ipc_client_instance *)xinst;
 }
 
-#ifdef XRT_OS_ANDROID
-
-static bool
-ipc_connect(struct ipc_connection *ipc_c)
+static xrt_result_t
+create_system_compositor(struct ipc_client_instance *ii,
+                         struct xrt_device *xdev,
+                         struct xrt_system_compositor **out_xsysc)
 {
-	ipc_c->ll = debug_get_log_option_ipc_log();
+	struct xrt_system_compositor *xsysc = NULL;
+	struct xrt_image_native_allocator *xina = NULL;
+	xrt_result_t xret;
 
-	ipc_c->ica = ipc_client_android_create(android_globals_get_vm(), android_globals_get_activity());
+#ifdef XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER
+	// On Android, we allocate images natively on the client side.
+	xina = android_ahardwarebuffer_allocator_create();
+#endif // XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER
 
-	if (ipc_c->ica == NULL) {
-		IPC_ERROR(ipc_c, "Client create error!");
-		return false;
+	xret = ipc_client_create_system_compositor(&ii->ipc_c, xina, xdev, &xsysc);
+	IPC_CHK_WITH_GOTO(&ii->ipc_c, xret, "ipc_client_create_system_compositor", err_xina);
+
+	// Paranoia.
+	if (xsysc == NULL) {
+		xret = XRT_ERROR_IPC_FAILURE;
+		IPC_ERROR(&ii->ipc_c, "Variable xsysc NULL!");
+		goto err_xina;
 	}
 
-	int socket = ipc_client_android_blocking_connect(ipc_c->ica);
-	if (socket < 0) {
-		IPC_ERROR(ipc_c, "Service Connect error!");
-		return false;
-	}
-	// The ownership belongs to the Java object. Dup because the fd will be
-	// closed when client destroy.
-	socket = dup(socket);
-	if (socket < 0) {
-		IPC_ERROR(ipc_c, "Failed to dup fd with error %d!", errno);
-		return false;
-	}
+	*out_xsysc = xsysc;
 
-	ipc_c->imc.socket_fd = socket;
-	ipc_c->imc.ll = ipc_c->ll;
+	return XRT_SUCCESS;
 
-	return true;
+err_xina:
+	xrt_images_destroy(&xina);
+	return xret;
 }
-
-
-#else
-static bool
-ipc_connect(struct ipc_connection *ipc_c)
-{
-	struct sockaddr_un addr;
-	int ret;
-
-	ipc_c->ll = debug_get_log_option_ipc_log();
-
-	// create our IPC socket
-
-	ret = socket(PF_UNIX, SOCK_STREAM, 0);
-	if (ret < 0) {
-		IPC_ERROR(ipc_c, "Socket Create Error!");
-		return false;
-	}
-
-	int socket = ret;
-
-	char sock_file[PATH_MAX];
-
-	int size = u_file_get_path_in_runtime_dir(IPC_MSG_SOCK_FILE, sock_file, PATH_MAX);
-	if (size == -1) {
-		IPC_ERROR(ipc_c, "Could not get socket file name");
-		return -1;
-	}
-
-	memset(&addr, 0, sizeof(addr));
-	addr.sun_family = AF_UNIX;
-	strcpy(addr.sun_path, sock_file);
-
-	ret = connect(socket, (struct sockaddr *)&addr, sizeof(addr));
-	if (ret < 0) {
-		IPC_ERROR(ipc_c, "Failed to connec to socket %s: %s!", sock_file, strerror(errno));
-		close(socket);
-		return false;
-	}
-
-	ipc_c->imc.socket_fd = socket;
-	ipc_c->imc.ll = ipc_c->ll;
-
-	return true;
-}
-#endif
 
 
 /*
@@ -162,54 +130,90 @@ ipc_connect(struct ipc_connection *ipc_c)
  *
  */
 
-static int
-ipc_client_instance_select(struct xrt_instance *xinst, struct xrt_device **xdevs, size_t num_xdevs)
+static xrt_result_t
+ipc_client_instance_create_system(struct xrt_instance *xinst,
+                                  struct xrt_system **out_xsys,
+                                  struct xrt_system_devices **out_xsysd,
+                                  struct xrt_space_overseer **out_xso,
+                                  struct xrt_system_compositor **out_xsysc)
 {
 	struct ipc_client_instance *ii = ipc_client_instance(xinst);
+	xrt_result_t xret = XRT_SUCCESS;
 
-	if (num_xdevs < 1) {
-		return -1;
-	}
+	assert(out_xsys != NULL);
+	assert(*out_xsys == NULL);
+	assert(out_xsysd != NULL);
+	assert(*out_xsysd == NULL);
+	assert(out_xsysc == NULL || *out_xsysc == NULL);
 
-	// @todo What about ownership?
-	for (size_t i = 0; i < num_xdevs && i < ii->num_xdevs; i++) {
-		xdevs[i] = ii->xdevs[i];
-	}
-
-	return 0;
-}
-
-static int
-ipc_client_instance_create_system_compositor(struct xrt_instance *xinst,
-                                             struct xrt_device *xdev,
-                                             struct xrt_system_compositor **out_xsysc)
-{
-	struct ipc_client_instance *ii = ipc_client_instance(xinst);
+	struct xrt_system_devices *xsysd = NULL;
 	struct xrt_system_compositor *xsysc = NULL;
-	struct xrt_image_native_allocator *xina = NULL;
 
-#ifdef XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER
-	// On Android, we allocate images natively on the client side.
-	xina = android_ahardwarebuffer_allocator_create();
-#endif // XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER
+	// Allocate a helper xrt_system_devices struct.
+	xsysd = ipc_client_system_devices_create(&ii->ipc_c);
 
-	int ret = ipc_client_create_system_compositor(&ii->ipc_c, xina, xdev, &xsysc);
-	if (ret < 0 || xsysc == NULL) {
-		xrt_images_destroy(&xina);
-		return -1;
+	// Take the devices from this instance.
+	for (uint32_t i = 0; i < ii->xdev_count; i++) {
+		xsysd->xdevs[i] = ii->xdevs[i];
+		ii->xdevs[i] = NULL;
+	}
+	xsysd->xdev_count = ii->xdev_count;
+	ii->xdev_count = 0;
+
+#define SET_ROLE(ROLE)                                                                                                 \
+	do {                                                                                                           \
+		int32_t index = ii->ipc_c.ism->roles.ROLE;                                                             \
+		xsysd->static_roles.ROLE = index >= 0 ? xsysd->xdevs[index] : NULL;                                    \
+	} while (false)
+
+	SET_ROLE(head);
+	SET_ROLE(eyes);
+	SET_ROLE(face);
+	SET_ROLE(hand_tracking.left);
+	SET_ROLE(hand_tracking.right);
+
+#undef SET_ROLE
+
+	// Done here now.
+	if (out_xsysc == NULL) {
+		goto out;
 	}
 
-	*out_xsysc = xsysc;
+	if (xsysd->static_roles.head == NULL) {
+		IPC_ERROR((&ii->ipc_c), "No head device found but asking for system compositor!");
+		xret = XRT_ERROR_IPC_FAILURE;
+		goto err_destroy;
+	}
 
-	return 0;
+	xret = create_system_compositor(ii, xsysd->static_roles.head, &xsysc);
+	if (xret != XRT_SUCCESS) {
+		goto err_destroy;
+	}
+
+out:
+	*out_xsys = ipc_client_system_create(&ii->ipc_c, xsysc);
+	*out_xsysd = xsysd;
+	*out_xso = ipc_client_space_overseer_create(&ii->ipc_c);
+
+	if (xsysc != NULL) {
+		assert(out_xsysc != NULL);
+		*out_xsysc = xsysc;
+	}
+
+	return XRT_SUCCESS;
+
+err_destroy:
+	xrt_system_devices_destroy(&xsysd);
+
+	return xret;
 }
 
-static int
+static xrt_result_t
 ipc_client_instance_get_prober(struct xrt_instance *xinst, struct xrt_prober **out_xp)
 {
 	*out_xp = NULL;
 
-	return -1;
+	return XRT_ERROR_PROBER_NOT_SUPPORTED;
 }
 
 static void
@@ -218,20 +222,20 @@ ipc_client_instance_destroy(struct xrt_instance *xinst)
 	struct ipc_client_instance *ii = ipc_client_instance(xinst);
 
 	// service considers us to be connected until fd is closed
-	ipc_message_channel_close(&ii->ipc_c.imc);
+	ipc_client_connection_fini(&ii->ipc_c);
 
-	for (size_t i = 0; i < ii->num_xtracks; i++) {
+	for (size_t i = 0; i < ii->xtrack_count; i++) {
 		u_var_remove_root(ii->xtracks[i]);
 		free(ii->xtracks[i]);
 		ii->xtracks[i] = NULL;
 	}
-	ii->num_xtracks = 0;
+	ii->xtrack_count = 0;
 
-	os_mutex_destroy(&ii->ipc_c.mutex);
-
-#ifdef XRT_OS_ANDROID
-	ipc_client_android_destroy(&(ii->ipc_c.ica));
+#ifdef XRT_OS_WINDOWS
+	timeEndPeriod(1);
 #endif
+
+	ipc_shmem_destroy(&ii->ipc_c.ism_handle, (void **)&ii->ipc_c.ism, sizeof(struct ipc_shared_memory));
 
 	free(ii);
 }
@@ -248,73 +252,22 @@ ipc_client_instance_destroy(struct xrt_instance *xinst)
  *
  * @public @memberof ipc_instance
  */
-int
+xrt_result_t
 ipc_instance_create(struct xrt_instance_info *i_info, struct xrt_instance **out_xinst)
 {
 	struct ipc_client_instance *ii = U_TYPED_CALLOC(struct ipc_client_instance);
-	ii->base.select = ipc_client_instance_select;
-	ii->base.create_system_compositor = ipc_client_instance_create_system_compositor;
+	ii->base.create_system = ipc_client_instance_create_system;
 	ii->base.get_prober = ipc_client_instance_get_prober;
 	ii->base.destroy = ipc_client_instance_destroy;
 
-	// FDs needs to be set to something negative.
-	ii->ipc_c.imc.socket_fd = -1;
-	ii->ipc_c.ism_handle = XRT_SHMEM_HANDLE_INVALID;
+#ifdef XRT_OS_WINDOWS
+	timeBeginPeriod(1);
+#endif
 
-	if (!ipc_connect(&ii->ipc_c)) {
-		IPC_ERROR((&ii->ipc_c),
-		          "Failed to connect to monado service process\n\n"
-		          "###\n"
-		          "#\n"
-		          "# Please make sure that the service process is running\n"
-		          "#\n"
-		          "# It is called \"monado-service\"\n"
-		          "# For builds it's located "
-		          "\"build-dir/src/xrt/targets/service/monado-service\"\n"
-		          "#\n"
-		          "###");
+	xrt_result_t xret = ipc_client_connection_init(&ii->ipc_c, debug_get_log_option_ipc_log(), i_info);
+	if (xret != XRT_SUCCESS) {
 		free(ii);
-		return -1;
-	}
-
-	// get our xdev shm from the server and mmap it
-	xrt_result_t r = ipc_call_instance_get_shm_fd(&ii->ipc_c, &ii->ipc_c.ism_handle, 1);
-	if (r != XRT_SUCCESS) {
-		IPC_ERROR((&ii->ipc_c), "Failed to retrieve shm fd!");
-		free(ii);
-		return -1;
-	}
-
-	struct ipc_app_state desc = {0};
-	desc.info = *i_info;
-	desc.pid = getpid(); // Extra info.
-
-	r = ipc_call_system_set_client_info(&ii->ipc_c, &desc);
-	if (r != XRT_SUCCESS) {
-		IPC_ERROR((&ii->ipc_c), "Failed to set instance info!");
-		free(ii);
-		return -1;
-	}
-
-	const int flags = MAP_SHARED;
-	const int access = PROT_READ | PROT_WRITE;
-	const size_t size = sizeof(struct ipc_shared_memory);
-
-	ii->ipc_c.ism = mmap(NULL, size, access, flags, ii->ipc_c.ism_handle, 0);
-	if (ii->ipc_c.ism == NULL) {
-		IPC_ERROR((&ii->ipc_c), "Failed to mmap shm!");
-		free(ii);
-		return -1;
-	}
-
-	if (strncmp(u_git_tag, ii->ipc_c.ism->u_git_tag, IPC_VERSION_NAME_LEN) != 0) {
-		IPC_ERROR((&ii->ipc_c), "Monado client library version %s does not match service version %s", u_git_tag,
-		          ii->ipc_c.ism->u_git_tag);
-		if (!debug_get_bool_option_ipc_ignore_version()) {
-			IPC_ERROR((&ii->ipc_c), "Set IPC_IGNORE_VERSION=1 to ignore this version conflict");
-			free(ii);
-			return -1;
-		}
+		return xret;
 	}
 
 	uint32_t count = 0;
@@ -323,7 +276,7 @@ ipc_instance_create(struct xrt_instance_info *i_info, struct xrt_instance **out_
 
 	// Query the server for how many tracking origins it has.
 	count = 0;
-	for (uint32_t i = 0; i < ism->num_itracks; i++) {
+	for (uint32_t i = 0; i < ism->itrack_count; i++) {
 		xtrack = U_TYPED_CALLOC(struct xrt_tracking_origin);
 
 		memcpy(xtrack->name, ism->itracks[i].name, sizeof(xtrack->name));
@@ -337,11 +290,11 @@ ipc_instance_create(struct xrt_instance_info *i_info, struct xrt_instance **out_
 		u_var_add_pose(xtrack, &xtrack->offset, "offset");
 	}
 
-	ii->num_xtracks = count;
+	ii->xtrack_count = count;
 
 	// Query the server for how many devices it has.
 	count = 0;
-	for (uint32_t i = 0; i < ism->num_isdevs; i++) {
+	for (uint32_t i = 0; i < ism->isdev_count; i++) {
 		struct ipc_shared_device *isdev = &ism->isdevs[i];
 		xtrack = ii->xtracks[isdev->tracking_origin_index];
 
@@ -352,11 +305,11 @@ ipc_instance_create(struct xrt_instance_info *i_info, struct xrt_instance **out_
 		}
 	}
 
-	ii->num_xdevs = count;
+	ii->xdev_count = count;
+
+	ii->base.startup_timestamp = ii->ipc_c.ism->startup_timestamp;
 
 	*out_xinst = &ii->base;
 
-	os_mutex_init(&ii->ipc_c.mutex);
-
-	return 0;
+	return XRT_SUCCESS;
 }

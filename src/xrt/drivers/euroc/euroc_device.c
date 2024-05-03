@@ -1,4 +1,4 @@
-// Copyright 2021, Collabora, Ltd.
+// Copyright 2021-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -17,12 +17,15 @@
 #include "xrt/xrt_prober.h"
 #include "xrt/xrt_tracking.h"
 #include "xrt/xrt_config_have.h"
+#include "xrt/xrt_config_build.h"
 
 #include "euroc_driver.h"
 
 #include <stdio.h>
 
 DEBUG_GET_ONCE_BOOL_OPTION(euroc_hmd, "EUROC_HMD", false)
+DEBUG_GET_ONCE_OPTION(euroc_path, "EUROC_PATH", NULL)
+DEBUG_GET_ONCE_LOG_OPTION(euroc_log, "EUROC_LOG", U_LOGGING_WARN)
 
 struct xrt_device *
 euroc_device_create(struct xrt_prober *xp);
@@ -70,7 +73,7 @@ euroc_prober_autoprobe(struct xrt_auto_prober *xap,
 }
 
 struct xrt_auto_prober *
-euroc_create_auto_prober()
+euroc_create_auto_prober(void)
 {
 	// `ep` var name used for euroc_player, let's use `epr` instead
 	struct euroc_prober *epr = U_TYPED_CALLOC(struct euroc_prober);
@@ -90,30 +93,13 @@ struct euroc_device
 	struct xrt_pose offset;
 	struct xrt_pose pose;
 	struct xrt_tracking_origin tracking_origin;
-	enum u_logging_level ll;
+	enum u_logging_level log_level;
 };
 
 static inline struct euroc_device *
 euroc_device(struct xrt_device *xdev)
 {
 	return (struct euroc_device *)xdev;
-}
-
-static void
-euroc_device_update_inputs(struct xrt_device *xdev)
-{
-	return;
-}
-
-//! Corrections specific for original euroc datasets and Kimera.
-//! If your datasets comes from a different camera you should probably
-//! use a different pose correction function.
-XRT_MAYBE_UNUSED static inline struct xrt_pose
-euroc_device_correct_pose_from_kimera(struct xrt_pose pose)
-{
-	//! @todo Implement proper pose corrections for the original euroc datasets
-	//! @todo Allow to use different pose corrections depending on the device used to record
-	return pose;
 }
 
 static void
@@ -131,31 +117,17 @@ euroc_device_get_tracked_pose(struct xrt_device *xdev,
 		int pose_bits = XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT;
 		bool pose_tracked = out_relation->relation_flags & pose_bits;
 		if (pose_tracked) {
-#if defined(XRT_HAVE_KIMERA_SLAM)
-			ed->pose = euroc_device_correct_pose_from_kimera(out_relation->pose);
-#else
 			ed->pose = out_relation->pose;
-#endif
 		}
 	}
 
-	struct xrt_space_graph space_graph = {0};
-	m_space_graph_add_pose(&space_graph, &ed->pose);
-	m_space_graph_add_pose(&space_graph, &ed->offset);
-	m_space_graph_resolve(&space_graph, out_relation);
+	struct xrt_relation_chain relation_chain = {0};
+	m_relation_chain_push_pose(&relation_chain, &ed->pose);
+	m_relation_chain_push_pose(&relation_chain, &ed->offset);
+	m_relation_chain_resolve(&relation_chain, out_relation);
 	out_relation->relation_flags = (enum xrt_space_relation_flags)(
 	    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_POSITION_VALID_BIT |
 	    XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT);
-}
-
-static void
-euroc_get_view_pose(struct xrt_device *xdev,
-                    const struct xrt_vec3 *eye_relation,
-                    uint32_t view_index,
-                    struct xrt_pose *out_pose)
-{
-	(void)xdev;
-	u_device_get_view_pose(eye_relation, view_index, out_pose);
 }
 
 static void
@@ -186,7 +158,7 @@ euroc_device_create(struct xrt_prober *xp)
 
 	ed->pose = (struct xrt_pose){{0, 0, 0, 1}, {0, 0, 0}};
 	ed->offset = (struct xrt_pose){{0, 0, 0, 1}, {0.2, 1.3, -0.5}};
-	ed->ll = debug_get_log_option_euroc_log();
+	ed->log_level = debug_get_log_option_euroc_log();
 
 	struct xrt_device *xd = &ed->base;
 
@@ -213,8 +185,8 @@ euroc_device_create(struct xrt_prober *xp)
 		info.display.h_meters = 0.07f;
 		info.lens_horizontal_separation_meters = 0.13f / 2.0f;
 		info.lens_vertical_position_meters = 0.07f / 2.0f;
-		info.views[0].fov = 85.0f * (M_PI / 180.0f);
-		info.views[1].fov = 85.0f * (M_PI / 180.0f);
+		info.fov[0] = 85.0f * (M_PI / 180.0f);
+		info.fov[1] = 85.0f * (M_PI / 180.0f);
 
 		bool ret = u_device_setup_split_side_by_side(xd, &info);
 		EUROC_ASSERT(ret, "Failed to setup HMD properties");
@@ -233,25 +205,26 @@ euroc_device_create(struct xrt_prober *xp)
 		xd->inputs[0].name = XRT_INPUT_SIMPLE_GRIP_POSE;
 	}
 
-	xd->update_inputs = euroc_device_update_inputs;
+	xd->update_inputs = u_device_noop_update_inputs;
 	xd->get_tracked_pose = euroc_device_get_tracked_pose;
 	xd->destroy = euroc_device_destroy;
 	if (is_hmd) {
-		xd->get_view_pose = euroc_get_view_pose;
-	}
-
-	int ret = xp->tracking->create_tracked_slam(xp->tracking, xd, &ed->slam);
-	if (ret < 0) {
-		EUROC_WARN(ed,
-		           "Unable to create the SLAM tracker so the Euroc device won't be tracked.\n\t"
-		           "Did you provide the appropriate SLAM dependency when compiling?");
-		// However, we can continue, maybe the user just wants to play with the euroc utilities
+		xd->get_view_poses = u_device_get_view_poses;
+	} else {
+		xd->get_view_poses = u_device_ni_get_view_poses;
 	}
 
 	u_var_add_root(ed, dev_name, false);
 	u_var_add_pose(ed, &ed->pose, "pose");
 	u_var_add_pose(ed, &ed->offset, "offset");
 	u_var_add_pose(ed, &ed->tracking_origin.offset, "tracking offset");
+
+	bool tracked = xp->tracking->create_tracked_slam(xp->tracking, &ed->slam) >= 0;
+	if (!tracked) {
+		EUROC_WARN(ed, "Unable to setup the SLAM tracker");
+		euroc_device_destroy(xd);
+		return NULL;
+	}
 
 	return xd;
 }

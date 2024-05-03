@@ -1,4 +1,4 @@
-// Copyright 2020, Collabora, Ltd.
+// Copyright 2020-2022, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -9,19 +9,20 @@
 
 #pragma once
 
+#include "r_interface.h"
+
 #include "xrt/xrt_device.h"
+#include "xrt/xrt_system.h"
 #include "xrt/xrt_tracking.h"
 
 #include "os/os_threading.h"
 
 #include "util/u_hand_tracking.h"
 
-#include "r_interface.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
 
 /*!
  * Central object remote object.
@@ -30,7 +31,11 @@ extern "C" {
  */
 struct r_hub
 {
-	struct xrt_tracking_origin base;
+	// System devices wrapper.
+	struct xrt_system_devices base;
+
+	//! Origin for all locations.
+	struct xrt_tracking_origin origin;
 
 	//! Connection to the controller.
 	struct r_remote_connection rc;
@@ -41,12 +46,19 @@ struct r_hub
 	//! The latest data received.
 	struct r_remote_data latest;
 
-
-	int accept_fd;
+	//! Incoming connection socket.
+	r_socket_t accept_fd;
 
 	uint16_t port;
+	uint32_t view_count;
 
 	struct os_thread_helper oth;
+
+	//! Index to the left controller.
+	int32_t left_index;
+
+	//! Index to the right controller.
+	int32_t right_index;
 
 	struct
 	{

@@ -21,13 +21,13 @@ struct u_process;
  * Creates a handle for this process that is unique to the operating system user. Returns NULL if another process
  * holding a handle is already running.
  *
- * @todo If built without libbsd support, a dummy value is returned that needs to be handled by the caller.
+ * @todo If built without libbsd support, a placeholder value is returned that needs to be handled by the caller.
  *
  * @return a new u_process handle if no monado instance is running, NULL if another instance is already running.
  * @ingroup aux_util
  */
 struct u_process *
-u_process_create_if_not_running();
+u_process_create_if_not_running(void);
 
 /*!
  * Releases the unique handle of the operating system user.

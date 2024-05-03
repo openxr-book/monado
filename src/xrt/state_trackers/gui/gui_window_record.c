@@ -12,6 +12,8 @@
 
 #include "os/os_threading.h"
 
+#include "math/m_api.h"
+
 #include "util/u_var.h"
 #include "util/u_misc.h"
 #include "util/u_sink.h"
@@ -32,6 +34,7 @@
 #include "gstreamer/gst_pipeline.h"
 #endif
 
+#include "gui_ogl.h"
 #include "gui_imgui.h"
 #include "gui_common.h"
 #include "gui_window_record.h"
@@ -60,12 +63,15 @@ create_pipeline(struct gui_record_window *rw)
 
 	switch (rw->gst.bitrate) {
 	default:
+	case GUI_RECORD_BITRATE_32768: bitrate = "32768"; break;
 	case GUI_RECORD_BITRATE_4096: bitrate = "4096"; break;
 	case GUI_RECORD_BITRATE_2048: bitrate = "2048"; break;
 	case GUI_RECORD_BITRATE_1024: bitrate = "1024"; break;
 	}
 
 	switch (rw->gst.pipeline) {
+	case GUI_RECORD_PIPELINE_SOFTWARE_ULTRAFAST: speed_preset = "ultrafast"; break;
+	case GUI_RECORD_PIPELINE_SOFTWARE_VERYFAST: speed_preset = "veryfast"; break;
 	case GUI_RECORD_PIPELINE_SOFTWARE_FAST: speed_preset = "fast"; break;
 	case GUI_RECORD_PIPELINE_SOFTWARE_MEDIUM: speed_preset = "medium"; break;
 	case GUI_RECORD_PIPELINE_SOFTWARE_SLOW: speed_preset = "slow"; break;
@@ -81,6 +87,7 @@ create_pipeline(struct gui_record_window *rw)
 		         "videoconvert ! "
 		         "queue ! "
 		         "x264enc bitrate=\"%s\" speed-preset=\"%s\" ! "
+		         "video/x-h264,profile=main ! "
 		         "h264parse ! "
 		         "queue ! "
 		         "mp4mux ! "
@@ -123,7 +130,7 @@ create_pipeline(struct gui_record_window *rw)
 	if (do_convert) {
 		u_sink_create_to_r8g8b8_or_l8(&rw->gst.xfctx, tmp, &tmp);
 	}
-	u_sink_queue_create(&rw->gst.xfctx, tmp, &tmp);
+	u_sink_simple_queue_create(&rw->gst.xfctx, tmp, &tmp);
 
 	os_mutex_lock(&rw->gst.mutex);
 	rw->gst.gs = gs;
@@ -156,7 +163,7 @@ draw_gst(struct gui_record_window *rw)
 {
 	static ImVec2 button_dims = {0, 0};
 
-	if (!igCollapsingHeaderBoolPtr("Record", NULL, ImGuiTreeNodeFlags_DefaultOpen)) {
+	if (!igCollapsingHeaderBoolPtr("Record", NULL, ImGuiTreeNodeFlags_None)) {
 		return;
 	}
 
@@ -165,8 +172,10 @@ draw_gst(struct gui_record_window *rw)
 	bool recording = rw->gst.gp != NULL;
 	os_mutex_unlock(&rw->gst.mutex);
 
-	igComboStr("Pipeline", (int *)&rw->gst.pipeline, "SW Fast\0SW Medium\0SW Slow\0SW Veryslow\0VAAPI H264\0\0", 5);
-	igComboStr("Bitrate", (int *)&rw->gst.bitrate, "4096bps\0002048bps\0001024bps\0\0", 3);
+	igComboStr("Pipeline", (int *)&rw->gst.pipeline,
+	           "SW Ultrafast\0SW Veryfast\0SW Fast\0SW Medium\0SW Slow\0SW Veryslow\0VAAPI H264\0\0", 5);
+	igComboStr("Bitrate", (int *)&rw->gst.bitrate, "32768bps (Be careful!)\0004096bps\0002048bps\0001024bps\0\0",
+	           3);
 
 	igInputText("Filename", rw->gst.filename, sizeof(rw->gst.filename), 0, NULL, NULL);
 
@@ -190,28 +199,44 @@ draw_gst(struct gui_record_window *rw)
 static void
 window_draw_misc(struct gui_record_window *rw)
 {
-	if (!igCollapsingHeaderBoolPtr("Misc", NULL, ImGuiTreeNodeFlags_DefaultOpen)) {
-		return;
-	}
+	igSliderFloat("", &rw->texture.scale, 20.0, 300.f, "Scale %f%%", ImGuiSliderFlags_None);
 
 	static ImVec2 button_dims = {0, 0};
-	bool plus = igButton("+", button_dims);
+
 	igSameLine(0.0f, 4.0f);
 	bool minus = igButton("-", button_dims);
+
 	igSameLine(0.0f, 4.0f);
+	bool plus = igButton("+", button_dims);
 
-	if (rw->texture.scale == 1) {
-		igText("Scale 100%%");
-	} else {
-		igText("Scale 1/%i", rw->texture.scale);
+	static const double scales[] = {
+	    25.0, 50.0, 100.0, 200.0, 300.0,
+	};
+
+	if (plus) {
+		for (uint32_t i = 0; i < ARRAY_SIZE(scales); i++) {
+			if (rw->texture.scale >= scales[i]) {
+				continue;
+			}
+			rw->texture.scale = scales[i];
+			break;
+		}
+	} else if (minus) {
+		// Initial length always greater then 0 so safe.
+		for (uint32_t i = ARRAY_SIZE(scales); i-- > 0;) {
+			if (rw->texture.scale <= scales[i]) {
+				continue;
+			}
+			rw->texture.scale = scales[i];
+			break;
+		}
 	}
 
-	if (plus && rw->texture.scale > 1) {
-		rw->texture.scale--;
-	}
-	if (minus && rw->texture.scale < 6) {
-		rw->texture.scale++;
-	}
+	igSameLine(0, 30);
+
+	igCheckbox("Rotate 180 degrees", &rw->texture.rotate_180);
+
+	igSameLine(0, 30);
 
 	igText("Sequence %u", (uint32_t)rw->texture.ogl->seq);
 }
@@ -222,6 +247,11 @@ window_frame(struct xrt_frame_sink *xfs, struct xrt_frame *xf)
 	struct gui_record_window *rw = container_of(xfs, struct gui_record_window, sink);
 
 	if (rw->source.width != xf->width || rw->source.height != xf->height || rw->source.format != xf->format) {
+		if (rw->source.width != 0 || rw->source.height != 0) {
+			U_LOG_E("Changing properties! Old: %ux%u:%s(%u), new %ux%u:%s(%u)", rw->source.width,
+			        rw->source.height, u_format_str(rw->source.format), rw->source.format, xf->width,
+			        xf->height, u_format_str(xf->format), xf->format);
+		}
 		assert(rw->source.width == 0 && rw->source.height == 0);
 
 		rw->source.width = xf->width;
@@ -261,16 +291,35 @@ gui_window_record_init(struct gui_record_window *rw)
 	}
 
 	snprintf(rw->gst.filename, sizeof(rw->gst.filename), "/tmp/capture.mp4");
+	rw->gst.bitrate = GUI_RECORD_BITRATE_4096;
+	rw->gst.pipeline = GUI_RECORD_PIPELINE_SOFTWARE_FAST;
 #endif
 
+
 	// Setup the preview texture.
-	rw->texture.scale = 1;
+	// 50% scale.
+	rw->texture.scale = 50.0;
 	struct xrt_frame_sink *tmp = NULL;
 	rw->texture.ogl = gui_ogl_sink_create("View", &rw->texture.xfctx, &tmp);
-	u_sink_create_to_r8g8b8_or_l8(&rw->texture.xfctx, tmp, &tmp);
-	u_sink_queue_create(&rw->texture.xfctx, tmp, &rw->texture.sink);
+	u_sink_create_to_r8g8b8_r8g8b8a8_r8g8b8x8_or_l8(&rw->texture.xfctx, tmp, &tmp);
+	u_sink_simple_queue_create(&rw->texture.xfctx, tmp, &rw->texture.sink);
 
 	return true;
+}
+
+void
+gui_window_record_to_background(struct gui_record_window *rw, struct gui_program *p)
+{
+	struct gui_ogl_texture *tex = rw->texture.ogl;
+
+	gui_ogl_sink_update(tex);
+
+	gui_ogl_draw_background(    //
+	    (uint32_t)tex->w,       // width
+	    (uint32_t)tex->h,       // height
+	    tex->id,                // tex_id
+	    rw->texture.rotate_180, // rotate_180
+	    false);                 // flip_y
 }
 
 void
@@ -281,23 +330,23 @@ gui_window_record_render(struct gui_record_window *rw, struct gui_program *p)
 
 	gui_ogl_sink_update(rw->texture.ogl);
 
+	window_draw_misc(rw);
+
 	struct gui_ogl_texture *tex = rw->texture.ogl;
 
-	int w = tex->w / rw->texture.scale;
-	int h = tex->h / rw->texture.scale;
+	gui_ogl_draw_image(             //
+	    (uint32_t)tex->w,           // width
+	    (uint32_t)tex->h,           // height
+	    tex->id,                    // tex_id
+	    rw->texture.scale / 100.0f, // scale
+	    rw->texture.rotate_180,     // rotate_180
+	    false);                     // flip_y
 
-	ImVec2 size = {(float)w, (float)h};
-	ImVec2 uv0 = {0, 0};
-	ImVec2 uv1 = {1, 1};
-	ImVec4 white = {1, 1, 1, 1};
-	ImTextureID id = (ImTextureID)(intptr_t)tex->id;
-	igImage(id, size, uv0, uv1, white, white);
 
 #ifdef XRT_HAVE_GST
 	draw_gst(rw);
 #endif
 
-	window_draw_misc(rw);
 
 	// Pop the ID making everything unique.
 	igPopID();

@@ -1,4 +1,4 @@
-// Copyright 2019, Collabora, Ltd.
+// Copyright 2019-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -9,8 +9,11 @@
 
 #pragma once
 
-#include "math/m_api.h"
 #include "xrt/xrt_device.h"
+#include "math/m_api.h"
+
+#include "openhmd.h"
+
 
 #ifdef __cplusplus
 extern "C" {
@@ -19,11 +22,11 @@ extern "C" {
 int
 oh_device_create(ohmd_context *ctx, bool no_hmds, struct xrt_device **out_xdevs);
 
-#define OHMD_TRACE(d, ...) U_LOG_XDEV_IFL_T(&d->base, d->ll, __VA_ARGS__)
-#define OHMD_DEBUG(d, ...) U_LOG_XDEV_IFL_D(&d->base, d->ll, __VA_ARGS__)
-#define OHMD_INFO(d, ...) U_LOG_XDEV_IFL_I(&d->base, d->ll, __VA_ARGS__)
-#define OHMD_WARN(d, ...) U_LOG_XDEV_IFL_W(&d->base, d->ll, __VA_ARGS__)
-#define OHMD_ERROR(d, ...) U_LOG_XDEV_IFL_E(&d->base, d->ll, __VA_ARGS__)
+#define OHMD_TRACE(d, ...) U_LOG_XDEV_IFL_T(&d->base, d->log_level, __VA_ARGS__)
+#define OHMD_DEBUG(d, ...) U_LOG_XDEV_IFL_D(&d->base, d->log_level, __VA_ARGS__)
+#define OHMD_INFO(d, ...) U_LOG_XDEV_IFL_I(&d->base, d->log_level, __VA_ARGS__)
+#define OHMD_WARN(d, ...) U_LOG_XDEV_IFL_W(&d->base, d->log_level, __VA_ARGS__)
+#define OHMD_ERROR(d, ...) U_LOG_XDEV_IFL_E(&d->base, d->log_level, __VA_ARGS__)
 
 
 #ifdef __cplusplus

@@ -23,10 +23,12 @@
 #include <sys/stat.h>
 
 #include "bindings/b_generated_bindings.h"
+#include <assert.h>
 
 DEBUG_GET_ONCE_OPTION(active_config, "P_OVERRIDE_ACTIVE_CONFIG", NULL)
 
 #define CONFIG_FILE_NAME "config_v0.json"
+#define GUI_STATE_FILE_NAME "gui_state_v0.json"
 
 void
 u_config_json_close(struct u_config_json *json)
@@ -38,13 +40,13 @@ u_config_json_close(struct u_config_json *json)
 	json->file_loaded = false;
 }
 
-void
-u_config_json_open_or_create_main_file(struct u_config_json *json)
+static void
+u_config_json_open_or_create_file(struct u_config_json *json, const char *filename)
 {
 	json->file_loaded = false;
-#if defined(XRT_OS_LINUX) && !defined(XRT_OS_ANDROID)
+#if (defined(XRT_OS_LINUX) || defined(XRT_OS_WINDOWS)) && !defined(XRT_OS_ANDROID)
 	char tmp[1024];
-	ssize_t ret = u_file_get_path_in_config_dir(CONFIG_FILE_NAME, tmp, sizeof(tmp));
+	ssize_t ret = u_file_get_path_in_config_dir(filename, tmp, sizeof(tmp));
 	if (ret <= 0) {
 		U_LOG_E(
 		    "Could not load or create config file no $HOME "
@@ -52,7 +54,7 @@ u_config_json_open_or_create_main_file(struct u_config_json *json)
 		return;
 	}
 
-	FILE *file = u_file_open_file_in_config_dir(CONFIG_FILE_NAME, "r");
+	FILE *file = u_file_open_file_in_config_dir(filename, "rb");
 	if (file == NULL) {
 		return;
 	}
@@ -83,6 +85,12 @@ u_config_json_open_or_create_main_file(struct u_config_json *json)
 	//! @todo implement the underlying u_file_get_path_in_config_dir
 	return;
 #endif
+}
+
+void
+u_config_json_open_or_create_main_file(struct u_config_json *json)
+{
+	u_config_json_open_or_create_file(json, CONFIG_FILE_NAME);
 }
 
 static cJSON *
@@ -230,7 +238,7 @@ u_config_json_get_active(struct u_config_json *json, enum u_config_json_active_c
 }
 
 bool
-u_config_json_get_remote_port(struct u_config_json *json, int *out_port)
+u_config_json_get_remote_settings(struct u_config_json *json, int *out_port, uint32_t *out_view_count)
 {
 	cJSON *t = cJSON_GetObjectItemCaseSensitive(json->root, "remote");
 	if (t == NULL) {
@@ -252,8 +260,13 @@ u_config_json_get_remote_port(struct u_config_json *json, int *out_port)
 	if (!get_obj_int(t, "port", &port)) {
 		return false;
 	}
+	int view_count = 0;
+	if (!get_obj_int(t, "view_count", &view_count)) {
+		return false;
+	}
 
 	*out_port = port;
+	*out_view_count = view_count;
 
 	return true;
 }
@@ -271,22 +284,13 @@ open_tracking_settings(struct u_config_json *json)
 		return NULL;
 	}
 
-	int ver = -1;
-	bool bad = false;
-
-	bad |= !get_obj_int(t, "version", &ver);
-	if (bad || ver >= 1) {
-		U_LOG_E("Missing or unknown version tag '%i' in tracking config", ver);
-		return NULL;
-	}
-
 	return t;
 }
 
 bool
 u_config_json_get_tracking_overrides(struct u_config_json *json,
                                      struct xrt_tracking_override *out_overrides,
-                                     size_t *out_num_overrides)
+                                     size_t *out_override_count)
 {
 	cJSON *t = open_tracking_settings(json);
 	if (t == NULL) {
@@ -296,22 +300,22 @@ u_config_json_get_tracking_overrides(struct u_config_json *json,
 
 	cJSON *overrides = cJSON_GetObjectItemCaseSensitive(t, "tracking_overrides");
 
-	*out_num_overrides = 0;
+	*out_override_count = 0;
 
 	cJSON *override = NULL;
 	cJSON_ArrayForEach(override, overrides)
 	{
 		bool bad = false;
 
-		struct xrt_tracking_override *o = &out_overrides[(*out_num_overrides)++];
+		struct xrt_tracking_override *o = &out_overrides[(*out_override_count)++];
 		bad |= !get_obj_str(override, "target_device_serial", o->target_device_serial, XRT_DEVICE_NAME_LEN);
 		bad |= !get_obj_str(override, "tracker_device_serial", o->tracker_device_serial, XRT_DEVICE_NAME_LEN);
 
 		char override_type[256];
-		bad |= !get_obj_str(override, "type", override_type, 256);
-		if (strncmp(override_type, "direct", 256) == 0) {
+		bad |= !get_obj_str(override, "type", override_type, sizeof(override_type));
+		if (strncmp(override_type, "direct", sizeof(override_type) - 1) == 0) {
 			o->override_type = XRT_TRACKING_OVERRIDE_DIRECT;
-		} else if (strncmp(override_type, "attached", 256) == 0) {
+		} else if (strncmp(override_type, "attached", sizeof(override_type) - 1) == 0) {
 			o->override_type = XRT_TRACKING_OVERRIDE_ATTACHED;
 		}
 
@@ -336,7 +340,7 @@ u_config_json_get_tracking_overrides(struct u_config_json *json,
 		o->input_name = xrt_input_name_enum(input_name);
 
 		if (bad) {
-			*out_num_overrides = 0;
+			*out_override_count = 0;
 			return false;
 		}
 	}
@@ -354,6 +358,15 @@ u_config_json_get_tracking_settings(struct u_config_json *json, struct xrt_setti
 	char tmp[16];
 
 	bool bad = false;
+
+	int ver = -1;
+
+	bad |= !get_obj_int(t, "version", &ver);
+	if (bad || ver >= 1) {
+		U_LOG_E("Missing or unknown version tag '%i' in tracking config", ver);
+		return false;
+	}
+
 
 	bad |= !get_obj_str(t, "camera_name", s->camera_name, sizeof(s->camera_name));
 	bad |= !get_obj_int(t, "camera_mode", &s->camera_mode);
@@ -386,12 +399,12 @@ u_config_json_make_default_root(struct u_config_json *json)
 }
 
 static void
-u_config_write(struct u_config_json *json)
+u_config_write(struct u_config_json *json, const char *filename)
 {
 	char *str = cJSON_Print(json->root);
 	U_LOG_D("%s", str);
 
-	FILE *config_file = u_file_open_file_in_config_dir(CONFIG_FILE_NAME, "w");
+	FILE *config_file = u_file_open_file_in_config_dir(filename, "w");
 	fprintf(config_file, "%s\n", str);
 	fflush(config_file);
 	fclose(config_file);
@@ -427,6 +440,7 @@ u_config_json_save_calibration(struct u_config_json *json, struct xrt_settings_t
 	switch (settings->camera_type) {
 	case XRT_SETTINGS_CAMERA_TYPE_REGULAR_MONO: cJSON_AddStringToObject(t, "camera_type", "regular_mono"); break;
 	case XRT_SETTINGS_CAMERA_TYPE_REGULAR_SBS: cJSON_AddStringToObject(t, "camera_type", "regular_sbs"); break;
+	case XRT_SETTINGS_CAMERA_TYPE_SLAM: cJSON_AddStringToObject(t, "camera_type", "slam_sbs"); break;
 	case XRT_SETTINGS_CAMERA_TYPE_PS4: cJSON_AddStringToObject(t, "camera_type", "ps4"); break;
 	case XRT_SETTINGS_CAMERA_TYPE_LEAP_MOTION: cJSON_AddStringToObject(t, "camera_type", "leap_motion"); break;
 	}
@@ -434,7 +448,7 @@ u_config_json_save_calibration(struct u_config_json *json, struct xrt_settings_t
 	cJSON_DeleteItemFromObject(t, "calibration_path");
 	cJSON_AddStringToObject(t, "calibration_path", settings->calibration_path);
 
-	u_config_write(json);
+	u_config_write(json, CONFIG_FILE_NAME);
 }
 
 static cJSON *
@@ -459,7 +473,7 @@ make_pose(struct xrt_pose *pose)
 }
 
 void
-u_config_json_save_overrides(struct u_config_json *json, struct xrt_tracking_override *overrides, size_t num_overrides)
+u_config_json_save_overrides(struct u_config_json *json, struct xrt_tracking_override *overrides, size_t override_count)
 {
 	if (!json->file_loaded) {
 		u_config_json_make_default_root(json);
@@ -475,18 +489,18 @@ u_config_json_save_overrides(struct u_config_json *json, struct xrt_tracking_ove
 	cJSON_DeleteItemFromObject(t, "tracking_overrides");
 	cJSON *o = cJSON_AddArrayToObject(t, "tracking_overrides");
 
-	for (size_t i = 0; i < num_overrides; i++) {
+	for (size_t i = 0; i < override_count; i++) {
 		cJSON *entry = cJSON_CreateObject();
 
 		cJSON_AddStringToObject(entry, "target_device_serial", overrides[i].target_device_serial);
 		cJSON_AddStringToObject(entry, "tracker_device_serial", overrides[i].tracker_device_serial);
 
-		char override_type[256];
+		char buffer[256];
 		switch (overrides[i].override_type) {
-		case XRT_TRACKING_OVERRIDE_DIRECT: strncpy(override_type, "direct", 256); break;
-		case XRT_TRACKING_OVERRIDE_ATTACHED: strncpy(override_type, "attached", 256); break;
+		case XRT_TRACKING_OVERRIDE_DIRECT: snprintf(buffer, ARRAY_SIZE(buffer), "direct"); break;
+		case XRT_TRACKING_OVERRIDE_ATTACHED: snprintf(buffer, ARRAY_SIZE(buffer), "attached"); break;
 		}
-		cJSON_AddStringToObject(entry, "type", override_type);
+		cJSON_AddStringToObject(entry, "type", buffer);
 
 		cJSON_AddItemToObject(entry, "offset", make_pose(&overrides[i].offset));
 
@@ -496,5 +510,56 @@ u_config_json_save_overrides(struct u_config_json *json, struct xrt_tracking_ove
 		cJSON_AddItemToArray(o, entry);
 	}
 
-	u_config_write(json);
+	u_config_write(json, CONFIG_FILE_NAME);
+}
+
+void
+u_gui_state_open_file(struct u_config_json *json)
+{
+	u_config_json_open_or_create_file(json, GUI_STATE_FILE_NAME);
+}
+
+static const char *
+u_gui_state_scene_to_string(enum u_gui_state_scene scene)
+{
+	switch (scene) {
+	case GUI_STATE_SCENE_CALIBRATE: return "calibrate";
+	default: assert(false); return NULL;
+	}
+}
+
+struct cJSON *
+u_gui_state_get_scene(struct u_config_json *json, enum u_gui_state_scene scene)
+{
+	if (json->root == NULL) {
+		return NULL;
+	}
+	const char *scene_name = u_gui_state_scene_to_string(scene);
+
+	struct cJSON *c =
+	    cJSON_DetachItemFromObjectCaseSensitive(cJSON_GetObjectItemCaseSensitive(json->root, "scenes"), scene_name);
+	cJSON_Delete(json->root);
+	return c;
+}
+
+void
+u_gui_state_save_scene(struct u_config_json *json, enum u_gui_state_scene scene, struct cJSON *new_state)
+{
+
+	if (!json->file_loaded) {
+		u_config_json_make_default_root(json);
+	}
+
+	cJSON *root = json->root;
+
+	const char *scene_name = u_gui_state_scene_to_string(scene);
+
+	struct cJSON *sc = cJSON_GetObjectItemCaseSensitive(root, "scenes");
+
+	if (!sc) {
+		sc = cJSON_AddObjectToObject(root, "scenes");
+	}
+	cJSON_DeleteItemFromObject(sc, scene_name);
+	cJSON_AddItemToObject(sc, scene_name, new_state);
+	u_config_write(json, GUI_STATE_FILE_NAME);
 }

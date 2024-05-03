@@ -1,13 +1,16 @@
-// Copyright 2020-2021, Collabora, Ltd.
+// Copyright 2020-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
-// Author: Ryan Pavlik <ryan.pavlik@collabora.com>
+// Author: Rylie Pavlik <rylie.pavlik@collabora.com>
 // Inline implementations: do not include on its own!
 
 #pragma once
 
 #include "android.content.pm.h"
 #include "android.database.h"
+#include "android.net.h"
 #include "android.os.h"
+#include "android.view.h"
+#include "java.io.h"
 #include "java.lang.h"
 #include <string>
 
@@ -51,6 +54,12 @@ inline java::lang::ClassLoader Context::getClassLoader() {
         object().call<jni::Object>(Meta::data().getClassLoader));
 }
 
+inline java::io::File Context::getExternalFilesDir(std::string const &type) {
+    assert(!isNull());
+    return java::io::File(
+        object().call<jni::Object>(Meta::data().getExternalFilesDir, type));
+}
+
 inline void Context::startActivity(Intent const &intent) {
     assert(!isNull());
     return object().call<void>(Meta::data().startActivity, intent.object());
@@ -63,11 +72,31 @@ inline void Context::startActivity(Intent const &intent,
                                bundle.object());
 }
 
+inline jni::Object Context::getSystemService(std::string const &name) {
+    assert(!isNull());
+    return object().call<jni::Object>(Meta::data().getSystemService, name);
+}
+
 inline Context Context::createPackageContext(std::string const &packageName,
                                              int32_t flags) {
     assert(!isNull());
     return Context(object().call<jni::Object>(Meta::data().createPackageContext,
                                               packageName, flags));
+}
+
+inline Context Context::createDisplayContext(view::Display const &display) {
+    assert(!isNull());
+    return Context(object().call<jni::Object>(Meta::data().createDisplayContext,
+                                              display.object()));
+}
+
+inline net::Uri_Builder ContentUris::appendId(net::Uri_Builder &uri_Builder,
+                                              long long longParam) {
+    auto &data = Meta::data(true);
+    auto ret = net::Uri_Builder(data.clazz().call<jni::Object>(
+        data.appendId, uri_Builder.object(), longParam));
+    data.dropClassRef();
+    return ret;
 }
 
 inline ComponentName ComponentName::construct(std::string const &pkg,
@@ -97,6 +126,10 @@ inline int32_t Intent::FLAG_ACTIVITY_NEW_TASK() {
     return get(Meta::data().FLAG_ACTIVITY_NEW_TASK, Meta::data().clazz());
 }
 
+inline Intent Intent::construct() {
+    return Intent(Meta::data().clazz().newInstance(Meta::data().init));
+}
+
 inline Intent Intent::construct(Intent const &intent) {
     return Intent(
         Meta::data().clazz().newInstance(Meta::data().init1, intent.object()));
@@ -107,9 +140,9 @@ inline Intent Intent::construct(std::string const &action) {
 }
 
 inline Intent Intent::construct(std::string const &action,
-                                jni::Object const &uri) {
-    return Intent(
-        Meta::data().clazz().newInstance(Meta::data().init3, action, uri));
+                                net::Uri const &uri) {
+    return Intent(Meta::data().clazz().newInstance(Meta::data().init3, action,
+                                                   uri.object()));
 }
 
 inline Intent Intent::construct(Context const &context,
@@ -118,12 +151,12 @@ inline Intent Intent::construct(Context const &context,
         Meta::data().init4, context.object(), classParam.object()));
 }
 
-inline Intent Intent::construct(std::string const &action,
-                                jni::Object const &uri, Context const &context,
+inline Intent Intent::construct(std::string const &action, net::Uri const &uri,
+                                Context const &context,
                                 java::lang::Class const &classParam) {
-    return Intent(Meta::data().clazz().newInstance(Meta::data().init5, action,
-                                                   uri, context.object(),
-                                                   classParam.object()));
+    return Intent(Meta::data().clazz().newInstance(
+        Meta::data().init5, action, uri.object(), context.object(),
+        classParam.object()));
 }
 
 inline Intent Intent::setFlags(int32_t flags) {
@@ -132,32 +165,41 @@ inline Intent Intent::setFlags(int32_t flags) {
 }
 
 inline database::Cursor ContentResolver::query(
-    jni::Object const &uri, jni::Array<std::string> const &projection,
+    net::Uri const &uri, jni::Array<std::string> const &projection,
     std::string const &selection, jni::Array<std::string> const &selectionArgs,
     std::string const &sortOrder) {
     assert(!isNull());
     return database::Cursor(
-        object().call<jni::Object>(Meta::data().query, uri, projection,
+        object().call<jni::Object>(Meta::data().query, uri.object(), projection,
                                    selection, selectionArgs, sortOrder));
 }
 
+inline database::Cursor
+ContentResolver::query(net::Uri const &uri,
+                       jni::Array<std::string> const &projection) {
+    assert(!isNull());
+    return database::Cursor(
+        object().call<jni::Object>(Meta::data().query, uri.object(), projection,
+                                   nullptr, nullptr, nullptr));
+}
+
 inline database::Cursor ContentResolver::query(
-    jni::Object const &uri, jni::Array<std::string> const &projection,
+    net::Uri const &uri, jni::Array<std::string> const &projection,
     std::string const &selection, jni::Array<std::string> const &selectionArgs,
     std::string const &sortOrder, jni::Object const &cancellationSignal) {
     assert(!isNull());
     return database::Cursor(object().call<jni::Object>(
-        Meta::data().query1, uri, projection, selection, selectionArgs,
+        Meta::data().query1, uri.object(), projection, selection, selectionArgs,
         sortOrder, cancellationSignal));
 }
 
 inline database::Cursor ContentResolver::query(
-    jni::Object const &uri, jni::Array<std::string> const &projection,
+    net::Uri const &uri, jni::Array<std::string> const &projection,
     os::Bundle const &queryArgs, jni::Object const &cancellationSignal) {
     assert(!isNull());
-    return database::Cursor(
-        object().call<jni::Object>(Meta::data().query2, uri, projection,
-                                   queryArgs.object(), cancellationSignal));
+    return database::Cursor(object().call<jni::Object>(
+        Meta::data().query2, uri.object(), projection, queryArgs.object(),
+        cancellationSignal));
 }
 
 } // namespace android::content

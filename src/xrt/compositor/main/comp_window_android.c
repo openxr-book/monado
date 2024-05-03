@@ -3,7 +3,7 @@
 /*!
  * @file
  * @brief  Android window code.
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @author Lubosz Sarnecki <lubosz.sarnecki@collabora.com>
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @ingroup comp_main
@@ -26,6 +26,7 @@
 #include <string.h>
 #include <linux/input.h>
 
+#define WINDOW_TITLE "Monado"
 
 /*
  *
@@ -55,7 +56,7 @@ struct comp_window_android
 static inline struct vk_bundle *
 get_vk(struct comp_window_android *cwa)
 {
-	return &cwa->base.base.c->vk;
+	return &cwa->base.base.c->base.vk;
 }
 
 static bool
@@ -87,8 +88,14 @@ comp_window_android_update_window_title(struct comp_target *ct, const char *titl
 static struct ANativeWindow *
 _create_android_window(struct comp_window_android *cwa)
 {
-	cwa->custom_surface =
-	    android_custom_surface_async_start(android_globals_get_vm(), android_globals_get_activity());
+	// 0 means default display
+	cwa->custom_surface = android_custom_surface_async_start( //
+	    android_globals_get_vm(),                             // vm
+	    android_globals_get_context(),                        // context
+	    0,                                                    // display_id
+	    WINDOW_TITLE,                                         // title in dumpsys
+	    0);                                                   // preferred_display_mode_id
+
 	if (cwa->custom_surface == NULL) {
 		COMP_ERROR(cwa->base.base.c,
 		           "comp_window_android_create_surface: could not "
@@ -102,7 +109,7 @@ _create_android_window(struct comp_window_android *cwa)
 static VkResult
 comp_window_android_create_surface(struct comp_window_android *cwa,
                                    struct ANativeWindow *window,
-                                   VkSurfaceKHR *vk_surface)
+                                   VkSurfaceKHR *out_surface)
 {
 	struct vk_bundle *vk = get_vk(cwa);
 	VkResult ret;
@@ -113,15 +120,19 @@ comp_window_android_create_surface(struct comp_window_android *cwa,
 	    .window = window,
 	};
 
+	VkSurfaceKHR surface = VK_NULL_HANDLE;
 	ret = vk->vkCreateAndroidSurfaceKHR( //
 	    vk->instance,                    //
 	    &surface_info,                   //
 	    NULL,                            //
-	    vk_surface);                     //
+	    &surface);                       //
 	if (ret != VK_SUCCESS) {
 		COMP_ERROR(cwa->base.base.c, "vkCreateAndroidSurfaceKHR: %s", vk_result_string(ret));
 		return ret;
 	}
+
+	VK_NAME_SURFACE(vk, surface, "comp_window_android surface");
+	*out_surface = surface;
 
 	return VK_SUCCESS;
 }
@@ -137,10 +148,23 @@ comp_window_android_init_swapchain(struct comp_target *ct, uint32_t width, uint3
 	if (android_globals_get_activity() != NULL) {
 		/* In process: Creating surface from activity */
 		window = _create_android_window(cwa);
+	} else if (android_custom_surface_can_draw_overlays(android_globals_get_vm(), android_globals_get_context())) {
+		/* Out of process: Create surface */
+		window = _create_android_window(cwa);
 	} else {
-		/* Out of process: Getting cached surface */
-		window = (struct ANativeWindow *)android_globals_get_window();
+		/* Out of process: Getting cached surface.
+		 * This loop polls for a surface created by Client.java in blockingConnect.
+		 * TODO: change java code to callback native code to notify Session lifecycle progress, instead
+		 * of polling here
+		 */
+		for (int i = 0; i < 100; i++) {
+			window = (struct ANativeWindow *)android_globals_get_window();
+			if (window)
+				break;
+			os_nanosleep(20 * U_TIME_1MS_IN_NS);
+		}
 	}
+
 
 	if (window == NULL) {
 		COMP_ERROR(cwa->base.base.c, "could not get ANativeWindow");
@@ -180,3 +204,47 @@ comp_window_android_create(struct comp_compositor *c)
 
 	return &w->base.base;
 }
+
+
+/*
+ *
+ * Factory
+ *
+ */
+
+static const char *instance_extensions[] = {
+    VK_KHR_ANDROID_SURFACE_EXTENSION_NAME,
+};
+
+static bool
+detect(const struct comp_target_factory *ctf, struct comp_compositor *c)
+{
+	return false;
+}
+
+static bool
+create_target(const struct comp_target_factory *ctf, struct comp_compositor *c, struct comp_target **out_ct)
+{
+	struct comp_target *ct = comp_window_android_create(c);
+	if (ct == NULL) {
+		return false;
+	}
+
+	*out_ct = ct;
+
+	return true;
+}
+
+const struct comp_target_factory comp_target_factory_android = {
+    .name = "Android",
+    .identifier = "android",
+    .requires_vulkan_for_create = false,
+    .is_deferred = true,
+    .required_instance_version = 0,
+    .required_instance_extensions = instance_extensions,
+    .required_instance_extension_count = ARRAY_SIZE(instance_extensions),
+    .optional_device_extensions = NULL,
+    .optional_device_extension_count = 0,
+    .detect = detect,
+    .create_target = create_target,
+};

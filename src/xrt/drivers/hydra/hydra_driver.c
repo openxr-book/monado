@@ -4,11 +4,11 @@
 /*!
  * @file
  * @brief  Razer Hydra prober and driver code
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @author Jakob Bornecrantz <jakob@collabora.com>
  *
  * Portions based on the VRPN Razer Hydra driver,
- * originally written by Ryan Pavlik and available under the BSL-1.0.
+ * originally written by Rylie Pavlik and available under the BSL-1.0.
  */
 
 
@@ -39,11 +39,11 @@
  *
  */
 
-#define HYDRA_TRACE(d, ...) U_LOG_XDEV_IFL_T(&d->base, d->sys->ll, __VA_ARGS__)
-#define HYDRA_DEBUG(d, ...) U_LOG_XDEV_IFL_D(&d->base, d->sys->ll, __VA_ARGS__)
-#define HYDRA_INFO(d, ...) U_LOG_XDEV_IFL_I(&d->base, d->sys->ll, __VA_ARGS__)
-#define HYDRA_WARN(d, ...) U_LOG_XDEV_IFL_W(&d->base, d->sys->ll, __VA_ARGS__)
-#define HYDRA_ERROR(d, ...) U_LOG_XDEV_IFL_E(&d->base, d->sys->ll, __VA_ARGS__)
+#define HYDRA_TRACE(d, ...) U_LOG_XDEV_IFL_T(&d->base, d->sys->log_level, __VA_ARGS__)
+#define HYDRA_DEBUG(d, ...) U_LOG_XDEV_IFL_D(&d->base, d->sys->log_level, __VA_ARGS__)
+#define HYDRA_INFO(d, ...) U_LOG_XDEV_IFL_I(&d->base, d->sys->log_level, __VA_ARGS__)
+#define HYDRA_WARN(d, ...) U_LOG_XDEV_IFL_W(&d->base, d->sys->log_level, __VA_ARGS__)
+#define HYDRA_ERROR(d, ...) U_LOG_XDEV_IFL_E(&d->base, d->sys->log_level, __VA_ARGS__)
 
 DEBUG_GET_ONCE_LOG_OPTION(hydra_log, "HYDRA_LOG", U_LOGGING_WARN)
 
@@ -157,7 +157,7 @@ struct hydra_system
 	bool was_in_gamepad_mode;
 	int motion_attempt_number;
 
-	enum u_logging_level ll;
+	enum u_logging_level log_level;
 };
 
 /*!
@@ -328,7 +328,7 @@ hydra_system_read_data_hid(struct hydra_system *hs, timepoint_ns now)
 			return got_message ? 1 : 0;
 		}
 		if (ret != 52) {
-			U_LOG_IFL_E(hs->ll, "Unexpected data report of size %d", ret);
+			U_LOG_IFL_E(hs->log_level, "Unexpected data report of size %d", ret);
 			return -1;
 		}
 		got_message = true;
@@ -348,7 +348,7 @@ hydra_system_read_data_hid(struct hydra_system *hs, timepoint_ns now)
 		}
 
 		hs->report_time = now;
-		U_LOG_IFL_T(hs->ll,
+		U_LOG_IFL_T(hs->log_level,
 		            "\n\t"
 		            "missed: %s\n\t"
 		            "seq_no: %x\n",
@@ -369,14 +369,14 @@ hydra_system_enter_motion_control(struct hydra_system *hs, timepoint_ns now)
 
 	hs->was_in_gamepad_mode = true;
 	hs->motion_attempt_number++;
-	U_LOG_IFL_D(hs->ll,
+	U_LOG_IFL_D(hs->log_level,
 	            "Setting feature report to start motion-controller mode, "
 	            "attempt %d",
 	            hs->motion_attempt_number);
 
 	os_hid_set_feature(hs->command_hid, HYDRA_REPORT_START_MOTION, sizeof(HYDRA_REPORT_START_MOTION));
 
-	// Doing a dummy get-feature now.
+	// Doing a throwaway get-feature now.
 	uint8_t buf[91] = {0};
 	os_hid_get_feature(hs->command_hid, 0, buf, sizeof(buf));
 
@@ -526,7 +526,7 @@ hydra_system_remove_child(struct hydra_system *hs, struct hydra_device *hd)
 		if (hs->data_hid != NULL && hs->command_hid != NULL && hs->sm.current_state == HYDRA_SM_REPORTING &&
 		    hs->was_in_gamepad_mode) {
 
-			U_LOG_IFL_D(hs->ll,
+			U_LOG_IFL_D(hs->log_level,
 			            "hydra: Sending command to re-enter gamepad mode "
 			            "and pausing while it takes effect.");
 
@@ -570,7 +570,7 @@ hydra_device_destroy(struct xrt_device *xdev)
 int
 hydra_found(struct xrt_prober *xp,
             struct xrt_prober_device **devices,
-            size_t num_devices,
+            size_t device_count,
             size_t index,
             cJSON *attached_data,
             struct xrt_device **out_xdevs)
@@ -594,7 +594,7 @@ hydra_found(struct xrt_prober *xp,
 	struct hydra_system *hs = U_TYPED_CALLOC(struct hydra_system);
 	hs->base.type = XRT_TRACKING_TYPE_HYDRA;
 	snprintf(hs->base.name, XRT_TRACKING_NAME_LEN, "%s", "Razer Hydra magnetic tracking");
-	// Dummy transform from local space to base.
+	// Arbitrary static transform from local space to base.
 	hs->base.offset.position.y = 1.0f;
 	hs->base.offset.position.z = -0.25f;
 	hs->base.offset.orientation.w = 1.0f;
@@ -613,7 +613,7 @@ hydra_found(struct xrt_prober *xp,
 	hs->report_counter = -1;
 	hs->refs = 2;
 
-	hs->ll = debug_get_log_option_hydra_log();
+	hs->log_level = debug_get_log_option_hydra_log();
 
 	// Populate the individual devices
 	for (size_t i = 0; i < 2; ++i) {

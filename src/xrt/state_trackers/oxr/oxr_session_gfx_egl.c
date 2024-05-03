@@ -1,4 +1,4 @@
-// Copyright 2018-2021, Collabora, Ltd.
+// Copyright 2018-2022, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -8,6 +8,10 @@
  * @ingroup oxr_main
  * @ingroup comp_client
  */
+
+#ifndef XR_USE_PLATFORM_EGL
+#error "Must build this file with EGL enabled!"
+#endif
 
 #include <stdlib.h>
 
@@ -20,7 +24,6 @@
 
 #include "xrt/xrt_instance.h"
 
-#ifdef XR_USE_PLATFORM_EGL
 #define EGL_NO_X11              // libglvnd
 #define MESA_EGL_NO_X11_HEADERS // mesa
 #include <EGL/egl.h>
@@ -32,9 +35,6 @@ typedef EGLBoolean(EGLAPIENTRYP PFNEGLQUERYCONTEXTPROC)(EGLDisplay dpy,
                                                         EGLContext ctx,
                                                         EGLint attribute,
                                                         EGLint *value);
-#endif
-
-#ifdef XR_USE_PLATFORM_EGL
 
 XrResult
 oxr_session_populate_egl(struct oxr_logger *log,
@@ -43,6 +43,7 @@ oxr_session_populate_egl(struct oxr_logger *log,
                          struct oxr_session *sess)
 {
 	EGLint egl_client_type = -1;
+	bool renderdoc_enabled = false;
 
 	PFNEGLQUERYCONTEXTPROC eglQueryContext = (PFNEGLQUERYCONTEXTPROC)next->getProcAddress("eglQueryContext");
 	if (!eglQueryContext) {
@@ -66,12 +67,13 @@ oxr_session_populate_egl(struct oxr_logger *log,
 	    next->display,                                  //
 	    next->config,                                   //
 	    next->context,                                  //
-	    next->getProcAddress,                           //
+	    (PFNEGLGETPROCADDRESSPROC)next->getProcAddress, //
+	    renderdoc_enabled,                              // renderdoc_enabled
 	    &xcgl);                                         //
 
 	if (xret == XRT_ERROR_EGL_CONFIG_MISSING) {
 		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,
-		                 "XrGraphicsBindingEGLMNDX::config can not be null when EGL_KHR_no_config_context is "
+		                 "XrGraphicsBindingEGLMNDX::config cannot be null when EGL_KHR_no_config_context is "
 		                 "not supported by the display.");
 	}
 	if (xret != XRT_SUCCESS || xcgl == NULL) {
@@ -83,5 +85,3 @@ oxr_session_populate_egl(struct oxr_logger *log,
 
 	return XR_SUCCESS;
 }
-
-#endif

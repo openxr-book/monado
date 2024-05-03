@@ -1,11 +1,26 @@
 #!/usr/bin/env python3
-# Copyright 2020, Collabora, Ltd.
+# Copyright 2020-2023, Collabora, Ltd.
 # SPDX-License-Identifier: BSL-1.0
 """Generate code from a JSON file describing the IPC protocol."""
 
 import json
 import re
 
+def write_cpp_header_guard_start(f):
+    """Write the starting C in C++ header guard"""
+    f.write('''
+#ifdef __cplusplus
+extern "C" {
+#endif
+''')
+
+def write_cpp_header_guard_end(f):
+    """Write the ending C in C++ header guard"""
+    f.write('''
+#ifdef __cplusplus
+}
+#endif
+''')
 
 def write_with_wrapped_args(f, start, args, indent):
     """Write something like a declaration or call."""
@@ -49,6 +64,45 @@ def write_result_handler(f, result, cleanup="", indent=""):
     f.write("\n" + indent + "}\n")
 
 
+def write_msg_struct(f, call, ident):
+    # Message struct
+    if call.needs_msg_struct:
+        f.write(ident + "struct ipc_" + call.name + "_msg _msg = {\n")
+    else:
+        f.write(ident + "struct ipc_command_msg _msg = {\n")
+
+    f.write(ident + "    .cmd = " + str(call.id) + ",\n")
+    for arg in call.in_args:
+        if arg.is_aggregate:
+            f.write(ident + "    ." + arg.name + " = *" + arg.name + ",\n")
+        else:
+            f.write(ident + "    ." + arg.name + " = " + arg.name + ",\n")
+    if call.in_handles:
+        f.write(ident + "    ." + call.in_handles.count_arg_name + " = " +
+                call.in_handles.count_arg_name + ",\n")
+    f.write(ident + "};\n")
+
+
+def write_reply_struct(f, call, ident):
+    # Reply struct
+    if call.out_args:
+        f.write(ident + "struct ipc_" + call.name + "_reply _reply;\n")
+    else:
+        f.write(ident + "struct ipc_result_reply _reply = {0};\n")
+    if call.in_handles:
+        f.write(ident + "struct ipc_result_reply _sync = {0};\n")
+
+
+def write_msg_send(f, ret, indent):
+    # Prepare initial sending
+    func = 'ipc_send'
+    args = ['&ipc_c->imc', '&_msg', 'sizeof(_msg)']
+
+    f.write("\n" + indent + "// Send our request")
+    write_invocation(f, ret, func, args, indent=indent)
+    f.write(';')
+
+
 class Arg:
     """An IPC call argument."""
 
@@ -56,7 +110,8 @@ class Arg:
     SCALAR_TYPES = set(("uint32_t",
                         "int64_t",
                         "uint64_t",
-                        "bool"))
+                        "bool",
+                        "float"))
     AGGREGATE_RE = re.compile(r"((const )?struct|union) (xrt|ipc)_[a-z_]+")
     ENUM_RE = re.compile(r"enum xrt_[a-z_]+")
 
@@ -68,7 +123,7 @@ class Arg:
     def get_func_argument_in(self):
         """Get the type and name of this argument as an input parameter."""
         if self.is_aggregate:
-            return self.typename + " *" + self.name
+            return "const " + self.typename + " *" + self.name
         else:
             return self.typename + " " + self.name
 
@@ -130,7 +185,7 @@ class HandleType:
     @property
     def count_arg_name(self):
         """Get the name of the count argument."""
-        return 'num_'+self.argstem
+        return self.argstem[:-1] + "_count"
 
     @property
     def count_arg_type(self):
@@ -186,6 +241,18 @@ class Call:
             for arg in self.out_args:
                 arg.dump()
 
+    def write_send_decl(self, f):
+        """Write declaration of ipc_send_CALLNAME_locked."""
+        args = ["struct ipc_connection *ipc_c"]
+        args.extend(arg.get_func_argument_in() for arg in self.in_args)
+        write_decl(f, 'xrt_result_t', 'ipc_send_' + self.name + "_locked", args)
+
+    def write_receive_decl(self, f):
+        """Write declaration of ipc_receive_CALLNAME_locked."""
+        args = ["struct ipc_connection *ipc_c"]
+        args.extend(arg.get_func_argument_out() for arg in self.out_args)
+        write_decl(f, 'xrt_result_t', 'ipc_receive_' + self.name + "_locked", args)
+
     def write_call_decl(self, f):
         """Write declaration of ipc_call_CALLNAME."""
         args = ["struct ipc_connection *ipc_c"]
@@ -200,12 +267,19 @@ class Call:
     def write_handler_decl(self, f):
         """Write declaration of ipc_handle_CALLNAME."""
         args = ["volatile struct ipc_client_state *ics"]
+
+        # Always get in arguments.
         args.extend(arg.get_func_argument_in() for arg in self.in_args)
-        args.extend(arg.get_func_argument_out() for arg in self.out_args)
+
+        # Handle sending reply in the function itself.
+        if not self.varlen:
+            args.extend(arg.get_func_argument_out() for arg in self.out_args)
+
         if self.out_handles:
             args.extend(self.out_handles.handler_arg_decls)
         if self.in_handles:
             args.extend(self.in_handles.const_arg_decls)
+
         write_decl(f, 'xrt_result_t', 'ipc_handle_' + self.name, args)
 
     @property
@@ -221,6 +295,7 @@ class Call:
         self.out_args = []
         self.in_handles = None
         self.out_handles = None
+        self.varlen = False
         for key, val in data.items():
             if key == 'id':
                 self.id = val
@@ -232,10 +307,14 @@ class Call:
                 self.out_handles = HandleType(val)
             elif key == 'in_handles':
                 self.in_handles = HandleType(val)
+            elif key == 'varlen':
+                self.varlen = val
             else:
                 raise RuntimeError("Unrecognized key")
         if not self.id:
             self.id = "IPC_" + name.upper()
+        if self.varlen and (self.in_handles or self.out_handles):
+            raise Exception("Can not have handles with varlen functions")
 
 
 class Proto:

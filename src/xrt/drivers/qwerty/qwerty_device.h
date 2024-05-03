@@ -11,6 +11,11 @@
 #include "util/u_logging.h"
 #include "xrt/xrt_device.h"
 
+/*!
+ * @addtogroup drv_qwerty
+ * @{
+ */
+
 #define QWERTY_HMD_STR "Qwerty HMD"
 #define QWERTY_HMD_TRACKER_STR QWERTY_HMD_STR " Tracker"
 #define QWERTY_LEFT_STR "Qwerty Left Controller"
@@ -23,11 +28,6 @@ extern "C" {
 #endif
 
 /*!
- * @addtogroup drv_qwerty
- * @{
- */
-
-/*!
  * @brief Container of qwerty devices and driver properties.
  * @see qwerty_hmd, qwerty_controller
  */
@@ -36,7 +36,7 @@ struct qwerty_system
 	struct qwerty_hmd *hmd;          //!< Can be NULL
 	struct qwerty_controller *lctrl; //!< Cannot be NULL
 	struct qwerty_controller *rctrl; //!< Cannot be NULL
-	enum u_logging_level ll;
+	enum u_logging_level log_level;
 	bool process_keys;  //!< If false disable keyboard and mouse input
 	bool hmd_focused;   //!< For gui var tracking only, true if hmd is the focused device
 	bool lctrl_focused; //!< Same as `hmd_focused` but for the left controller
@@ -91,7 +91,9 @@ struct qwerty_controller
 	struct qwerty_device base;
 
 	bool select_clicked;
+	int64_t select_timestamp;
 	bool menu_clicked;
+	int64_t menu_timestamp;
 
 	/*!
 	 * Only used when a qwerty_hmd exists in the system.
@@ -254,18 +256,32 @@ struct qwerty_controller *
 qwerty_controller(struct xrt_device *xd);
 
 /*!
- * Simulate input/select/click
+ * Simulate pressing input/select/click
  * @public @memberof qwerty_controller
  */
 void
-qwerty_select_click(struct qwerty_controller *qc);
+qwerty_press_select(struct qwerty_controller *qc);
 
 /*!
- * Simulate input/menu/click
+ * Simulate releasing input/select/click
  * @public @memberof qwerty_controller
  */
 void
-qwerty_menu_click(struct qwerty_controller *qc);
+qwerty_release_select(struct qwerty_controller *qc);
+
+/*!
+ * Simulate pressing input/menu/click
+ * @public @memberof qwerty_controller
+ */
+void
+qwerty_press_menu(struct qwerty_controller *qc);
+
+/*!
+ * Simulate releasing input/menu/click
+ * @public @memberof qwerty_controller
+ */
+void
+qwerty_release_menu(struct qwerty_controller *qc);
 
 /*!
  * Attach/detach the pose of `qc` to its HMD. Only works when a qwerty_hmd is present.

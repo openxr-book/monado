@@ -1,4 +1,4 @@
-// Copyright 2019, Collabora, Ltd.
+// Copyright 2019-2022, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -8,15 +8,16 @@
  */
 
 #include "util/u_var.h"
-#include "util/u_time.h"
-#include "util/u_misc.h"
 #include "util/u_debug.h"
-#include "util/u_device.h"
 
 #include <string>
 #include <sstream>
 #include <vector>
 #include <unordered_map>
+#include <mutex>
+
+
+namespace xrt::auxiliary::util {
 
 
 /*
@@ -25,41 +26,55 @@
  *
  */
 
-
+/*!
+ * Simple container for the variable information.
+ */
 class Var
 {
 public:
 	struct u_var_info info = {};
 };
 
+/*!
+ * Object that has a series of tracked variables.
+ */
 class Obj
 {
 public:
 	std::string name = {};
+	std::string raw_name = {};
+	struct u_var_root_info info = {};
 	std::vector<Var> vars = {};
 };
 
+/*!
+ * Object that has a series of tracked variables.
+ */
 class Tracker
 {
 public:
-	std::unordered_map<std::string, size_t> counters = {};
+	std::unordered_map<std::string, uint32_t> counters = {};
 	std::unordered_map<ptrdiff_t, Obj> map = {};
-	bool on;
-	bool tested;
+	std::mutex mutex = {};
+	bool on = false;
+	bool tested = false;
 
 public:
-	int
+	uint32_t
 	getNumber(const std::string &name)
 	{
 		auto s = counters.find(name);
-		int count = int(s != counters.end() ? s->second : 0) + 1;
+		uint32_t count = (s != counters.end() ? s->second : 0u) + 1u;
 		counters[name] = count;
 
 		return count;
 	}
 };
 
-static class Tracker tracker;
+/*!
+ * Global variable tracking state.
+ */
+static class Tracker gTracker;
 
 
 /*
@@ -71,20 +86,20 @@ static class Tracker tracker;
 static bool
 get_on()
 {
-	if (tracker.tested) {
-		return tracker.on;
+	if (gTracker.tested) {
+		return gTracker.on;
 	}
-	tracker.on = debug_get_bool_option("XRT_TRACK_VARIABLES", false);
-	tracker.tested = true;
+	gTracker.on = debug_get_bool_option("XRT_TRACK_VARIABLES", false);
+	gTracker.tested = true;
 
-	return tracker.on;
+	return gTracker.on;
 }
 
 static void
 add_var(void *root, void *ptr, u_var_kind kind, const char *c_name)
 {
-	auto s = tracker.map.find((ptrdiff_t)root);
-	if (s == tracker.map.end()) {
+	auto s = gTracker.map.find((ptrdiff_t)root);
+	if (s == gTracker.map.end()) {
 		return;
 	}
 
@@ -106,29 +121,37 @@ add_var(void *root, void *ptr, u_var_kind kind, const char *c_name)
 extern "C" void
 u_var_force_on(void)
 {
-	tracker.on = true;
-	tracker.tested = true;
+	gTracker.on = true;
+	gTracker.tested = true;
 }
 
 extern "C" void
-u_var_add_root(void *root, const char *c_name, bool number)
+u_var_add_root(void *root, const char *c_name, bool suffix_with_number)
 {
 	if (!get_on()) {
 		return;
 	}
 
-	auto name = std::string(c_name);
+	std::unique_lock<std::mutex> lock(gTracker.mutex);
 
-	if (number) {
-		int count = tracker.getNumber(name);
+	auto name = std::string(c_name);
+	auto raw_name = name;
+	uint32_t count = 0; // Zero means no number.
+
+	if (suffix_with_number) {
+		count = gTracker.getNumber(name);
 
 		std::stringstream ss;
 		ss << name << " #" << count;
 		name = ss.str();
 	}
 
-	auto &obj = tracker.map[(ptrdiff_t)root] = Obj();
+	auto &obj = gTracker.map[(ptrdiff_t)root] = Obj();
 	obj.name = name;
+	obj.raw_name = raw_name;
+	obj.info.name = obj.name.c_str();
+	obj.info.raw_name = obj.raw_name.c_str();
+	obj.info.number = count;
 }
 
 extern "C" void
@@ -138,12 +161,14 @@ u_var_remove_root(void *root)
 		return;
 	}
 
-	auto s = tracker.map.find((ptrdiff_t)root);
-	if (s == tracker.map.end()) {
+	std::unique_lock<std::mutex> lock(gTracker.mutex);
+
+	auto s = gTracker.map.find((ptrdiff_t)root);
+	if (s == gTracker.map.end()) {
 		return;
 	}
 
-	tracker.map.erase(s);
+	gTracker.map.erase(s);
 }
 
 extern "C" void
@@ -153,21 +178,23 @@ u_var_visit(u_var_root_cb enter_cb, u_var_root_cb exit_cb, u_var_elm_cb elem_cb,
 		return;
 	}
 
-	std::vector<Obj *> tmp;
-	tmp.reserve(tracker.map.size());
+	std::unique_lock<std::mutex> lock(gTracker.mutex);
 
-	for (auto &n : tracker.map) {
+	std::vector<Obj *> tmp;
+	tmp.reserve(gTracker.map.size());
+
+	for (auto &n : gTracker.map) {
 		tmp.push_back(&n.second);
 	}
 
 	for (Obj *obj : tmp) {
-		enter_cb(obj->name.c_str(), priv);
+		enter_cb(&obj->info, priv);
 
 		for (auto &var : obj->vars) {
 			elem_cb(&var.info, priv);
 		}
 
-		exit_cb(obj->name.c_str(), priv);
+		exit_cb(&obj->info, priv);
 	}
 }
 
@@ -183,3 +210,5 @@ u_var_visit(u_var_root_cb enter_cb, u_var_root_cb exit_cb, u_var_elm_cb elem_cb,
 U_VAR_ADD_FUNCS()
 
 #undef ADD_FUNC
+
+} // namespace xrt::auxiliary::util

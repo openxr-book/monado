@@ -3,7 +3,7 @@
 /*!
  * @file
  * @brief  Very simple file opening functions, mostly using std::filesystem for portability.
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @author Pete Black <pblack@collabora.com>
  * @ingroup aux_util
@@ -32,10 +32,17 @@ static inline fs::path
 get_config_path()
 {
 #ifdef XRT_OS_WINDOWS
-	auto local_app_data = fs::path{getenv("LOCALAPPDATA")};
+	char *buffer = nullptr;
+	errno_t ret = _dupenv_s(&buffer, nullptr, "LOCALAPPDATA");
+	if (ret != 0) {
+		return {};
+	}
+
+	auto local_app_data = fs::path{buffer};
+	free(buffer);
+
 	return local_app_data / "monado";
 #else
-
 	const char *xdg_home = getenv("XDG_CONFIG_HOME");
 	const char *home = getenv("HOME");
 	if (xdg_home != NULL) {
@@ -47,6 +54,7 @@ get_config_path()
 	return {};
 #endif
 }
+
 ssize_t
 u_file_get_config_dir(char *out_path, size_t out_path_size)
 {
@@ -78,8 +86,9 @@ u_file_open_file_in_config_dir(const char *filename, const char *mode)
 	}
 
 	auto file_path_string = (config_path / filename).string();
-	FILE *file = fopen(file_path_string.c_str(), mode);
-	if (file != NULL) {
+	FILE *file = nullptr;
+	errno_t ret = fopen_s(&file, file_path_string.c_str(), mode);
+	if (ret == 0) {
 		return file;
 	}
 
@@ -88,7 +97,12 @@ u_file_open_file_in_config_dir(const char *filename, const char *mode)
 	fs::create_directories(directory);
 
 	// Do not report error.
-	return fopen(file_path_string.c_str(), mode);
+	ret = fopen_s(&file, file_path_string.c_str(), mode);
+	if (ret == 0) {
+		return file;
+	}
+
+	return nullptr;
 }
 
-#endif
+#endif // XRT_OS_LINUX

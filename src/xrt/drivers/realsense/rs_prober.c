@@ -5,12 +5,13 @@
  * @brief  Realsense prober code.
  * @author Christoph Haag <christoph.haag@collabora.com>
  * @author Jakob Bornecrantz <jakob@collabora.com>
- * @ingroup drv_rs
+ * @ingroup drv_realsense
  */
 
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "xrt/xrt_config_build.h"
 #include "xrt/xrt_config_have.h"
 #include "xrt/xrt_prober.h"
 
@@ -78,6 +79,8 @@ rs_prober_destroy(struct xrt_auto_prober *p)
 /*!
  * @brief Explores a realsense device to see what SLAM capabilities it supports
  *
+ * @param device_list List in which the device resides.
+ * @param dev_idx Index of the device in @p device_list.
  * @param[out] out_hslam Whether it supports host-SLAM tracking (Has camera-imu streams)
  * @param[out] out_dslam Whether it supports device-SLAM tracking (T26x)
  */
@@ -162,7 +165,7 @@ create_tracked_rs_device(struct xrt_prober *xp)
 	rs2_error *e = NULL;
 	struct rs_container rsc = {0};
 	int expected_tracking = debug_get_num_option_rs_tracking();
-#ifdef XRT_HAVE_SLAM
+#ifdef XRT_FEATURE_SLAM
 	bool external_slam_supported = true;
 #else
 	bool external_slam_supported = false;
@@ -220,6 +223,33 @@ create_tracked_rs_device(struct xrt_prober *xp)
 	return dev;
 }
 
+
+//! Basically just for T265
+struct xrt_device *
+rs_create_tracked_device_internal_slam(void)
+{
+	rs2_error *e = NULL;
+	struct rs_container rsc = {0};
+
+	rsc.context = DO(rs2_create_context, RS2_API_VERSION);
+	rsc.device_list = DO(rs2_query_devices, rsc.context);
+	rsc.device_count = DO(rs2_get_device_count, rsc.device_list);
+
+
+	int ddev_idx = find_capable_device(RS_TRACKING_DEVICE_SLAM, rsc.device_list);
+
+
+
+	rs_container_cleanup(&rsc); // We got ddev_idx and hdev_idx, release realsense resources
+
+	struct xrt_device *dev = NULL;
+
+	dev = rs_ddev_create(ddev_idx);
+
+
+	return dev;
+}
+
 //! @public @memberof rs_prober
 static int
 rs_prober_autoprobe(struct xrt_auto_prober *xap,
@@ -241,7 +271,7 @@ rs_prober_autoprobe(struct xrt_auto_prober *xap,
 }
 
 struct xrt_auto_prober *
-rs_create_auto_prober()
+rs_create_auto_prober(void)
 {
 	struct rs_prober *dp = U_TYPED_CALLOC(struct rs_prober);
 	dp->base.name = "Realsense";

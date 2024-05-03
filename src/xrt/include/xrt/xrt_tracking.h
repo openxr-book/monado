@@ -10,10 +10,10 @@
 #pragma once
 
 #define XRT_TRACKING_NAME_LEN 256
+#define XRT_TRACKING_MAX_SLAM_CAMS 5
 
 #include "xrt/xrt_defines.h"
 
-#include "util/u_hand_tracking.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -26,7 +26,6 @@ struct xrt_tracking;
 struct xrt_tracking_factory;
 struct xrt_tracked_psmv;
 struct xrt_tracked_psvr;
-struct xrt_tracked_hand;
 struct xrt_tracked_slam;
 
 //! @todo This is from u_time, duplicated to avoid layer violation.
@@ -95,30 +94,19 @@ struct xrt_tracking_factory
 	/*!
 	 * Create a tracked PSMV ball.
 	 */
-	int (*create_tracked_psmv)(struct xrt_tracking_factory *,
-	                           struct xrt_device *xdev,
-	                           struct xrt_tracked_psmv **out_psmv);
+	int (*create_tracked_psmv)(struct xrt_tracking_factory *, struct xrt_tracked_psmv **out_psmv);
 
 	/*!
 	 * Create a tracked PSVR HMD.
 	 */
-	int (*create_tracked_psvr)(struct xrt_tracking_factory *,
-	                           struct xrt_device *xdev,
-	                           struct xrt_tracked_psvr **out_psvr);
+	int (*create_tracked_psvr)(struct xrt_tracking_factory *, struct xrt_tracked_psvr **out_psvr);
 
-	/*!
-	 * Create a tracked hand.
-	 */
-	int (*create_tracked_hand)(struct xrt_tracking_factory *,
-	                           struct xrt_device *xdev,
-	                           struct xrt_tracked_hand **out_hand);
+
 
 	/*!
 	 * Create a SLAM tracker.
 	 */
-	int (*create_tracked_slam)(struct xrt_tracking_factory *,
-	                           struct xrt_device *xdev,
-	                           struct xrt_tracked_slam **out_slam);
+	int (*create_tracked_slam)(struct xrt_tracking_factory *, struct xrt_tracked_slam **out_slam);
 };
 
 /*!
@@ -143,9 +131,34 @@ struct xrt_imu_sample
 };
 
 /*!
+ * Pose sample.
+ */
+struct xrt_pose_sample
+{
+	timepoint_ns timestamp_ns;
+	struct xrt_pose pose;
+};
+
+/*!
+ * Masks (bounding boxes) of different hands from current views
+ */
+struct xrt_hand_masks_sample
+{
+	struct xrt_hand_masks_sample_camera
+	{
+		bool enabled; //!< Whether any hand mask for this camera is being reported
+		struct xrt_hand_masks_sample_hand
+		{
+			bool enabled;             //!< Whether a mask for this hand is being reported
+			struct xrt_rect_f32 rect; //!< The mask itself in pixel coordinates
+		} hands[2];
+	} views[XRT_TRACKING_MAX_SLAM_CAMS];
+};
+
+/*!
  * @interface xrt_imu_sink
  *
- * An object that is sent IMU samples.
+ * An object to send IMU samples to.
  *
  * Similar to @ref xrt_frame_sink but the interface implementation must manage
  * its own resources, not through a context graph.
@@ -161,14 +174,37 @@ struct xrt_imu_sink
 };
 
 /*!
+ * @interface xrt_pose_sink
+ *
+ * An object to send pairs of timestamps and poses to. @see xrt_imu_sink.
+ */
+struct xrt_pose_sink
+{
+	void (*push_pose)(struct xrt_pose_sink *, struct xrt_pose_sample *sample);
+};
+
+/*!
+ * @interface xrt_hand_masks_sink
+ *
+ * An object to push @ref xrt_hand_masks_sample to.
+ */
+struct xrt_hand_masks_sink
+{
+	void (*push_hand_masks)(struct xrt_hand_masks_sink *, struct xrt_hand_masks_sample *hand_masks);
+};
+
+
+/*!
  * Container of pointers to sinks that could be used for a SLAM system. Sinks
  * are considered disabled if they are null.
  */
 struct xrt_slam_sinks
 {
-	struct xrt_frame_sink *left;
-	struct xrt_frame_sink *right;
+	int cam_count;
+	struct xrt_frame_sink *cams[XRT_TRACKING_MAX_SLAM_CAMS];
 	struct xrt_imu_sink *imu;
+	struct xrt_pose_sink *gt; //!< Can receive ground truth poses if available
+	struct xrt_hand_masks_sink *hand_masks;
 };
 
 /*!
@@ -248,35 +284,6 @@ struct xrt_tracked_psvr
 };
 
 /*!
- * @interface xrt_tracked_hand
- *
- * A single tracked Hand
- */
-struct xrt_tracked_hand
-{
-	//! The tracking system origin for this hand.
-	struct xrt_tracking_origin *origin;
-
-	//! Device owning this hand.
-	struct xrt_device *xdev;
-
-	/*!
-	 * Called by the owning @ref xrt_device @ref xdev to get the pose of
-	 * the hand in the tracking space at the given time.
-	 */
-	void (*get_tracked_joints)(struct xrt_tracked_hand *,
-	                           enum xrt_input_name name,
-	                           timepoint_ns when_ns,
-	                           struct u_hand_joint_default_set *out_joints,
-	                           struct xrt_space_relation *out_relation);
-
-	/*!
-	 * Destroy this tracked hand.
-	 */
-	void (*destroy)(struct xrt_tracked_hand *);
-};
-
-/*!
  * @interface xrt_tracked_slam
  *
  * An adapter that wraps an external SLAM tracker to provide SLAM tracking.
@@ -305,6 +312,20 @@ static inline void
 xrt_sink_push_imu(struct xrt_imu_sink *sink, struct xrt_imu_sample *sample)
 {
 	sink->push_imu(sink, sample);
+}
+
+//! @public @memberof xrt_pose_sink
+static inline void
+xrt_sink_push_pose(struct xrt_pose_sink *sink, struct xrt_pose_sample *sample)
+{
+	sink->push_pose(sink, sample);
+}
+
+//! @public @memberof xrt_hand_masks_sink
+static inline void
+xrt_sink_push_hand_masks(struct xrt_hand_masks_sink *sink, struct xrt_hand_masks_sample *hand_masks)
+{
+	sink->push_hand_masks(sink, hand_masks);
 }
 
 //! @public @memberof xrt_tracked_psmv
@@ -366,17 +387,6 @@ xrt_tracked_psvr_destroy(struct xrt_tracked_psvr **xtvr_ptr)
 	*xtvr_ptr = NULL;
 }
 
-
-//! @public @memberof xrt_tracked_hand
-static inline void
-xrt_tracked_hand_get_joints(struct xrt_tracked_hand *h,
-                            enum xrt_input_name name,
-                            timepoint_ns when_ns,
-                            struct u_hand_joint_default_set *out_joints,
-                            struct xrt_space_relation *out_relation)
-{
-	h->get_tracked_joints(h, name, when_ns, out_joints, out_relation);
-}
 
 //! @public @memberof xrt_tracked_slam
 static inline void

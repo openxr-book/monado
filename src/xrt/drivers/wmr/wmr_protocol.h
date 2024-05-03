@@ -23,24 +23,54 @@ extern "C" {
 /*!
  * WMR and MS HoloLens Sensors protocol constants and structures
  *
- * @ingroup drv_wmr
+ * @addtogroup drv_wmr
  * @{
  */
 
 #define WMR_FEATURE_BUFFER_SIZE 497
 #define WMR_MS_HOLOLENS_NS_PER_TICK 100
 
+// Messages types specific to WMR Hololens Sensors devices
 #define WMR_MS_HOLOLENS_MSG_SENSORS 0x01
-#define WMR_MS_HOLOLENS_MSG_CONTROL 0x02
+#define WMR_MS_HOLOLENS_MSG_CONTROL 0x02 // Firmware read control responses
 #define WMR_MS_HOLOLENS_MSG_DEBUG 0x03
-#define WMR_MS_HOLOLENS_MSG_UNKNOWN_05 0x05
-#define WMR_MS_HOLOLENS_MSG_UNKNOWN_06 0x06
-#define WMR_MS_HOLOLENS_MSG_UNKNOWN_0E 0x0E
-#define WMR_MS_HOLOLENS_MSG_UNKNOWN_17 0x17
+#define WMR_MS_HOLOLENS_MSG_BT_IFACE 0x05         /* Bluetooth interface */
+#define WMR_MS_HOLOLENS_MSG_LEFT_CONTROLLER 0x06  /* Left controller */
+#define WMR_MS_HOLOLENS_MSG_RIGHT_CONTROLLER 0x0E /* Right controller */
+#define WMR_MS_HOLOLENS_MSG_BT_CONTROL 0x16       /* BT control message on Reverb G2 & Odyssey+ */
+#define WMR_MS_HOLOLENS_MSG_CONTROLLER_STATUS 0x17
 
+// Messages types specific to WMR Hololens Sensors' companion devices
 #define WMR_CONTROL_MSG_IPD_VALUE 0x01
-#define WMR_CONTROL_MSG_UNKNOWN_05 0x05
+#define WMR_CONTROL_MSG_UNKNOWN_02 0x02    // Seen in relation to proximity events on Reverb G1
+#define WMR_CONTROL_MSG_DEVICE_STATUS 0x05 // Seen in relation screen state changes on Reverb G1
 
+// Message sub-types for WMR_MS_HOLOLENS_MSG_BT_IFACE WMR Hololens Sensors message
+#define WMR_BT_IFACE_MSG_DEBUG 0x19
+
+// Controller status codes for WMR_MS_HOLOLENS_MSG_CONTROLLER_STATUS status message
+#define WMR_CONTROLLER_STATUS_UNPAIRED 0x0
+#define WMR_CONTROLLER_STATUS_OFFLINE 0x1
+#define WMR_CONTROLLER_STATUS_ONLINE 0x2
+
+/* Messages we can send the G2 via WMR_MS_HOLOLENS_MSG_BT_CONTROL */
+enum wmr_bt_control_msg
+{
+	WMR_BT_CONTROL_MSG_ONLINE_STATUS = 0x04,
+	WMR_BT_CONTROL_MSG_PAIR = 0x05,
+	WMR_BT_CONTROL_MSG_UNPAIR = 0x06,
+	WMR_BT_CONTROL_MSG_PAIRING_STATUS = 0x08,
+	WMR_BT_CONTROL_MSG_CMD_STATUS = 0x09,
+};
+
+#define STR_TO_U32(s) ((uint32_t)(((s)[0]) | ((s)[1] << 8) | ((s)[2] << 16) | ((s)[3] << 24)))
+#define WMR_MAGIC STR_TO_U32("Dlo+")
+
+#define WMR_MIN_EXPOSURE 60
+#define WMR_MAX_OBSERVED_EXPOSURE 6000
+#define WMR_MAX_EXPOSURE 9000
+#define WMR_MIN_GAIN 16
+#define WMR_MAX_GAIN 255
 
 static const unsigned char hololens_sensors_imu_on[64] = {0x02, 0x07};
 
@@ -78,7 +108,7 @@ struct wmr_config_header
 /*!
  * WMR and MS HoloLens Sensors protocol helpers
  *
- * @ingroup drv_wmr
+ * @addtogroup drv_wmr
  * @{
  */
 
@@ -104,6 +134,17 @@ read16(const unsigned char **buffer)
 	              (*(*buffer + 1) << 8);
 	*buffer += 2;
 	return ret;
+}
+
+static inline int32_t
+read24(const unsigned char **buffer)
+{
+	// Note: Preserve sign by shifting up to write MSB
+	int32_t ret = (*(*buffer + 0) << 8) | (*(*buffer + 1) << 16) | (*(*buffer + 2) << 24);
+	*buffer += 3;
+
+	// restore 24 bit scale again
+	return ret >> 8;
 }
 
 static inline int32_t

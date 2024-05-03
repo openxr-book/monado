@@ -1,4 +1,4 @@
-// Copyright 2020-2021, Collabora, Ltd.
+// Copyright 2020-2023, Collabora, Ltd.
 // Copyright 2020-2021, Moses Turner
 // SPDX-License-Identifier: BSL-1.0
 /*!
@@ -23,11 +23,11 @@
 
 DEBUG_GET_ONCE_LOG_OPTION(ulv2_log, "ULV2_LOG", U_LOGGING_INFO)
 
-#define ULV2_TRACE(ulv2d, ...) U_LOG_XDEV_IFL_T(&ulv2d->base, ulv2d->ll, __VA_ARGS__)
-#define ULV2_DEBUG(ulv2d, ...) U_LOG_XDEV_IFL_D(&ulv2d->base, ulv2d->ll, __VA_ARGS__)
-#define ULV2_INFO(ulv2d, ...) U_LOG_XDEV_IFL_I(&ulv2d->base, ulv2d->ll, __VA_ARGS__)
-#define ULV2_WARN(ulv2d, ...) U_LOG_XDEV_IFL_W(&ulv2d->base, ulv2d->ll, __VA_ARGS__)
-#define ULV2_ERROR(ulv2d, ...) U_LOG_XDEV_IFL_E(&ulv2d->base, ulv2d->ll, __VA_ARGS__)
+#define ULV2_TRACE(ulv2d, ...) U_LOG_XDEV_IFL_T(&ulv2d->base, ulv2d->log_level, __VA_ARGS__)
+#define ULV2_DEBUG(ulv2d, ...) U_LOG_XDEV_IFL_D(&ulv2d->base, ulv2d->log_level, __VA_ARGS__)
+#define ULV2_INFO(ulv2d, ...) U_LOG_XDEV_IFL_I(&ulv2d->base, ulv2d->log_level, __VA_ARGS__)
+#define ULV2_WARN(ulv2d, ...) U_LOG_XDEV_IFL_W(&ulv2d->base, ulv2d->log_level, __VA_ARGS__)
+#define ULV2_ERROR(ulv2d, ...) U_LOG_XDEV_IFL_E(&ulv2d->base, ulv2d->log_level, __VA_ARGS__)
 
 #define printf_pose(pose)                                                                                              \
 	printf("%f %f %f  %f %f %f %f\n", pose.position.x, pose.position.y, pose.position.z, pose.orientation.x,       \
@@ -53,7 +53,7 @@ struct ulv2_device
 
 	struct xrt_tracking_origin tracking_origin;
 
-	enum u_logging_level ll;
+	enum u_logging_level log_level;
 
 	bool pthread_should_stop;
 
@@ -183,7 +183,7 @@ ulv2_process_hand(Leap::Hand hand, xrt_hand_joint_set *joint_set, int hi)
 			ulv2_process_joint(nextJ(ld), fb(ld).basis(), fb(ld).width(), hi, xrtj(LITTLE_TIP));
 			break;
 			// I hear that Sagittarius has a better api, in C even, so hopefully
-			// there'll be less weird boilerplate whenever we get access to that
+			// there'll be less weird boilerplate whenever we get that
 		}
 	}
 }
@@ -220,7 +220,7 @@ leap_input_loop(void *ptr_to_xdev)
 			          "connected to Leap Motion "
 			          "controller. Retrying (%i / %i)",
 			          i, num_tries);
-			// This codepath should very rarely get hit as nowadays this gets probed by VID/PID, so you'd
+			// This codepath should very rarely be enter as nowadays this gets probed by VID/PID, so you'd
 			// have to be pretty fast to unplug after it gets probed and before this check.
 		} else {
 			ULV2_INFO(ulv2d,
@@ -323,13 +323,6 @@ cleanup_leap_loop:
 }
 
 static void
-ulv2_device_update_inputs(struct xrt_device *xdev)
-{
-	// Empty
-}
-
-
-static void
 ulv2_device_get_hand_tracking(struct xrt_device *xdev,
                               enum xrt_input_name name,
                               uint64_t at_timestamp_ns,
@@ -369,7 +362,9 @@ ulv2_device_destroy(struct xrt_device *xdev)
 	struct ulv2_device *ulv2d = ulv2_device(xdev);
 
 	ulv2d->pthread_should_stop = true;
-	os_thread_helper_stop(&ulv2d->leap_loop_oth);
+
+	// Destroy also stops the thread.
+	os_thread_helper_destroy(&ulv2d->leap_loop_oth);
 
 	// Remove the variable tracking.
 	u_var_remove_root(ulv2d);
@@ -377,13 +372,8 @@ ulv2_device_destroy(struct xrt_device *xdev)
 	u_device_free(&ulv2d->base);
 }
 
-int
-ulv2_found(struct xrt_prober *xp,
-           struct xrt_prober_device **devices,
-           size_t num_devices,
-           size_t index,
-           cJSON *attached_data,
-           struct xrt_device **out_xdev)
+xrt_result_t
+ulv2_create_device(struct xrt_device **out_xdev)
 {
 	enum u_device_alloc_flags flags = U_DEVICE_ALLOC_NO_FLAGS;
 
@@ -399,9 +389,9 @@ ulv2_found(struct xrt_prober *xp,
 
 	math_pose_identity(&ulv2d->base.tracking_origin->offset);
 
-	ulv2d->ll = debug_get_log_option_ulv2_log();
+	ulv2d->log_level = debug_get_log_option_ulv2_log();
 
-	ulv2d->base.update_inputs = ulv2_device_update_inputs;
+	ulv2d->base.update_inputs = u_device_noop_update_inputs;
 	ulv2d->base.get_hand_tracking = ulv2_device_get_hand_tracking;
 	ulv2d->base.destroy = ulv2_device_destroy;
 
@@ -442,11 +432,11 @@ ulv2_found(struct xrt_prober *xp,
 
 	out_xdev[0] = &ulv2d->base;
 
-	return 1;
+	return XRT_SUCCESS;
 
 cleanup:
 	ulv2_device_destroy(&ulv2d->base);
-	return 0;
+	return XRT_ERROR_DEVICE_CREATION_FAILED;
 }
 
 } // extern "C"

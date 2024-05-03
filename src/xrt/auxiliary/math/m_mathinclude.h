@@ -7,19 +7,19 @@
  *
  * Use this instead of directly including <math.H> in headers and when
  * you need M_PI and its friends.
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  *
  * @ingroup aux_math
  */
 
 #pragma once
 
-#define _USE_MATH_DEFINES // for M_PI
+#define _USE_MATH_DEFINES // for M_PI // NOLINT
 #ifdef __cplusplus
 #include <cmath>
-#else
-#include <math.h>
 #endif
+
+#include <math.h>
 
 
 // Might be missing on Windows.

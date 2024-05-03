@@ -1,0 +1,246 @@
+# SPDX-License-Identifier: CC0-1.0
+# SPDX-FileCopyrightText: 2018-2023 Collabora, Ltd. and the Monado contributors
+
+{# ignore the warning, this is actually the template to edit. #}
+###############################################
+# GENERATED - DO NOT EDIT
+# see .gitlab-ci/ci.template, etc instead
+###############################################
+{# See README.md for instructions to regenerate after modification. #}
+{#
+useful links:
+https://freedesktop.pages.freedesktop.org/ci-templates/
+https://freedesktop.pages.freedesktop.org/ci-templates/ci-fairy.html#templating-gitlab-ci-yml
+https://gitlab.freedesktop.org/freedesktop/ci-templates
+
+Config file used for all templates: .gitlab-ci/config.yml
+.gitlab-ci.yml template: .gitlab-ci/ci.template
+.gitlab-ci/distributions template (for reprepro): .gitlab-ci/distributions.jinja
+.gitlab-ci/reprepro.sh template: .gitlab-ci/reprepro.sh.jinja
+
+The following will update all files from templates:
+make -f .gitlab-ci/ci-scripts.mk
+#}
+
+# workflow:
+#   rules:
+#     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+#     - if: $CI_PIPELINE_SOURCE == 'push'
+
+variables:
+  FDO_UPSTREAM_REPO: "monado/monado"
+
+include:
+  - project: "freedesktop/ci-templates"
+    ref: {{fdo_ci_templates_sha}}
+    file:
+{% for distro in distributions %}
+      - "/templates/{{distro.name}}.yml"
+{% endfor %}
+  # - local: .gitlab-ci/containers/ci-container-prep.yml
+
+  # This include is for compatibility with the fdo CI restrictions/checks
+  # needed due to https://gitlab.freedesktop.org/freedesktop/freedesktop/-/issues/438
+  - local: .gitlab-ci/ci-rules.yml
+
+stages:
+  - container_prep
+  - build
+  - package
+  - reprepro
+  - pages
+  - deploy
+
+###
+# Extra rules for packaging
+.monado.packaging.conditions:
+  rules:
+    # Only the default branch of the "upstream" repo.
+    - if: "$CI_PROJECT_PATH == $FDO_UPSTREAM_REPO && $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH"
+      when: on_success
+    # Otherwise, don't build packages.
+    - when: never
+
+
+{% include 'include.win_containers.yml' %}
+{% include 'include.ci-containers-variables.yml.jinja' %}
+{% include 'include.ci-containers.yml.jinja' %}
+
+{% from 'include.functions.jinja' import image_name, base_job_to_use_image_containing, base_job_to_use_image with context %}
+
+# Style check job
+format-and-spellcheck:
+  extends:
+    - {{base_job_to_use_image_containing("codespell")}}
+  stage: build
+  script:
+    - scripts/format-and-spellcheck.sh
+  artifacts:
+    paths:
+      - patches/
+    expire_in: 1 week
+    when: on_failure
+
+# Verify REUSE compliance
+reuse:
+  extends:
+    - .build-rules
+  stage: build
+  image:
+    name: fsfe/reuse:latest
+    entrypoint: [""]
+  script:
+    - reuse lint
+
+{% macro make_cmake_args(cmake_defines) %}
+{% if cmake_defines is defined and cmake_defines %}
+{%- for k, v in cmake_defines |dictsort %} -D{{ k }}={{ v }}{% endfor %}
+{%- endif %}
+{%- endmacro -%}
+
+{####  Main build jobs ####}
+{% for distro in distributions -%} {%- for image in distro.images if image.build_jobs -%} {%- for job in image.build_jobs %}
+
+{{job.name}}:
+  stage: build
+  extends:
+{% if job.name == documentation_build %}
+    - .monado.packaging.conditions
+{% endif %}
+    - {{base_job_to_use_image(distro, image)}}
+
+{%- if job.before_script or "android" in job.name %}
+
+  before_script:
+{% endif %}
+{% for line in job.before_script %}
+    - {{line}}
+{% endfor %}
+{%- if "android" in job.name %}
+    {# Keep this right below the before_script since this is an extra line!! #}
+    # For caching gradle stuff
+    - export GRADLE_USER_HOME=`pwd`/.gradlehome
+
+  variables:
+    GRADLE_ARGS: "-Porg.gradle.daemon=false "
+  cache:
+    paths:
+      - .gradlehome/wrapper
+      - .gradlehome/caches
+{% endif %}
+
+  script:
+
+    - .gitlab-ci/prebuild.sh
+{#- regular or NDK cmake builds -#}
+{%- if "cmake" in job.name or "ndk" in job.name %}
+
+    - .gitlab-ci/ci-cmake-build.sh {{- make_cmake_args(job.cmake_defines) }}
+
+{#- gradle builds -#}
+{%- elif "android" in job.name %}
+
+    - .gitlab-ci/ci-gradle-build.sh {{ job.target }}
+
+{%- else %}
+
+{# error message #}
+  CANNOT GUESS JOB TYPE
+
+{%- endif %}
+
+{%- if "cmake" in job.name %}
+
+    - cd build && ctest --output-on-failure
+{%- endif %}
+
+{%- if job.artifact_path %}
+
+  artifacts:
+    paths:
+      - {{ job.artifact_path }}
+{%- endif %}
+
+{% endfor -%} {%- endfor -%} {%- endfor %}
+
+# Windows build
+windows:
+  stage: build
+  extends:
+    - .monado.image.windows
+  script:
+    - ./.gitlab-ci/windows/monado_build.ps1 -Install -RunTests
+  artifacts:
+    when: always
+    paths:
+      - install
+      - build/Testing/Temporary
+
+{% macro packaging_job_name(distro, image) -%}
+{{ image_name(distro, image) }}:package
+{%- endmacro %}
+
+{% for distro in distributions -%} {%- for image in distro.images if "deb_version_suffix" in image %}
+
+{{packaging_job_name(distro, image)}}:
+  extends:
+    - {{base_job_to_use_image(distro, image)}}
+    - .monado.packaging.conditions
+  variables:
+    GIT_STRATEGY: clone
+    DEBFULLNAME: "{{packaging.name}}"
+    DEBEMAIL: "{{packaging.email}}"
+    DISTRO: {{distro.name}}
+    CODENAME: {{image.codename}}
+    DEB_VERSION_SUFFIX: {{image.deb_version_suffix}}
+  stage: package
+  before_script:
+    {# Configure git - needed despite not actually committing here. #}
+    - git config --global user.name {{packaging.name}}
+    - git config --global user.email {{packaging.email}}
+  script:
+    - .gitlab-ci/prebuild.sh
+    # Prep the source tree
+    - git clean -dfx
+    # Call this script to build binary and source packages.
+    # Can try locally by exporting the right variables and passing -B to get only a binary package to avoid complaints.
+    - .gitlab-ci/build-and-submit-package.sh
+  artifacts:
+    paths:
+      - "incoming/"
+    expire_in: 2 days
+{% endfor -%} {%- endfor %}
+
+reprepro:package:
+  stage: reprepro
+  extends:
+    - {{ base_job_to_use_image_containing("reprepro") }}
+    - .monado.packaging.conditions
+  needs:
+{% for distro in distributions -%} {%- for image in distro.images if "deb_version_suffix" in image %}
+    - {{packaging_job_name(distro, image)}}
+{% endfor -%} {%- endfor %}
+  script:
+    - bash .gitlab-ci/reprepro.sh
+  artifacts:
+    paths:
+      - "repo/"
+    expire_in: 2 days
+
+###
+# Pages
+###
+pages:
+  stage: pages
+  extends:
+    - .monado.packaging.conditions
+  needs:
+    - {{ documentation_build }}
+    - reprepro:package
+  script:
+    - mkdir -p public
+    - mv build/doc/html/* public/
+    - mv repo public/apt
+  artifacts:
+    paths:
+      - public

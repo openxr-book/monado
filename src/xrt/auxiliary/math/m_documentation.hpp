@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  Header with just documentation.
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @brief  Header with only documentation.
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup aux_math
  */
 
@@ -13,6 +13,6 @@
 namespace xrt::auxiliary {
 //! C++-only functionality in the Math helper library
 namespace math {
-
+	// Empty
 } // namespace math
 } // namespace xrt::auxiliary

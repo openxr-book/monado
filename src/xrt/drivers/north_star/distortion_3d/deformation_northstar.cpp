@@ -182,7 +182,7 @@ OpticalSystem::SolveDisplayUVToRenderUV(const Vector2 &inputUV, Vector2 const &i
 		Vector3 rayDir;
 
 		// we can do all three calls below to RenderUVToDisplayUV at the
-		// same time via SIMD or better yet we can vectorize across all
+		// same time using SIMD or better yet we can vectorize across all
 		// the uvs if we have a list of them
 		curDisplayUV = RenderUVToDisplayUV(curCameraUV);
 		Vector2 displayUVGradX =
@@ -209,7 +209,7 @@ OpticalSystem::SolveDisplayUVToRenderUV(const Vector2 &inputUV, Vector2 const &i
 
 
 Vector2
-OpticalSystem::DisplayUVToRenderUVPreviousSeed(Vector2 inputUV)
+OpticalSystem::DisplayUVToRenderUVPreviousSeed(const Vector2 &inputUV)
 {
 	// if we don't find a point we generate it and add it to our list
 	Vector2 curDisplayUV;
@@ -265,6 +265,14 @@ ns_3d_create_optical_system(struct ns_3d_eye *eye)
 	opticalSystem->setiters(50, 50);
 	opticalSystem->RegenerateMesh();
 	return (struct ns_optical_system *)opticalSystem;
+}
+
+extern "C" void
+ns_3d_free_optical_system(struct ns_optical_system **system)
+{
+	OpticalSystem *cast_sys = (OpticalSystem *)*system;
+	delete cast_sys;
+	*system = NULL;
 }
 
 extern "C" void

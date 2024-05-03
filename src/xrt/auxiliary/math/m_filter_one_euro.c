@@ -6,21 +6,21 @@
  * @brief  The "One Euro Filter" for filtering interaction data.
  * @author Moses Turner <moses@collabora.com>
  * @author Jan Schmidt <jan@centricular.com>
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup aux_math
  *
  * Based in part on https://github.com/thaytan/OpenHMD/blob/rift-kalman-filter/src/exponential-filter.c
  */
 
+#include "math/m_mathinclude.h"
+#include "math/m_vec2.h"
+#include "math/m_vec3.h"
+
+#include "util/u_time.h"
+#include "util/u_misc.h"
 
 #include "m_filter_one_euro.h"
 
-#include "math/m_mathinclude.h"
-
-#include "math/m_vec2.h"
-#include "math/m_vec3.h"
-#include "util/u_time.h"
-#include "util/u_misc.h"
 
 static double
 calc_smoothing_alpha(double Fc, double dt)
@@ -53,9 +53,19 @@ exp_smooth_vec3(double alpha, struct xrt_vec3 y, struct xrt_vec3 prev_y)
 	return m_vec3_add(scaled_prev, scaled_new);
 }
 
-static void
-filter_one_euro_init(struct m_filter_one_euro_base *f, double fc_min, double beta, double fc_min_d)
+static inline struct xrt_quat
+exp_smooth_quat(double alpha, struct xrt_quat y, struct xrt_quat prev_y)
 {
+	struct xrt_quat result;
+	math_quat_slerp(&prev_y, &y, alpha, &result);
+	return result;
+}
+
+static void
+filter_one_euro_init(struct m_filter_one_euro_base *f, double fc_min, double fc_min_d, double beta)
+{
+	U_ZERO(f);
+
 	f->fc_min = fc_min;
 	f->beta = beta;
 	f->fc_min_d = fc_min_d;
@@ -117,13 +127,13 @@ filter_one_euro_compute_alpha(const struct m_filter_one_euro_base *f, double dt,
 
 
 void
-m_filter_euro_f32_init(struct m_filter_euro_f32 *f, double fc_min, double beta, double fc_min_d)
+m_filter_euro_f32_init(struct m_filter_euro_f32 *f, double fc_min, double fc_min_d, double beta)
 {
-	filter_one_euro_init(&f->base, fc_min, beta, fc_min_d);
+	filter_one_euro_init(&f->base, fc_min, fc_min_d, beta);
 }
 
 void
-m_filter_f32_run(struct m_filter_euro_f32 *f, uint64_t ts, const float *in_y, float *out_y)
+m_filter_euro_f32_run(struct m_filter_euro_f32 *f, uint64_t ts, const float *in_y, float *out_y)
 {
 
 	if (filter_one_euro_handle_first_sample(&f->base, ts, true)) {
@@ -138,7 +148,7 @@ m_filter_f32_run(struct m_filter_euro_f32 *f, uint64_t ts, const float *in_y, fl
 	double dt = 0;
 	double alpha_d = filter_one_euro_compute_alpha_d(&f->base, &dt, ts, true);
 
-	double dy = *in_y - f->prev_y;
+	double dy = (*in_y - f->prev_y) / dt;
 
 	/* Smooth the dy values and use them to calculate the frequency cutoff for the main filter */
 	f->prev_dy = exp_smooth(alpha_d, dy, f->prev_dy);
@@ -152,7 +162,7 @@ m_filter_f32_run(struct m_filter_euro_f32 *f, uint64_t ts, const float *in_y, fl
 void
 m_filter_euro_vec2_init(struct m_filter_euro_vec2 *f, double fc_min, double fc_min_d, double beta)
 {
-	filter_one_euro_init(&f->base, fc_min, beta, fc_min_d);
+	filter_one_euro_init(&f->base, fc_min, fc_min_d, beta);
 }
 
 void
@@ -170,7 +180,7 @@ m_filter_euro_vec2_run(struct m_filter_euro_vec2 *f, uint64_t ts, const struct x
 	double dt = 0;
 	double alpha_d = filter_one_euro_compute_alpha_d(&f->base, &dt, ts, true);
 
-	struct xrt_vec2 dy = m_vec2_sub((*in_y), f->prev_y);
+	struct xrt_vec2 dy = m_vec2_div_scalar(m_vec2_sub((*in_y), f->prev_y), dt);
 	f->prev_dy = exp_smooth_vec2(alpha_d, dy, f->prev_dy);
 
 	double dy_mag = m_vec2_len(f->prev_dy);
@@ -189,7 +199,8 @@ m_filter_euro_vec2_run_no_commit(struct m_filter_euro_vec2 *f,
 {
 
 	if (filter_one_euro_handle_first_sample(&f->base, ts, false)) {
-		// First sample - no filtering yet - and we're not committing anything to the filter so just return
+		// First sample - no filtering yet - and we're not committing anything to the filter so return right
+		// away
 		*out_y = *in_y;
 		return;
 	}
@@ -197,7 +208,7 @@ m_filter_euro_vec2_run_no_commit(struct m_filter_euro_vec2 *f,
 	double dt = 0;
 	double alpha_d = filter_one_euro_compute_alpha_d(&f->base, &dt, ts, false);
 
-	struct xrt_vec2 dy = m_vec2_sub((*in_y), f->prev_y);
+	struct xrt_vec2 dy = m_vec2_div_scalar(m_vec2_sub((*in_y), f->prev_y), dt);
 	struct xrt_vec2 prev_dy = exp_smooth_vec2(alpha_d, dy, f->prev_dy);
 
 	double dy_mag = m_vec2_len(prev_dy);
@@ -209,9 +220,9 @@ m_filter_euro_vec2_run_no_commit(struct m_filter_euro_vec2 *f,
 
 
 void
-m_filter_euro_vec3_init(struct m_filter_euro_vec3 *f, double fc_min, double beta, double fc_min_d)
+m_filter_euro_vec3_init(struct m_filter_euro_vec3 *f, double fc_min, double fc_min_d, double beta)
 {
-	filter_one_euro_init(&f->base, fc_min, beta, fc_min_d);
+	filter_one_euro_init(&f->base, fc_min, fc_min_d, beta);
 }
 
 void
@@ -229,7 +240,7 @@ m_filter_euro_vec3_run(struct m_filter_euro_vec3 *f, uint64_t ts, const struct x
 	double dt = 0;
 	double alpha_d = filter_one_euro_compute_alpha_d(&f->base, &dt, ts, true);
 
-	struct xrt_vec3 dy = m_vec3_sub((*in_y), f->prev_y);
+	struct xrt_vec3 dy = m_vec3_div_scalar(m_vec3_sub((*in_y), f->prev_y), dt);
 	f->prev_dy = exp_smooth_vec3(alpha_d, dy, f->prev_dy);
 
 	double dy_mag = m_vec3_len(f->prev_dy);
@@ -237,5 +248,50 @@ m_filter_euro_vec3_run(struct m_filter_euro_vec3 *f, uint64_t ts, const struct x
 
 	/* Smooth the dy values and use them to calculate the frequency cutoff for the main filter */
 	f->prev_y = exp_smooth_vec3(alpha, *in_y, f->prev_y);
+	*out_y = f->prev_y;
+}
+
+//! @todo fix order of args
+void
+m_filter_euro_quat_init(struct m_filter_euro_quat *f, double fc_min, double fc_min_d, double beta)
+{
+	filter_one_euro_init(&f->base, fc_min, fc_min_d, beta);
+}
+
+void
+m_filter_euro_quat_run(struct m_filter_euro_quat *f, uint64_t ts, const struct xrt_quat *in_y, struct xrt_quat *out_y)
+{
+	if (filter_one_euro_handle_first_sample(&f->base, ts, true)) {
+		/* First sample - no filtering yet */
+		f->prev_dy = (struct xrt_quat)XRT_QUAT_IDENTITY;
+		f->prev_y = *in_y;
+
+		*out_y = *in_y;
+		return;
+	}
+
+	double dt = 0;
+	double alpha_d = filter_one_euro_compute_alpha_d(&f->base, &dt, ts, true);
+
+	struct xrt_quat dy;
+	math_quat_unrotate(&f->prev_y, in_y, &dy);
+
+	// Scale dy with dt through a conversion to angle_axis
+	struct xrt_vec3 dy_aa;
+	math_quat_ln(&dy, &dy_aa);
+	dy_aa = m_vec3_div_scalar(dy_aa, dt);
+	math_quat_exp(&dy_aa, &dy);
+
+	f->prev_dy = exp_smooth_quat(alpha_d, dy, f->prev_dy);
+
+	// The magnitud of the smoothed dy (f->prev_dy) is its rotation angle in radians
+	struct xrt_vec3 smooth_dy_aa;
+	math_quat_ln(&f->prev_dy, &smooth_dy_aa);
+	double smooth_dy_mag = m_vec3_len(smooth_dy_aa);
+
+	double alpha = filter_one_euro_compute_alpha(&f->base, dt, smooth_dy_mag);
+
+	/* Smooth the dy values and use them to calculate the frequency cutoff for the main filter */
+	f->prev_y = exp_smooth_quat(alpha, *in_y, f->prev_y);
 	*out_y = f->prev_y;
 }

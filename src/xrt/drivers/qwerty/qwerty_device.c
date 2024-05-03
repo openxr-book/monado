@@ -7,21 +7,25 @@
  * @ingroup drv_qwerty
  */
 
-#include "qwerty_device.h"
-
-#include "util/u_device.h"
-#include "util/u_distortion_mesh.h"
-#include "util/u_var.h"
-#include "util/u_logging.h"
+#include "xrt/xrt_device.h"
 
 #include "math/m_api.h"
 #include "math/m_space.h"
 #include "math/m_mathinclude.h"
 
-#include "xrt/xrt_device.h"
+#include "util/u_device.h"
+#include "util/u_distortion_mesh.h"
+#include "util/u_var.h"
+#include "util/u_logging.h"
+#include "util/u_time.h"
+#include "util/u_misc.h"
+#include "os/os_time.h"
+
+#include "qwerty_device.h"
 
 #include <stdio.h>
 #include <assert.h>
+
 
 #define QWERTY_HMD_INITIAL_MOVEMENT_SPEED 0.002f // in meters per frame
 #define QWERTY_HMD_INITIAL_LOOK_SPEED 0.02f      // in radians per frame
@@ -43,11 +47,11 @@
 #define QWERTY_AIM 3
 #define QWERTY_VIBRATION 0
 
-#define QWERTY_TRACE(qd, ...) U_LOG_XDEV_IFL_T(&qd->base, qd->sys->ll, __VA_ARGS__)
-#define QWERTY_DEBUG(qd, ...) U_LOG_XDEV_IFL_D(&qd->base, qd->sys->ll, __VA_ARGS__)
-#define QWERTY_INFO(qd, ...) U_LOG_XDEV_IFL_I(&qd->base, qd->sys->ll, __VA_ARGS__)
-#define QWERTY_WARN(qd, ...) U_LOG_XDEV_IFL_W(&qd->base, qd->sys->ll, __VA_ARGS__)
-#define QWERTY_ERROR(qd, ...) U_LOG_XDEV_IFL_E(&qd->base, qd->sys->ll, __VA_ARGS__)
+#define QWERTY_TRACE(qd, ...) U_LOG_XDEV_IFL_T(&qd->base, qd->sys->log_level, __VA_ARGS__)
+#define QWERTY_DEBUG(qd, ...) U_LOG_XDEV_IFL_D(&qd->base, qd->sys->log_level, __VA_ARGS__)
+#define QWERTY_INFO(qd, ...) U_LOG_XDEV_IFL_I(&qd->base, qd->sys->log_level, __VA_ARGS__)
+#define QWERTY_WARN(qd, ...) U_LOG_XDEV_IFL_W(&qd->base, qd->sys->log_level, __VA_ARGS__)
+#define QWERTY_ERROR(qd, ...) U_LOG_XDEV_IFL_E(&qd->base, qd->sys->log_level, __VA_ARGS__)
 
 static void
 qwerty_system_remove(struct qwerty_system *qs, struct qwerty_device *qd);
@@ -110,26 +114,21 @@ qwerty_update_inputs(struct xrt_device *xd)
 	struct qwerty_controller *qc = qwerty_controller(xd);
 	struct qwerty_device *qd = &qc->base;
 
-	xd->inputs[QWERTY_SELECT].value.boolean = qc->select_clicked;
-	if (qc->select_clicked) {
-		QWERTY_INFO(qd, "[%s] Select click", xd->str);
-		qc->select_clicked = false;
-	}
+	QWERTY_TRACE(qd, "select: %u, menu: %u", qc->select_clicked, qc->menu_clicked);
 
+	xd->inputs[QWERTY_SELECT].value.boolean = qc->select_clicked;
+	xd->inputs[QWERTY_SELECT].timestamp = qc->select_timestamp;
 	xd->inputs[QWERTY_MENU].value.boolean = qc->menu_clicked;
-	if (qc->menu_clicked) {
-		QWERTY_INFO(qd, "[%s] Menu click", xd->str);
-		qc->menu_clicked = false;
-	}
+	xd->inputs[QWERTY_MENU].timestamp = qc->menu_timestamp;
 }
 
 static void
-qwerty_set_output(struct xrt_device *xd, enum xrt_output_name name, union xrt_output_value *value)
+qwerty_set_output(struct xrt_device *xd, enum xrt_output_name name, const union xrt_output_value *value)
 {
 	struct qwerty_device *qd = qwerty_device(xd);
 	float frequency = value->vibration.frequency;
 	float amplitude = value->vibration.amplitude;
-	time_duration_ns duration = value->vibration.duration;
+	time_duration_ns duration = value->vibration.duration_ns;
 	if (amplitude || duration || frequency) {
 		QWERTY_INFO(qd,
 		            "[%s] Haptic output: \n"
@@ -146,7 +145,8 @@ qwerty_get_tracked_pose(struct xrt_device *xd,
 {
 	struct qwerty_device *qd = qwerty_device(xd);
 
-	if (name != XRT_INPUT_GENERIC_HEAD_POSE && name != XRT_INPUT_SIMPLE_GRIP_POSE) {
+	if (name != XRT_INPUT_GENERIC_HEAD_POSE && name != XRT_INPUT_SIMPLE_GRIP_POSE &&
+	    name != XRT_INPUT_SIMPLE_AIM_POSE) {
 		QWERTY_ERROR(qd, "Unexpected input name = 0x%04X", name >> 8);
 		return;
 	}
@@ -176,7 +176,8 @@ qwerty_get_tracked_pose(struct xrt_device *xd,
 	qd->yaw_delta = 0;
 	qd->pitch_delta = 0;
 
-	struct xrt_quat x_rotation, y_rotation;
+	struct xrt_quat x_rotation;
+	struct xrt_quat y_rotation;
 	const struct xrt_vec3 x_axis = XRT_VEC3_UNIT_X;
 	const struct xrt_vec3 y_axis = XRT_VEC3_UNIT_Y;
 	math_quat_from_angle_vector(x_look_speed, &x_axis, &x_rotation);
@@ -187,30 +188,20 @@ qwerty_get_tracked_pose(struct xrt_device *xd,
 
 	// HMD Parenting
 
-	bool qd_is_ctrl = name == XRT_INPUT_SIMPLE_GRIP_POSE;
+	bool qd_is_ctrl = name == XRT_INPUT_SIMPLE_GRIP_POSE || name == XRT_INPUT_SIMPLE_AIM_POSE;
 	struct qwerty_controller *qc = qd_is_ctrl ? qwerty_controller(&qd->base) : NULL;
 	if (qd_is_ctrl && qc->follow_hmd) {
-		struct xrt_space_graph space_graph = {0};
+		struct xrt_relation_chain relation_chain = {0};
 		struct qwerty_device *qd_hmd = &qd->sys->hmd->base;
-		m_space_graph_add_pose(&space_graph, &qd->pose);     // controller pose
-		m_space_graph_add_pose(&space_graph, &qd_hmd->pose); // base space is hmd space
-		m_space_graph_resolve(&space_graph, out_relation);
+		m_relation_chain_push_pose(&relation_chain, &qd->pose);     // controller pose
+		m_relation_chain_push_pose(&relation_chain, &qd_hmd->pose); // base space is hmd space
+		m_relation_chain_resolve(&relation_chain, out_relation);
 	} else {
 		out_relation->pose = qd->pose;
 	}
 	out_relation->relation_flags =
 	    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_POSITION_VALID_BIT |
 	    XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT;
-}
-
-static void
-qwerty_get_view_pose(struct xrt_device *xdev,
-                     const struct xrt_vec3 *eye_relation,
-                     uint32_t view_index,
-                     struct xrt_pose *out_pose)
-{
-	(void)xdev;
-	u_device_get_view_pose(eye_relation, view_index, out_pose);
 }
 
 static void
@@ -227,8 +218,9 @@ struct qwerty_hmd *
 qwerty_hmd_create(void)
 {
 	enum u_device_alloc_flags flags = U_DEVICE_ALLOC_HMD | U_DEVICE_ALLOC_TRACKING_NONE;
-	size_t num_inputs = 1, num_outputs = 0;
-	struct qwerty_hmd *qh = U_DEVICE_ALLOCATE(struct qwerty_hmd, flags, num_inputs, num_outputs);
+	size_t input_count = 1;
+	size_t output_count = 0;
+	struct qwerty_hmd *qh = U_DEVICE_ALLOCATE(struct qwerty_hmd, flags, input_count, output_count);
 	assert(qh);
 
 	struct qwerty_device *qd = &qh->base;
@@ -252,8 +244,8 @@ qwerty_hmd_create(void)
 	info.display.h_meters = 0.07f;
 	info.lens_horizontal_separation_meters = 0.13f / 2.0f;
 	info.lens_vertical_position_meters = 0.07f / 2.0f;
-	info.views[0].fov = 85.0f * (M_PI / 180.0f);
-	info.views[1].fov = 85.0f * (M_PI / 180.0f);
+	info.fov[0] = 85.0f * (M_PI / 180.0f);
+	info.fov[1] = 85.0f * (M_PI / 180.0f);
 
 	if (!u_device_setup_split_side_by_side(xd, &info)) {
 		QWERTY_ERROR(qd, "Failed to setup HMD properties");
@@ -269,7 +261,7 @@ qwerty_hmd_create(void)
 
 	xd->update_inputs = qwerty_update_inputs;
 	xd->get_tracked_pose = qwerty_get_tracked_pose;
-	xd->get_view_pose = qwerty_get_view_pose;
+	xd->get_view_poses = u_device_get_view_poses;
 	xd->destroy = qwerty_destroy;
 	u_distortion_mesh_set_none(xd); // Fill in xd->compute_distortion()
 
@@ -307,7 +299,7 @@ qwerty_controller_create(bool is_left, struct qwerty_hmd *qhmd)
 	xd->inputs[QWERTY_SELECT].name = XRT_INPUT_SIMPLE_SELECT_CLICK;
 	xd->inputs[QWERTY_MENU].name = XRT_INPUT_SIMPLE_MENU_CLICK;
 	xd->inputs[QWERTY_GRIP].name = XRT_INPUT_SIMPLE_GRIP_POSE;
-	xd->inputs[QWERTY_AIM].name = XRT_INPUT_SIMPLE_AIM_POSE; // @todo: aim input not implemented
+	xd->inputs[QWERTY_AIM].name = XRT_INPUT_SIMPLE_AIM_POSE; //!< @todo: aim input not implemented
 	xd->outputs[QWERTY_VIBRATION].name = XRT_OUTPUT_NAME_SIMPLE_VIBRATION;
 
 	xd->update_inputs = qwerty_update_inputs;
@@ -328,7 +320,7 @@ qwerty_setup_var_tracking(struct qwerty_system *qs)
 	struct qwerty_device *qd_right = &qs->rctrl->base;
 
 	u_var_add_root(qs, "Qwerty System", true);
-	u_var_add_log_level(qs, &qs->ll, "log_level");
+	u_var_add_log_level(qs, &qs->log_level, "Log level");
 	u_var_add_bool(qs, &qs->process_keys, "process_keys");
 
 	u_var_add_ro_text(qs, "", "Focused Device");
@@ -384,7 +376,7 @@ qwerty_system_create(struct qwerty_hmd *qhmd,
 	qs->hmd = qhmd;
 	qs->lctrl = qleft;
 	qs->rctrl = qright;
-	qs->ll = log_level;
+	qs->log_level = log_level;
 	qs->process_keys = true;
 
 	if (qhmd) {
@@ -499,10 +491,33 @@ qwerty_release_all(struct qwerty_device *qd)
 
 // Controller methods
 
-// clang-format off
-void qwerty_select_click(struct qwerty_controller *qc) { qc->select_clicked = true; }
-void qwerty_menu_click(struct qwerty_controller *qc) { qc->menu_clicked = true; }
-// clang-format on
+void
+qwerty_press_select(struct qwerty_controller *qc)
+{
+	qc->select_clicked = true;
+	qc->select_timestamp = os_monotonic_get_ns();
+}
+
+void
+qwerty_release_select(struct qwerty_controller *qc)
+{
+	qc->select_clicked = false;
+	qc->select_timestamp = os_monotonic_get_ns();
+}
+
+void
+qwerty_press_menu(struct qwerty_controller *qc)
+{
+	qc->menu_clicked = true;
+	qc->menu_timestamp = os_monotonic_get_ns();
+}
+
+void
+qwerty_release_menu(struct qwerty_controller *qc)
+{
+	qc->menu_clicked = false;
+	qc->menu_timestamp = os_monotonic_get_ns();
+}
 
 void
 qwerty_follow_hmd(struct qwerty_controller *qc, bool follow)
@@ -515,16 +530,16 @@ qwerty_follow_hmd(struct qwerty_controller *qc, bool follow)
 	}
 
 	struct qwerty_device *qd_hmd = &qd->sys->hmd->base;
-	struct xrt_space_graph graph = {0};
-	struct xrt_space_relation rel = {0};
+	struct xrt_relation_chain chain = {0};
+	struct xrt_space_relation rel = XRT_SPACE_RELATION_ZERO;
 
-	m_space_graph_add_pose(&graph, &qd->pose);
+	m_relation_chain_push_pose(&chain, &qd->pose);
 	if (follow) { // From global to hmd
-		m_space_graph_add_inverted_pose_if_not_identity(&graph, &qd_hmd->pose);
+		m_relation_chain_push_inverted_pose_if_not_identity(&chain, &qd_hmd->pose);
 	} else { // From hmd to global
-		m_space_graph_add_pose(&graph, &qd_hmd->pose);
+		m_relation_chain_push_pose(&chain, &qd_hmd->pose);
 	}
-	m_space_graph_resolve(&graph, &rel);
+	m_relation_chain_resolve(&chain, &rel);
 
 	qd->pose = rel.pose;
 	qc->follow_hmd = follow;

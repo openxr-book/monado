@@ -1,4 +1,4 @@
-// Copyright 2019, Collabora, Ltd.
+// Copyright 2019-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -10,7 +10,7 @@
 #pragma once
 
 #include <stdlib.h> // for calloc
-#include <string.h> // for memset
+#include <string.h> // for memset // IWYU pragma: keep
 
 #ifdef __cplusplus
 extern "C" {
@@ -80,7 +80,7 @@ extern "C" {
 /*!
  * Reallocates or frees dynamically-allocated memory.
  *
- * Just wraps realloc with a return value check, freeing the provided memory if
+ * Wraps realloc with a return value check, freeing the provided memory if
  * it is NULL, to avoid leaks. Use U_ARRAY_REALLOC_OR_FREE() instead.
  *
  * @ingroup aux_util
@@ -89,7 +89,11 @@ static inline void *
 u_realloc_or_free(void *ptr, size_t new_size)
 {
 	void *ret = realloc(ptr, new_size);
-	if (ret == NULL) {
+	if (ret == NULL && new_size != 0) {
+		/*
+		 * We only need to call free if the new size isn't zero, and
+		 * that realloc failed to allocate a new array.
+		 */
 		free(ptr);
 	}
 	return ret;

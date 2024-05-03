@@ -77,7 +77,7 @@
                 },
                 "calibration_path": {
                     "type": "string"
-                },
+                }
             }
         },
         "tracking_overrides": {
@@ -204,7 +204,7 @@
                 "w"
             ]
         },
-        "vec3": {
+        "vector3": {
             "type": "object",
             "title": "Vector3",
             "properties": {

@@ -1,5 +1,6 @@
-// Copyright 2020, Collabora, Ltd.
+// Copyright 2020-2022, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
+import groovy.xml.XmlUtil
 
 plugins {
     id 'com.android.application'
@@ -7,17 +8,39 @@ plugins {
 
     id 'com.mikepenz.aboutlibraries.plugin'
 
+    id "com.gladed.androidgitversion"
+    id "de.undercouch.download"
+
     // Hilt dependency injection
     id 'kotlin-kapt'
     id 'dagger.hilt.android.plugin'
 
     // SVG files in the "raw" resource directory will be transformed into vector drawables of the same name.
     id 'com.quittle.svg-2-android-vector'
+
+    // Use spotless to format Java and Kotlin code
+    id 'com.diffplug.spotless'
+}
+
+spotless {
+    java {
+        target 'src/main/java/**/*.java'
+        // apply a specific flavor of google-java-format.
+        googleJavaFormat('1.18.1').aosp().reflowLongStrings()
+        // fix formatting of type annotations.
+        formatAnnotations()
+    }
+
+    kotlin {
+        target 'src/main/java/**/*.kt'
+        // Use ktfmt(https://github.com/facebook/ktfmt) as the default Kotlin formatter.
+        ktfmt('0.43').kotlinlangStyle()
+    }
 }
 
 androidGitVersion {
     tagPattern(/^v[0-9]+.*/)
-    codeFormat = 'MMNNPPBBB'
+    codeFormat = 'MMNPBBBBB'
     format = '%tag%%-count%%-gcommit%%-dirty%'
 }
 
@@ -25,7 +48,7 @@ def parseOpenXRVersion(def fn) {
     def matches = file(fn).readLines().find {
         it.contains('XR_CURRENT_API_VERSION')
     } =~ ~/XR_MAKE_VERSION\(([^)]+)\)/
-    def components = matches[0][1].split(',').each { it.replace(' ', '').trim() }
+    def components = matches[0][1].split(',').collect { it.replace(' ', '').trim() }
     String.join('.', components)
 }
 
@@ -39,37 +62,53 @@ project.ext.filterLicense = { String line ->
     if (line.trim().isEmpty()) {
         return '<br /><br />'
     } else {
-        return groovy.xml.XmlUtil.escapeXml(line)
+        return XmlUtil.escapeXml(line)
     }
 }
 
-// TODO: this copies to the source dir for simplicity right now, but it's not great!
+project.ext.licenseDir = new File(project.buildDir, 'generated/licenses/main/res/raw')
+
 task copyLicenses(type: Copy) {
     from "${rootDir}/LICENSES/"
     include 'BSL-1.0.txt'
     rename(renameLicense)
-    into project.layout.projectDirectory.dir('src/main/res/raw').asFile
+    into project.licenseDir
     filter(filterLicense)
 }
-project.ext.licenseDir = new File(project.buildDir, 'intermediates/licenses/')
 
-// For JSR250 used by Hilt
-task downloadCddl(type: Download) {
-    src 'https://spdx.org/licenses/CDDL-1.0.txt'
-    dest "${project.licenseDir}/CDDL-1.0.txt"
-    overwrite false
+// Grab Eigen if we can't find it on the system.
+task downloadEigen(type: Download) {
+    src "https://gitlab.com/libeigen/eigen/-/archive/${project.eigenFetchVersion}/eigen-${project.eigenFetchVersion}.tar.gz"
+    dest new File(project.buildDir, "intermediates/eigenDownload/eigen-${project.eigenFetchVersion}.tar.gz")
 }
 
-task copyDownloadedLicenses(type: Copy) {
-    from downloadCddl.dest
-    rename(renameLicense)
-    into project.layout.projectDirectory.dir('src/main/res/raw').asFile
-    filter(filterLicense)
-    dependsOn downloadCddl
+def eigenUnpackDir = new File(project.buildDir, 'intermediates/eigen')
+task unpackEigen(dependsOn: downloadEigen, type: Copy) {
+    from tarTree(downloadEigen.dest)
+    into eigenUnpackDir
 }
+
+if (!(new File(project.file(project.eigenIncludeDir), "Eigen/Core")).exists()) {
+    println "project.eigenIncludeDir not set or not valid, so downloading Eigen at build time"
+    project.ext.eigenIncludeDir = "${eigenUnpackDir}/eigen-${project.eigenFetchVersion}"
+} else {
+    println "Using Eigen as specified/detected in project.eigenIncludeDir: ${project.eigenIncludeDir}"
+    downloadEigen.enabled = false
+    unpackEigen.enabled = false
+}
+
+// Pass -PsharedStl=true on the gradle command line to build with the shared runtime library.
+// This has potential compatibility issues and should only be used if you're consuming another
+// library that exposes a C++ interface.
+project.ext.stl = "c++_static"
+if (project.hasProperty("sharedStl") && project.getProperty("sharedStl")) {
+    project.ext.stl = "c++_shared"
+    println "Using SHARED C++ standard library"
+}
+
 android {
-    compileSdkVersion project.sharedTargetSdk
-    buildToolsVersion '30.0.3'
+    compileSdk project.sharedCompileSdk
+    buildToolsVersion = buildToolsVersion
 
     ndkVersion "${ndk_version}"
 
@@ -89,7 +128,10 @@ android {
 
         externalNativeBuild {
             cmake {
-                arguments "-DEIGEN3_INCLUDE_DIR=${project.eigenIncludeDir}", "-DANDROID_PLATFORM=26", "-DANDROID_STL=c++_shared", "-DANDROID_ARM_NEON=TRUE"
+                arguments "-DEIGEN3_INCLUDE_DIR=${project.eigenIncludeDir}",
+                    "-DANDROID_PLATFORM=${project.sharedMinSdk}",
+                    "-DANDROID_STL=${project.stl}",
+                    "-DANDROID_ARM_NEON=TRUE"
 
             }
             if (project.pythonBinary != null) {
@@ -100,7 +142,9 @@ android {
 
         // Be sure to copy over licenses formatted as required.
         preBuild.dependsOn(copyLicenses)
-        preBuild.dependsOn(copyDownloadedLicenses)
+
+        // We also need the unpacked Eigen
+        preBuild.dependsOn(unpackEigen)
     }
 
     buildTypes {
@@ -117,11 +161,7 @@ android {
         }
     }
 
-    lintOptions {
-        fatal 'StopShip'
-    }
-
-    flavorDimensions 'deployment'
+    flavorDimensions = ['deployment']
     productFlavors {
         inProcess {
             dimension 'deployment'
@@ -129,6 +169,7 @@ android {
             externalNativeBuild.cmake.arguments += "-DXRT_FEATURE_SERVICE=OFF"
             externalNativeBuild.cmake.targets "openxr_monado"
 
+            buildConfigField "boolean", "inProcess", "true"
             resValue "string", "app_name", "Monado XR"
         }
         outOfProcess {
@@ -137,27 +178,39 @@ android {
             externalNativeBuild.cmake.arguments += "-DXRT_FEATURE_SERVICE=ON"
             externalNativeBuild.cmake.targets "openxr_monado", "monado-service"
 
+            buildConfigField "boolean", "inProcess", "false"
             resValue "string", "app_name", "Monado XR (Out-of-Proc)"
         }
+    }
+    hilt {
+        enableAggregatingTask = true
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
     packagingOptions {
-        exclude("META-INF/*.kotlin_module")
+        resources {
+            excludes += ['META-INF/*.kotlin_module']
+        }
+        jniLibs {
+            useLegacyPackaging true
+        }
+    }
+    namespace 'org.freedesktop.monado.openxr_runtime'
+    lint {
+        fatal 'StopShip'
     }
 
 }
 
 aboutLibraries {
-    configPath = "${projectDir}/config"
-
     // Full license text for license IDs mentioned here
     // will be included, even if no detected dependency uses them.
     additionalLicenses {
         mit
         mpl_2_0
+        bsl_1_0
     }
 }
 
@@ -173,8 +226,8 @@ dependencies {
     // Dependencies related only to AboutLibraries
     implementation "com.mikepenz:aboutlibraries-core:${latestAboutLibsRelease}"
     implementation "com.mikepenz:aboutlibraries:${latestAboutLibsRelease}"
-    implementation 'androidx.cardview:cardview:1.0.0'
-    implementation 'androidx.recyclerview:recyclerview:1.2.0'
+    implementation "androidx.cardview:cardview:$androidxCardViewVersion"
+    implementation "androidx.recyclerview:recyclerview:$androidxRecyclerViewVersion"
 
 
     // for Hilt dependency injection

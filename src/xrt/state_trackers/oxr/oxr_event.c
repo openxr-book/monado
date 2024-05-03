@@ -13,6 +13,7 @@
 
 #include "oxr_objects.h"
 #include "oxr_logger.h"
+#include "oxr_conversions.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -130,9 +131,14 @@ is_session_link_to_event(struct oxr_event *event, XrSession session)
 		XrEventDataInteractionProfileChanged *changed = (XrEventDataInteractionProfileChanged *)type;
 		return changed->session == session;
 	}
+	case XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING: {
+		XrEventDataReferenceSpaceChangePending *pending = (XrEventDataReferenceSpaceChangePending *)type;
+		return pending->session == session;
+	}
 	default: return false;
 	}
 }
+
 
 /*
  *
@@ -157,7 +163,7 @@ oxr_event_push_XrEventDataSessionStateChanged(struct oxr_logger *log,
 	changed->state = state;
 	changed->time = time;
 
-	event->result = state == XR_SESSION_STATE_LOSS_PENDING ? XR_SESSION_LOSS_PENDING : XR_SUCCESS;
+	event->result = XR_SUCCESS;
 
 	lock(inst);
 	push(inst, event);
@@ -165,7 +171,6 @@ oxr_event_push_XrEventDataSessionStateChanged(struct oxr_logger *log,
 
 	return XR_SUCCESS;
 }
-
 
 XrResult
 oxr_event_push_XrEventDataInteractionProfileChanged(struct oxr_logger *log, struct oxr_session *sess)
@@ -187,6 +192,60 @@ oxr_event_push_XrEventDataInteractionProfileChanged(struct oxr_logger *log, stru
 }
 
 XrResult
+oxr_event_push_XrEventDataReferenceSpaceChangePending(struct oxr_logger *log,
+                                                      struct oxr_session *sess,
+                                                      XrReferenceSpaceType referenceSpaceType,
+                                                      XrTime changeTime,
+                                                      XrBool32 poseValid,
+                                                      const XrPosef *poseInPreviousSpace)
+{
+	struct oxr_instance *inst = sess->sys->inst;
+	XrEventDataReferenceSpaceChangePending *pending;
+	struct oxr_event *event = NULL;
+
+	ALLOC(log, inst, &event, &pending);
+
+	pending->type = XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING;
+	pending->session = oxr_session_to_openxr(sess);
+	pending->referenceSpaceType = referenceSpaceType;
+	pending->changeTime = changeTime;
+	pending->poseValid = poseValid;
+	pending->poseInPreviousSpace = *poseInPreviousSpace;
+	event->result = XR_SUCCESS;
+
+	lock(inst);
+	push(inst, event);
+	unlock(inst);
+
+	return XR_SUCCESS;
+}
+
+#ifdef OXR_HAVE_FB_display_refresh_rate
+XrResult
+oxr_event_push_XrEventDataDisplayRefreshRateChangedFB(struct oxr_logger *log,
+                                                      struct oxr_session *sess,
+                                                      float fromDisplayRefreshRate,
+                                                      float toDisplayRefreshRate)
+{
+	struct oxr_instance *inst = sess->sys->inst;
+	XrEventDataDisplayRefreshRateChangedFB *changed;
+	struct oxr_event *event = NULL;
+
+	ALLOC(log, inst, &event, &changed);
+	changed->type = XR_TYPE_EVENT_DATA_DISPLAY_REFRESH_RATE_CHANGED_FB;
+	changed->fromDisplayRefreshRate = fromDisplayRefreshRate;
+	changed->toDisplayRefreshRate = toDisplayRefreshRate;
+	event->result = XR_SUCCESS;
+	lock(inst);
+	push(inst, event);
+	unlock(inst);
+
+	return XR_SUCCESS;
+}
+#endif // OXR_HAVE_FB_display_refresh_rate
+
+#ifdef OXR_HAVE_EXTX_overlay
+XrResult
 oxr_event_push_XrEventDataMainSessionVisibilityChangedEXTX(struct oxr_logger *log,
                                                            struct oxr_session *sess,
                                                            bool visible)
@@ -206,6 +265,58 @@ oxr_event_push_XrEventDataMainSessionVisibilityChangedEXTX(struct oxr_logger *lo
 
 	return XR_SUCCESS;
 }
+#endif // OXR_HAVE_EXTX_overlay
+
+
+#ifdef OXR_HAVE_EXT_performance_settings
+XrResult
+oxr_event_push_XrEventDataPerfSettingsEXTX(struct oxr_logger *log,
+                                           struct oxr_session *sess,
+                                           enum xrt_perf_domain domain,
+                                           enum xrt_perf_sub_domain subDomain,
+                                           enum xrt_perf_notify_level fromLevel,
+                                           enum xrt_perf_notify_level toLevel)
+{
+	struct oxr_instance *inst = sess->sys->inst;
+	XrEventDataPerfSettingsEXT *changed;
+	struct oxr_event *event = NULL;
+
+	ALLOC(log, inst, &event, &changed);
+	changed->type = XR_TYPE_EVENT_DATA_PERF_SETTINGS_EXT;
+	changed->domain = xrt_perf_domain_to_xr(domain);
+	changed->subDomain = xrt_perf_sub_domain_to_xr(subDomain);
+	changed->fromLevel = xrt_perf_notify_level_to_xr(fromLevel);
+	changed->toLevel = xrt_perf_notify_level_to_xr(toLevel);
+	event->result = XR_SUCCESS;
+	lock(inst);
+	push(inst, event);
+	unlock(inst);
+
+	return XR_SUCCESS;
+}
+#endif // OXR_HAVE_EXT_performance_settings
+
+#ifdef OXR_HAVE_FB_passthrough
+XrResult
+oxr_event_push_XrEventDataPassthroughStateChangedFB(struct oxr_logger *log,
+                                                    struct oxr_session *sess,
+                                                    XrPassthroughStateChangedFlagsFB flags)
+{
+	struct oxr_instance *inst = sess->sys->inst;
+	XrEventDataPassthroughStateChangedFB *changed;
+	struct oxr_event *event = NULL;
+
+	ALLOC(log, inst, &event, &changed);
+	changed->type = XR_TYPE_EVENT_DATA_PASSTHROUGH_STATE_CHANGED_FB;
+	changed->flags = flags;
+	event->result = XR_SUCCESS;
+	lock(inst);
+	push(inst, event);
+	unlock(inst);
+
+	return XR_SUCCESS;
+}
+#endif // OXR_HAVE_FB_passthrough
 
 XrResult
 oxr_event_remove_session_events(struct oxr_logger *log, struct oxr_session *sess)
@@ -243,8 +354,14 @@ XrResult
 oxr_poll_event(struct oxr_logger *log, struct oxr_instance *inst, XrEventDataBuffer *eventData)
 {
 	struct oxr_session *sess = inst->sessions;
+	XrResult ret;
+
 	while (sess) {
-		oxr_session_poll(log, sess);
+		ret = oxr_session_poll(log, sess);
+		if (ret != XR_SUCCESS) {
+			return ret;
+		}
+
 		sess = sess->next;
 	}
 
@@ -256,7 +373,7 @@ oxr_poll_event(struct oxr_logger *log, struct oxr_instance *inst, XrEventDataBuf
 		return XR_EVENT_UNAVAILABLE;
 	}
 
-	XrResult ret = event->result;
+	ret = event->result;
 	memcpy(eventData, oxr_event_extra(event), event->length);
 	free(event);
 

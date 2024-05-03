@@ -3,7 +3,7 @@
 /*!
  * @file
  * @brief  Interface to @ref drv_hydra
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup drv_hydra
  */
 
@@ -29,11 +29,12 @@ extern "C" {
  * Probing function for Razer Hydra devices.
  *
  * @ingroup drv_hydra
+ * @see xrt_prober_found_func_t
  */
 int
 hydra_found(struct xrt_prober *xp,
             struct xrt_prober_device **devices,
-            size_t num_devices,
+            size_t device_count,
             size_t index,
             cJSON *attached_data,
             struct xrt_device **out_xdevs);

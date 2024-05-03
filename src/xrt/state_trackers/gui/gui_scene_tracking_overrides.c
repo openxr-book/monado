@@ -10,6 +10,7 @@
 
 #include "util/u_misc.h"
 #include "util/u_format.h"
+#include "util/u_logging.h"
 
 #include "util/u_config_json.h"
 
@@ -17,6 +18,7 @@
 
 #include "xrt/xrt_prober.h"
 #include "xrt/xrt_settings.h"
+#include "xrt/xrt_system.h"
 
 #include "gui_common.h"
 #include "gui_imgui.h"
@@ -27,9 +29,9 @@ struct gui_tracking_overrides
 {
 	struct gui_scene base;
 
-	int editing_override;
+	int gui_edit_override_index;
 
-	bool add_one;
+	bool gui_add_override_active;
 	int add_target;
 	int add_tracker;
 
@@ -115,17 +117,17 @@ get_indices(struct gui_program *p,
 	bool has_target = false;
 	bool has_tracker = false;
 
-	for (int i = 0; i < NUM_XDEVS; i++) {
-		if (!p->xdevs[i]) {
+	for (int i = 0; i < XRT_SYSTEM_MAX_DEVICES; i++) {
+		if (!p->xsysd->xdevs[i]) {
 			continue;
 		}
 
-		if (strcmp(p->xdevs[i]->serial, override->target_device_serial) == 0) {
+		if (strcmp(p->xsysd->xdevs[i]->serial, override->target_device_serial) == 0) {
 			has_target = true;
 			*out_target = i;
 		}
 
-		if (strcmp(p->xdevs[i]->serial, override->tracker_device_serial) == 0) {
+		if (strcmp(p->xsysd->xdevs[i]->serial, override->tracker_device_serial) == 0) {
 			has_tracker = true;
 			*out_tracker = i;
 		}
@@ -138,16 +140,16 @@ static struct xrt_pose identity = {.position = {.x = 0, .y = 0, .z = 0},
                                    .orientation = {.x = 0, .y = 0, .z = 0, .w = 1}};
 
 static void
-add_one(struct gui_program *p, struct gui_tracking_overrides *ts)
+gui_add_override(struct gui_program *p, struct gui_tracking_overrides *ts)
 {
 	igBegin("Target Device", NULL, 0);
 	for (int i = 0; i < 8; i++) {
-		if (!p->xdevs[i]) {
+		if (!p->xsysd->xdevs[i]) {
 			continue;
 		}
 
 		char buf[NAME_LENGTH];
-		make_name(p->xdevs[i], buf);
+		make_name(p->xsysd->xdevs[i], buf);
 
 		bool selected = ts->add_target == i;
 		if (igCheckbox(buf, &selected)) {
@@ -158,12 +160,12 @@ add_one(struct gui_program *p, struct gui_tracking_overrides *ts)
 
 	igBegin("Tracker Device", NULL, 0);
 	for (int i = 0; i < 8; i++) {
-		if (!p->xdevs[i]) {
+		if (!p->xsysd->xdevs[i]) {
 			continue;
 		}
 
 		char buf[NAME_LENGTH];
-		make_name(p->xdevs[i], buf);
+		make_name(p->xsysd->xdevs[i], buf);
 
 		bool selected = ts->add_tracker == i;
 		if (igCheckbox(buf, &selected)) {
@@ -174,13 +176,13 @@ add_one(struct gui_program *p, struct gui_tracking_overrides *ts)
 
 	if (ts->add_target >= 0 && ts->add_tracker >= 0 && ts->add_target != ts->add_tracker) {
 		struct xrt_tracking_override *o = &ts->overrides[ts->num_overrides];
-		strncpy(o->target_device_serial, p->xdevs[ts->add_target]->serial, XRT_DEVICE_NAME_LEN);
-		strncpy(o->tracker_device_serial, p->xdevs[ts->add_tracker]->serial, XRT_DEVICE_NAME_LEN);
+		strncpy(o->target_device_serial, p->xsysd->xdevs[ts->add_target]->serial, XRT_DEVICE_NAME_LEN);
+		strncpy(o->tracker_device_serial, p->xsysd->xdevs[ts->add_tracker]->serial, XRT_DEVICE_NAME_LEN);
 		o->offset = identity;
 
 		// set input_name to the first pose in the inputs
-		for (uint32_t i = 0; i < p->xdevs[ts->add_tracker]->num_inputs; i++) {
-			enum xrt_input_name input_name = p->xdevs[ts->add_tracker]->inputs[i].name;
+		for (uint32_t i = 0; i < p->xsysd->xdevs[ts->add_tracker]->input_count; i++) {
+			enum xrt_input_name input_name = p->xsysd->xdevs[ts->add_tracker]->inputs[i].name;
 			if (XRT_GET_INPUT_TYPE(input_name) != XRT_INPUT_TYPE_POSE) {
 				continue;
 			}
@@ -193,10 +195,10 @@ add_one(struct gui_program *p, struct gui_tracking_overrides *ts)
 		ts->add_target = -1;
 		ts->add_tracker = -1;
 
-		ts->add_one = false;
+		ts->gui_add_override_active = false;
 
 		// immediately open for editing
-		ts->editing_override = ts->num_overrides - 1;
+		ts->gui_edit_override_index = ts->num_overrides - 1;
 	}
 }
 
@@ -206,18 +208,19 @@ scene_render(struct gui_scene *scene, struct gui_program *p)
 	struct gui_tracking_overrides *ts = (struct gui_tracking_overrides *)scene;
 
 	// don't edit and add at the same time
-	if (ts->add_one) {
-		ts->editing_override = -1;
+	if (ts->gui_add_override_active) {
+		ts->gui_edit_override_index = -1;
 	}
 
-	if (ts->editing_override >= 0) {
-		struct xrt_tracking_override *o = &ts->overrides[ts->editing_override];
+	if (ts->gui_edit_override_index >= 0) {
+		struct xrt_tracking_override *o = &ts->overrides[ts->gui_edit_override_index];
 
 		igBegin("Tracker Device Offset", NULL, 0);
-		int target = -1, tracker = -1;
+		int target = -1;
+		int tracker = -1;
 		if (get_indices(p, ts, o, &target, &tracker)) {
-			igText("Editing %s [%s] <- %s [%s]", p->xdevs[target]->str, o->target_device_serial,
-			       p->xdevs[tracker]->str, o->tracker_device_serial);
+			igText("Editing %s [%s] <- %s [%s]", p->xsysd->xdevs[target]->str, o->target_device_serial,
+			       p->xsysd->xdevs[tracker]->str, o->tracker_device_serial);
 		} else {
 			igText("Editing unconnected %s <- %s", o->target_device_serial, o->tracker_device_serial);
 		}
@@ -234,8 +237,8 @@ scene_render(struct gui_scene *scene, struct gui_program *p)
 
 		if (tracker >= 0) {
 			igText("Tracker Input Pose Name");
-			for (uint32_t i = 0; i < p->xdevs[tracker]->num_inputs; i++) {
-				enum xrt_input_name input_name = p->xdevs[tracker]->inputs[i].name;
+			for (uint32_t i = 0; i < p->xsysd->xdevs[tracker]->input_count; i++) {
+				enum xrt_input_name input_name = p->xsysd->xdevs[tracker]->inputs[i].name;
 				if (XRT_GET_INPUT_TYPE(input_name) != XRT_INPUT_TYPE_POSE) {
 					continue;
 				}
@@ -246,12 +249,12 @@ scene_render(struct gui_scene *scene, struct gui_program *p)
 					o->input_name = input_name;
 				}
 			}
-			igEnd();
 		}
+		igEnd();
 	}
 
-	if (ts->add_one) {
-		add_one(p, ts);
+	if (ts->gui_add_override_active) {
+		gui_add_override(p, ts);
 	}
 
 	igBegin("Tracking Overrides", NULL, 0);
@@ -263,26 +266,26 @@ scene_render(struct gui_scene *scene, struct gui_program *p)
 
 		igSeparator();
 
-		bool checked = ts->editing_override == (int)i;
+		bool checked = ts->gui_edit_override_index == (int)i;
 
 		char buf[XRT_DEVICE_NAME_LEN * 2 + 10];
 		snprintf(buf, sizeof(buf), "%s <- %s", ts->overrides[i].target_device_serial,
 		         ts->overrides[i].tracker_device_serial);
 		if (igCheckbox(buf, &checked)) {
 
-			// abort adding override when clicking to edit one
-			ts->add_one = false;
+			// skip adding override when clicking to edit one
+			ts->gui_add_override_active = false;
 
-			ts->editing_override = i;
+			ts->gui_edit_override_index = i;
 			ts->reset_offset = ts->overrides[i].offset;
 		}
-		if (igButton("Delete this one", button_dims)) {
+		if (igButton("Delete this override", button_dims)) {
 			for (size_t j = i; j < ts->num_overrides - 1; j++) {
 				ts->overrides[j] = ts->overrides[j + 1];
 			}
 			ts->num_overrides--;
-			if (ts->editing_override >= (int)i) {
-				ts->editing_override -= 1;
+			if (ts->gui_edit_override_index >= (int)i) {
+				ts->gui_edit_override_index -= 1;
 			}
 		}
 
@@ -295,7 +298,7 @@ scene_render(struct gui_scene *scene, struct gui_program *p)
 
 	if (igButton("Add one", button_dims)) {
 		if (ts->num_overrides < XRT_MAX_TRACKING_OVERRIDES) {
-			ts->add_one = true;
+			ts->gui_add_override_active = true;
 		}
 	}
 
@@ -330,8 +333,8 @@ create(struct gui_program *p)
 	ts->base.render = scene_render;
 	ts->base.destroy = scene_destroy;
 
-	ts->editing_override = -1;
-	ts->add_one = false;
+	ts->gui_edit_override_index = -1;
+	ts->gui_add_override_active = false;
 	ts->add_target = -1;
 	ts->add_tracker = -1;
 
@@ -351,17 +354,9 @@ create(struct gui_program *p)
 void
 gui_scene_tracking_overrides(struct gui_program *p)
 {
-	if (p->xp == NULL) {
-		// No prober, nothing to create.
-		return;
-	}
-
-	// If we have created a prober select devices now.
-	if (p->xp != NULL) {
-		gui_prober_select(p);
-	}
-
 	struct gui_tracking_overrides *ts = create(p);
+
+	gui_prober_select(p);
 
 	gui_scene_push_front(p, &ts->base);
 }

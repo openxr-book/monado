@@ -1,4 +1,4 @@
-// Copyright 2019, Collabora, Ltd.
+// Copyright 2019-2022, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -50,7 +50,7 @@ struct v4l2_source_descriptor
 	/*!
 	 * Offset from start off frame to start of pixels.
 	 *
-	 * Aka crop_scanline_bytes_start.
+	 * Also known as crop_scanline_bytes_start.
 	 *
 	 * Special case for ps4 camera
 	 */

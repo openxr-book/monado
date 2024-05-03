@@ -11,42 +11,44 @@
 #pragma once
 
 #include "xrt/xrt_device.h"
+#include "xrt/xrt_config_drivers.h"
 
 #include "tracking/t_tracking.h"
+#include "tracking/t_hand_tracking.h"
+#include "xrt/xrt_prober.h"
+#include "xrt/xrt_tracking.h"
 
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-enum ht_run_type
-{
-	HT_RUN_TYPE_VALVE_INDEX,
-	HT_RUN_TYPE_NORTH_STAR,
-};
-// YES this is stupid. PLEASE bikeshed me on this when the time comes, this is terrible.
-
-// With Valve Index, we use the frameserver prober and look for the Valve Index camera, and we give the joint poses out
-// in the space of the left (unrectified) camera.
-
-// With North Star, (really just Moses's headset :)) we hard-code to opening up a depthai_fs_stereo_rgb and give the
-// joint poses out in the space of the "center" of the stereo camera. (Why? Because I don't have exact extrinsics from
-// the NS "eyes" to the cameras. Less code this way.)
-
 /*!
  * @defgroup drv_ht Camera based hand tracking
  * @ingroup drv
  *
- * @brief
+ * @brief Camera based hand tracking
  */
 
 /*!
- * Create a hand tracker device.
+ * Create hand tracker.
  *
  * @ingroup drv_ht
+ *
+ * @param xfctx Frame context to attach the tracker to
+ * @param calib Calibration struct for stereo camera
+ * @param create_info Additional creation options
+ * @param out_sinks Sinks to stream camera data to
+ * @param out_device Newly created hand tracker "device"
+ * @return int 0 on success
  */
-struct xrt_device *
-ht_device_create(struct xrt_prober *xp, struct t_stereo_camera_calibration *calib);
+int
+ht_device_create(struct xrt_frame_context *xfctx,
+                 struct t_stereo_camera_calibration *calib,
+                 struct t_hand_tracking_create_info create_info,
+                 struct xrt_slam_sinks **out_sinks,
+                 struct xrt_device **out_device);
+
 
 /*!
  * @dir drivers/ht

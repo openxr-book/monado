@@ -7,6 +7,7 @@
  * @ingroup gui
  */
 
+#include "util/u_file.h"
 #include "util/u_var.h"
 #include "util/u_time.h"
 #include "util/u_misc.h"
@@ -15,6 +16,7 @@
 
 #include "ogl/ogl_api.h"
 #include "gui/gui_imgui.h"
+#include "xrt/xrt_compiler.h"
 
 #include "gui_sdl2.h"
 
@@ -52,6 +54,17 @@ gui_sdl2_imgui_loop(struct sdl2_program *p)
 
 	// Local state
 	ImGuiIO *io = igGetIO();
+
+	// Make window layout file "imgui.ini" live in config dir
+	XRT_MAYBE_UNUSED int res = u_file_get_path_in_config_dir("imgui.ini", p->layout_file, sizeof(p->layout_file));
+	assert(res > 0);
+	io->IniFilename = p->layout_file;
+
+	// Ensure imgui.ini file exists in config dir
+	FILE *imgui_ini = u_file_open_file_in_config_dir("imgui.ini", "a");
+	if (imgui_ini != NULL) {
+		fclose(imgui_ini);
+	}
 
 	// Setup Platform/Renderer bindings
 	igImGui_ImplSDL2_InitForOpenGL(p->win, p->ctx);

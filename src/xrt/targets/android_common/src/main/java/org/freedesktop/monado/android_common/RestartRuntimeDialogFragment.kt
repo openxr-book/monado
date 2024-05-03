@@ -13,6 +13,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.DialogInterface
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.os.Process
 import androidx.appcompat.app.AlertDialog
@@ -23,23 +24,25 @@ class RestartRuntimeDialogFragment : DialogFragment() {
     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
         val message = arguments!!.getString(ARGS_KEY_MESSAGE)
         val builder = AlertDialog.Builder(requireActivity())
-        builder.setMessage(message)
-            .setCancelable(false)
-            .setPositiveButton(R.string.restart) { _: DialogInterface?, _: Int ->
-                delayRestart(DELAY_RESTART_DURATION)
-                //! @todo elegant way to stop service? A bounded service might be restarted by
-                //        framework automatically.
-                Process.killProcess(Process.myPid())
-            }
+        builder.setMessage(message).setCancelable(false).setPositiveButton(R.string.restart) {
+            _: DialogInterface?,
+            _: Int ->
+            delayRestart(DELAY_RESTART_DURATION)
+            // ! @todo elegant way to stop service? A bounded service might be restarted by
+            //        framework automatically.
+            Process.killProcess(Process.myPid())
+        }
         return builder.create()
     }
 
     private fun delayRestart(delayMillis: Long) {
         val intent = Intent(requireContext(), AboutActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(
-            requireContext(), REQUEST_CODE,
-            intent, PendingIntent.FLAG_CANCEL_CURRENT
-        )
+        var flags = PendingIntent.FLAG_CANCEL_CURRENT
+        // From targeting S+, the PendingIntent needs one of FLAG_IMMUTABLE and FLAG_MUTABLE
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            flags = flags or PendingIntent.FLAG_IMMUTABLE
+        }
+        val pendingIntent = PendingIntent.getActivity(requireContext(), REQUEST_CODE, intent, flags)
         val am = requireContext().getSystemService(Context.ALARM_SERVICE) as AlarmManager
         am.setExact(AlarmManager.RTC, System.currentTimeMillis() + delayMillis, pendingIntent)
     }

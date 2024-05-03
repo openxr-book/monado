@@ -1,294 +1,73 @@
-// Copyright 2020, Collabora, Ltd.
+// Copyright 2020-2023, Collabora, Ltd.
+// Copyright 2022, Magic Leap, Inc.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  IPC util helpers, for internal use only
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Julian Petrov <jpetrov@magicleap.com>
+ * @author Jakob Bornecrantz <jakob@collabora.com>
  * @ingroup ipc_shared
  */
 
 #pragma once
 
-#include <xrt/xrt_handles.h>
-#include <xrt/xrt_results.h>
-
-#include <stddef.h>
-#include <stdbool.h>
-#include <stdint.h>
+#include "xrt/xrt_config_os.h"
+#include "xrt/xrt_results.h"
 
 #include "util/u_logging.h"
+
+#ifdef XRT_OS_WINDOWS
+#include "util/u_windows.h"
+#endif
+
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/*!
- * Wrapper for a socket and flags.
+
+/*
+ *
+ * Misc utils.
+ *
  */
-struct ipc_message_channel
-{
-	int socket_fd;
-	enum u_logging_level ll;
-};
 
 /*!
- * Close an IPC message channel
+ * Helper to print the results of called functions that return xret results, if
+ * the result is @p XRT_SUCCESS will log with info, otherwise error. Will also
+ * check if logging should be done with @p cond_level.
+ *
+ * @param cond_level What the current logging level is.
+ * @param file       Callee site (__FILE__).
+ * @param line       Callee site (__LINE__).
+ * @param calling_fn Callee site (__func__).
+ * @param xret       Result from the called function.
+ * @param called_fn  Which function that this return is from.
+ *
+ * @ingroup ipc_shared
  */
 void
-ipc_message_channel_close(struct ipc_message_channel *imc);
+ipc_print_result(enum u_logging_level cond_level,
+                 const char *file,
+                 int line,
+                 const char *calling_func,
+                 xrt_result_t xret,
+                 const char *called_func);
 
+#if defined(XRT_OS_WINDOWS) || defined(XRT_DOXYGEN)
 /*!
- * Send a bare message over the IPC channel.
+ * Helper to convert windows error codes to human readable strings for logging.
+ * N.B. This routine is not thread safe.
  *
- * There are other functions if you have handles, not just scalar/aggregate
- * data.
+ * @param err windows error code
+ * @return human readable string corresponding to the error code.
  *
- * @param imc Message channel to use
- * @param[in] data Pointer to the data buffer to send. Must not be
- * null: use a filler message if necessary.
- * @param[in] size Size of data pointed-to by @p data, must be greater than 0
- *
- * @public @memberof ipc_message_channel
+ * @ingroup ipc_shared
  */
-xrt_result_t
-ipc_send(struct ipc_message_channel *imc, const void *data, size_t size);
+const char *
+ipc_winerror(DWORD err);
+#endif
 
-/*!
- * Receive a bare message over the IPC channel.
- *
- * There are other functions if you have handles, not just scalar/aggregate
- * data.
- *
- * @param imc Message channel to use
- * @param[out] out_data Pointer to the buffer to fill with data. Must not be
- * null.
- * @param[in] size Maximum size to read, must be greater than 0
- *
- * @public @memberof ipc_message_channel
- */
-xrt_result_t
-ipc_receive(struct ipc_message_channel *imc, void *out_data, size_t size);
-
-/*!
- * @name File Descriptor utilities
- * @brief These are typically called from within the send/receive_handles
- * functions.
- * @{
- */
-#ifdef XRT_OS_UNIX
-/*!
- * Receive a message along with a known number of file descriptors over the IPC
- * channel.
- *
- * @param imc Message channel to use
- * @param[out] out_data Pointer to the buffer to fill with data. Must not be
- * null.
- * @param[in] size Maximum size to read, must be greater than 0
- * @param[out] out_handles Array of file descriptors to populate.  Must not be
- * null.
- * @param[in] num_handles Number of elements to receive into @p out_handles,
- * must be greater than 0 and must match the value provided at the other end.
- *
- * @public @memberof ipc_message_channel
- */
-xrt_result_t
-ipc_receive_fds(struct ipc_message_channel *imc, void *out_data, size_t size, int *out_handles, uint32_t num_handles);
-
-/*!
- * Send a message along with file descriptors over the IPC channel.
- *
- * @param imc Message channel to use
- * @param[in] data Pointer to the data buffer to send. Must not be
- * null: use a filler message if necessary.
- * @param[in] size Size of data pointed-to by @p data, must be greater than 0
- * @param[out] handles Array of file descriptors to send.  Must not be
- * null.
- * @param[in] num_handles Number of elements in @p handles, must be greater
- * than 0. If this is variable, it must also be separately transmitted ahead of
- * time, because the receiver must have the same value in its receive call.
- *
- * @public @memberof ipc_message_channel
- */
-xrt_result_t
-ipc_send_fds(struct ipc_message_channel *imc, const void *data, size_t size, const int *handles, uint32_t num_handles);
-#endif // XRT_OS_UNIX
-/*!
- * @}
- */
-
-/*!
- * @name Shared memory handle utilities
- * @brief Send/receive shared memory handles along with scalar/aggregate message
- * data.
- * @{
- */
-
-/*!
- * Receive a message along with a known number of shared memory handles over the
- * IPC channel.
- *
- * @param imc Message channel to use
- * @param[out] out_data Pointer to the buffer to fill with data. Must not be
- * null.
- * @param[in] size Maximum size to read, must be greater than 0
- * @param[out] out_handles Array of shared memory handles to populate.  Must not
- * be null.
- * @param[in] num_handles Number of elements to receive into @p out_handles,
- * must be greater than 0 and must match the value provided at the other end.
- *
- * @public @memberof ipc_message_channel
- * @see xrt_shmem_handle_t
- */
-xrt_result_t
-ipc_receive_handles_shmem(struct ipc_message_channel *imc,
-                          void *out_data,
-                          size_t size,
-                          xrt_shmem_handle_t *out_handles,
-                          uint32_t num_handles);
-
-
-/*!
- * Send a message along with shared memory handles over the IPC channel.
- *
- * @param imc Message channel to use
- * @param[in] data Pointer to the data buffer to send. Must not be
- * null: use a filler message if necessary.
- * @param[in] size Size of data pointed-to by @p data, must be greater than 0
- * @param[out] handles Array of shared memory handles to send.  Must not be
- * null.
- * @param[in] num_handles Number of elements in @p handles, must be greater
- * than 0. If this is variable, it must also be separately transmitted ahead of
- * time, because the receiver must have the same value in its receive call.
- *
- * @public @memberof ipc_message_channel
- * @see xrt_shmem_handle_t
- */
-xrt_result_t
-ipc_send_handles_shmem(struct ipc_message_channel *imc,
-                       const void *data,
-                       size_t size,
-                       const xrt_shmem_handle_t *handles,
-                       uint32_t num_handles);
-/*!
- * @}
- */
-
-
-/*!
- * @name Graphics buffer handle utilities
- * @brief Send/receive graphics buffer handles along with scalar/aggregate
- * message data.
- * @{
- */
-
-/*!
- * Receive a message along with a known number of graphics buffer handles over
- * the IPC channel.
- *
- * @param imc Message channel to use
- * @param[out] out_data Pointer to the buffer to fill with data. Must not be
- * null.
- * @param[in] size Maximum size to read, must be greater than 0
- * @param[out] out_handles Array of graphics buffer handles to populate.  Must
- * not be null.
- * @param[in] num_handles Number of elements to receive into @p out_handles,
- * must be greater than 0 and must match the value provided at the other end.
- *
- * @public @memberof ipc_message_channel
- * @see xrt_graphics_buffer_handle_t
- */
-xrt_result_t
-ipc_receive_handles_graphics_buffer(struct ipc_message_channel *imc,
-                                    void *out_data,
-                                    size_t size,
-                                    xrt_graphics_buffer_handle_t *out_handles,
-                                    uint32_t num_handles);
-
-
-/*!
- * Send a message along with native graphics buffer handles over the IPC
- * channel.
- *
- * @param imc Message channel to use
- * @param[in] data Pointer to the data buffer to send. Must not be
- * null: use a filler message if necessary.
- * @param[in] size Size of data pointed-to by @p data, must be greater than 0
- * @param[out] handles Array of graphics buffer handles to send.  Must not be
- * null.
- * @param[in] num_handles Number of elements in @p handles, must be greater
- * than 0. If this is variable, it must also be separately transmitted ahead of
- * time, because the receiver must have the same value in its receive call.
- *
- * @public @memberof ipc_message_channel
- * @see xrt_graphics_buffer_handle_t
- */
-xrt_result_t
-ipc_send_handles_graphics_buffer(struct ipc_message_channel *imc,
-                                 const void *data,
-                                 size_t size,
-                                 const xrt_graphics_buffer_handle_t *handles,
-                                 uint32_t num_handles);
-
-/*!
- * @}
- */
-
-
-/*!
- * @name Graphics buffer handle utilities
- * @brief Send/receive graphics buffer handles along with scalar/aggregate
- * message data.
- * @{
- */
-
-/*!
- * Receive a message along with a known number of graphics sync handles over
- * the IPC channel.
- *
- * @param imc Message channel to use
- * @param[out] out_data Pointer to the sync to fill with data. Must not be null.
- * @param[in] size Maximum size to read, must be greater than 0
- * @param[out] out_handles Array of graphics sync handles to populate. Must not
- * be null.
- * @param[in] num_handles Number of elements to receive into @p out_handles,
- * must be greater than 0 and must match the value provided at the other end.
- *
- * @public @memberof ipc_message_channel
- * @see xrt_graphics_sync_handle_t
- */
-xrt_result_t
-ipc_receive_handles_graphics_sync(struct ipc_message_channel *imc,
-                                  void *out_data,
-                                  size_t size,
-                                  xrt_graphics_sync_handle_t *out_handles,
-                                  uint32_t num_handles);
-
-/*!
- * Send a message along with native graphics sync handles over the IPC channel.
- *
- * @param imc Message channel to use
- * @param[in] data Pointer to the data sync to send. Must not be null: use a
- * filler message if necessary.
- * @param[in] size Size of data pointed-to by @p data, must be greater than 0
- * @param[out] handles Array of graphics sync handles to send.  Must not be
- * null.
- * @param[in] num_handles Number of elements in @p handles, must be greater than
- * 0. If this is variable, it must also be separately transmitted ahead of time,
- * because the receiver must have the same value in its receive call.
- *
- * @public @memberof ipc_message_channel
- * @see xrt_graphics_sync_handle_t
- */
-xrt_result_t
-ipc_send_handles_graphics_sync(struct ipc_message_channel *imc,
-                               const void *data,
-                               size_t size,
-                               const xrt_graphics_sync_handle_t *handles,
-                               uint32_t num_handles);
-
-/*!
- * @}
- */
 
 #ifdef __cplusplus
 }

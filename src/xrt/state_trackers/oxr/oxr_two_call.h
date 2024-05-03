@@ -3,7 +3,7 @@
 /*!
  * @file
  * @brief  Two call helper functions.
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @ingroup oxr_main
  */
@@ -17,21 +17,21 @@ extern "C" {
 
 #define OXR_TWO_CALL_HELPER(log, cnt_input, cnt_output, output, count, data, sval)                                     \
 	do {                                                                                                           \
-		if (cnt_output == NULL) {                                                                              \
+		if ((cnt_output) == NULL) {                                                                            \
 			return oxr_error(log, XR_ERROR_VALIDATION_FAILURE, #cnt_output);                               \
 		}                                                                                                      \
-		*cnt_output = count;                                                                                   \
+		*(cnt_output) = (uint32_t)(count);                                                                     \
                                                                                                                        \
-		if (cnt_input == 0) {                                                                                  \
+		if ((cnt_input) == 0) {                                                                                \
 			return sval;                                                                                   \
 		}                                                                                                      \
-		if (cnt_input < count) {                                                                               \
+		if ((cnt_input) < (uint32_t)(count)) {                                                                 \
 			return oxr_error(log, XR_ERROR_SIZE_INSUFFICIENT, #cnt_input);                                 \
 		}                                                                                                      \
-		for (uint32_t i = 0; i < count; i++) {                                                                 \
+		for (uint32_t i = 0; i < (count); i++) {                                                               \
 			(output)[i] = (data)[i];                                                                       \
 		}                                                                                                      \
-		return sval;                                                                                           \
+		return (sval);                                                                                         \
 	} while (false)
 
 //! Calls fill_fn(&output_struct[i], &source_struct[i]) to fill output_structs

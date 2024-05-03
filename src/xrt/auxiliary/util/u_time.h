@@ -9,7 +9,7 @@
  * simpler (like @ref aux_os_time) for most purposes that aren't in OpenXR
  * interface code.
  *
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup aux_util
  *
  * @see time_state
@@ -17,15 +17,26 @@
 
 #pragma once
 
+#include "xrt/xrt_compiler.h"
+
 #include <stdint.h>
-#include <time.h>
+#include <time.h> // IWYU pragma: keep
+
+#if defined(XRT_ENV_MINGW)
+// That define is needed before to include windows.h, to avoid a collision
+// between the 'byte' type defined by windows and std::byte defined in cstddef
+// since C++17
+#define byte win_byte_override
+#include <windows.h>
+#undef byte
+#endif
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 //! Helper define to make code more readable.
-#define U_1_000_000_000 (1000000000)
+#define U_1_000_000_000 (1000 * 1000 * 1000)
 
 /*!
  * The number of nanoseconds in a second.
@@ -36,14 +47,14 @@ extern "C" {
 #define U_TIME_1S_IN_NS U_1_000_000_000
 
 /*!
- * The number of nanoseconds in a milliseconds.
+ * The number of nanoseconds in a millisecond.
  *
  * @see timepoint_ns
  */
-#define U_TIME_1MS_IN_NS (U_TIME_1S_IN_NS / 1000)
+#define U_TIME_1MS_IN_NS (1000 * 1000)
 
 /*!
- * The number of nanoseconds in half a milliseconds.
+ * The number of nanoseconds in half a millisecond.
  *
  * @see timepoint_ns
  */
@@ -78,7 +89,7 @@ typedef int64_t time_duration_ns;
 static inline double
 time_ns_to_s(time_duration_ns ns)
 {
-	return (double)(ns) / (double)U_TIME_1S_IN_NS;
+	return (double)(ns) / (double)(U_TIME_1S_IN_NS);
 }
 
 /*!
@@ -102,7 +113,20 @@ time_s_to_ns(double duration)
 static inline double
 time_ns_to_ms_f(time_duration_ns ns)
 {
-	return (double)(ns) / (double)U_TIME_1MS_IN_NS;
+	return (double)(ns) / (double)(U_TIME_1MS_IN_NS);
+}
+
+/*!
+ * Convert double float milliseconds to nanoseconds, human comprehensible config
+ * inputs. Recommended to keep the absolute value of the input relitively small.
+ *
+ * @see timepoint_ns
+ * @ingroup aux_util
+ */
+static inline timepoint_ns
+time_ms_f_to_ns(double ms_f)
+{
+	return (timepoint_ns)(ms_f * (double)(U_TIME_1MS_IN_NS));
 }
 
 /*!
@@ -196,7 +220,7 @@ struct time_state;
  * @ingroup aux_util
  */
 struct time_state *
-time_state_create();
+time_state_create(uint64_t offset);
 
 
 /*!
@@ -284,6 +308,30 @@ time_state_monotonic_to_ts_ns(struct time_state const *state, uint64_t monotonic
  */
 uint64_t
 time_state_ts_to_monotonic_ns(struct time_state const *state, timepoint_ns timestamp);
+
+#if defined(XRT_OS_WINDOWS) || defined(XRT_DOXYGEN)
+/*!
+ * Converts a timestamp to Win32 "QPC" ticks.
+ *
+ * Should not be called simultaneously with time_state_get_now_and_update.
+ *
+ * @public @memberof time_state
+ * @ingroup aux_util
+ */
+void
+time_state_to_win32perfcounter(struct time_state const *state, timepoint_ns timestamp, LARGE_INTEGER *out_qpc_ticks);
+
+/*!
+ * Converts from Win32 "QPC" ticks to timestamp.
+ *
+ * Should not be called simultaneously with time_state_get_now_and_update.
+ *
+ * @public @memberof time_state
+ * @ingroup aux_util
+ */
+timepoint_ns
+time_state_from_win32perfcounter(struct time_state const *state, const LARGE_INTEGER *qpc_ticks);
+#endif // defined(XRT_OS_WINDOWS) || defined(XRT_DOXYGEN)
 
 
 #ifdef __cplusplus

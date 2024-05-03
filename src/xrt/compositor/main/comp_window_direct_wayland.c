@@ -66,6 +66,8 @@ struct comp_window_direct_wayland
 	struct wl_display *display;
 	struct direct_wayland_lease_device *devices;
 	struct direct_wayland_lease *lease;
+
+	VkDisplayKHR vk_display;
 };
 
 static void
@@ -120,7 +122,7 @@ comp_window_direct_wayland_destroy(struct comp_target *w)
 static inline struct vk_bundle *
 get_vk(struct comp_window_direct_wayland *cww)
 {
-	return &cww->base.base.c->vk;
+	return &cww->base.base.c->base.vk;
 }
 
 static void
@@ -141,8 +143,9 @@ _lease_finished(void *data, struct wp_drm_lease_v1 *wp_drm_lease_v1)
 		lease->leased_fd = -1;
 	}
 
-	COMP_DEBUG(lease->w->base.base.c, "Lease has been terminated");
+	COMP_DEBUG(lease->w->base.base.c, "Lease has been closed");
 	lease->finished = true;
+	/* TODO handle graceful shutdown if lease is currently used */
 }
 
 static const struct wp_drm_lease_v1_listener lease_listener = {
@@ -159,7 +162,7 @@ comp_window_direct_wayland_create_surface(struct comp_window_direct_wayland *w,
 	assert(!w->lease);
 
 	struct vk_bundle *vk = get_vk(w);
-	VkDisplayKHR _display = VK_NULL_HANDLE;
+	w->vk_display = VK_NULL_HANDLE;
 	VkResult ret = VK_ERROR_INCOMPATIBLE_DISPLAY_KHR;
 
 	/* TODO: Choose the connector with an environment variable or from `ct->c->settings.display` */
@@ -183,7 +186,7 @@ comp_window_direct_wayland_create_surface(struct comp_window_direct_wayland *w,
 		return VK_ERROR_INITIALIZATION_FAILED;
 	}
 
-	ret = vk->vkGetDrmDisplayEXT(vk->physical_device, dev->drm_fd, conn->id, &_display);
+	ret = vk->vkGetDrmDisplayEXT(vk->physical_device, dev->drm_fd, conn->id, &w->vk_display);
 	if (ret != VK_SUCCESS) {
 		COMP_ERROR(w->base.base.c, "vkGetDrmDisplayEXT failed: %s", vk_result_string(ret));
 		return ret;
@@ -219,13 +222,13 @@ comp_window_direct_wayland_create_surface(struct comp_window_direct_wayland *w,
 		return VK_ERROR_UNKNOWN;
 	}
 
-	ret = vk->vkAcquireDrmDisplayEXT(vk->physical_device, lease->leased_fd, _display);
+	ret = vk->vkAcquireDrmDisplayEXT(vk->physical_device, lease->leased_fd, w->vk_display);
 	if (ret != VK_SUCCESS) {
 		COMP_ERROR(w->base.base.c, "vkAcquireDrmDisplayEXT failed: %s", vk_result_string(ret));
 		return ret;
 	}
 
-	ret = comp_window_direct_create_surface(&w->base, _display, width, height);
+	ret = comp_window_direct_create_surface(&w->base, w->vk_display, width, height);
 	if (ret != VK_SUCCESS) {
 		COMP_ERROR(w->base.base.c, "Failed to create surface: %s", vk_result_string(ret));
 	}
@@ -244,6 +247,9 @@ comp_window_direct_wayland_init_swapchain(struct comp_target *w, uint32_t width,
 		COMP_ERROR(w->c, "Failed to create surface!");
 		return false;
 	}
+
+	struct comp_target_swapchain *cts = (struct comp_target_swapchain *)w_wayland;
+	cts->display = w_wayland->vk_display;
 
 	return true;
 }
@@ -316,9 +322,7 @@ static void
 _lease_connector_withdrawn(void *data, struct wp_drm_lease_connector_v1 *wp_drm_lease_connector_v1)
 {
 	struct direct_wayland_lease_connector *conn = data;
-	COMP_ERROR(conn->w->base.base.c, "Connector %s has been withdrawn by the compositor", conn->name);
-
-	/* TODO: handle graceful shutdown, remove the connector from the device */
+	COMP_DEBUG(conn->w->base.base.c, "Connector %s has been withdrawn by the compositor", conn->name);
 }
 
 static const struct wp_drm_lease_connector_v1_listener lease_connector_listener = {
@@ -450,6 +454,7 @@ comp_window_direct_wayland_create(struct comp_compositor *c)
 	comp_target_swapchain_init_and_set_fnptrs(&w->base, COMP_TARGET_FORCE_FAKE_DISPLAY_TIMING);
 
 	w->base.base.name = "wayland-direct";
+	w->base.display = VK_NULL_HANDLE;
 	w->base.base.destroy = comp_window_direct_wayland_destroy;
 	w->base.base.flush = comp_window_direct_wayland_flush;
 	w->base.base.init_pre_vulkan = comp_window_direct_wayland_init;
@@ -459,3 +464,53 @@ comp_window_direct_wayland_create(struct comp_compositor *c)
 
 	return &w->base.base;
 }
+
+
+/*
+ *
+ * Factory
+ *
+ */
+
+static const char *instance_extensions[] = {
+    VK_KHR_DISPLAY_EXTENSION_NAME,             //
+    VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME,     //
+    VK_EXT_DIRECT_MODE_DISPLAY_EXTENSION_NAME, //
+
+#ifdef VK_EXT_acquire_drm_display
+    VK_EXT_ACQUIRE_DRM_DISPLAY_EXTENSION_NAME,
+#endif
+};
+
+static bool
+detect(const struct comp_target_factory *ctf, struct comp_compositor *c)
+{
+	return false;
+}
+
+static bool
+create_target(const struct comp_target_factory *ctf, struct comp_compositor *c, struct comp_target **out_ct)
+{
+	struct comp_target *ct = comp_window_direct_wayland_create(c);
+	if (ct == NULL) {
+		return false;
+	}
+
+	*out_ct = ct;
+
+	return true;
+}
+
+const struct comp_target_factory comp_target_factory_direct_wayland = {
+    .name = "Wayland Direct-Mode",
+    .identifier = "direct_wayland",
+    .requires_vulkan_for_create = false,
+    .is_deferred = false,
+    .required_instance_version = 0,
+    .required_instance_extensions = instance_extensions,
+    .required_instance_extension_count = ARRAY_SIZE(instance_extensions),
+    .optional_device_extensions = NULL,
+    .optional_device_extension_count = 0,
+    .detect = detect,
+    .create_target = create_target,
+};

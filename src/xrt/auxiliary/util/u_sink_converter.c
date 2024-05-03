@@ -1,9 +1,10 @@
-// Copyright 2019-2021, Collabora, Ltd.
+// Copyright 2019-2022, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  @ref xrt_frame_sink converters and other helpers.
  * @author Jakob Bornecrantz <jakob@collabora.com>
+ * @author Moses Turner <moses@collabora.com>
  * @ingroup aux_util
  */
 
@@ -39,7 +40,6 @@ struct u_sink_converter
 	struct xrt_frame_node node;
 
 	struct xrt_frame_sink *downstream;
-	struct xrt_frame_sink *downstream2;
 
 	enum xrt_format format;
 };
@@ -232,6 +232,21 @@ from_YUYV422_to_R8G8B8(struct xrt_frame *dst_frame, uint32_t w, uint32_t h, size
 }
 
 static void
+from_YUYV422_to_L8(struct xrt_frame *dst_frame, uint32_t w, uint32_t h, size_t stride, const uint8_t *data)
+{
+	SINK_TRACE_MARKER();
+
+	for (uint32_t y = 0; y < h; y++) {
+		const uint8_t *src = data + (y * stride);
+		uint8_t *dst = dst_frame->data + (y * dst_frame->stride);
+
+		for (uint32_t x = 0; x < w; x++) {
+			dst[x] = src[x * 2];
+		}
+	}
+}
+
+static void
 from_UYVY422_to_R8G8B8(struct xrt_frame *dst_frame, uint32_t w, uint32_t h, size_t stride, const uint8_t *data)
 {
 	SINK_TRACE_MARKER();
@@ -388,10 +403,10 @@ from_BAYER_GR8_to_R8G8B8(struct xrt_frame *dst_frame, uint32_t w, uint32_t h, si
 	SINK_TRACE_MARKER();
 
 	const uint8_t *src_data = data;
-	uint32_t src_stride = stride;
+	size_t src_stride = stride;
 
 	uint8_t *dst_data = dst_frame->data;
-	uint32_t dst_stride = dst_frame->stride;
+	size_t dst_stride = dst_frame->stride;
 
 	for (uint32_t y = 0; y < h; y++) {
 		const uint8_t *src0 = src_data + (y * 2) * src_stride;
@@ -461,6 +476,32 @@ create_frame_with_format(struct xrt_frame *xf, enum xrt_format format, struct xr
 }
 
 static void
+convert_frame_l8(struct xrt_frame_sink *xs, struct xrt_frame *xf)
+{
+	SINK_TRACE_MARKER();
+
+	struct u_sink_converter *s = (struct u_sink_converter *)xs;
+
+	struct xrt_frame *converted = NULL;
+
+	switch (xf->format) {
+	case XRT_FORMAT_L8: s->downstream->push_frame(s->downstream, xf); return;
+	case XRT_FORMAT_YUYV422:
+		if (!create_frame_with_format(xf, XRT_FORMAT_L8, &converted)) {
+			return;
+		}
+		from_YUYV422_to_L8(converted, xf->width, xf->height, xf->stride, xf->data);
+		break;
+	default: U_LOG_E("Cannot convert from '%s' to L8!", u_format_str(xf->format)); return;
+	}
+
+	s->downstream->push_frame(s->downstream, converted);
+
+	// Refcount in case it's being held downstream.
+	xrt_frame_reference(&converted, NULL);
+}
+
+static void
 convert_frame_r8g8b8_or_l8(struct xrt_frame_sink *xs, struct xrt_frame *xf)
 {
 	SINK_TRACE_MARKER();
@@ -510,13 +551,29 @@ convert_frame_r8g8b8_or_l8(struct xrt_frame_sink *xs, struct xrt_frame *xf)
 		}
 		break;
 #endif
-	default: U_LOG_E("Can not convert from '%s' to R8G8B8 or L8!", u_format_str(xf->format)); return;
+	default: U_LOG_E("Cannot convert from '%s' to R8G8B8 or L8!", u_format_str(xf->format)); return;
 	}
 
 	s->downstream->push_frame(s->downstream, converted);
 
 	// Refcount in case it's being held downstream.
 	xrt_frame_reference(&converted, NULL);
+}
+
+static void
+convert_frame_r8g8b8_r8g8b8a8_r8g8b8x8_or_l8(struct xrt_frame_sink *xs, struct xrt_frame *xf)
+{
+	SINK_TRACE_MARKER();
+
+	struct u_sink_converter *s = (struct u_sink_converter *)xs;
+
+	switch (xf->format) {
+	case XRT_FORMAT_L8:
+	case XRT_FORMAT_R8G8B8A8:
+	case XRT_FORMAT_R8G8B8X8:
+	case XRT_FORMAT_R8G8B8: s->downstream->push_frame(s->downstream, xf); return;
+	default: convert_frame_r8g8b8_or_l8(xs, xf);
+	}
 }
 
 static void
@@ -562,7 +619,7 @@ convert_frame_r8g8b8_bayer_or_l8(struct xrt_frame_sink *xs, struct xrt_frame *xf
 		}
 		break;
 #endif
-	default: U_LOG_E("Can not convert from '%s' to R8G8B8 or L8!", u_format_str(xf->format)); return;
+	default: U_LOG_E("Cannot convert from '%s' to R8G8B8 or L8!", u_format_str(xf->format)); return;
 	}
 
 	s->downstream->push_frame(s->downstream, converted);
@@ -626,7 +683,7 @@ convert_frame_r8g8b8(struct xrt_frame_sink *xs, struct xrt_frame *xf)
 		}
 		break;
 #endif
-	default: U_LOG_E("Can not convert from '%s' to R8G8B8!", u_format_str(xf->format)); return;
+	default: U_LOG_E("Cannot convert from '%s' to R8G8B8!", u_format_str(xf->format)); return;
 	}
 
 	s->downstream->push_frame(s->downstream, converted);
@@ -661,7 +718,7 @@ convert_frame_rgb_yuv_yuyv_uyvy_or_l8(struct xrt_frame_sink *xs, struct xrt_fram
 		break;
 #endif
 	default:
-		U_LOG_E("Can not convert from '%s' to either R8G8B8, YUV, YUYV, UYVY or L8!", u_format_str(xf->format));
+		U_LOG_E("Cannot convert from '%s' to either R8G8B8, YUV, YUYV, UYVY or L8!", u_format_str(xf->format));
 		return;
 	}
 
@@ -697,7 +754,7 @@ convert_frame_yuv_yuyv_uyvy_or_l8(struct xrt_frame_sink *xs, struct xrt_frame *x
 #endif
 	default:
 		U_LOG_E(
-		    "Can not convert from '%s' to either YUV, YUYV, UYVY or "
+		    "Cannot convert from '%s' to either YUV, YUYV, UYVY or "
 		    "L8!",
 		    u_format_str(xf->format));
 		return;
@@ -731,7 +788,7 @@ convert_frame_yuv_or_yuyv(struct xrt_frame_sink *xs, struct xrt_frame *xf)
 		}
 		break;
 #endif
-	default: U_LOG_E("Can not convert from '%s' to either YUV or YUYV!", u_format_str(xf->format)); return;
+	default: U_LOG_E("Cannot convert from '%s' to either YUV or YUYV!", u_format_str(xf->format)); return;
 	}
 
 	s->downstream->push_frame(s->downstream, converted);
@@ -784,13 +841,18 @@ destroy(struct xrt_frame_node *node)
 
 void
 u_sink_create_format_converter(struct xrt_frame_context *xfctx,
-                               enum xrt_format f,
+                               enum xrt_format format,
                                struct xrt_frame_sink *downstream,
                                struct xrt_frame_sink **out_xfs)
 {
-	if (f != XRT_FORMAT_R8G8B8) {
-		U_LOG_E("Format '%s' not supported", u_format_str(f));
-		return;
+	assert(downstream != NULL);
+
+	void (*func)(struct xrt_frame_sink *, struct xrt_frame *);
+
+	switch (format) {
+	case XRT_FORMAT_R8G8B8: func = convert_frame_r8g8b8; break;
+	case XRT_FORMAT_L8: func = convert_frame_l8; break;
+	default: U_LOG_E("Format '%s' not supported", u_format_str(format)); return;
 	}
 
 #ifdef USE_TABLE
@@ -798,7 +860,7 @@ u_sink_create_format_converter(struct xrt_frame_context *xfctx,
 #endif
 
 	struct u_sink_converter *s = U_TYPED_CALLOC(struct u_sink_converter);
-	s->base.push_frame = convert_frame_r8g8b8;
+	s->base.push_frame = func;
 	s->node.break_apart = break_apart;
 	s->node.destroy = destroy;
 	s->downstream = downstream;
@@ -813,8 +875,32 @@ u_sink_create_to_r8g8b8_or_l8(struct xrt_frame_context *xfctx,
                               struct xrt_frame_sink *downstream,
                               struct xrt_frame_sink **out_xfs)
 {
+	assert(downstream != NULL);
+
 	struct u_sink_converter *s = U_TYPED_CALLOC(struct u_sink_converter);
 	s->base.push_frame = convert_frame_r8g8b8_or_l8;
+	s->node.break_apart = break_apart;
+	s->node.destroy = destroy;
+	s->downstream = downstream;
+
+#ifdef USE_TABLE
+	generate_lookup_YUV_to_RGBX();
+#endif
+
+	xrt_frame_context_add(xfctx, &s->node);
+
+	*out_xfs = &s->base;
+}
+
+void
+u_sink_create_to_r8g8b8_r8g8b8a8_r8g8b8x8_or_l8(struct xrt_frame_context *xfctx,
+                                                struct xrt_frame_sink *downstream,
+                                                struct xrt_frame_sink **out_xfs)
+{
+	assert(downstream != NULL);
+
+	struct u_sink_converter *s = U_TYPED_CALLOC(struct u_sink_converter);
+	s->base.push_frame = convert_frame_r8g8b8_r8g8b8a8_r8g8b8x8_or_l8;
 	s->node.break_apart = break_apart;
 	s->node.destroy = destroy;
 	s->downstream = downstream;
@@ -833,6 +919,8 @@ u_sink_create_to_r8g8b8_bayer_or_l8(struct xrt_frame_context *xfctx,
                                     struct xrt_frame_sink *downstream,
                                     struct xrt_frame_sink **out_xfs)
 {
+	assert(downstream != NULL);
+
 	struct u_sink_converter *s = U_TYPED_CALLOC(struct u_sink_converter);
 	s->base.push_frame = convert_frame_r8g8b8_bayer_or_l8;
 	s->node.break_apart = break_apart;
@@ -849,6 +937,8 @@ u_sink_create_to_rgb_yuv_yuyv_uyvy_or_l8(struct xrt_frame_context *xfctx,
                                          struct xrt_frame_sink *downstream,
                                          struct xrt_frame_sink **out_xfs)
 {
+	assert(downstream != NULL);
+
 	struct u_sink_converter *s = U_TYPED_CALLOC(struct u_sink_converter);
 	s->base.push_frame = convert_frame_rgb_yuv_yuyv_uyvy_or_l8;
 	s->node.break_apart = break_apart;
@@ -865,6 +955,8 @@ u_sink_create_to_yuv_yuyv_uyvy_or_l8(struct xrt_frame_context *xfctx,
                                      struct xrt_frame_sink *downstream,
                                      struct xrt_frame_sink **out_xfs)
 {
+	assert(downstream != NULL);
+
 	struct u_sink_converter *s = U_TYPED_CALLOC(struct u_sink_converter);
 	s->base.push_frame = convert_frame_yuv_yuyv_uyvy_or_l8;
 	s->node.break_apart = break_apart;
@@ -881,6 +973,8 @@ u_sink_create_to_yuv_or_yuyv(struct xrt_frame_context *xfctx,
                              struct xrt_frame_sink *downstream,
                              struct xrt_frame_sink **out_xfs)
 {
+	assert(downstream != NULL);
+
 	struct u_sink_converter *s = U_TYPED_CALLOC(struct u_sink_converter);
 	s->base.push_frame = convert_frame_yuv_or_yuyv;
 	s->node.break_apart = break_apart;

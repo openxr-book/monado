@@ -2,7 +2,7 @@
 #define OPENXR_PLATFORM_H_ 1
 
 /*
-** Copyright (c) 2017-2021, The Khronos Group Inc.
+** Copyright 2017-2024, The Khronos Group Inc.
 **
 ** SPDX-License-Identifier: Apache-2.0 OR MIT
 */
@@ -22,7 +22,7 @@ extern "C" {
 #ifdef XR_USE_PLATFORM_ANDROID
 
 #define XR_KHR_android_thread_settings 1
-#define XR_KHR_android_thread_settings_SPEC_VERSION 5
+#define XR_KHR_android_thread_settings_SPEC_VERSION 6
 #define XR_KHR_ANDROID_THREAD_SETTINGS_EXTENSION_NAME "XR_KHR_android_thread_settings"
 
 typedef enum XrAndroidThreadTypeKHR {
@@ -94,7 +94,7 @@ typedef struct XrVulkanSwapchainFormatListCreateInfoKHR {
 #ifdef XR_USE_GRAPHICS_API_OPENGL
 
 #define XR_KHR_opengl_enable 1
-#define XR_KHR_opengl_enable_SPEC_VERSION 9
+#define XR_KHR_opengl_enable_SPEC_VERSION 10
 #define XR_KHR_OPENGL_ENABLE_EXTENSION_NAME "XR_KHR_opengl_enable"
 #ifdef XR_USE_PLATFORM_WIN32
 // XrGraphicsBindingOpenGLWin32KHR extends XrSessionCreateInfo
@@ -170,7 +170,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrGetOpenGLGraphicsRequirementsKHR(
 #ifdef XR_USE_GRAPHICS_API_OPENGL_ES
 
 #define XR_KHR_opengl_es_enable 1
-#define XR_KHR_opengl_es_enable_SPEC_VERSION 7
+#define XR_KHR_opengl_es_enable_SPEC_VERSION 8
 #define XR_KHR_OPENGL_ES_ENABLE_EXTENSION_NAME "XR_KHR_opengl_es_enable"
 #ifdef XR_USE_PLATFORM_ANDROID
 // XrGraphicsBindingOpenGLESAndroidKHR extends XrSessionCreateInfo
@@ -275,7 +275,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrGetVulkanGraphicsRequirementsKHR(
 #ifdef XR_USE_GRAPHICS_API_D3D11
 
 #define XR_KHR_D3D11_enable 1
-#define XR_KHR_D3D11_enable_SPEC_VERSION  5
+#define XR_KHR_D3D11_enable_SPEC_VERSION  9
 #define XR_KHR_D3D11_ENABLE_EXTENSION_NAME "XR_KHR_D3D11_enable"
 // XrGraphicsBindingD3D11KHR extends XrSessionCreateInfo
 typedef struct XrGraphicsBindingD3D11KHR {
@@ -312,7 +312,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrGetD3D11GraphicsRequirementsKHR(
 #ifdef XR_USE_GRAPHICS_API_D3D12
 
 #define XR_KHR_D3D12_enable 1
-#define XR_KHR_D3D12_enable_SPEC_VERSION  7
+#define XR_KHR_D3D12_enable_SPEC_VERSION  9
 #define XR_KHR_D3D12_ENABLE_EXTENSION_NAME "XR_KHR_D3D12_enable"
 // XrGraphicsBindingD3D12KHR extends XrSessionCreateInfo
 typedef struct XrGraphicsBindingD3D12KHR {
@@ -454,9 +454,9 @@ typedef XrSwapchainImageVulkanKHR XrSwapchainImageVulkan2KHR;
 
 typedef XrGraphicsRequirementsVulkanKHR XrGraphicsRequirementsVulkan2KHR;
 
-typedef XrResult (XRAPI_PTR *PFN_xrCreateVulkanInstanceKHR)(XrInstance                          instance, const XrVulkanInstanceCreateInfoKHR*createInfo, VkInstance*                         vulkanInstance, VkResult*                           vulkanResult);
-typedef XrResult (XRAPI_PTR *PFN_xrCreateVulkanDeviceKHR)(XrInstance                          instance, const XrVulkanDeviceCreateInfoKHR*  createInfo, VkDevice*                           vulkanDevice, VkResult*                           vulkanResult);
-typedef XrResult (XRAPI_PTR *PFN_xrGetVulkanGraphicsDevice2KHR)(XrInstance                              instance, const XrVulkanGraphicsDeviceGetInfoKHR* getInfo, VkPhysicalDevice*                       vulkanPhysicalDevice);
+typedef XrResult (XRAPI_PTR *PFN_xrCreateVulkanInstanceKHR)(XrInstance instance, const XrVulkanInstanceCreateInfoKHR* createInfo, VkInstance* vulkanInstance, VkResult* vulkanResult);
+typedef XrResult (XRAPI_PTR *PFN_xrCreateVulkanDeviceKHR)(XrInstance instance, const XrVulkanDeviceCreateInfoKHR* createInfo, VkDevice* vulkanDevice, VkResult* vulkanResult);
+typedef XrResult (XRAPI_PTR *PFN_xrGetVulkanGraphicsDevice2KHR)(XrInstance instance, const XrVulkanGraphicsDeviceGetInfoKHR* getInfo, VkPhysicalDevice* vulkanPhysicalDevice);
 typedef XrResult (XRAPI_PTR *PFN_xrGetVulkanGraphicsRequirements2KHR)(XrInstance instance, XrSystemId systemId, XrGraphicsRequirementsVulkanKHR* graphicsRequirements);
 
 #ifndef XR_NO_PROTOTYPES
@@ -489,16 +489,17 @@ XRAPI_ATTR XrResult XRAPI_CALL xrGetVulkanGraphicsRequirements2KHR(
 #ifdef XR_USE_PLATFORM_EGL
 
 #define XR_MNDX_egl_enable 1
-#define XR_MNDX_egl_enable_SPEC_VERSION   1
+#define XR_MNDX_egl_enable_SPEC_VERSION   2
 #define XR_MNDX_EGL_ENABLE_EXTENSION_NAME "XR_MNDX_egl_enable"
+typedef PFN_xrVoidFunction (*PFN_xrEglGetProcAddressMNDX)(const char *name);
 // XrGraphicsBindingEGLMNDX extends XrSessionCreateInfo
 typedef struct XrGraphicsBindingEGLMNDX {
-    XrStructureType             type;
-    const void* XR_MAY_ALIAS    next;
-    PFNEGLGETPROCADDRESSPROC    getProcAddress;
-    EGLDisplay                  display;
-    EGLConfig                   config;
-    EGLContext                  context;
+    XrStructureType                type;
+    const void* XR_MAY_ALIAS       next;
+    PFN_xrEglGetProcAddressMNDX    getProcAddress;
+    EGLDisplay                     display;
+    EGLConfig                      config;
+    EGLContext                     context;
 } XrGraphicsBindingEGLMNDX;
 
 #endif /* XR_USE_PLATFORM_EGL */
@@ -564,6 +565,30 @@ typedef struct XrAndroidSurfaceSwapchainCreateInfoFB {
 #endif // XR_USE_PLATFORM_ANDROID
 
 #endif /* XR_USE_PLATFORM_ANDROID */
+
+#ifdef XR_USE_PLATFORM_ML
+
+#define XR_ML_compat 1
+#define XR_ML_compat_SPEC_VERSION         1
+#define XR_ML_COMPAT_EXTENSION_NAME       "XR_ML_compat"
+typedef struct XrCoordinateSpaceCreateInfoML {
+    XrStructureType             type;
+    const void* XR_MAY_ALIAS    next;
+    MLCoordinateFrameUID        cfuid;
+    XrPosef                     poseInCoordinateSpace;
+} XrCoordinateSpaceCreateInfoML;
+
+typedef XrResult (XRAPI_PTR *PFN_xrCreateSpaceFromCoordinateFrameUIDML)(XrSession session, const XrCoordinateSpaceCreateInfoML *createInfo, XrSpace* space);
+
+#ifndef XR_NO_PROTOTYPES
+#ifdef XR_EXTENSION_PROTOTYPES
+XRAPI_ATTR XrResult XRAPI_CALL xrCreateSpaceFromCoordinateFrameUIDML(
+    XrSession                                   session,
+    const XrCoordinateSpaceCreateInfoML *       createInfo,
+    XrSpace*                                    space);
+#endif /* XR_EXTENSION_PROTOTYPES */
+#endif /* !XR_NO_PROTOTYPES */
+#endif /* XR_USE_PLATFORM_ML */
 
 #ifdef XR_USE_PLATFORM_WIN32
 
@@ -665,6 +690,21 @@ typedef struct XrSwapchainStateSamplerVulkanFB {
     XrColor4f               borderColor;
 } XrSwapchainStateSamplerVulkanFB;
 #endif // XR_USE_GRAPHICS_API_VULKAN
+
+#endif /* XR_USE_GRAPHICS_API_VULKAN */
+
+#ifdef XR_USE_GRAPHICS_API_VULKAN
+
+#define XR_META_vulkan_swapchain_create_info 1
+#define XR_META_vulkan_swapchain_create_info_SPEC_VERSION 1
+#define XR_META_VULKAN_SWAPCHAIN_CREATE_INFO_EXTENSION_NAME "XR_META_vulkan_swapchain_create_info"
+// XrVulkanSwapchainCreateInfoMETA extends XrSwapchainCreateInfo
+typedef struct XrVulkanSwapchainCreateInfoMETA {
+    XrStructureType             type;
+    const void* XR_MAY_ALIAS    next;
+    VkImageCreateFlags          additionalCreateFlags;
+    VkImageUsageFlags           additionalUsageFlags;
+} XrVulkanSwapchainCreateInfoMETA;
 
 #endif /* XR_USE_GRAPHICS_API_VULKAN */
 

@@ -4,7 +4,7 @@
  * @file
  * @brief  Internal header for the RealSense driver.
  * @author Mateo de Mayo <mateo.demayo@collabora.com>
- * @ingroup drv_rs
+ * @ingroup drv_realsense
  */
 #pragma once
 
@@ -15,14 +15,14 @@
 #include <librealsense2/rs.h>
 #include <librealsense2/h/rs_pipeline.h>
 
+/*!
+ * @addtogroup drv_realsense
+ * @{
+ */
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-/*!
- * @addtogroup drv_rs
- * @{
- */
 
 //! Container to store and manage useful objects from the RealSense API
 struct rs_container

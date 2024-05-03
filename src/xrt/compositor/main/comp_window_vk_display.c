@@ -38,7 +38,7 @@ struct comp_window_vk_display
 	struct comp_target_swapchain base;
 
 	struct vk_display *displays;
-	uint16_t num_displays;
+	uint16_t display_count;
 };
 
 /*
@@ -66,6 +66,12 @@ comp_window_vk_display_init_swapchain(struct comp_target *ct, uint32_t width, ui
  *
  */
 
+static inline struct vk_bundle *
+get_vk(struct comp_target *ct)
+{
+	return &ct->c->base.vk;
+}
+
 static void
 _flush(struct comp_target *ct)
 {
@@ -88,6 +94,7 @@ comp_window_vk_display_create(struct comp_compositor *c)
 	comp_target_swapchain_init_and_set_fnptrs(&w->base, COMP_TARGET_FORCE_FAKE_DISPLAY_TIMING);
 
 	w->base.base.name = "VkDisplayKHR";
+	w->base.display = VK_NULL_HANDLE;
 	w->base.base.destroy = comp_window_vk_display_destroy;
 	w->base.base.flush = _flush;
 	w->base.base.init_pre_vulkan = comp_window_vk_display_init;
@@ -105,13 +112,14 @@ comp_window_vk_display_destroy(struct comp_target *ct)
 
 	comp_target_swapchain_cleanup(&w_direct->base);
 
-	for (uint32_t i = 0; i < w_direct->num_displays; i++) {
+	for (uint32_t i = 0; i < w_direct->display_count; i++) {
 		struct vk_display *d = &w_direct->displays[i];
 		d->display = VK_NULL_HANDLE;
 	}
 
-	if (w_direct->displays != NULL)
+	if (w_direct->displays != NULL) {
 		free(w_direct->displays);
+	}
 
 	free(ct);
 }
@@ -119,18 +127,28 @@ comp_window_vk_display_destroy(struct comp_target *ct)
 static bool
 append_vk_display_entry(struct comp_window_vk_display *w, struct VkDisplayPropertiesKHR *disp)
 {
-	w->base.base.c->settings.preferred.width = disp->physicalResolution.width;
-	w->base.base.c->settings.preferred.height = disp->physicalResolution.height;
-	struct vk_display d = {.display_properties = *disp, .display = disp->display};
+	// Make the compositor use this size.
+	comp_target_swapchain_override_extents(&w->base, disp->physicalResolution);
 
-	w->num_displays += 1;
+	// Create the entry.
+	struct vk_display d = {
+	    .display_properties = *disp,
+	    .display = disp->display,
+	};
 
-	U_ARRAY_REALLOC_OR_FREE(w->displays, struct vk_display, w->num_displays);
+	w->display_count += 1;
 
-	if (w->displays == NULL)
+	U_ARRAY_REALLOC_OR_FREE(w->displays, struct vk_display, w->display_count);
+
+	if (w->displays == NULL) {
 		COMP_ERROR(w->base.base.c, "Unable to reallocate vk_display displays");
 
-	w->displays[w->num_displays - 1] = d;
+		// Reset the count.
+		w->display_count = 0;
+		return false;
+	}
+
+	w->displays[w->display_count - 1] = d;
 
 	return true;
 }
@@ -152,31 +170,30 @@ static bool
 comp_window_vk_display_init(struct comp_target *ct)
 {
 	struct comp_window_vk_display *w_direct = (struct comp_window_vk_display *)ct;
-	struct vk_bundle *vk = &ct->c->vk;
+	struct vk_bundle *vk = get_vk(ct);
+	VkDisplayPropertiesKHR *display_props = NULL;
+	uint32_t display_count = 0;
+	VkResult ret;
 
-	// Sanity check.
 	if (vk->instance == VK_NULL_HANDLE) {
 		COMP_ERROR(ct->c, "Vulkan not initialized before vk display init!");
 		return false;
 	}
 
-	uint32_t display_count;
-	if (vk->vkGetPhysicalDeviceDisplayPropertiesKHR(vk->physical_device, &display_count, NULL) != VK_SUCCESS) {
-		COMP_ERROR(ct->c, "Failed to get vulkan display count");
+	// Get a list of attached displays.
+	ret = vk_enumerate_physical_device_display_properties( //
+	    vk,                                                //
+	    vk->physical_device,                               //
+	    &display_count,                                    //
+	    &display_props);                                   //
+	if (ret != VK_SUCCESS) {
+		CVK_ERROR(ct->c, "vk_enumerate_physical_device_display_properties", "Failed to get display properties",
+		          ret);
 		return false;
 	}
 
 	if (display_count == 0) {
 		COMP_ERROR(ct->c, "No Vulkan displays found.");
-		return false;
-	}
-
-	struct VkDisplayPropertiesKHR *display_props = U_TYPED_ARRAY_CALLOC(VkDisplayPropertiesKHR, display_count);
-
-	if (display_props && vk->vkGetPhysicalDeviceDisplayPropertiesKHR(vk->physical_device, &display_count,
-	                                                                 display_props) != VK_SUCCESS) {
-		COMP_ERROR(ct->c, "Failed to get display properties");
-		free(display_props);
 		return false;
 	}
 
@@ -210,7 +227,7 @@ comp_window_vk_display_current_display(struct comp_window_vk_display *w)
 	if (index == -1)
 		index = 0;
 
-	if (w->num_displays <= (uint32_t)index)
+	if (w->display_count <= (uint32_t)index)
 		return NULL;
 
 	return &w->displays[index];
@@ -243,5 +260,52 @@ comp_window_vk_display_init_swapchain(struct comp_target *ct, uint32_t width, ui
 
 	COMP_DEBUG(ct->c, "Will use display: %s", d->display_properties.displayName);
 
+	struct comp_target_swapchain *cts = (struct comp_target_swapchain *)ct;
+	cts->display = d->display;
+
 	return init_swapchain(&w_direct->base, d->display, width, height);
 }
+
+
+/*
+ *
+ * Factory
+ *
+ */
+
+static const char *instance_extensions[] = {
+    VK_KHR_DISPLAY_EXTENSION_NAME,
+};
+
+static bool
+detect(const struct comp_target_factory *ctf, struct comp_compositor *c)
+{
+	return false;
+}
+
+static bool
+create_target(const struct comp_target_factory *ctf, struct comp_compositor *c, struct comp_target **out_ct)
+{
+	struct comp_target *ct = comp_window_vk_display_create(c);
+	if (ct == NULL) {
+		return false;
+	}
+
+	*out_ct = ct;
+
+	return true;
+}
+
+const struct comp_target_factory comp_target_factory_vk_display = {
+    .name = "Vulkan Display Direct-Mode",
+    .identifier = "vk_display",
+    .requires_vulkan_for_create = true,
+    .is_deferred = false,
+    .required_instance_version = 0,
+    .required_instance_extensions = instance_extensions,
+    .required_instance_extension_count = ARRAY_SIZE(instance_extensions),
+    .optional_device_extensions = NULL,
+    .optional_device_extension_count = 0,
+    .detect = detect,
+    .create_target = create_target,
+};

@@ -1,9 +1,10 @@
-// Copyright 2020, Collabora, Ltd.
+// Copyright 2020-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Header for @ref xrt_instance object.
  * @author Jakob Bornecrantz <jakob@collabora.com>
+ * @author Korcan Hussein <korcan.hussein@collabora.com>
  * @ingroup xrt_iface
  */
 
@@ -20,7 +21,9 @@ extern "C" {
 
 struct xrt_prober;
 struct xrt_device;
-struct xrt_compositor_native;
+struct xrt_space_overseer;
+struct xrt_system;
+struct xrt_system_devices;
 struct xrt_system_compositor;
 
 
@@ -37,6 +40,10 @@ struct xrt_system_compositor;
 struct xrt_instance_info
 {
 	char application_name[XRT_MAX_APPLICATION_NAME_SIZE];
+	bool ext_hand_tracking_enabled;
+	bool ext_eye_gaze_interaction_enabled;
+	bool ext_hand_interaction_enabled;
+	bool htc_facial_tracking_enabled;
 };
 
 /*!
@@ -66,44 +73,27 @@ struct xrt_instance
 	 * methods. To use this interface, see the helper functions.
 	 * @{
 	 */
-	/*!
-	 * Returns the devices of the system represented as @ref xrt_device.
-	 *
-	 * Should only be called once.
-	 *
-	 * @note Code consuming this interface should use xrt_instance_select()
-	 *
-	 * @param xinst Pointer to self
-	 * @param[in,out] xdevs Pointer to xrt_device array. Array elements will
-	 * be populated.
-	 * @param[in] num_xdevs The capacity of the @p xdevs array.
-	 *
-	 * @return 0 on success, <0 on error.
-	 *
-	 * @see xrt_prober::probe, xrt_prober::select
-	 */
-	int (*select)(struct xrt_instance *xinst, struct xrt_device **xdevs, size_t num_xdevs);
 
 	/*!
-	 * Creates a @ref xrt_system_compositor.
+	 * Creates all of the system resources like the devices and system
+	 * compositor. The system compositor is optional.
 	 *
 	 * Should only be called once.
 	 *
-	 * @note Code consuming this interface should use
-	 * xrt_instance_create_system_compositor()
+	 * @note Code consuming this interface should use xrt_instance_create_system()
 	 *
-	 * @param xinst Pointer to self
-	 * @param[in] xdev Device to use for creating the compositor
-	 * @param[out] out_xsc Pointer to create_system_compositor pointer, will
-	 * be populated.
+	 * @param      xinst     Pointer to self
+	 * @param[out] out_xsys  Return of system, required.
+	 * @param[out] out_xsysd Return of devices, required.
+	 * @param[out] out_xsysc Return of system compositor, optional.
 	 *
-	 * @return 0 on success, <0 on error.
-	 *
-	 * @see xrt_gfx_provider_create_native
+	 * @see xrt_prober::probe, xrt_prober::select, xrt_gfx_provider_create_native
 	 */
-	int (*create_system_compositor)(struct xrt_instance *xinst,
-	                                struct xrt_device *xdev,
-	                                struct xrt_system_compositor **out_xsc);
+	xrt_result_t (*create_system)(struct xrt_instance *xinst,
+	                              struct xrt_system **out_xsys,
+	                              struct xrt_system_devices **out_xsysd,
+	                              struct xrt_space_overseer **out_xso,
+	                              struct xrt_system_compositor **out_xsysc);
 
 	/*!
 	 * Get the instance @ref xrt_prober, if any.
@@ -123,10 +113,9 @@ struct xrt_instance
 	 * @param[out] out_xp Pointer to xrt_prober pointer, will be populated
 	 * or set to NULL.
 	 *
-	 * @return 0 on success, <0 on error. (Note that success may mean
-	 * returning a null pointer!)
+	 * @return XRT_SUCCESS on success, other error code on error.
 	 */
-	int (*get_prober)(struct xrt_instance *xinst, struct xrt_prober **out_xp);
+	xrt_result_t (*get_prober)(struct xrt_instance *xinst, struct xrt_prober **out_xp);
 
 	/*!
 	 * Destroy the instance and its owned objects, including the prober (if
@@ -141,34 +130,25 @@ struct xrt_instance
 	 * @}
 	 */
 	struct xrt_instance_info instance_info;
+
+	uint64_t startup_timestamp;
 };
 
 /*!
- * @copydoc xrt_instance::select
+ * @copydoc xrt_instance::create_system
  *
  * Helper for calling through the function pointer.
  *
  * @public @memberof xrt_instance
  */
-static inline int
-xrt_instance_select(struct xrt_instance *xinst, struct xrt_device **xdevs, size_t num_xdevs)
+static inline xrt_result_t
+xrt_instance_create_system(struct xrt_instance *xinst,
+                           struct xrt_system **out_xsys,
+                           struct xrt_system_devices **out_xsysd,
+                           struct xrt_space_overseer **out_xso,
+                           struct xrt_system_compositor **out_xsysc)
 {
-	return xinst->select(xinst, xdevs, num_xdevs);
-}
-
-/*!
- * @copydoc xrt_instance::create_system_compositor
- *
- * Helper for calling through the function pointer.
- *
- * @public @memberof xrt_instance
- */
-static inline int
-xrt_instance_create_system_compositor(struct xrt_instance *xinst,
-                                      struct xrt_device *xdev,
-                                      struct xrt_system_compositor **out_xsc)
-{
-	return xinst->create_system_compositor(xinst, xdev, out_xsc);
+	return xinst->create_system(xinst, out_xsys, out_xsysd, out_xso, out_xsysc);
 }
 
 /*!
@@ -178,7 +158,7 @@ xrt_instance_create_system_compositor(struct xrt_instance *xinst,
  *
  * @public @memberof xrt_instance
  */
-static inline int
+static inline xrt_result_t
 xrt_instance_get_prober(struct xrt_instance *xinst, struct xrt_prober **out_xp)
 {
 	return xinst->get_prober(xinst, out_xp);
@@ -228,10 +208,8 @@ xrt_instance_destroy(struct xrt_instance **xinst_ptr)
  *
  * @relates xrt_instance
  */
-int
-xrt_instance_create(struct xrt_instance_info *ii, struct xrt_instance **out_xinst
-
-);
+xrt_result_t
+xrt_instance_create(struct xrt_instance_info *ii, struct xrt_instance **out_xinst);
 
 /*!
  * @}

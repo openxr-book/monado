@@ -28,7 +28,7 @@ public:
 		AlwaysSingle,
 	};
 
-public:
+
 	Kind kind = AllAvailable;
 	struct u_sink_debug usd = {};
 	struct xrt_frame *frame = {};
@@ -36,7 +36,7 @@ public:
 	cv::Mat rgb[2] = {};
 
 
-public:
+
 	HelperDebugSink(Kind kind)
 	{
 		this->kind = kind;
@@ -60,7 +60,10 @@ public:
 
 		// But what about second breakfast?
 		bool second_view = false;
-		int rows, cols, width, height;
+		int rows;
+		int cols;
+		int width;
+		int height;
 
 		cols = xf->width;
 		rows = xf->height;
@@ -120,7 +123,12 @@ public:
 		rgb[0] = cv::Mat();
 		rgb[1] = cv::Mat();
 
-		// Does checking.
+		// Don't try to push null frames.
+		if (frame == nullptr) {
+			return;
+		}
+
+		// Does checking if the sink is active.
 		u_sink_debug_push_frame(&usd, frame);
 
 		// We unreference the frame here, downstream is either

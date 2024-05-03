@@ -27,31 +27,17 @@ extern "C" {
  * be careful about which displays we attempt to acquire.
  * We may wish to allow user configuration to extend this list.
  */
-XRT_MAYBE_UNUSED static const char *NV_DIRECT_WHITELIST[] = {
-    "Sony SIE  HMD *08",           "HTC Corporation HTC-VIVE",
-    "HTC Corporation VIVE Pro",    "Oculus VR Inc. Rift", /* Matches DK1, DK2 and CV1 */
-    "Valve Corporation Index HMD",
+XRT_MAYBE_UNUSED static const char *NV_DIRECT_ALLOWLIST[] = {
+    "Sony SIE  HMD *08",           // PSVR
+    "HTC Corporation HTC-VIVE",    // HTC Vive
+    "HTC Corporation VIVE Pro",    // HTC Vive Pro
+    "Oculus VR Inc. Rift",         // DK1, DK2 and CV1
+    "Valve Corporation Index HMD", // Valve Index
+    "Seiko/Epson SEC144A",         // Samsung Odyssey+
+    "HPN",                         // Reverb G2
+    "HP Inc.",                     // Also Reverb G2?
+    "PNP",                         // NorthStar (Generic)
 };
-
-/*!
- * Window type to use.
- *
- * @ingroup comp_main
- */
-enum window_type
-{
-	WINDOW_NONE = 0,
-	WINDOW_AUTO,
-	WINDOW_XCB,
-	WINDOW_WAYLAND,
-	WINDOW_DIRECT_WAYLAND,
-	WINDOW_DIRECT_RANDR,
-	WINDOW_DIRECT_NVIDIA,
-	WINDOW_ANDROID,
-	WINDOW_MSWIN,
-	WINDOW_VK_DISPLAY,
-};
-
 
 /*!
  * Settings for the compositor.
@@ -64,12 +50,14 @@ struct comp_settings
 
 	bool use_compute;
 
-	VkFormat color_format;
+	VkFormat formats[XRT_MAX_SWAPCHAIN_FORMATS];
+	uint32_t format_count;
+
 	VkColorSpaceKHR color_space;
 	VkPresentModeKHR present_mode;
 
-	//! Window type to use.
-	enum window_type window_type;
+	//! Preferred window type to use, not actual used.
+	const char *target_identifier;
 
 	//! display string forced by user or NULL
 	const char *nvidia_display;
@@ -82,12 +70,6 @@ struct comp_settings
 		uint32_t width;
 		uint32_t height;
 	} preferred;
-
-	struct
-	{
-		//! Display wireframe instead of solid triangles.
-		bool wireframe;
-	} debug;
 
 	//! Percentage to scale the viewport by.
 	double viewport_scale;
@@ -112,12 +94,17 @@ struct comp_settings
 	int client_gpu_index;
 
 
-	//! Vulkan device UUID selected by comp_settings_check_vulkan_caps,
-	//! valid across Vulkan instances
-	uint8_t selected_gpu_deviceUUID[XRT_GPU_UUID_SIZE];
+	//! Vulkan device UUID selected by comp_settings_check_vulkan_caps, valid across Vulkan instances
+	xrt_uuid_t selected_gpu_deviceUUID;
 
 	//! Vulkan device UUID to suggest to clients
-	uint8_t client_gpu_deviceUUID[XRT_GPU_UUID_SIZE];
+	xrt_uuid_t client_gpu_deviceUUID;
+
+	//! The Windows LUID for the GPU device suggested for D3D clients, never changes.
+	xrt_luid_t client_gpu_deviceLUID;
+
+	//! Whether @ref client_gpu_deviceLUID is valid
+	bool client_gpu_deviceLUID_valid;
 
 	//! Try to choose the mode with this index for direct mode
 	int desired_mode;

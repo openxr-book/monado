@@ -36,11 +36,13 @@
  *
  */
 
-#define P_TRACE(d, ...) U_LOG_IFL_T(d->ll, __VA_ARGS__)
-#define P_DEBUG(d, ...) U_LOG_IFL_D(d->ll, __VA_ARGS__)
-#define P_INFO(d, ...) U_LOG_IFL_I(d->ll, __VA_ARGS__)
-#define P_WARN(d, ...) U_LOG_IFL_W(d->ll, __VA_ARGS__)
-#define P_ERROR(d, ...) U_LOG_IFL_E(d->ll, __VA_ARGS__)
+#define P_PROBER_BLUETOOTH_PRODUCT_COUNT 64
+
+#define P_TRACE(d, ...) U_LOG_IFL_T(d->log_level, __VA_ARGS__)
+#define P_DEBUG(d, ...) U_LOG_IFL_D(d->log_level, __VA_ARGS__)
+#define P_INFO(d, ...) U_LOG_IFL_I(d->log_level, __VA_ARGS__)
+#define P_WARN(d, ...) U_LOG_IFL_W(d->log_level, __VA_ARGS__)
+#define P_ERROR(d, ...) U_LOG_IFL_E(d->log_level, __VA_ARGS__)
 
 #ifdef XRT_OS_LINUX
 /*!
@@ -93,6 +95,8 @@ struct prober_device
 	struct
 	{
 		uint64_t id;
+
+		char product[P_PROBER_BLUETOOTH_PRODUCT_COUNT];
 	} bluetooth;
 
 #ifdef XRT_HAVE_LIBUVC
@@ -124,6 +128,21 @@ struct prober
 
 	struct u_config_json json;
 
+	/*!
+	 * List of created builder.
+	 */
+	struct xrt_builder **builders;
+
+	/*!
+	 * The number of created builders.
+	 */
+	size_t builder_count;
+
+	/*!
+	 * Has the list been locked.
+	 */
+	bool list_locked;
+
 #ifdef XRT_HAVE_LIBUSB
 	struct
 	{
@@ -142,9 +161,10 @@ struct prober
 	} uvc;
 #endif
 
-	struct xrt_auto_prober *auto_probers[MAX_AUTO_PROBERS];
 
-	size_t num_devices;
+	struct xrt_auto_prober *auto_probers[XRT_MAX_AUTO_PROBERS];
+
+	size_t device_count;
 	struct prober_device *devices;
 
 	size_t num_entries;
@@ -154,7 +174,7 @@ struct prober
 	size_t num_disabled_drivers;
 	char **disabled_drivers;
 
-	enum u_logging_level ll;
+	enum u_logging_level log_level;
 };
 
 
@@ -170,7 +190,7 @@ struct prober
  * @public @memberof prober
  */
 void
-p_dump_device(struct prober *p, struct prober_device *pdev, int id);
+p_dump_device(struct prober *p, struct prober_device *pdev, int id, bool use_stdout);
 
 /*!
  * Get or create a @ref prober_device from the device.
@@ -191,8 +211,12 @@ p_dev_get_usb_dev(struct prober *p,
  * @public @memberof prober
  */
 int
-p_dev_get_bluetooth_dev(
-    struct prober *p, uint64_t id, uint16_t vendor_id, uint16_t product_id, struct prober_device **out_pdev);
+p_dev_get_bluetooth_dev(struct prober *p,
+                        uint64_t id,
+                        uint16_t vendor_id,
+                        uint16_t product_id,
+                        const char *product_name,
+                        struct prober_device **out_pdev);
 
 /*!
  * @name Tracking systems

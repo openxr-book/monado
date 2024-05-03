@@ -17,6 +17,7 @@
 #include "math/m_vec2.h"
 #include "math/m_api.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <assert.h>
 
@@ -24,54 +25,54 @@
 DEBUG_GET_ONCE_NUM_OPTION(mesh_size, "XRT_MESH_SIZE", 64)
 
 
-typedef bool (*func_calc)(struct xrt_device *xdev, int view, float u, float v, struct xrt_uv_triplet *result);
+typedef bool (*func_calc)(struct xrt_device *xdev, uint32_t view, float u, float v, struct xrt_uv_triplet *result);
 
 static int
-index_for(int row, int col, int stride, int offset)
+index_for(int row, int col, uint32_t stride, uint32_t offset)
 {
 	return row * stride + col + offset;
 }
 
-void
-run_func(struct xrt_device *xdev, func_calc calc, int num_views, struct xrt_hmd_parts *target, size_t num)
+static void
+run_func(struct xrt_device *xdev, func_calc calc, struct xrt_hmd_parts *target, uint32_t num)
 {
 	assert(calc != NULL);
-	assert(num_views == 2);
-	assert(num_views <= 2);
 
-	size_t offset_vertices[2] = {0};
-	size_t offset_indices[2] = {0};
+	uint32_t view_count = target->view_count;
 
-	int cells_cols = num;
-	int cells_rows = num;
-	int vert_cols = cells_cols + 1;
-	int vert_rows = cells_rows + 1;
+	uint32_t vertex_offsets[XRT_MAX_VIEWS] = {0};
+	uint32_t index_offsets[XRT_MAX_VIEWS] = {0};
 
-	size_t num_vertices_per_view = vert_rows * vert_cols;
-	size_t num_vertices = num_vertices_per_view * num_views;
+	uint32_t cells_cols = num;
+	uint32_t cells_rows = num;
+	uint32_t vert_cols = cells_cols + 1;
+	uint32_t vert_rows = cells_rows + 1;
 
-	size_t num_uv_channels = 3;
-	size_t stride_in_floats = 2 + num_uv_channels * 2;
-	size_t num_floats = num_vertices * stride_in_floats;
+	uint32_t vertex_count_per_view = vert_rows * vert_cols;
+	uint32_t vertex_count = vertex_count_per_view * view_count;
 
-	float *verts = U_TYPED_ARRAY_CALLOC(float, num_floats);
+	uint32_t uv_channels_count = 3;
+	uint32_t stride_in_floats = 2 + uv_channels_count * 2;
+	uint32_t float_count = vertex_count * stride_in_floats;
+
+	float *verts = U_TYPED_ARRAY_CALLOC(float, float_count);
 
 	// Setup the vertices for all views.
-	size_t i = 0;
-	for (int view = 0; view < num_views; view++) {
-		offset_vertices[view] = i / stride_in_floats;
+	uint32_t i = 0;
+	for (uint32_t view = 0; view < view_count; view++) {
+		vertex_offsets[view] = i / stride_in_floats;
 
-		for (int r = 0; r < vert_rows; r++) {
+		for (uint32_t r = 0; r < vert_rows; r++) {
 			// This goes from 0 to 1.0 inclusive.
 			float v = (float)r / (float)cells_rows;
 
-			for (int c = 0; c < vert_cols; c++) {
+			for (uint32_t c = 0; c < vert_cols; c++) {
 				// This goes from 0 to 1.0 inclusive.
 				float u = (float)c / (float)cells_cols;
 
 				// Make the position in the range of [-1, 1]
-				verts[i + 0] = u * 2.0 - 1.0;
-				verts[i + 1] = v * 2.0 - 1.0;
+				verts[i + 0] = u * 2.0f - 1.0f;
+				verts[i + 1] = v * 2.0f - 1.0f;
 
 				if (!calc(xdev, view, u, v, (struct xrt_uv_triplet *)&verts[i + 2])) {
 					// bail on error, without updating
@@ -84,22 +85,22 @@ run_func(struct xrt_device *xdev, func_calc calc, int num_views, struct xrt_hmd_
 		}
 	}
 
-	size_t num_indices_per_view = cells_rows * (vert_cols * 2 + 2);
-	size_t num_indices = num_indices_per_view * num_views;
-	int *indices = U_TYPED_ARRAY_CALLOC(int, num_indices);
+	uint32_t index_count_per_view = cells_rows * (vert_cols * 2 + 2);
+	uint32_t index_count_total = index_count_per_view * view_count;
+	int *indices = U_TYPED_ARRAY_CALLOC(int, index_count_total);
 
 	// Set up indices for all views.
 	i = 0;
-	for (int view = 0; view < num_views; view++) {
-		offset_indices[view] = i;
+	for (uint32_t view = 0; view < view_count; view++) {
+		index_offsets[view] = i;
 
-		size_t off = offset_vertices[view];
+		uint32_t off = vertex_offsets[view];
 
-		for (int r = 0; r < cells_rows; r++) {
+		for (uint32_t r = 0; r < cells_rows; r++) {
 			// Top vertex row for this cell row, left most vertex.
 			indices[i++] = index_for(r, 0, vert_cols, off);
 
-			for (int c = 0; c < vert_cols; c++) {
+			for (uint32_t c = 0; c < vert_cols; c++) {
 				indices[i++] = index_for(r, c, vert_cols, off);
 				indices[i++] = index_for(r + 1, c, vert_cols, off);
 			}
@@ -113,14 +114,14 @@ run_func(struct xrt_device *xdev, func_calc calc, int num_views, struct xrt_hmd_
 	target->distortion.models |= XRT_DISTORTION_MODEL_MESHUV;
 	target->distortion.mesh.vertices = verts;
 	target->distortion.mesh.stride = stride_in_floats * sizeof(float);
-	target->distortion.mesh.num_vertices = num_vertices;
-	target->distortion.mesh.num_uv_channels = num_uv_channels;
+	target->distortion.mesh.vertex_count = vertex_count;
+	target->distortion.mesh.uv_channels_count = uv_channels_count;
 	target->distortion.mesh.indices = indices;
-	target->distortion.mesh.num_indices[0] = num_indices_per_view;
-	target->distortion.mesh.num_indices[1] = num_indices_per_view;
-	target->distortion.mesh.offset_indices[0] = offset_indices[0];
-	target->distortion.mesh.offset_indices[1] = offset_indices[1];
-	target->distortion.mesh.total_num_indices = num_indices;
+	target->distortion.mesh.index_count_total = index_count_total;
+	for (uint32_t view = 0; view < view_count; ++view) {
+		target->distortion.mesh.index_counts[view] = index_count_per_view;
+		target->distortion.mesh.index_offsets[view] = index_offsets[view];
+	}
 }
 
 bool
@@ -129,20 +130,20 @@ u_compute_distortion_vive(struct u_vive_values *values, float u, float v, struct
 	// Reading the whole struct like this gives the compiler more opportunity to optimize.
 	const struct u_vive_values val = *values;
 
-	const float common_factor_value = 0.5 / (1.0 + val.grow_for_undistort);
+	const float common_factor_value = 0.5f / (1.0f + val.grow_for_undistort);
 	const struct xrt_vec2 factor = {
 	    common_factor_value,
 	    common_factor_value * val.aspect_x_over_y,
 	};
 
 	// Results r/g/b.
-	struct xrt_vec2 tc[3];
+	struct xrt_vec2 tc[3] = {{0, 0}, {0, 0}, {0, 0}};
 
 	// Dear compiler, please vectorize.
 	for (int i = 0; i < 3; i++) {
 		struct xrt_vec2 texCoord = {
-		    2.0 * u - 1.0,
-		    2.0 * v - 1.0,
+		    2.f * u - 1.f,
+		    2.f * v - 1.f,
 		};
 
 		texCoord.y /= val.aspect_x_over_y;
@@ -167,11 +168,11 @@ u_compute_distortion_vive(struct u_vive_values *values, float u, float v, struct
 		 *    1.0 + r^2 * ((k1 + r^2 * k2) + r^2 * k3)
 		 */
 
-		float top = 1.0;
-		float bottom = 1.0 + r2 * (k1 + r2 * (k2 + r2 * k3));
+		float top = 1.f;
+		float bottom = 1.f + r2 * (k1 + r2 * (k2 + r2 * k3));
 		float d = (top / bottom) + k4;
 
-		struct xrt_vec2 offset = {0.5, 0.5};
+		struct xrt_vec2 offset = {0.5f, 0.5f};
 
 		tc[i].x = offset.x + (texCoord.x * d + val.center[i].x) * factor.x;
 		tc[i].y = offset.y + (texCoord.y * d + val.center[i].y) * factor.y;
@@ -294,21 +295,21 @@ u_compute_distortion_ns_p2d(struct u_ns_p2d_values *values, int view, float u, f
 {
 	// I think that OpenCV and Monado have different definitions of v coordinates, but not sure. if not,
 	// unexplainable
-	v = 1.0 - v;
+	v = 1.0f - v;
 
 	float x_ray = u_ns_polyval2d(u, v, view ? values->x_coefficients_left : values->x_coefficients_right);
 	float y_ray = u_ns_polyval2d(u, v, view ? values->y_coefficients_left : values->y_coefficients_right);
 
 	struct xrt_fov fov = values->fov[view];
 
-	float left_ray_bound = tan(fov.angle_left);
-	float right_ray_bound = tan(fov.angle_right);
-	float up_ray_bound = tan(fov.angle_up);
-	float down_ray_bound = tan(fov.angle_down);
+	float left_ray_bound = tanf(fov.angle_left);
+	float right_ray_bound = tanf(fov.angle_right);
+	float up_ray_bound = tanf(fov.angle_up);
+	float down_ray_bound = tanf(fov.angle_down);
 
-	float u_eye = math_map_ranges(x_ray, left_ray_bound, right_ray_bound, 0, 1);
+	float u_eye = (float)math_map_ranges(x_ray, left_ray_bound, right_ray_bound, 0, 1);
 
-	float v_eye = math_map_ranges(y_ray, down_ray_bound, up_ray_bound, 0, 1);
+	float v_eye = (float)math_map_ranges(y_ray, down_ray_bound, up_ray_bound, 0, 1);
 
 	// boilerplate, put the UV coordinates in all the RGB slots
 	result->r.x = u_eye;
@@ -324,41 +325,63 @@ u_compute_distortion_ns_p2d(struct u_ns_p2d_values *values, int view, float u, f
 
 /*
  *
- * Moses's "variable-IPD 2D" distortion
- * If Moses goes away or stops using North Star for some reason, please remove this - as of june 2021 nobody else is
- * using it.
+ * Moshi Turner's mesh-grid-based North Star distortion correction.
+ * This is a relatively ad-hoc thing I wrote; if this ends up going unused feel free to remove it.
  *
  */
 
 bool
-u_compute_distortion_ns_vipd(struct u_ns_vipd_values *values, int view, float u, float v, struct xrt_uv_triplet *result)
+u_compute_distortion_ns_meshgrid(
+    struct u_ns_meshgrid_values *values, int view, float u, float v, struct xrt_uv_triplet *result)
 {
-	int u_index_int = floorf(u * 64);
-	int v_index_int = floorf(v * 64);
-	float u_index_frac = (u * 64) - u_index_int;
-	float v_index_frac = (v * 64) - v_index_int;
+	int u_edge_num = (values->num_grid_points_u - 1);
+	int v_edge_num = (values->num_grid_points_v - 1);
 
-	float x_ray;
-	float y_ray;
+	int u_index_int = floorf(u * u_edge_num);
+	int v_index_int = floorf(v * v_edge_num);
+	float u_index_frac = (u * u_edge_num) - u_index_int;
+	float v_index_frac = (v * v_edge_num) - v_index_int;
 
-	if (u_index_frac > 0.0001) {
-		// Probably this codepath if grid size is not 65x65
+	// Imagine this like a ray coming out of your eye with x, y coordinate bearing and z coordinate -1.0f
+	struct xrt_vec2 bearing = {0};
+
+	int stride = values->num_grid_points_u;
+
+	float eps = 0.000001;
+
+	struct xrt_vec2 *grid = values->grid[view];
+	int topleft_i = (v_index_int * stride) + u_index_int;
+	int topright_i = (v_index_int * stride) + u_index_int + 1;
+	int bottomleft_i = ((v_index_int + 1) * stride) + u_index_int;
+	int bottomright_i = ((v_index_int + 1) * stride) + u_index_int + 1;
+
+	if (u_index_frac > eps && v_index_frac > eps) {
+		// Usual case - we're in the middle of a cell
 		// {top,bottom}-{left,right} notation might be inaccurate. The code *works* right now but don't take its
 		// word when reading
-		struct xrt_vec2 topleft = values->grid_for_use.grid[view][v_index_int][u_index_int];
-		struct xrt_vec2 topright = values->grid_for_use.grid[view][v_index_int][u_index_int + 1];
-		struct xrt_vec2 bottomleft = values->grid_for_use.grid[view][v_index_int + 1][u_index_int];
-		struct xrt_vec2 bottomright = values->grid_for_use.grid[view][v_index_int + 1][u_index_int + 1];
-		struct xrt_vec2 leftcorrect = {math_map_ranges(v_index_frac, 0, 1, topleft.x, bottomleft.x),
-		                               math_map_ranges(v_index_frac, 0, 1, topleft.y, bottomleft.y)};
-		struct xrt_vec2 rightcorrect = {math_map_ranges(v_index_frac, 0, 1, topright.x, bottomright.x),
-		                                math_map_ranges(v_index_frac, 0, 1, topright.y, bottomright.y)};
-		y_ray = math_map_ranges(u_index_frac, 0, 1, leftcorrect.x, rightcorrect.x);
-		x_ray = math_map_ranges(u_index_frac, 0, 1, leftcorrect.y, rightcorrect.y);
+		struct xrt_vec2 topleft = grid[topleft_i];
+		struct xrt_vec2 topright = grid[topright_i];
+		struct xrt_vec2 bottomleft = grid[bottomleft_i];
+		struct xrt_vec2 bottomright = grid[bottomright_i];
+
+		struct xrt_vec2 left_point_on_line_segment = m_vec2_lerp(topleft, bottomleft, v_index_frac);
+		struct xrt_vec2 right_point_on_line_segment = m_vec2_lerp(topright, bottomright, v_index_frac);
+
+		bearing = m_vec2_lerp(left_point_on_line_segment, right_point_on_line_segment, u_index_frac);
+
+	} else if (v_index_frac > eps) {
+		// We're on a vertical edge
+		struct xrt_vec2 top = values->grid[view][topleft_i];
+		struct xrt_vec2 bottom = values->grid[view][bottomleft_i];
+		bearing = m_vec2_lerp(top, bottom, v_index_frac);
+	} else if (u_index_frac > eps) {
+		// We're on a horizontal edge
+		struct xrt_vec2 left = values->grid[view][topleft_i];
+		struct xrt_vec2 right = values->grid[view][topright_i];
+		bearing = m_vec2_lerp(left, right, u_index_frac);
 	} else {
-		// probably this path if grid size is 65x65 like normal
-		x_ray = values->grid_for_use.grid[view][v_index_int][u_index_int].y;
-		y_ray = values->grid_for_use.grid[view][v_index_int][u_index_int].x;
+		int acc_idx = (v_index_int * stride) + u_index_int;
+		bearing = values->grid[view][acc_idx];
 	}
 
 	struct xrt_fov fov = values->fov[view];
@@ -367,11 +390,9 @@ u_compute_distortion_ns_vipd(struct u_ns_vipd_values *values, int view, float u,
 	float right_ray_bound = tan(fov.angle_right);
 	float up_ray_bound = tan(fov.angle_up);
 	float down_ray_bound = tan(fov.angle_down);
-	// printf("%f %f", fov.angle_down, fov.angle_up);
 
-	float u_eye = math_map_ranges(x_ray, left_ray_bound, right_ray_bound, 0, 1);
-
-	float v_eye = math_map_ranges(y_ray, down_ray_bound, up_ray_bound, 0, 1);
+	float u_eye = math_map_ranges(bearing.x, left_ray_bound, right_ray_bound, 0, 1);
+	float v_eye = math_map_ranges(bearing.y, down_ray_bound, up_ray_bound, 0, 1);
 
 	// boilerplate, put the UV coordinates in all the RGB slots
 	result->r.x = u_eye;
@@ -380,8 +401,6 @@ u_compute_distortion_ns_vipd(struct u_ns_vipd_values *values, int view, float u,
 	result->g.y = v_eye;
 	result->b.x = u_eye;
 	result->b.y = v_eye;
-	// printf("%f %f\n", values->grid_for_use.grid[view][v_index_int][u_index_int].y,
-	// values->grid_for_use.grid[view][v_index_int][u_index_int].x);
 
 	return true;
 }
@@ -408,7 +427,7 @@ u_compute_distortion_none(float u, float v, struct xrt_uv_triplet *result)
  */
 
 bool
-u_distortion_mesh_none(struct xrt_device *xdev, int view, float u, float v, struct xrt_uv_triplet *result)
+u_distortion_mesh_none(struct xrt_device *xdev, uint32_t view, float u, float v, struct xrt_uv_triplet *result)
 {
 	return u_compute_distortion_none(u, v, result);
 }
@@ -419,7 +438,7 @@ u_distortion_mesh_fill_in_none(struct xrt_device *xdev)
 	struct xrt_hmd_parts *target = xdev->hmd;
 
 	// Do the generation.
-	run_func(xdev, u_distortion_mesh_none, 2, target, 1);
+	run_func(xdev, u_distortion_mesh_none, target, 1);
 
 	// Make the target mostly usable.
 	target->distortion.models |= XRT_DISTORTION_MODEL_NONE;
@@ -462,6 +481,7 @@ u_distortion_mesh_fill_in_compute(struct xrt_device *xdev)
 
 	struct xrt_hmd_parts *target = xdev->hmd;
 
-	size_t num = debug_get_num_option_mesh_size();
-	run_func(xdev, calc, 2, target, num);
+	uint32_t num = (uint32_t)debug_get_num_option_mesh_size();
+
+	run_func(xdev, calc, target, num);
 }

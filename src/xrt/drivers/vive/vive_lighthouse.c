@@ -7,6 +7,8 @@
  * @author Lubosz Sarnecki <lubosz.sarnecki@collabora.com>
  * @ingroup drv_vive
  */
+// IWYU pragma: no_include <asm/int-ll64.h>
+// IWYU pragma: no_include <linux/byteorder/little_endian.h>
 
 #include <asm/byteorder.h>
 #include <stdint.h>
@@ -20,13 +22,13 @@
 
 #include "vive_lighthouse.h"
 
-static enum u_logging_level ll;
+static enum u_logging_level log_level;
 
-#define LH_TRACE(...) U_LOG_IFL_T(ll, __VA_ARGS__)
-#define LH_DEBUG(...) U_LOG_IFL_D(ll, __VA_ARGS__)
-#define LH_INFO(...) U_LOG_IFL_I(ll, __VA_ARGS__)
-#define LH_WARN(...) U_LOG_IFL_W(ll, __VA_ARGS__)
-#define LH_ERROR(...) U_LOG_IFL_E(ll, __VA_ARGS__)
+#define LH_TRACE(...) U_LOG_IFL_T(log_level, __VA_ARGS__)
+#define LH_DEBUG(...) U_LOG_IFL_D(log_level, __VA_ARGS__)
+#define LH_INFO(...) U_LOG_IFL_I(log_level, __VA_ARGS__)
+#define LH_WARN(...) U_LOG_IFL_W(log_level, __VA_ARGS__)
+#define LH_ERROR(...) U_LOG_IFL_E(log_level, __VA_ARGS__)
 
 DEBUG_GET_ONCE_LOG_OPTION(vive_log, "VIVE_LOG", U_LOGGING_WARN)
 
@@ -435,7 +437,7 @@ _handle_sweep_pulse(struct lighthouse_watchman *watchman, uint8_t id, uint32_t t
 	}
 
 	if (frame->sweep_ids & (1 << id)) {
-		LH_WARN("%s: sensor %u hit twice per frame, assuming reflection", watchman->name, id);
+		LH_WARN("%s: sensor %u triggered twice per frame, assuming reflection", watchman->name, id);
 		return;
 	}
 
@@ -538,5 +540,5 @@ lighthouse_watchman_init(struct lighthouse_watchman *watchman, const char *name)
 	watchman->last_timestamp = 0;
 	watchman->last_sync.timestamp = 0;
 	watchman->last_sync.duration = 0;
-	ll = debug_get_log_option_vive_log();
+	log_level = debug_get_log_option_vive_log();
 }

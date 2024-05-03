@@ -3,7 +3,7 @@
 /*!
  * @file
  * @brief  Common settings structs to be transferred between different parts of
- *         Monadon.
+ *         Monado, mainly for tracking and camera usage.
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @ingroup xrt_iface
  */
@@ -32,8 +32,9 @@ enum xrt_settings_camera_type
 {
 	XRT_SETTINGS_CAMERA_TYPE_REGULAR_MONO = 0,
 	XRT_SETTINGS_CAMERA_TYPE_REGULAR_SBS = 1, // side-by-side
-	XRT_SETTINGS_CAMERA_TYPE_PS4 = 2,
-	XRT_SETTINGS_CAMERA_TYPE_LEAP_MOTION = 3,
+	XRT_SETTINGS_CAMERA_TYPE_SLAM = 2,
+	XRT_SETTINGS_CAMERA_TYPE_PS4 = 3,
+	XRT_SETTINGS_CAMERA_TYPE_LEAP_MOTION = 4,
 };
 
 #define XRT_SETTINGS_CAMERA_NAME_LENGTH 256
@@ -41,6 +42,9 @@ enum xrt_settings_camera_type
 
 #define XRT_MAX_TRACKING_OVERRIDES 16
 
+/*!
+ * Tracking override type.
+ */
 enum xrt_tracking_override_type
 {
 	XRT_TRACKING_OVERRIDE_DIRECT = 0,

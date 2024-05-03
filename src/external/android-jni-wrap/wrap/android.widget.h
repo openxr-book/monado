@@ -1,6 +1,6 @@
 // Copyright 2020-2021, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
-// Author: Ryan Pavlik <ryan.pavlik@collabora.com>
+// Author: Rylie Pavlik <rylie.pavlik@collabora.com>
 
 #pragma once
 
@@ -74,7 +74,7 @@ class Toast : public ObjectWrapperBase {
      *
      */
     static Toast makeText(content::Context const &context,
-                          jni::Object const &text, int32_t duration);
+                          std::string const &stringParam, int32_t duration);
 
     /*!
      * Wrapper for the makeText static method

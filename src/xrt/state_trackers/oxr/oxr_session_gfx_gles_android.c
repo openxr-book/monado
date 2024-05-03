@@ -1,14 +1,18 @@
-// Copyright 2018-2021, Collabora, Ltd.
+// Copyright 2018-2022, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Holds OpenGLES-specific session functions.
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @author Drew DeVault <sir@cmpwn.com>
  * @author Simon Ser <contact@emersion.fr>
  * @ingroup oxr_main
  * @ingroup comp_client
  */
+
+#ifndef XR_USE_GRAPHICS_API_OPENGL_ES
+#error "Must build this file with OpenGL ES enabled!"
+#endif
 
 #include <stdlib.h>
 
@@ -21,7 +25,6 @@
 
 #include "xrt/xrt_instance.h"
 
-#ifdef XR_USE_GRAPHICS_API_OPENGL_ES
 
 #include "ogl/ogl_api.h"
 #include "ogl/egl_api.h"
@@ -29,6 +32,7 @@
 #include "xrt/xrt_gfx_egl.h"
 
 #include <dlfcn.h>
+
 
 XrResult
 oxr_session_populate_gles_android(struct oxr_logger *log,
@@ -55,6 +59,12 @@ oxr_session_populate_gles_android(struct oxr_logger *log,
 		return oxr_error(log, XR_ERROR_INITIALIZATION_FAILED, "Call to getProcAddress(eglQueryContext) failed");
 	}
 
+	if (next->context == EGL_NO_CONTEXT) {
+		dlclose(so);
+		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID,
+		                 "XrGraphicsBindingOpenGLESAndroidKHR has EGL_NO_CONTEXT");
+	}
+
 	if (!eglQueryContext(next->display, next->context, EGL_CONTEXT_CLIENT_TYPE, &egl_client_type)) {
 		dlclose(so);
 		return oxr_error(log, XR_ERROR_INITIALIZATION_FAILED,
@@ -66,6 +76,13 @@ oxr_session_populate_gles_android(struct oxr_logger *log,
 		return oxr_error(log, XR_ERROR_INITIALIZATION_FAILED, "Unsupported EGL client type");
 	}
 
+	bool renderdoc_enabled = false;
+
+#if defined(XRT_FEATURE_RENDERDOC)
+	if (sess->sys->inst->rdoc_api) {
+		renderdoc_enabled = true;
+	}
+#endif
 
 	struct xrt_compositor_native *xcn = sess->xcn;
 	struct xrt_compositor_gl *xcgl = NULL;
@@ -75,11 +92,12 @@ oxr_session_populate_gles_android(struct oxr_logger *log,
 	    next->config,                                   //
 	    next->context,                                  //
 	    get_proc_addr,                                  //
+	    renderdoc_enabled,                              //
 	    &xcgl);                                         //
 
 	if (xret == XRT_ERROR_EGL_CONFIG_MISSING) {
 		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,
-		                 "XrGraphicsBindingEGLMNDX::config can not be null when EGL_KHR_no_config_context is "
+		                 "XrGraphicsBindingEGLMNDX::config cannot be null when EGL_KHR_no_config_context is "
 		                 "not supported by the display.");
 	}
 	if (xret != XR_SUCCESS || xcgl == NULL) {
@@ -91,5 +109,3 @@ oxr_session_populate_gles_android(struct oxr_logger *log,
 
 	return XR_SUCCESS;
 }
-
-#endif

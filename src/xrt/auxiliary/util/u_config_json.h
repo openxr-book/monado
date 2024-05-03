@@ -59,7 +59,9 @@ u_config_json_save_calibration(struct u_config_json *json, struct xrt_settings_t
  * @ingroup aux_util
  */
 void
-u_config_json_save_overrides(struct u_config_json *json, struct xrt_tracking_override *overrides, size_t num_overrides);
+u_config_json_save_overrides(struct u_config_json *json,
+                             struct xrt_tracking_override *overrides,
+                             size_t override_count);
 
 /*!
  * Read from the JSON loaded json config file and returns the active config,
@@ -90,7 +92,7 @@ u_config_json_get_tracking_settings(struct u_config_json *json, struct xrt_setti
 bool
 u_config_json_get_tracking_overrides(struct u_config_json *json,
                                      struct xrt_tracking_override *out_overrides,
-                                     size_t *out_num_overrides);
+                                     size_t *out_override_count);
 
 /*!
  * Extract remote settings from the JSON.
@@ -98,7 +100,22 @@ u_config_json_get_tracking_overrides(struct u_config_json *json,
  * @ingroup aux_util
  */
 bool
-u_config_json_get_remote_port(struct u_config_json *json, int *out_port);
+u_config_json_get_remote_settings(struct u_config_json *json, int *out_port, uint32_t *out_view_count);
+
+
+enum u_gui_state_scene
+{
+	GUI_STATE_SCENE_CALIBRATE
+};
+
+void
+u_gui_state_open_file(struct u_config_json *json);
+
+struct cJSON *
+u_gui_state_get_scene(struct u_config_json *json, enum u_gui_state_scene scene);
+
+void
+u_gui_state_save_scene(struct u_config_json *json, enum u_gui_state_scene scene, struct cJSON *new_state);
 
 #ifdef __cplusplus
 }

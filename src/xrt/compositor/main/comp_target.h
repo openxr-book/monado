@@ -24,16 +24,28 @@ extern "C" {
 
 /*!
  * For marking timepoints on a frame's lifetime, not a async event.
+ *
+ * @ingroup comp_main
  */
 enum comp_target_timing_point
 {
-	COMP_TARGET_TIMING_POINT_WAKE_UP, //<! Woke up after sleeping in wait frame.
-	COMP_TARGET_TIMING_POINT_BEGIN,   //<! Began CPU side work for GPU.
-	COMP_TARGET_TIMING_POINT_SUBMIT,  //<! Submitted work to the GPU.
+	//! Woke up after sleeping in wait frame.
+	COMP_TARGET_TIMING_POINT_WAKE_UP,
+
+	//! Began CPU side work for GPU.
+	COMP_TARGET_TIMING_POINT_BEGIN,
+
+	//! Just before submitting work to the GPU.
+	COMP_TARGET_TIMING_POINT_SUBMIT_BEGIN,
+
+	//! Just after submitting work to the GPU.
+	COMP_TARGET_TIMING_POINT_SUBMIT_END,
 };
 
 /*!
  * If the target should use the display timing information.
+ *
+ * @ingroup comp_main
  */
 enum comp_target_display_timing_usage
 {
@@ -50,6 +62,58 @@ struct comp_target_image
 {
 	VkImage handle;
 	VkImageView view;
+};
+
+/*!
+ * Information given in when creating the swapchain images,
+ * argument to @ref comp_target_create_images.
+ *
+ * @ingroup comp_main
+ */
+struct comp_target_create_images_info
+{
+	//! Image usage for the images, must be followed.
+	VkImageUsageFlags image_usage;
+
+	//! Acceptable formats for the images, must be followed.
+	VkFormat formats[XRT_MAX_SWAPCHAIN_FORMATS];
+
+	// Number of formats.
+	uint32_t format_count;
+
+	//! Preferred extent, can be ignored by the target.
+	VkExtent2D extent;
+
+	//! Preferred color space, can be ignored by the target.
+	VkColorSpaceKHR color_space;
+
+	// Preferred present_mode, can be ignored by the target.
+	VkPresentModeKHR present_mode;
+};
+
+/*!
+ * Collection of semaphores needed for a target.
+ *
+ * @ingroup comp_main
+ */
+struct comp_target_semaphores
+{
+	/*!
+	 * Optional semaphore the target should signal when present is complete.
+	 */
+	VkSemaphore present_complete;
+
+	/*!
+	 * Semaphore the renderer (consuming this target)
+	 * should signal when rendering is complete.
+	 */
+	VkSemaphore render_complete;
+
+	/*!
+	 * If true, @ref render_complete is a timeline
+	 * semaphore instead of a binary semaphore.
+	 */
+	bool render_complete_is_timeline;
 };
 
 /*!
@@ -79,13 +143,15 @@ struct comp_target
 	VkFormat format;
 
 	//! Number of images that this target has.
-	uint32_t num_images;
+	uint32_t image_count;
 	//! Array of images and image views for rendering.
 	struct comp_target_image *images;
 
 	//! Transformation of the current surface, required for pre-rotation
 	VkSurfaceTransformFlagBitsKHR surface_transform;
 
+	// Holds semaphore information.
+	struct comp_target_semaphores semaphores;
 
 	/*
 	 *
@@ -118,38 +184,43 @@ struct comp_target
 	 *
 	 * @pre @ref check_ready returns true
 	 */
-	void (*create_images)(struct comp_target *ct,
-	                      uint32_t preferred_width,
-	                      uint32_t preferred_height,
-	                      VkFormat preferred_color_format,
-	                      VkColorSpaceKHR preferred_color_space,
-	                      VkImageUsageFlags image_usage,
-	                      VkPresentModeKHR present_mode);
+	void (*create_images)(struct comp_target *ct, const struct comp_target_create_images_info *create_info);
 
 	/*!
 	 * Has this target successfully had images created?
 	 *
-	 * Call before calling @ref acquire - if false but @ref check_ready is true, you'll need to call @ref
-	 * create_images
+	 * Call before calling @ref acquire - if false but @ref check_ready is
+	 * true, you'll need to call @ref create_images.
 	 */
 	bool (*has_images)(struct comp_target *ct);
 
 	/*!
 	 * Acquire the next image for rendering.
 	 *
-	 * @pre @ref has_images returns true
+	 * If @ref comp_target_semaphores::present_complete is not null,
+	 * your use of this image should wait on it..
+	 *
+	 * @pre @ref has_images() returns true
 	 */
-	VkResult (*acquire)(struct comp_target *ct, VkSemaphore semaphore, uint32_t *out_index);
+	VkResult (*acquire)(struct comp_target *ct, uint32_t *out_index);
 
 	/*!
 	 * Present the image at index to the screen.
 	 *
 	 * @pre @ref acquire succeeded for the same @p semaphore and @p index you are passing
+	 *
+	 * @param ct self
+	 * @param queue The Vulkan queue being used
+	 * @param index The swapchain image index to present
+	 * @param timeline_semaphore_value The value to await on @ref comp_target_semaphores::render_complete
+	 *                                 if @ref comp_target_semaphores::render_complete_is_timeline is true.
+	 * @param desired_present_time_ns The timestamp to present at, ideally.
+	 * @param present_slop_ns TODO
 	 */
 	VkResult (*present)(struct comp_target *ct,
 	                    VkQueue queue,
 	                    uint32_t index,
-	                    VkSemaphore semaphore,
+	                    uint64_t timeline_semaphore_value,
 	                    uint64_t desired_present_time_ns,
 	                    uint64_t present_slop_ns);
 
@@ -169,12 +240,12 @@ struct comp_target
 	 * Predict when the next frame should be started and when it will be
 	 * turned into photons by the hardware.
 	 */
-	void (*calc_frame_timings)(struct comp_target *ct,
-	                           int64_t *out_frame_id,
-	                           uint64_t *out_wake_up_time_ns,
-	                           uint64_t *out_desired_present_time_ns,
-	                           uint64_t *out_present_slop_ns,
-	                           uint64_t *out_predicted_display_time_ns);
+	void (*calc_frame_pacing)(struct comp_target *ct,
+	                          int64_t *out_frame_id,
+	                          uint64_t *out_wake_up_time_ns,
+	                          uint64_t *out_desired_present_time_ns,
+	                          uint64_t *out_present_slop_ns,
+	                          uint64_t *out_predicted_display_time_ns);
 
 	/*!
 	 * The compositor tells the target a timing information about a single
@@ -192,6 +263,23 @@ struct comp_target
 	 */
 	VkResult (*update_timings)(struct comp_target *ct);
 
+	/*!
+	 * Provide frame timing information about GPU start and stop time.
+	 *
+	 * Depend on when the information is delivered this can be called at any
+	 * point of the following frames.
+	 *
+	 * @param[in] ct           The compositor target.
+	 * @param[in] frame_id     The frame ID to record for.
+	 * @param[in] gpu_start_ns When the GPU work startred.
+	 * @param[in] gpu_end_ns   When the GPU work stopped.
+	 * @param[in] when_ns      When the informatioon collected, nominally
+	 *                         from @ref os_monotonic_get_ns.
+	 *
+	 * @see @ref frame-pacing.
+	 */
+	void (*info_gpu)(
+	    struct comp_target *ct, int64_t frame_id, uint64_t gpu_start_ns, uint64_t gpu_end_ns, uint64_t when_ns);
 
 	/*
 	 *
@@ -259,24 +347,11 @@ comp_target_check_ready(struct comp_target *ct)
  * @ingroup comp_main
  */
 static inline void
-comp_target_create_images(struct comp_target *ct,
-                          uint32_t preferred_width,
-                          uint32_t preferred_height,
-                          VkFormat preferred_color_format,
-                          VkColorSpaceKHR preferred_color_space,
-                          VkImageUsageFlags image_usage,
-                          VkPresentModeKHR present_mode)
+comp_target_create_images(struct comp_target *ct, const struct comp_target_create_images_info *create_info)
 {
 	COMP_TRACE_MARKER();
 
-	ct->create_images(          //
-	    ct,                     //
-	    preferred_width,        //
-	    preferred_height,       //
-	    preferred_color_format, //
-	    preferred_color_space,  //
-	    image_usage,            //
-	    present_mode);          //
+	ct->create_images(ct, create_info);
 }
 
 /*!
@@ -300,11 +375,11 @@ comp_target_has_images(struct comp_target *ct)
  * @ingroup comp_main
  */
 static inline VkResult
-comp_target_acquire(struct comp_target *ct, VkSemaphore semaphore, uint32_t *out_index)
+comp_target_acquire(struct comp_target *ct, uint32_t *out_index)
 {
 	COMP_TRACE_MARKER();
 
-	return ct->acquire(ct, semaphore, out_index);
+	return ct->acquire(ct, out_index);
 }
 
 /*!
@@ -317,20 +392,20 @@ static inline VkResult
 comp_target_present(struct comp_target *ct,
                     VkQueue queue,
                     uint32_t index,
-                    VkSemaphore semaphore,
+                    uint64_t timeline_semaphore_value,
                     uint64_t desired_present_time_ns,
                     uint64_t present_slop_ns)
 
 {
 	COMP_TRACE_MARKER();
 
-	return ct->present(          //
-	    ct,                      //
-	    queue,                   //
-	    index,                   //
-	    semaphore,               //
-	    desired_present_time_ns, //
-	    present_slop_ns);        //
+	return ct->present(           //
+	    ct,                       //
+	    queue,                    //
+	    index,                    //
+	    timeline_semaphore_value, //
+	    desired_present_time_ns,  //
+	    present_slop_ns);         //
 }
 
 /*!
@@ -348,22 +423,22 @@ comp_target_flush(struct comp_target *ct)
 }
 
 /*!
- * @copydoc comp_target::calc_frame_timings
+ * @copydoc comp_target::calc_frame_pacing
  *
  * @public @memberof comp_target
  * @ingroup comp_main
  */
 static inline void
-comp_target_calc_frame_timings(struct comp_target *ct,
-                               int64_t *out_frame_id,
-                               uint64_t *out_wake_up_time_ns,
-                               uint64_t *out_desired_present_time_ns,
-                               uint64_t *out_present_slop_ns,
-                               uint64_t *out_predicted_display_time_ns)
+comp_target_calc_frame_pacing(struct comp_target *ct,
+                              int64_t *out_frame_id,
+                              uint64_t *out_wake_up_time_ns,
+                              uint64_t *out_desired_present_time_ns,
+                              uint64_t *out_present_slop_ns,
+                              uint64_t *out_predicted_display_time_ns)
 {
 	COMP_TRACE_MARKER();
 
-	ct->calc_frame_timings(             //
+	ct->calc_frame_pacing(              //
 	    ct,                             //
 	    out_frame_id,                   //
 	    out_wake_up_time_ns,            //
@@ -403,18 +478,33 @@ comp_target_mark_begin(struct comp_target *ct, int64_t frame_id, uint64_t when_b
 }
 
 /*!
- * Quick helper for marking submit.
+ * Quick helper for marking submit began.
  * @copydoc comp_target::mark_timing_point
  *
  * @public @memberof comp_target
  * @ingroup comp_main
  */
 static inline void
-comp_target_mark_submit(struct comp_target *ct, int64_t frame_id, uint64_t when_submitted_ns)
+comp_target_mark_submit_begin(struct comp_target *ct, int64_t frame_id, uint64_t when_submit_began_ns)
 {
 	COMP_TRACE_MARKER();
 
-	ct->mark_timing_point(ct, COMP_TARGET_TIMING_POINT_SUBMIT, frame_id, when_submitted_ns);
+	ct->mark_timing_point(ct, COMP_TARGET_TIMING_POINT_SUBMIT_BEGIN, frame_id, when_submit_began_ns);
+}
+
+/*!
+ * Quick helper for marking submit end.
+ * @copydoc comp_target::mark_timing_point
+ *
+ * @public @memberof comp_target
+ * @ingroup comp_main
+ */
+static inline void
+comp_target_mark_submit_end(struct comp_target *ct, int64_t frame_id, uint64_t when_submit_end_ns)
+{
+	COMP_TRACE_MARKER();
+
+	ct->mark_timing_point(ct, COMP_TARGET_TIMING_POINT_SUBMIT_END, frame_id, when_submit_end_ns);
 }
 
 /*!
@@ -429,6 +519,21 @@ comp_target_update_timings(struct comp_target *ct)
 	COMP_TRACE_MARKER();
 
 	return ct->update_timings(ct);
+}
+
+/*!
+ * @copydoc comp_target::info_gpu
+ *
+ * @public @memberof comp_target
+ * @ingroup comp_main
+ */
+static inline void
+comp_target_info_gpu(
+    struct comp_target *ct, int64_t frame_id, uint64_t gpu_start_ns, uint64_t gpu_end_ns, uint64_t when_ns)
+{
+	COMP_TRACE_MARKER();
+
+	ct->info_gpu(ct, frame_id, gpu_start_ns, gpu_end_ns, when_ns);
 }
 
 /*!
@@ -464,6 +569,95 @@ comp_target_destroy(struct comp_target **ct_ptr)
 
 	ct->destroy(ct);
 	*ct_ptr = NULL;
+}
+
+/*!
+ * A factory of targets.
+ *
+ * @ingroup comp_main
+ */
+struct comp_target_factory
+{
+	//! Pretty loggable name of target type.
+	const char *name;
+
+	//! Short all lowercase identifier for target type.
+	const char *identifier;
+
+	//! Does this factory require Vulkan to have been initialized.
+	bool requires_vulkan_for_create;
+
+	/*!
+	 * Is this a deferred target that can have it's creation
+	 * delayed even further then after Vulkan initialization.
+	 */
+	bool is_deferred;
+
+	/*!
+	 * Vulkan version that is required or 0 if no specific
+	 * requirement, equivalent to VK_MAKE_VERSION(1, 0, 0)
+	 */
+	uint32_t required_instance_version;
+
+	//! Required instance extensions.
+	const char **required_instance_extensions;
+
+	//! Required instance extension count.
+	size_t required_instance_extension_count;
+
+	//! Optional device extensions.
+	const char **optional_device_extensions;
+
+	//! Optional device extension count.
+	size_t optional_device_extension_count;
+
+	/*!
+	 * Checks if this target can be detected, is the preferred target or
+	 * some other special consideration that this target should be used over
+	 * all other targets.
+	 *
+	 * This is needed for NVIDIA direct mode which window must be created
+	 * after vulkan has initialized.
+	 */
+	bool (*detect)(const struct comp_target_factory *ctf, struct comp_compositor *c);
+
+	/*!
+	 * Create a target from this factory, some targets requires Vulkan to
+	 * have been initialised, see @ref requires_vulkan_for_create.
+	 */
+	bool (*create_target)(const struct comp_target_factory *ctf,
+	                      struct comp_compositor *c,
+	                      struct comp_target **out_ct);
+};
+
+/*!
+ * @copydoc comp_target_factory::detect
+ *
+ * @public @memberof comp_target_factory
+ * @ingroup comp_main
+ */
+static inline bool
+comp_target_factory_detect(const struct comp_target_factory *ctf, struct comp_compositor *c)
+{
+	COMP_TRACE_MARKER();
+
+	return ctf->detect(ctf, c);
+}
+
+/*!
+ * @copydoc comp_target_factory::create_target
+ *
+ * @public @memberof comp_target_factory
+ * @ingroup comp_main
+ */
+static inline bool
+comp_target_factory_create_target(const struct comp_target_factory *ctf,
+                                  struct comp_compositor *c,
+                                  struct comp_target **out_ct)
+{
+	COMP_TRACE_MARKER();
+
+	return ctf->create_target(ctf, c, out_ct);
 }
 
 

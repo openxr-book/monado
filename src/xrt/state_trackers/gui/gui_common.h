@@ -1,4 +1,4 @@
-// Copyright 2019, Collabora, Ltd.
+// Copyright 2019-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -23,7 +23,6 @@
 extern "C" {
 #endif
 
-#define NUM_XDEVS 8
 
 struct xrt_device;
 struct xrt_prober;
@@ -33,6 +32,7 @@ struct xrt_frame_context;
 struct xrt_settings_tracking;
 struct time_state;
 struct gui_scene_manager;
+struct xrt_system_devices;
 
 
 /*!
@@ -46,7 +46,9 @@ struct gui_program
 
 	struct gui_scene_manager *gsm;
 
-	struct xrt_device *xdevs[NUM_XDEVS];
+	struct xrt_system *xsys;
+	struct xrt_system_devices *xsysd;
+	struct xrt_space_overseer *xso;
 	struct xrt_instance *instance;
 	struct xrt_prober *xp;
 
@@ -79,8 +81,6 @@ struct gui_ogl_texture
 	uint32_t w, h;
 	uint32_t id;
 	bool half;
-
-	void *ptr;
 };
 
 /*!
@@ -132,7 +132,7 @@ gui_ogl_sink_create(const char *name, struct xrt_frame_context *xfctx, struct xr
  * @ingroup gui
  */
 void
-gui_ogl_sink_update(struct gui_ogl_texture *);
+gui_ogl_sink_update(struct gui_ogl_texture * /*tex*/);
 
 /*!
  * Push the scene to the top of the lists.
@@ -214,6 +214,22 @@ void
 gui_scene_debug(struct gui_program *p);
 
 /*!
+ * Small hand-tracking demo.
+ *
+ * @ingroup gui
+ */
+void
+gui_scene_hand_tracking_demo(struct gui_program *p);
+
+/*!
+ * EuRoC recorder for DepthAI cameras
+ *
+ * @ingroup gui
+ */
+void
+gui_scene_record_euroc(struct gui_program *p);
+
+/*!
  * Create a recording view scene.
  *
  * @ingroup gui
@@ -224,10 +240,11 @@ gui_scene_record(struct gui_program *p, const char *camera);
 /*!
  * Remote control debugging UI.
  *
+ * @param Optional address.
  * @ingroup gui
  */
 void
-gui_scene_remote(struct gui_program *p);
+gui_scene_remote(struct gui_program *p, const char *address);
 
 /*!
  * Given the frameserver runs the calibration code on it.

@@ -25,6 +25,7 @@ src/xrt/compositor/shaders/*.vert.h
 src/xrt/compositor/shaders/*.frag.h
 src/xrt/compositor/shaders/*.comp.h
 src/xrt/include/xrt/xrt_config_*.h
+!src/xrt/include/xrt/xrt_config_*os.h
 src/xrt/ipc/*_generated.*
 src/xrt/targets/cli/monado-cli
 src/xrt/targets/ctl/monado-ctl
@@ -44,12 +45,14 @@ __pycache__/
 # Ignore build trees
 build/
 build*/
+cmake-build-*/
 
 # Ignore local settings
 .vscode
 *.autosave
 .vs
 CMakeSettings.json
+CMakeUserPresets.json
 
 # Ignore merge-conflict resolution files
 *.orig
@@ -74,7 +77,7 @@ src/xrt/drivers/arduino/device/*.bin
 # Ignore gradle-related and android studio-related things
 *.iml
 .gradle/
-local.properties
+/local.properties
 .idea/*
 # .idea/caches
 # .idea/libraries
@@ -87,10 +90,7 @@ local.properties
 .settings
 .project
 .classpath
-
-gradlew
-gradlew.bat
-gradle-wrapper.jar
+*.hprof
 
 # Ignore Sourcetrail things
 *.srctrlbm
@@ -99,3 +99,12 @@ gradle-wrapper.jar
 
 # Ignore clangd things
 .cache/
+
+# Ignore CI things
+container-build-report.xml
+
+# Ignore Vulkan validation layer settings
+vk_layer_settings.txt
+
+# Ignore local pyenv version file
+.python-version

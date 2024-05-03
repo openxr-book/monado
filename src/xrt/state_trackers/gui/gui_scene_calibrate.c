@@ -27,6 +27,7 @@
 
 #include "gui_common.h"
 #include "gui_imgui.h"
+#include "gui_ogl.h"
 
 #include <assert.h>
 
@@ -77,7 +78,7 @@ save_calibration(struct calibration_scene *cs)
 
 	saved_header(cs);
 	igSetNextItemWidth(115);
-	igInputText(".calibration", cs->filename, sizeof(cs->filename), 0, NULL, NULL);
+	igInputText(".calibration.json", cs->filename, sizeof(cs->filename), 0, NULL, NULL);
 	igSameLine(0.0f, 4.0f);
 
 	static ImVec2 button_dims = {0, 0};
@@ -93,8 +94,8 @@ save_calibration(struct calibration_scene *cs)
 	 *
 	 */
 
-	char tmp[sizeof(cs->filename) + 16];
-	snprintf(tmp, sizeof(tmp), "%s.calibration", cs->filename);
+	char tmp[sizeof(cs->filename) + 32];
+	snprintf(tmp, sizeof(tmp), "%s.calibration.json", cs->filename);
 
 	u_file_get_path_in_config_dir(tmp, cs->settings->calibration_path, sizeof(cs->settings->calibration_path));
 
@@ -114,10 +115,7 @@ save_calibration(struct calibration_scene *cs)
 	 *
 	 */
 
-	FILE *calib_file = fopen(cs->settings->calibration_path, "wb");
-	t_stereo_camera_calibration_save_v1(calib_file, cs->status.stereo_data);
-	fclose(calib_file);
-	calib_file = NULL;
+	t_stereo_camera_calibration_save(cs->settings->calibration_path, cs->status.stereo_data);
 
 	cs->saved = true;
 }
@@ -137,15 +135,14 @@ draw_texture(struct gui_ogl_texture *tex, bool header)
 
 	gui_ogl_sink_update(tex);
 
-	int w = tex->w / (tex->half ? 2 : 1);
-	int h = tex->h / (tex->half ? 2 : 1);
+	gui_ogl_draw_image(          //
+	    (uint32_t)tex->w,        // width
+	    (uint32_t)tex->h,        // height
+	    tex->id,                 // tex_id
+	    tex->half ? 0.5f : 1.0f, // scale
+	    false,                   // rotate_180
+	    false);                  // flip_y
 
-	ImVec2 size = {(float)w, (float)h};
-	ImVec2 uv0 = {0, 0};
-	ImVec2 uv1 = {1, 1};
-	ImVec4 white = {1, 1, 1, 1};
-	ImTextureID id = (ImTextureID)(intptr_t)tex->id;
-	igImage(id, size, uv0, uv1, white, white);
 	igText("Sequence %u", (uint32_t)tex->seq);
 
 	char temp[512];
@@ -235,7 +232,7 @@ scene_render_select(struct gui_scene *scene, struct gui_program *p)
 	igBegin("Params", NULL, 0);
 
 	igComboStr("Type", (int *)&cs->settings->camera_type,
-	           "Regular Mono\0Regular Stereo (Side-by-Side)\0PS4\0Leap Motion Controller\0\0", -1);
+	           "Regular Mono\0Regular Stereo (Side-by-Side)\0SLAM Stereo\0PS4\0Leap Motion Controller\0\0", -1);
 
 	switch (cs->settings->camera_type) {
 	case XRT_SETTINGS_CAMERA_TYPE_REGULAR_MONO:
@@ -243,6 +240,10 @@ scene_render_select(struct gui_scene *scene, struct gui_program *p)
 		cs->params.stereo_sbs = false;
 		break;
 	case XRT_SETTINGS_CAMERA_TYPE_REGULAR_SBS:
+		igCheckbox("Fisheye Camera", &cs->params.use_fisheye);
+		cs->params.stereo_sbs = true;
+		break;
+	case XRT_SETTINGS_CAMERA_TYPE_SLAM:
 		igCheckbox("Fisheye Camera", &cs->params.use_fisheye);
 		cs->params.stereo_sbs = true;
 		break;
@@ -273,7 +274,8 @@ scene_render_select(struct gui_scene *scene, struct gui_program *p)
 	igInputInt("Collect in groups of #", &cs->params.num_collect_restart, 1, 5, 0);
 
 	igSeparator();
-	igComboStr("Board type", (int *)&cs->params.pattern, "Checkers\0Corners SB\0Circles\0Asymetric Circles\0\0", 3);
+	igComboStr("Board type", (int *)&cs->params.pattern, "Checkers\0Corners SB\0Circles\0Asymmetric Circles\0\0",
+	           3);
 	switch (cs->params.pattern) {
 	case T_BOARD_CHECKERS:
 		igInputInt("Checkerboard Rows", &cs->params.checkers.rows, 1, 5, 0);
@@ -312,6 +314,14 @@ scene_render_select(struct gui_scene *scene, struct gui_program *p)
 		return;
 	}
 
+	struct u_config_json config_json;
+	u_gui_state_open_file(&config_json);
+
+	struct cJSON *new_state;
+	t_calibration_gui_params_to_json(&new_state, &cs->params);
+
+	u_gui_state_save_scene(&config_json, GUI_STATE_SCENE_CALIBRATE, new_state);
+
 	cs->base.render = scene_render_video;
 
 	struct xrt_frame_sink *rgb = NULL;
@@ -320,16 +330,16 @@ scene_render_select(struct gui_scene *scene, struct gui_program *p)
 
 	p->texs[p->num_texs++] = gui_ogl_sink_create("Calibration", cs->xfctx, &rgb);
 	u_sink_create_to_r8g8b8_or_l8(cs->xfctx, rgb, &rgb);
-	u_sink_queue_create(cs->xfctx, rgb, &rgb);
+	u_sink_simple_queue_create(cs->xfctx, rgb, &rgb);
 
 	p->texs[p->num_texs++] = gui_ogl_sink_create("Raw", cs->xfctx, &raw);
 	u_sink_create_to_r8g8b8_or_l8(cs->xfctx, raw, &raw);
-	u_sink_queue_create(cs->xfctx, raw, &raw);
+	u_sink_simple_queue_create(cs->xfctx, raw, &raw);
 
 	t_calibration_stereo_create(cs->xfctx, &cs->params, &cs->status, rgb, &cali);
 	u_sink_split_create(cs->xfctx, raw, cali, &cali);
 	u_sink_deinterleaver_create(cs->xfctx, cali, &cali);
-	u_sink_queue_create(cs->xfctx, cali, &cali);
+	u_sink_simple_queue_create(cs->xfctx, cali, &cali);
 
 	// Just after the camera create a quirk stream.
 	struct u_sink_quirk_params qp;
@@ -340,7 +350,18 @@ scene_render_select(struct gui_scene *scene, struct gui_program *p)
 	u_sink_quirk_create(cs->xfctx, cali, &qp, &cali);
 
 	// Now that we have setup a node graph, start it.
-	xrt_fs_stream_start(cs->xfs, cali, XRT_FS_CAPTURE_TYPE_CALIBRATION, cs->settings->camera_mode);
+
+	if (cs->settings->camera_type == XRT_SETTINGS_CAMERA_TYPE_SLAM) {
+		struct xrt_frame_sink *tmp = cali;
+		struct xrt_slam_sinks sinks;
+		sinks.cam_count = 2;
+		u_sink_combiner_create(cs->xfctx, tmp, &sinks.cams[0], &sinks.cams[1]);
+
+		xrt_fs_slam_stream_start(cs->xfs, &sinks);
+	} else {
+		xrt_fs_stream_start(cs->xfs, cali, XRT_FS_CAPTURE_TYPE_CALIBRATION, cs->settings->camera_mode);
+	}
+
 #else
 	gui_scene_delete_me(p, &cs->base);
 #endif
@@ -389,7 +410,7 @@ gui_scene_calibrate(struct gui_program *p,
 	cs->settings = s;
 
 #ifdef XRT_HAVE_OPENCV
-	t_calibration_params_default(&cs->params);
+	t_calibration_gui_params_load_or_default(&cs->params);
 
 	/*
 	 * Pre-quirk some known cameras.
@@ -429,6 +450,7 @@ gui_scene_calibrate(struct gui_program *p,
 		cs->params.stereo_sbs = true;
 		cs->settings->camera_type = XRT_SETTINGS_CAMERA_TYPE_REGULAR_SBS;
 	}
+
 #endif
 	gui_scene_push_front(p, &cs->base);
 }

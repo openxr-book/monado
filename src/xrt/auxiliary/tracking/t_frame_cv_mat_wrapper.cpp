@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  Simple @ref xrt_frame wrapper around a @ref cv::Mat.
+ * @brief  Simple @ref xrt_frame wrapper around a cv::Mat.
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @ingroup aux_tracking
  */
@@ -20,13 +20,6 @@ namespace xrt::auxiliary::tracking {
  * C functions.
  *
  */
-
-extern "C" void
-frame_mat_destroy(struct xrt_frame *xf)
-{
-	FrameMat *fm = (FrameMat *)xf;
-	delete fm;
-}
 
 
 /*
@@ -48,7 +41,7 @@ FrameMat::fillInFields(cv::Mat mat, xrt_format format, const Params &params)
 	// Main wrapping of cv::Mat by frame.
 	xrt_frame &frame = this->frame;
 	frame.reference.count = 1;
-	frame.destroy = frame_mat_destroy;
+	frame.destroy = destroyFrame;
 	frame.data = mat.ptr<uint8_t>();
 	frame.format = format;
 	frame.width = width;
@@ -71,6 +64,13 @@ FrameMat::FrameMat()
 	// Noop
 }
 
+void
+FrameMat::destroyFrame(xrt_frame *xf)
+{
+	FrameMat *fm = (FrameMat *)xf;
+	delete fm;
+}
+
 
 /*
  *
@@ -79,7 +79,7 @@ FrameMat::FrameMat()
  */
 
 void
-FrameMat::wrapR8G8B8(cv::Mat mat, xrt_frame **fm_out, const Params /*&&?*/ params)
+FrameMat::wrapR8G8B8(const cv::Mat &mat, xrt_frame **fm_out, const Params /*&&?*/ params)
 {
 	assert(mat.channels() == 3);
 	assert(mat.type() == CV_8UC3);
@@ -96,7 +96,7 @@ FrameMat::wrapR8G8B8(cv::Mat mat, xrt_frame **fm_out, const Params /*&&?*/ param
 }
 
 void
-FrameMat::wrapL8(cv::Mat mat, xrt_frame **fm_out, const Params /*&&?*/ params)
+FrameMat::wrapL8(const cv::Mat &mat, xrt_frame **fm_out, const Params /*&&?*/ params)
 {
 	assert(mat.channels() == 1);
 	assert(mat.type() == CV_8UC1);

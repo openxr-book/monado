@@ -11,6 +11,7 @@
 #include "p_prober.h"
 
 #include <stdio.h>
+#include <assert.h>
 #include <string.h>
 #include <libudev.h>
 #include <inttypes.h>
@@ -65,6 +66,7 @@ p_udev_get_and_parse_uevent(struct udev_device *raw_dev,
                             uint32_t *out_bus_type,
                             uint16_t *out_vendor_id,
                             uint16_t *out_product_id,
+                            char (*out_product_name)[P_PROBER_BLUETOOTH_PRODUCT_COUNT],
                             uint64_t *out_bluetooth_serial);
 
 static int
@@ -147,7 +149,8 @@ static void
 p_udev_enumerate_usb(struct prober *p, struct udev *udev)
 {
 	struct udev_enumerate *enumerate;
-	struct udev_list_entry *devices, *dev_list_entry;
+	struct udev_list_entry *devices;
+	struct udev_list_entry *dev_list_entry;
 
 	enumerate = udev_enumerate_new(udev);
 	udev_enumerate_add_match_subsystem(enumerate, "usb");
@@ -252,7 +255,8 @@ static void
 p_udev_enumerate_v4l2(struct prober *p, struct udev *udev)
 {
 	struct udev_enumerate *enumerate;
-	struct udev_list_entry *devices, *dev_list_entry;
+	struct udev_list_entry *devices;
+	struct udev_list_entry *dev_list_entry;
 
 	enumerate = udev_enumerate_new(udev);
 	udev_enumerate_add_match_subsystem(enumerate, "video4linux");
@@ -370,7 +374,8 @@ static void
 p_udev_enumerate_hidraw(struct prober *p, struct udev *udev)
 {
 	struct udev_enumerate *enumerate;
-	struct udev_list_entry *devices, *dev_list_entry;
+	struct udev_list_entry *devices;
+	struct udev_list_entry *dev_list_entry;
 
 	enumerate = udev_enumerate_new(udev);
 	udev_enumerate_add_match_subsystem(enumerate, "hidraw");
@@ -382,12 +387,15 @@ p_udev_enumerate_hidraw(struct prober *p, struct udev *udev)
 	{
 		struct prober_device *pdev = NULL;
 		struct udev_device *raw_dev = NULL;
-		uint16_t vendor_id, product_id, interface;
+		uint16_t vendor_id;
+		uint16_t product_id;
+		uint16_t interface;
 		uint8_t dev_class = 0;
 		uint16_t usb_bus = 0;
 		uint16_t usb_addr = 0;
 		uint32_t bus_type = 0;
 		uint64_t bluetooth_id = 0;
+		char product_name[P_PROBER_BLUETOOTH_PRODUCT_COUNT] = {0};
 		const char *sysfs_path;
 		const char *dev_path;
 		int ret;
@@ -400,7 +408,8 @@ p_udev_enumerate_hidraw(struct prober *p, struct udev *udev)
 		dev_path = udev_device_get_devnode(raw_dev);
 
 		// Bus type, vendor_id and product_id.
-		ret = p_udev_get_and_parse_uevent(raw_dev, &bus_type, &vendor_id, &product_id, &bluetooth_id);
+		ret = p_udev_get_and_parse_uevent(raw_dev, &bus_type, &vendor_id, &product_id, &product_name,
+		                                  &bluetooth_id);
 		if (ret != 0) {
 			P_ERROR(p, "Failed to get uevent info from device");
 			goto next;
@@ -431,7 +440,7 @@ p_udev_enumerate_hidraw(struct prober *p, struct udev *udev)
 		}
 
 		if (bus_type == HIDRAW_BUS_BLUETOOTH) {
-			ret = p_dev_get_bluetooth_dev(p, bluetooth_id, vendor_id, product_id, &pdev);
+			ret = p_dev_get_bluetooth_dev(p, bluetooth_id, vendor_id, product_id, product_name, &pdev);
 		} else if (bus_type == HIDRAW_BUS_USB) {
 			ret = p_dev_get_usb_dev(p, usb_bus, usb_addr, vendor_id, product_id, &pdev);
 		} else {
@@ -451,12 +460,13 @@ p_udev_enumerate_hidraw(struct prober *p, struct udev *udev)
 		        "\t\tbus_type:     %i\n"
 		        "\t\tvendor_id:    %04x\n"
 		        "\t\tproduct_id:   %04x\n"
+		        "\t\tproduct_name: '%s'\n"
 		        "\t\tinterface:    %i\n"
 		        "\t\tusb_bus:      %i\n"
 		        "\t\tusb_addr:     %i\n"
 		        "\t\tbluetooth_id: %012" PRIx64,
-		        (void *)pdev, ret, sysfs_path, dev_path, bus_type, vendor_id, product_id, interface, usb_bus,
-		        usb_addr, bluetooth_id);
+		        (void *)pdev, ret, sysfs_path, dev_path, bus_type, vendor_id, product_id, product_name,
+		        interface, usb_bus, usb_addr, bluetooth_id);
 
 		if (ret != 0) {
 			P_ERROR(p, "p_dev_get_usb_device failed!");
@@ -492,7 +502,8 @@ p_udev_get_usb_hid_address(struct udev_device *raw_dev,
                            uint16_t *out_usb_bus,
                            uint16_t *out_usb_addr)
 {
-	uint16_t dummy_vendor, dummy_product;
+	uint16_t unused_vendor;
+	uint16_t unused_product;
 	struct udev_device *usb_dev;
 
 	if (bus_type != HIDRAW_BUS_USB) {
@@ -506,7 +517,7 @@ p_udev_get_usb_hid_address(struct udev_device *raw_dev,
 		return -1;
 	}
 
-	return p_udev_get_usb_device_info(usb_dev, out_dev_class, &dummy_vendor, &dummy_product, out_usb_bus,
+	return p_udev_get_usb_device_info(usb_dev, out_dev_class, &unused_vendor, &unused_product, out_usb_bus,
 	                                  out_usb_addr);
 }
 
@@ -538,18 +549,22 @@ p_udev_get_and_parse_uevent(struct udev_device *raw_dev,
                             uint32_t *out_bus_type,
                             uint16_t *out_vendor_id,
                             uint16_t *out_product_id,
+                            char (*out_product_name)[P_PROBER_BLUETOOTH_PRODUCT_COUNT],
                             uint64_t *out_bluetooth_serial)
 {
 	struct udev_device *hid_dev;
 	char *serial_utf8 = NULL;
 	uint64_t bluetooth_serial = 0;
-	uint16_t vendor_id = 0, product_id = 0;
+	uint16_t vendor_id = 0;
+	uint16_t product_id = 0;
+	char product_name[sizeof(*out_product_name)];
 	uint32_t bus_type;
 	const char *uevent;
 	char *saveptr;
 	char *line;
 	char *tmp;
 	int ret;
+
 
 	// Dig through and find the regular hid node.
 	hid_dev = udev_device_get_parent_with_subsystem_devtype(raw_dev, "hid", NULL);
@@ -576,10 +591,9 @@ p_udev_get_and_parse_uevent(struct udev_device *raw_dev,
 				ok = true;
 			}
 		} else if (strncmp(line, "HID_NAME=", 9) == 0) {
-			// U_LOG_D("\t\tprocuct_name: '%s'", line + 9);
+			snprintf(product_name, sizeof(product_name), "%s", line + 9);
 		} else if (strncmp(line, "HID_UNIQ=", 9) == 0) {
 			serial_utf8 = &line[9];
-			// U_LOG_D("\t\tserial: '%s'", line + 9);
 		}
 
 		line = strtok_r(NULL, "\n", &saveptr);
@@ -604,6 +618,7 @@ p_udev_get_and_parse_uevent(struct udev_device *raw_dev,
 		*out_bus_type = bus_type;
 		*out_vendor_id = vendor_id;
 		*out_product_id = product_id;
+		strncpy(*out_product_name, product_name, sizeof(*out_product_name));
 		*out_bluetooth_serial = bluetooth_serial;
 		return 0;
 	}
@@ -619,7 +634,9 @@ p_udev_try_usb_relation_get_address(struct udev_device *raw_dev,
                                     uint16_t *out_usb_addr,
                                     struct udev_device **out_usb_device)
 {
-	struct udev_device *parent_dev, *usb_interface, *usb_device;
+	struct udev_device *parent_dev;
+	struct udev_device *usb_interface;
+	struct udev_device *usb_device;
 
 	parent_dev = udev_device_get_parent(raw_dev);
 	usb_interface = udev_device_get_parent_with_subsystem_devtype(raw_dev, "usb", "usb_interface");
@@ -657,7 +674,8 @@ p_udev_try_usb_relation_get_address(struct udev_device *raw_dev,
 static int
 p_udev_get_vendor_id_product(struct udev_device *usb_dev, uint16_t *out_vendor_id, uint16_t *out_product_id)
 {
-	uint16_t vendor_id, product_id;
+	uint16_t vendor_id;
+	uint16_t product_id;
 	int ret;
 
 	ret = p_udev_get_sysattr_u16_base16(usb_dev, "idVendor", &vendor_id);
@@ -684,7 +702,9 @@ p_udev_get_usb_device_info(struct udev_device *usb_dev,
                            uint16_t *out_usb_bus,
                            uint16_t *out_usb_addr)
 {
-	uint16_t vendor_id, product_id, dev_class;
+	uint16_t vendor_id;
+	uint16_t product_id;
+	uint16_t dev_class;
 	int ret;
 
 	// First get the vendor and product ids.
@@ -720,7 +740,8 @@ p_udev_get_usb_device_info(struct udev_device *usb_dev,
 static int
 p_udev_get_usb_device_address_path(struct udev_device *usb_dev, uint16_t *out_usb_bus, uint16_t *out_usb_addr)
 {
-	uint16_t bus = 0, addr = 0;
+	uint16_t bus = 0;
+	uint16_t addr = 0;
 
 	const char *dev_path = udev_device_get_devnode(usb_dev);
 	if (dev_path == NULL) {
@@ -741,7 +762,8 @@ p_udev_get_usb_device_address_path(struct udev_device *usb_dev, uint16_t *out_us
 static int
 p_udev_get_usb_device_address_sysfs(struct udev_device *usb_dev, uint16_t *out_usb_bus, uint16_t *out_usb_addr)
 {
-	uint16_t usb_bus = 0, usb_addr = 0;
+	uint16_t usb_bus = 0;
+	uint16_t usb_addr = 0;
 	int ret;
 
 	ret = p_udev_get_sysattr_u16_base16(usb_dev, "busnum", &usb_bus);

@@ -1,6 +1,6 @@
 // Copyright 2020-2021, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
-// Author: Ryan Pavlik <ryan.pavlik@collabora.com>
+// Author: Rylie Pavlik <rylie.pavlik@collabora.com>
 
 #pragma once
 
@@ -23,9 +23,22 @@ namespace android::database {
 class Cursor;
 } // namespace android::database
 
+namespace android::net {
+class Uri;
+class Uri_Builder;
+} // namespace android::net
+
 namespace android::os {
 class Bundle;
 } // namespace android::os
+
+namespace android::view {
+class Display;
+} // namespace android::view
+
+namespace java::io {
+class File;
+} // namespace java::io
 
 namespace java::lang {
 class Class;
@@ -113,6 +126,17 @@ class Context : public ObjectWrapperBase {
     java::lang::ClassLoader getClassLoader();
 
     /*!
+     * Wrapper for the getExternalFilesDir method
+     *
+     * Java prototype:
+     * `public abstract java.io.File getExternalFilesDir(java.lang.String);`
+     *
+     * JNI signature: (Ljava/lang/String;)Ljava/io/File;
+     *
+     */
+    java::io::File getExternalFilesDir(std::string const &type);
+
+    /*!
      * Wrapper for the startActivity method
      *
      * Java prototype:
@@ -136,6 +160,17 @@ class Context : public ObjectWrapperBase {
     void startActivity(Intent const &intent, os::Bundle const &bundle);
 
     /*!
+     * Wrapper for the getSystemService method
+     *
+     * Java prototype:
+     * `public abstract java.lang.Object getSystemService(java.lang.String);`
+     *
+     * JNI signature: (Ljava/lang/String;)Ljava/lang/Object;
+     *
+     */
+    jni::Object getSystemService(std::string const &name);
+
+    /*!
      * Wrapper for the createPackageContext method
      *
      * Java prototype:
@@ -147,6 +182,18 @@ class Context : public ObjectWrapperBase {
      *
      */
     Context createPackageContext(std::string const &packageName, int32_t flags);
+
+    /*!
+     * Wrapper for the createDisplayContext method
+     *
+     * Java prototype:
+     * `public abstract android.content.Context
+     * createDisplayContext(android.view.Display);`
+     *
+     * JNI signature: (Landroid/view/Display;)Landroid/content/Context;
+     *
+     */
+    Context createDisplayContext(view::Display const &display);
 
     enum {
         CONTEXT_INCLUDE_CODE = 1,
@@ -163,9 +210,54 @@ class Context : public ObjectWrapperBase {
         jni::method_t getContentResolver;
         jni::method_t getApplicationContext;
         jni::method_t getClassLoader;
+        jni::method_t getExternalFilesDir;
         jni::method_t startActivity;
         jni::method_t startActivity1;
+        jni::method_t getSystemService;
         jni::method_t createPackageContext;
+        jni::method_t createDisplayContext;
+
+        /*!
+         * Singleton accessor
+         */
+        static Meta &data(bool deferDrop = false) {
+            static Meta instance{deferDrop};
+            return instance;
+        }
+
+      private:
+        explicit Meta(bool deferDrop);
+    };
+};
+
+/*!
+ * Wrapper for android.content.ContentUris objects.
+ */
+class ContentUris : public ObjectWrapperBase {
+  public:
+    using ObjectWrapperBase::ObjectWrapperBase;
+    static constexpr const char *getTypeName() noexcept {
+        return "android/content/ContentUris";
+    }
+
+    /*!
+     * Wrapper for the appendId static method
+     *
+     * Java prototype:
+     * `public static android.net.Uri$Builder appendId(android.net.Uri$Builder,
+     * long);`
+     *
+     * JNI signature: (Landroid/net/Uri$Builder;J)Landroid/net/Uri$Builder;
+     *
+     */
+    static net::Uri_Builder appendId(net::Uri_Builder &uri_Builder,
+                                     long long longParam);
+
+    /*!
+     * Class metadata
+     */
+    struct Meta : public MetaBaseDroppable {
+        jni::method_t appendId;
 
         /*!
          * Singleton accessor
@@ -287,6 +379,17 @@ class Intent : public ObjectWrapperBase {
      * Wrapper for a constructor
      *
      * Java prototype:
+     * `public android.content.Intent();`
+     *
+     * JNI signature: ()V
+     *
+     */
+    static Intent construct();
+
+    /*!
+     * Wrapper for a constructor
+     *
+     * Java prototype:
      * `public android.content.Intent(android.content.Intent);`
      *
      * JNI signature: (Landroid/content/Intent;)V
@@ -314,7 +417,7 @@ class Intent : public ObjectWrapperBase {
      * JNI signature: (Ljava/lang/String;Landroid/net/Uri;)V
      *
      */
-    static Intent construct(std::string const &action, jni::Object const &uri);
+    static Intent construct(std::string const &action, net::Uri const &uri);
 
     /*!
      * Wrapper for a constructor
@@ -340,7 +443,7 @@ class Intent : public ObjectWrapperBase {
      * (Ljava/lang/String;Landroid/net/Uri;Landroid/content/Context;Ljava/lang/Class;)V
      *
      */
-    static Intent construct(std::string const &action, jni::Object const &uri,
+    static Intent construct(std::string const &action, net::Uri const &uri,
                             Context const &context,
                             java::lang::Class const &classParam);
 
@@ -360,6 +463,7 @@ class Intent : public ObjectWrapperBase {
      */
     struct Meta : public MetaBase {
         impl::StaticFieldId<int32_t> FLAG_ACTIVITY_NEW_TASK;
+        jni::method_t init;
         jni::method_t init1;
         jni::method_t init2;
         jni::method_t init3;
@@ -402,11 +506,28 @@ class ContentResolver : public ObjectWrapperBase {
      * (Landroid/net/Uri;[Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;)Landroid/database/Cursor;
      *
      */
-    database::Cursor query(jni::Object const &uri,
+    database::Cursor query(net::Uri const &uri,
                            jni::Array<std::string> const &projection,
                            std::string const &selection,
                            jni::Array<std::string> const &selectionArgs,
                            std::string const &sortOrder);
+
+    /*!
+     * Wrapper for the query method - overload added in API level 1
+     *
+     * Java prototype:
+     * `public final android.database.Cursor query(android.net.Uri,
+     * java.lang.String[], java.lang.String, java.lang.String[],
+     * java.lang.String);`
+     *
+     * JNI signature:
+     * (Landroid/net/Uri;[Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;)Landroid/database/Cursor;
+     *
+     * This is a way to call the main query() function without the three
+     * trailing optional arguments.
+     */
+    database::Cursor query(net::Uri const &uri,
+                           jni::Array<std::string> const &projection);
 
     /*!
      * Wrapper for the query method - overload added in API level 16
@@ -420,7 +541,7 @@ class ContentResolver : public ObjectWrapperBase {
      * (Landroid/net/Uri;[Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;Landroid/os/CancellationSignal;)Landroid/database/Cursor;
      *
      */
-    database::Cursor query(jni::Object const &uri,
+    database::Cursor query(net::Uri const &uri,
                            jni::Array<std::string> const &projection,
                            std::string const &selection,
                            jni::Array<std::string> const &selectionArgs,
@@ -438,7 +559,7 @@ class ContentResolver : public ObjectWrapperBase {
      * (Landroid/net/Uri;[Ljava/lang/String;Landroid/os/Bundle;Landroid/os/CancellationSignal;)Landroid/database/Cursor;
      *
      */
-    database::Cursor query(jni::Object const &uri,
+    database::Cursor query(net::Uri const &uri,
                            jni::Array<std::string> const &projection,
                            os::Bundle const &queryArgs,
                            jni::Object const &cancellationSignal);

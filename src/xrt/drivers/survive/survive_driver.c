@@ -1,5 +1,5 @@
-// Copyright 2019-2021, Collabora, Ltd.
-// SPDX-License-Identifier: Apache-2.0
+// Copyright 2019-2023, Collabora, Ltd.
+// SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Adapter to Libsurvive.
@@ -18,11 +18,13 @@
 #include <inttypes.h>
 
 #include "math/m_api.h"
+#include "math/m_space.h"
 #include "tracking/t_tracking.h"
 #include "xrt/xrt_device.h"
 #include "util/u_debug.h"
 #include "util/u_device.h"
 #include "util/u_misc.h"
+#include "util/u_var.h"
 #include "util/u_time.h"
 #include "util/u_device.h"
 #include "util/u_distortion_mesh.h"
@@ -40,18 +42,17 @@
 #include "util/u_json.h"
 
 #include "util/u_hand_tracking.h"
+#include "util/u_hand_simulation.h"
 #include "util/u_logging.h"
 #include "math/m_relation_history.h"
 
 #include "math/m_predict.h"
 
 #include "vive/vive_config.h"
+#include "vive/vive_bindings.h"
+#include "vive/vive_poses.h"
 
-#include "../ht/ht_interface.h"
-#include "../multi_wrapper/multi.h"
-#include "xrt/xrt_config_drivers.h"
-
-#include "survive_driver.h"
+#include "util/u_trace_marker.h"
 
 // If we haven't gotten a config for devices this long after startup, just start without those devices
 #define DEFAULT_WAIT_TIMEOUT 3.5f
@@ -64,14 +65,15 @@
 //! excl HMD we support 16 devices (controllers, trackers, ...)
 #define MAX_TRACKED_DEVICE_COUNT 16
 
-// initializing survive_driver once creates xrt_devices for all connected devices
-static bool survive_already_initialized = false;
+DEBUG_GET_ONCE_BOOL_OPTION(survive_disable_hand_emulation, "SURVIVE_DISABLE_HAND_EMULATION", false)
+DEBUG_GET_ONCE_BOOL_OPTION(survive_default_ipd, "SURVIVE_DEFAULT_IPD", false)
+DEBUG_GET_ONCE_FLOAT_OPTION(survive_timecode_offset_ms, "SURVIVE_TIMECODE_OFFSET_MS", 0.0)
 
-#define SURVIVE_TRACE(d, ...) U_LOG_XDEV_IFL_T(&d->base, d->sys->ll, __VA_ARGS__)
-#define SURVIVE_DEBUG(d, ...) U_LOG_XDEV_IFL_D(&d->base, d->sys->ll, __VA_ARGS__)
-#define SURVIVE_INFO(d, ...) U_LOG_XDEV_IFL_I(&d->base, d->sys->ll, __VA_ARGS__)
-#define SURVIVE_WARN(d, ...) U_LOG_XDEV_IFL_W(&d->base, d->sys->ll, __VA_ARGS__)
-#define SURVIVE_ERROR(d, ...) U_LOG_XDEV_IFL_E(&d->base, d->sys->ll, __VA_ARGS__)
+#define SURVIVE_TRACE(d, ...) U_LOG_XDEV_IFL_T(&d->base, d->sys->log_level, __VA_ARGS__)
+#define SURVIVE_DEBUG(d, ...) U_LOG_XDEV_IFL_D(&d->base, d->sys->log_level, __VA_ARGS__)
+#define SURVIVE_INFO(d, ...) U_LOG_XDEV_IFL_I(&d->base, d->sys->log_level, __VA_ARGS__)
+#define SURVIVE_WARN(d, ...) U_LOG_XDEV_IFL_W(&d->base, d->sys->log_level, __VA_ARGS__)
+#define SURVIVE_ERROR(d, ...) U_LOG_XDEV_IFL_E(&d->base, d->sys->log_level, __VA_ARGS__)
 
 struct survive_system;
 
@@ -141,6 +143,7 @@ struct survive_device
 		{
 			float proximity; // [0,1]
 			float ipd;
+			bool use_default_ipd;
 
 			struct vive_config config;
 		} hmd;
@@ -165,9 +168,10 @@ struct survive_system
 	SurviveSimpleContext *ctx;
 	struct survive_device *hmd;
 	struct survive_device *controllers[MAX_TRACKED_DEVICE_COUNT];
-	enum u_logging_level ll;
+	enum u_logging_level log_level;
 
 	float wait_timeout;
+	struct u_var_draggable_f32 timecode_offset_ms;
 
 	struct os_thread_helper event_thread;
 	struct os_mutex lock;
@@ -202,7 +206,11 @@ survive_device_destroy(struct xrt_device *xdev)
 
 	if (survive->sys->hmd == NULL && all_null) {
 		U_LOG_D("Tearing down libsurvive context");
-		os_thread_helper_stop(&survive->sys->event_thread);
+
+		// Remove the variable tracking.
+		u_var_remove_root(survive->sys);
+
+		// Destroy also stops the thread.
 		os_thread_helper_destroy(&survive->sys->event_thread);
 
 		// Now that the thread is not running we can destroy the lock.
@@ -215,6 +223,9 @@ survive_device_destroy(struct xrt_device *xdev)
 	}
 	m_relation_history_destroy(&survive->relation_hist);
 
+	// Remove the variable tracking.
+	u_var_remove_root(survive);
+
 	free(survive->last_inputs);
 	u_device_free(&survive->base);
 }
@@ -222,7 +233,7 @@ survive_device_destroy(struct xrt_device *xdev)
 // libsurvive timecode may not be exactly comparable with monotonic ns.
 // see OGGetAbsoluteTimeUS in libsurvive redist/os_generic.unix.h
 static double
-survive_timecode_now_s()
+survive_timecode_now_s(void)
 {
 	struct timeval tv;
 	gettimeofday(&tv, 0);
@@ -230,7 +241,7 @@ survive_timecode_now_s()
 }
 
 static timepoint_ns
-survive_timecode_to_monotonic(double timecode)
+survive_timecode_to_monotonic(struct survive_device *survive, double timecode)
 {
 	timepoint_ns timecode_ns = time_s_to_ns(timecode);
 	timepoint_ns survive_now_ns = time_s_to_ns(survive_timecode_now_s());
@@ -238,7 +249,7 @@ survive_timecode_to_monotonic(double timecode)
 	timepoint_ns timecode_age_ns = survive_now_ns - timecode_ns;
 
 	timepoint_ns now = os_monotonic_get_ns();
-	timepoint_ns timestamp = now - timecode_age_ns;
+	timepoint_ns timestamp = now - timecode_age_ns + (uint64_t)(survive->sys->timecode_offset_ms.val * 1000000.0);
 
 	return timestamp;
 }
@@ -305,7 +316,7 @@ verify_device_name(struct survive_device *survive, enum xrt_input_name name)
 {
 
 	switch (survive->device_type) {
-	case DEVICE_TYPE_HMD: return name == XRT_INPUT_GENERIC_HEAD_POSE;
+	case DEVICE_TYPE_HMD: return name == XRT_INPUT_GENERIC_HEAD_POSE || name == XRT_INPUT_GENERIC_STAGE_SPACE_POSE;
 	case DEVICE_TYPE_CONTROLLER:
 		return name == XRT_INPUT_INDEX_AIM_POSE || name == XRT_INPUT_INDEX_GRIP_POSE ||
 		       name == XRT_INPUT_VIVE_AIM_POSE || name == XRT_INPUT_VIVE_GRIP_POSE ||
@@ -326,12 +337,29 @@ survive_device_get_tracked_pose(struct xrt_device *xdev,
 		return;
 	}
 
+	if (name == XRT_INPUT_GENERIC_STAGE_SPACE_POSE) {
+		// STAGE is implicitly defined as the space poses are returned in, therefore STAGE origin is (0, 0, 0).
+		*out_relation = (struct xrt_space_relation)XRT_SPACE_RELATION_ZERO;
+		out_relation->relation_flags = XRT_SPACE_RELATION_BITMASK_ALL;
+		return;
+	}
+
 	if (!survive->survive_obj) {
 		// U_LOG_D("Obj not set for %p", (void*)survive);
 		return;
 	}
 
-	m_relation_history_get(survive->relation_hist, out_relation, at_timestamp_ns);
+	// We're pretty sure libsurvive is giving us the IMU pose here, so this works.
+	struct xrt_pose pose_offset = XRT_POSE_IDENTITY;
+	vive_poses_get_pose_offset(survive->base.name, survive->base.device_type, name, &pose_offset);
+
+	struct xrt_space_relation space_relation;
+	m_relation_history_get(survive->relation_hist, at_timestamp_ns, &space_relation);
+
+	struct xrt_relation_chain relation_chain = {0};
+	m_relation_chain_push_pose(&relation_chain, &pose_offset);
+	m_relation_chain_push_relation(&relation_chain, &space_relation);
+	m_relation_chain_resolve(&relation_chain, out_relation);
 
 	struct xrt_pose *p = &out_relation->pose;
 	SURVIVE_TRACE(survive, "GET_POSITION (%f %f %f) GET_ORIENTATION (%f, %f, %f, %f)", p->position.x, p->position.y,
@@ -339,14 +367,14 @@ survive_device_get_tracked_pose(struct xrt_device *xdev,
 }
 
 static int
-survive_controller_haptic_pulse(struct survive_device *survive, union xrt_output_value *value)
+survive_controller_haptic_pulse(struct survive_device *survive, const union xrt_output_value *value)
 {
 	float duration_seconds;
-	if (value->vibration.duration == XRT_MIN_HAPTIC_DURATION) {
+	if (value->vibration.duration_ns == XRT_MIN_HAPTIC_DURATION) {
 		SURVIVE_TRACE(survive, "Haptic pulse duration: using %f minimum", MIN_HAPTIC_DURATION);
 		duration_seconds = MIN_HAPTIC_DURATION;
 	} else {
-		duration_seconds = time_ns_to_s(value->vibration.duration);
+		duration_seconds = time_ns_to_s(value->vibration.duration_ns);
 	}
 
 	float frequency = value->vibration.frequency;
@@ -359,7 +387,7 @@ survive_controller_haptic_pulse(struct survive_device *survive, union xrt_output
 	float amplitude = value->vibration.amplitude;
 
 	SURVIVE_TRACE(survive, "Got Haptic pulse amp %f, %fHz, %" PRId64 "ns", value->vibration.amplitude,
-	              value->vibration.frequency, value->vibration.duration);
+	              value->vibration.frequency, value->vibration.duration_ns);
 	SURVIVE_TRACE(survive, "Doing Haptic pulse amp %f, %fHz, %fs", amplitude, frequency, duration_seconds);
 
 	return survive_simple_object_haptic((struct SurviveSimpleObject *)survive->survive_obj, frequency, amplitude,
@@ -367,7 +395,9 @@ survive_controller_haptic_pulse(struct survive_device *survive, union xrt_output
 }
 
 static void
-survive_controller_device_set_output(struct xrt_device *xdev, enum xrt_output_name name, union xrt_output_value *value)
+survive_controller_device_set_output(struct xrt_device *xdev,
+                                     enum xrt_output_name name,
+                                     const union xrt_output_value *value)
 {
 	struct survive_device *survive = (struct survive_device *)xdev;
 
@@ -387,6 +417,34 @@ survive_controller_device_set_output(struct xrt_device *xdev, enum xrt_output_na
 		SURVIVE_ERROR(survive, "haptic failed %d", ret);
 	}
 }
+
+struct Button
+{
+	enum input_index click;
+	enum input_index touch;
+};
+
+struct Button buttons[255] = {
+    [SURVIVE_BUTTON_A] = {.click = VIVE_CONTROLLER_A_CLICK, .touch = VIVE_CONTROLLER_A_TOUCH},
+    [SURVIVE_BUTTON_B] = {.click = VIVE_CONTROLLER_B_CLICK, .touch = VIVE_CONTROLLER_B_TOUCH},
+
+    [SURVIVE_BUTTON_TRACKPAD] = {.click = VIVE_CONTROLLER_TRACKPAD_CLICK, .touch = VIVE_CONTROLLER_TRACKPAD_TOUCH},
+
+    [SURVIVE_BUTTON_THUMBSTICK] = {.click = VIVE_CONTROLLER_THUMBSTICK_CLICK,
+                                   .touch = VIVE_CONTROLLER_THUMBSTICK_TOUCH},
+
+    [SURVIVE_BUTTON_SYSTEM] = {.click = VIVE_CONTROLLER_SYSTEM_CLICK, .touch = VIVE_CONTROLLER_SYSTEM_TOUCH},
+
+    [SURVIVE_BUTTON_MENU] = {.click = VIVE_CONTROLLER_MENU_CLICK,
+                             // only on vive wand without touch
+                             .touch = 0},
+
+    [SURVIVE_BUTTON_GRIP] = {.click = VIVE_CONTROLLER_SQUEEZE_CLICK,
+                             // only on vive wand without touch
+                             .touch = 0},
+
+    [SURVIVE_BUTTON_TRIGGER] = {.click = VIVE_CONTROLLER_TRIGGER_CLICK, .touch = VIVE_CONTROLLER_TRIGGER_TOUCH},
+};
 
 static void
 survive_controller_get_hand_tracking(struct xrt_device *xdev,
@@ -415,27 +473,35 @@ survive_controller_get_hand_tracking(struct xrt_device *xdev,
 		thumb_curl = 1.0;
 	}
 
+	if (survive->last_inputs[buttons[SURVIVE_BUTTON_TRIGGER].click].value.boolean) {
+		survive->ctrl.curl[XRT_FINGER_INDEX] = 1.0;
+		thumb_curl = 1.0;
+	}
+
 	struct u_hand_tracking_curl_values values = {.little = survive->ctrl.curl[XRT_FINGER_LITTLE],
 	                                             .ring = survive->ctrl.curl[XRT_FINGER_RING],
 	                                             .middle = survive->ctrl.curl[XRT_FINGER_MIDDLE],
 	                                             .index = survive->ctrl.curl[XRT_FINGER_INDEX],
 	                                             .thumb = thumb_curl};
 
-	/* The tracked controller position is at the very -z end of the
-	 * controller. Move the hand back offset_z meter to the handle center.
-	 */
-	struct xrt_vec3 static_offset = {.x = 0, .y = 0, .z = 0.11};
-
-	u_hand_joints_update_curl(&survive->ctrl.hand_tracking, hand, at_timestamp_ns, &values);
-
-	struct xrt_pose hand_on_handle_pose;
-	u_hand_joints_offset_valve_index_controller(hand, &static_offset, &hand_on_handle_pose);
 
 	struct xrt_space_relation hand_relation;
 
-	m_relation_history_get(survive->relation_hist, &hand_relation, at_timestamp_ns);
+	m_relation_history_get(survive->relation_hist, at_timestamp_ns, &hand_relation);
 
-	u_hand_joints_set_out_data(&survive->ctrl.hand_tracking, hand, &hand_relation, &hand_on_handle_pose, out_value);
+
+	u_hand_sim_simulate_for_valve_index_knuckles(&values, hand, &hand_relation, out_value);
+
+
+	struct xrt_relation_chain chain = {0};
+
+	// We're pretty sure libsurvive is giving us the IMU pose here, so this works.
+	struct xrt_pose pose_offset = XRT_POSE_IDENTITY;
+	vive_poses_get_pose_offset(survive->base.name, survive->base.device_type, name, &pose_offset);
+
+	m_relation_chain_push_pose(&chain, &pose_offset);
+	m_relation_chain_push_relation(&chain, &hand_relation);
+	m_relation_chain_resolve(&chain, &out_value->hand_pose);
 
 	// This is the truth - we pose-predicted or interpolated all the way up to `at_timestamp_ns`.
 	*out_timestamp_ns = at_timestamp_ns;
@@ -446,19 +512,42 @@ survive_controller_get_hand_tracking(struct xrt_device *xdev,
 }
 
 static void
-survive_device_get_view_pose(struct xrt_device *xdev,
-                             const struct xrt_vec3 *eye_relation,
-                             uint32_t view_index,
-                             struct xrt_pose *out_pose)
+survive_device_get_view_poses(struct xrt_device *xdev,
+                              const struct xrt_vec3 *default_eye_relation,
+                              uint64_t at_timestamp_ns,
+                              uint32_t view_count,
+                              struct xrt_space_relation *out_head_relation,
+                              struct xrt_fov *out_fovs,
+                              struct xrt_pose *out_poses)
 {
-	// Only supports two views.
-	assert(view_index < 2);
+	XRT_TRACE_MARKER();
 
-	u_device_get_view_pose(eye_relation, view_index, out_pose);
+	// Only supports two views.
+	assert(view_count <= 2);
+
+	struct survive_device *survive = (struct survive_device *)xdev;
+
+	struct xrt_vec3 eye_relation = {0};
+
+	if (survive->hmd.use_default_ipd || survive->hmd.ipd == 0.f) {
+		eye_relation = *default_eye_relation;
+	} else {
+		eye_relation.x = survive->hmd.ipd;
+	}
+
+	u_device_get_view_poses( //
+	    xdev,                //
+	    &eye_relation,       //
+	    at_timestamp_ns,     //
+	    view_count,          //
+	    out_head_relation,   //
+	    out_fovs,            //
+	    out_poses);          //
 
 	// This is for the Index' canted displays, on the Vive [Pro] they are identity.
-	struct survive_device *survive = (struct survive_device *)xdev;
-	out_pose->orientation = survive->hmd.config.display.rot[view_index];
+	for (uint32_t i = 0; i < view_count && i < ARRAY_SIZE(survive->hmd.config.display.rot); i++) {
+		out_poses[i].orientation = survive->hmd.config.display.rot[i];
+	}
 }
 
 enum InputComponent
@@ -536,33 +625,7 @@ update_axis(struct survive_device *survive, struct Axis *axis, const SurviveSimp
 	return true;
 }
 
-struct Button
-{
-	enum input_index click;
-	enum input_index touch;
-};
 
-struct Button buttons[255] = {
-    [SURVIVE_BUTTON_A] = {.click = VIVE_CONTROLLER_A_CLICK, .touch = VIVE_CONTROLLER_A_TOUCH},
-    [SURVIVE_BUTTON_B] = {.click = VIVE_CONTROLLER_B_CLICK, .touch = VIVE_CONTROLLER_B_TOUCH},
-
-    [SURVIVE_BUTTON_TRACKPAD] = {.click = VIVE_CONTROLLER_TRACKPAD_CLICK, .touch = VIVE_CONTROLLER_TRACKPAD_TOUCH},
-
-    [SURVIVE_BUTTON_THUMBSTICK] = {.click = VIVE_CONTROLLER_THUMBSTICK_CLICK,
-                                   .touch = VIVE_CONTROLLER_THUMBSTICK_TOUCH},
-
-    [SURVIVE_BUTTON_SYSTEM] = {.click = VIVE_CONTROLLER_SYSTEM_CLICK, .touch = VIVE_CONTROLLER_SYSTEM_TOUCH},
-
-    [SURVIVE_BUTTON_MENU] = {.click = VIVE_CONTROLLER_MENU_CLICK,
-                             // only on vive wand without touch
-                             .touch = 0},
-
-    [SURVIVE_BUTTON_GRIP] = {.click = VIVE_CONTROLLER_SQUEEZE_CLICK,
-                             // only on vive wand without touch
-                             .touch = 0},
-
-    [SURVIVE_BUTTON_TRIGGER] = {.click = VIVE_CONTROLLER_TRIGGER_CLICK, .touch = VIVE_CONTROLLER_TRIGGER_TOUCH},
-};
 
 static bool
 update_button(struct survive_device *survive, const struct SurviveSimpleButtonEvent *e, timepoint_ns ts)
@@ -614,7 +677,7 @@ _calculate_squeeze_value(struct survive_device *survive)
 static void
 _process_button_event(struct survive_device *survive, const struct SurviveSimpleButtonEvent *e)
 {
-	timepoint_ns ts = survive_timecode_to_monotonic(e->time);
+	timepoint_ns ts = survive_timecode_to_monotonic(survive, e->time);
 	;
 	if (e->event_type == SURVIVE_INPUT_EVENT_AXIS_CHANGED) {
 		for (int i = 0; i < e->axis_count; i++) {
@@ -662,9 +725,27 @@ _process_hmd_button_event(struct survive_device *survive, const struct SurviveSi
 
 			if (e->axis_ids[i] == SURVIVE_AXIS_IPD) {
 				float ipd = val;
-				float range = INDEX_MAX_IPD - INDEX_MIN_IPD;
+
+				// arbitrary default values
+				float max = 70;
+				float min = 60;
+				if (survive->hmd.config.variant == VIVE_VARIANT_INDEX) {
+					max = INDEX_MAX_IPD;
+					min = INDEX_MIN_IPD;
+				} else if (survive->hmd.config.variant == VIVE_VARIANT_VIVE) {
+					max = VIVE_MAX_IPD;
+					min = VIVE_MIN_IPD;
+				} else {
+					if (!survive->hmd.use_default_ipd) {
+						SURVIVE_WARN(survive,
+						             "No IPD range for this HMD, falling back to default");
+						survive->hmd.use_default_ipd = true;
+					}
+				}
+
+				float range = max - min;
 				ipd *= range;
-				ipd += INDEX_MIN_IPD;
+				ipd += min;
 				survive->hmd.ipd = ipd;
 
 				// SURVIVE_DEBUG(survive, "ipd: %f meter", ipd);
@@ -727,7 +808,7 @@ _process_pose_event(struct survive_device *survive, const struct SurviveSimplePo
 	struct xrt_space_relation rel;
 	timepoint_ns ts;
 	pose_to_relation(&e->pose, &e->velocity, &rel);
-	ts = survive_timecode_to_monotonic(e->time);
+	ts = survive_timecode_to_monotonic(survive, e->time);
 	m_relation_history_push(survive->relation_hist, &rel, ts);
 
 	SURVIVE_TRACE(survive, "Process pose event for %s", survive->base.str);
@@ -742,7 +823,7 @@ _process_event(struct survive_system *ss, struct SurviveSimpleEvent *event)
 
 		struct survive_device *event_device = get_device_by_object(ss, e->object);
 		if (event_device == NULL) {
-			U_LOG_IFL_I(ss->ll, "Event for unknown object not handled");
+			U_LOG_IFL_I(ss->log_level, "Event for unknown object not handled");
 			return;
 		}
 
@@ -759,7 +840,7 @@ _process_event(struct survive_system *ss, struct SurviveSimpleEvent *event)
 		const struct SurviveSimpleConfigEvent *e = survive_simple_get_config_event(event);
 		enum SurviveSimpleObject_type t = survive_simple_object_get_type(e->object);
 		const char *name = survive_simple_object_name(e->object);
-		U_LOG_IFL_D(ss->ll, "Processing config for object name %s: type %d", name, t);
+		U_LOG_IFL_D(ss->log_level, "Processing config for object name %s: type %d", name, t);
 		add_device(ss, e);
 		break;
 	}
@@ -768,7 +849,7 @@ _process_event(struct survive_system *ss, struct SurviveSimpleEvent *event)
 
 		struct survive_device *event_device = get_device_by_object(ss, e->object);
 		if (event_device == NULL) {
-			U_LOG_IFL_E(ss->ll, "Event for unknown object not handled");
+			U_LOG_IFL_E(ss->log_level, "Event for unknown object not handled");
 			return;
 		}
 
@@ -776,11 +857,11 @@ _process_event(struct survive_system *ss, struct SurviveSimpleEvent *event)
 		break;
 	}
 	case SurviveSimpleEventType_DeviceAdded: {
-		U_LOG_IFL_W(ss->ll, "Device added event, but hotplugging not implemented yet");
+		U_LOG_IFL_W(ss->log_level, "Device added event, but hotplugging not implemented yet");
 		break;
 	}
 	case SurviveSimpleEventType_None: break;
-	default: U_LOG_IFL_E(ss->ll, "Unknown event %d", event->event_type);
+	default: U_LOG_IFL_E(ss->log_level, "Unknown event %d", event->event_type);
 	}
 }
 
@@ -791,7 +872,7 @@ survive_device_update_inputs(struct xrt_device *xdev)
 
 	os_mutex_lock(&survive->sys->lock);
 
-	for (size_t i = 0; i < survive->base.num_inputs; i++) {
+	for (size_t i = 0; i < survive->base.input_count; i++) {
 		survive->base.inputs[i] = survive->last_inputs[i];
 	}
 
@@ -799,10 +880,18 @@ survive_device_update_inputs(struct xrt_device *xdev)
 }
 
 static bool
-compute_distortion(struct xrt_device *xdev, int view, float u, float v, struct xrt_uv_triplet *result)
+compute_distortion(struct xrt_device *xdev, uint32_t view, float u, float v, struct xrt_uv_triplet *result)
 {
 	struct survive_device *d = (struct survive_device *)xdev;
-	return u_compute_distortion_vive(&d->hmd.config.distortion[view], u, v, result);
+	bool status = u_compute_distortion_vive(&d->hmd.config.distortion.values[view], u, v, result);
+
+	if (d->hmd.config.variant == VIVE_VARIANT_PRO2) {
+		// Flip Y coordinates
+		result->r.y = 1.0f - result->r.y;
+		result->g.y = 1.0f - result->g.y;
+		result->b.y = 1.0f - result->b.y;
+	}
+	return status;
 }
 
 static bool
@@ -815,7 +904,7 @@ _create_hmd_device(struct survive_system *sys, const struct SurviveSimpleObject 
 
 	struct survive_device *survive = U_DEVICE_ALLOCATE(struct survive_device, flags, inputs, outputs);
 
-	if (!vive_config_parse(&survive->hmd.config, conf_str, sys->ll)) {
+	if (!vive_config_parse(&survive->hmd.config, conf_str, sys->log_level)) {
 		free(survive);
 		return false;
 	}
@@ -829,7 +918,7 @@ _create_hmd_device(struct survive_system *sys, const struct SurviveSimpleObject 
 	survive->base.destroy = survive_device_destroy;
 	survive->base.update_inputs = survive_device_update_inputs;
 	survive->base.get_tracked_pose = survive_device_get_tracked_pose;
-	survive->base.get_view_pose = survive_device_get_view_pose;
+	survive->base.get_view_poses = survive_device_get_view_poses;
 	survive->base.tracking_origin = &sys->base;
 
 	SURVIVE_INFO(survive, "survive HMD present");
@@ -838,22 +927,18 @@ _create_hmd_device(struct survive_system *sys, const struct SurviveSimpleObject 
 
 	size_t idx = 0;
 	survive->base.hmd->blend_modes[idx++] = XRT_BLEND_MODE_OPAQUE;
-	survive->base.hmd->num_blend_modes = idx;
+	survive->base.hmd->blend_mode_count = idx;
 
 	switch (survive->hmd.config.variant) {
 	case VIVE_VARIANT_VIVE: snprintf(survive->base.str, XRT_DEVICE_NAME_LEN, "HTC Vive (libsurvive)"); break;
 	case VIVE_VARIANT_PRO: snprintf(survive->base.str, XRT_DEVICE_NAME_LEN, "HTC Vive Pro (libsurvive)"); break;
 	case VIVE_VARIANT_INDEX: snprintf(survive->base.str, XRT_DEVICE_NAME_LEN, "Valve Index (libsurvive)"); break;
+	case VIVE_VARIANT_PRO2: snprintf(survive->base.str, XRT_DEVICE_NAME_LEN, "HTC Vive Pro 2 (libsurvive)"); break;
 	case VIVE_UNKNOWN: snprintf(survive->base.str, XRT_DEVICE_NAME_LEN, "Unknown HMD (libsurvive)"); break;
 	}
 	snprintf(survive->base.serial, XRT_DEVICE_NAME_LEN, "%s", survive->hmd.config.firmware.device_serial_number);
 
-	// TODO: Replace hard coded values from OpenHMD with config
-	double w_meters = 0.122822 / 2.0;
-	double h_meters = 0.068234;
-	double lens_horizontal_separation = 0.057863;
-	double eye_to_screen_distance = 0.023226876441867737;
-
+	// Per-view size.
 	uint32_t w_pixels = survive->hmd.config.display.eye_target_width_in_pixels;
 	uint32_t h_pixels = survive->hmd.config.display.eye_target_height_in_pixels;
 
@@ -864,50 +949,27 @@ _create_hmd_device(struct survive_system *sys, const struct SurviveSimpleObject 
 	survive->base.hmd->screens[0].h_pixels = (int)h_pixels;
 
 	if (survive->hmd.config.variant == VIVE_VARIANT_INDEX) {
-		lens_horizontal_separation = 0.06;
-		h_meters = 0.07;
-		// eye relief knob adjusts this around [0.0255(near)-0.275(far)]
-		eye_to_screen_distance = 0.0255;
-
 		survive->base.hmd->screens[0].nominal_frame_interval_ns = (uint64_t)time_s_to_ns(1.0f / 144.0f);
 	} else {
 		survive->base.hmd->screens[0].nominal_frame_interval_ns = (uint64_t)time_s_to_ns(1.0f / 90.0f);
 	}
 
-	double fov = 2 * atan2(w_meters - lens_horizontal_separation / 2.0, eye_to_screen_distance);
-
-	struct xrt_vec2 lens_center[2];
-
 	for (uint8_t eye = 0; eye < 2; eye++) {
 		struct xrt_view *v = &survive->base.hmd->views[eye];
-		v->display.w_meters = (float)w_meters;
-		v->display.h_meters = (float)h_meters;
 		v->display.w_pixels = w_pixels;
 		v->display.h_pixels = h_pixels;
 		v->viewport.w_pixels = w_pixels;
 		v->viewport.h_pixels = h_pixels;
+		v->viewport.x_pixels = eye == 0 ? 0 : w_pixels;
 		v->viewport.y_pixels = 0;
-		lens_center[eye].y = (float)h_meters / 2.0f;
 		v->rot = u_device_rotation_ident;
 	}
 
-	// Left
-	lens_center[0].x = (float)(w_meters - lens_horizontal_separation / 2.0);
-	survive->base.hmd->views[0].viewport.x_pixels = 0;
+	// FoV values from config.
+	survive->base.hmd->distortion.fov[0] = survive->hmd.config.distortion.fov[0];
+	survive->base.hmd->distortion.fov[1] = survive->hmd.config.distortion.fov[1];
 
-	// Right
-	lens_center[1].x = (float)lens_horizontal_separation / 2.0f;
-	survive->base.hmd->views[1].viewport.x_pixels = w_pixels;
-
-	for (uint8_t eye = 0; eye < 2; eye++) {
-		if (!math_compute_fovs(w_meters, (double)lens_center[eye].x, fov, h_meters, (double)lens_center[eye].y,
-		                       0, &survive->base.hmd->views[eye].fov)) {
-			SURVIVE_ERROR(survive, "Failed to compute the partial fields of view.");
-			free(survive);
-			return NULL;
-		}
-	}
-
+	// Distortion params.
 	survive->base.hmd->distortion.models = XRT_DISTORTION_MODEL_COMPUTE;
 	survive->base.hmd->distortion.preferred = XRT_DISTORTION_MODEL_COMPUTE;
 	survive->base.compute_distortion = compute_distortion;
@@ -915,65 +977,34 @@ _create_hmd_device(struct survive_system *sys, const struct SurviveSimpleObject 
 	survive->base.orientation_tracking_supported = true;
 	survive->base.position_tracking_supported = true;
 	survive->base.device_type = XRT_DEVICE_TYPE_HMD;
+	survive->base.stage_supported = true;
 
 	survive->base.inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;
 
-	survive->last_inputs = U_TYPED_ARRAY_CALLOC(struct xrt_input, survive->base.num_inputs);
-	survive->num_last_inputs = survive->base.num_inputs;
-	for (size_t i = 0; i < survive->base.num_inputs; i++) {
+	survive->last_inputs = U_TYPED_ARRAY_CALLOC(struct xrt_input, survive->base.input_count);
+	survive->num_last_inputs = survive->base.input_count;
+	for (size_t i = 0; i < survive->base.input_count; i++) {
 		survive->last_inputs[i] = survive->base.inputs[i];
 	}
 
+	survive->hmd.use_default_ipd = debug_get_bool_option_survive_default_ipd();
+
+	u_var_add_root(survive, "Survive HMD Device", true);
+	u_var_add_bool(survive, &survive->hmd.use_default_ipd, "Use default IPD");
+	u_var_add_f32(survive, &survive->hmd.ipd, "IPD");
+
+	u_var_add_f32(survive, &survive->base.hmd->distortion.fov[0].angle_down, "View 0 FovAngleDown");
+	u_var_add_f32(survive, &survive->base.hmd->distortion.fov[0].angle_left, "View 0 FovAngleLeft");
+	u_var_add_f32(survive, &survive->base.hmd->distortion.fov[0].angle_right, "View 0 FovAngleRight");
+	u_var_add_f32(survive, &survive->base.hmd->distortion.fov[0].angle_up, "View 0 FovAngleUp");
+
+	u_var_add_f32(survive, &survive->base.hmd->distortion.fov[1].angle_down, "View 1 FovAngleDown");
+	u_var_add_f32(survive, &survive->base.hmd->distortion.fov[1].angle_left, "View 1 FovAngleLeft");
+	u_var_add_f32(survive, &survive->base.hmd->distortion.fov[1].angle_right, "View 1 FovAngleRight");
+	u_var_add_f32(survive, &survive->base.hmd->distortion.fov[1].angle_up, "View 1 FovAngleUp");
+
 	return true;
 }
-
-/*
- *
- * Bindings
- *
- */
-
-static struct xrt_binding_input_pair simple_inputs_index[4] = {
-    {XRT_INPUT_SIMPLE_SELECT_CLICK, XRT_INPUT_INDEX_TRIGGER_VALUE},
-    {XRT_INPUT_SIMPLE_MENU_CLICK, XRT_INPUT_INDEX_B_CLICK},
-    {XRT_INPUT_SIMPLE_GRIP_POSE, XRT_INPUT_INDEX_GRIP_POSE},
-    {XRT_INPUT_SIMPLE_AIM_POSE, XRT_INPUT_INDEX_AIM_POSE},
-};
-
-static struct xrt_binding_output_pair simple_outputs_index[1] = {
-    {XRT_OUTPUT_NAME_SIMPLE_VIBRATION, XRT_OUTPUT_NAME_INDEX_HAPTIC},
-};
-
-static struct xrt_binding_input_pair simple_inputs_vive[4] = {
-    {XRT_INPUT_SIMPLE_SELECT_CLICK, XRT_INPUT_VIVE_TRIGGER_VALUE},
-    {XRT_INPUT_SIMPLE_MENU_CLICK, XRT_INPUT_VIVE_MENU_CLICK},
-    {XRT_INPUT_SIMPLE_GRIP_POSE, XRT_INPUT_VIVE_GRIP_POSE},
-    {XRT_INPUT_SIMPLE_AIM_POSE, XRT_INPUT_VIVE_AIM_POSE},
-};
-
-static struct xrt_binding_output_pair simple_outputs_vive[1] = {
-    {XRT_OUTPUT_NAME_SIMPLE_VIBRATION, XRT_OUTPUT_NAME_VIVE_HAPTIC},
-};
-
-static struct xrt_binding_profile binding_profiles_index[1] = {
-    {
-        .name = XRT_DEVICE_SIMPLE_CONTROLLER,
-        .inputs = simple_inputs_index,
-        .num_inputs = ARRAY_SIZE(simple_inputs_index),
-        .outputs = simple_outputs_index,
-        .num_outputs = ARRAY_SIZE(simple_outputs_index),
-    },
-};
-
-static struct xrt_binding_profile binding_profiles_vive[1] = {
-    {
-        .name = XRT_DEVICE_SIMPLE_CONTROLLER,
-        .inputs = simple_inputs_vive,
-        .num_inputs = ARRAY_SIZE(simple_inputs_vive),
-        .outputs = simple_outputs_vive,
-        .num_outputs = ARRAY_SIZE(simple_outputs_vive),
-    },
-};
 
 #define SET_WAND_INPUT(NAME, NAME2)                                                                                    \
 	do {                                                                                                           \
@@ -1000,24 +1031,25 @@ _create_controller_device(struct survive_system *sys,
 		} else if (sys->controllers[SURVIVE_RIGHT_CONTROLLER_INDEX] == NULL) {
 			idx = SURVIVE_RIGHT_CONTROLLER_INDEX;
 		} else {
-			U_LOG_IFL_E(sys->ll, "Only creating 2 controllers!");
+			U_LOG_IFL_E(sys->log_level, "Only creating 2 controllers!");
 			return false;
 		}
 	} else if (variant == CONTROLLER_INDEX_LEFT) {
 		if (sys->controllers[SURVIVE_LEFT_CONTROLLER_INDEX] == NULL) {
 			idx = SURVIVE_LEFT_CONTROLLER_INDEX;
 		} else {
-			U_LOG_IFL_E(sys->ll, "Only creating 1 left controller!");
+			U_LOG_IFL_E(sys->log_level, "Only creating 1 left controller!");
 			return false;
 		}
 	} else if (variant == CONTROLLER_INDEX_RIGHT) {
 		if (sys->controllers[SURVIVE_RIGHT_CONTROLLER_INDEX] == NULL) {
 			idx = SURVIVE_RIGHT_CONTROLLER_INDEX;
 		} else {
-			U_LOG_IFL_E(sys->ll, "Only creating 1 right controller!");
+			U_LOG_IFL_E(sys->log_level, "Only creating 1 right controller!");
 			return false;
 		}
-	} else if (variant == CONTROLLER_TRACKER_GEN1 || variant == CONTROLLER_TRACKER_GEN2) {
+	} else if (variant == CONTROLLER_TRACKER_GEN1 || variant == CONTROLLER_TRACKER_GEN2 ||
+	           variant == CONTROLLER_TRACKER_GEN3 || variant == CONTROLLER_TRACKER_TUNDRA) {
 		for (int i = SURVIVE_NON_CONTROLLER_START; i < MAX_TRACKED_DEVICE_COUNT; i++) {
 			if (sys->controllers[i] == NULL) {
 				idx = i;
@@ -1027,7 +1059,8 @@ _create_controller_device(struct survive_system *sys,
 	}
 
 	if (idx == -1) {
-		U_LOG_IFL_E(sys->ll, "Skipping survive device we couldn't assign: %s!", config->firmware.model_number);
+		U_LOG_IFL_E(sys->log_level, "Skipping survive device we couldn't assign: %s!",
+		            config->firmware.model_number);
 		return false;
 	}
 
@@ -1088,18 +1121,13 @@ _create_controller_device(struct survive_system *sys,
 			snprintf(survive->base.str, XRT_DEVICE_NAME_LEN, "Valve Index Right Controller (libsurvive)");
 		}
 
-		survive->base.get_hand_tracking = survive_controller_get_hand_tracking;
-
-		enum xrt_hand hand = idx == SURVIVE_LEFT_CONTROLLER_INDEX ? XRT_HAND_LEFT : XRT_HAND_RIGHT;
-		u_hand_joints_init_default_set(&survive->ctrl.hand_tracking, hand, XRT_HAND_TRACKING_MODEL_FINGERL_CURL,
-		                               1.0);
-
 		survive->base.outputs[0].name = XRT_OUTPUT_NAME_INDEX_HAPTIC;
 
-		survive->base.binding_profiles = binding_profiles_index;
-		survive->base.num_binding_profiles = ARRAY_SIZE(binding_profiles_index);
+		survive->base.binding_profiles = vive_binding_profiles_index;
+		survive->base.binding_profile_count = vive_binding_profiles_index_count;
 
-		survive->base.hand_tracking_supported = true;
+		survive->base.get_hand_tracking = survive_controller_get_hand_tracking;
+		survive->base.hand_tracking_supported = !debug_get_bool_option_survive_disable_hand_emulation();
 
 	} else if (survive->ctrl.config.variant == CONTROLLER_VIVE_WAND) {
 		survive->base.name = XRT_DEVICE_VIVE_WAND;
@@ -1119,18 +1147,26 @@ _create_controller_device(struct survive_system *sys,
 
 		survive->base.outputs[0].name = XRT_OUTPUT_NAME_VIVE_HAPTIC;
 
-		survive->base.binding_profiles = binding_profiles_vive;
-		survive->base.num_binding_profiles = ARRAY_SIZE(binding_profiles_vive);
+		survive->base.binding_profiles = vive_binding_profiles_wand;
+		survive->base.binding_profile_count = vive_binding_profiles_wand_count;
 
 		survive->base.device_type = XRT_DEVICE_TYPE_ANY_HAND_CONTROLLER;
 	} else if (survive->ctrl.config.variant == CONTROLLER_TRACKER_GEN1 ||
-	           survive->ctrl.config.variant == CONTROLLER_TRACKER_GEN2) {
+	           survive->ctrl.config.variant == CONTROLLER_TRACKER_GEN2 ||
+	           survive->ctrl.config.variant == CONTROLLER_TRACKER_GEN3 ||
+	           survive->ctrl.config.variant == CONTROLLER_TRACKER_TUNDRA) {
 		if (survive->ctrl.config.variant == CONTROLLER_TRACKER_GEN1) {
 			survive->base.name = XRT_DEVICE_VIVE_TRACKER_GEN1;
 			snprintf(survive->base.str, XRT_DEVICE_NAME_LEN, "Vive Tracker Gen1 (libsurvive)");
 		} else if (survive->ctrl.config.variant == CONTROLLER_TRACKER_GEN2) {
 			survive->base.name = XRT_DEVICE_VIVE_TRACKER_GEN2;
 			snprintf(survive->base.str, XRT_DEVICE_NAME_LEN, "Vive Tracker Gen2 (libsurvive)");
+		} else if (survive->ctrl.config.variant == CONTROLLER_TRACKER_GEN3) {
+			survive->base.name = XRT_DEVICE_VIVE_TRACKER_GEN3;
+			snprintf(survive->base.str, XRT_DEVICE_NAME_LEN, "Vive Tracker Gen3 (libsurvive)");
+		} else if (survive->ctrl.config.variant == CONTROLLER_TRACKER_TUNDRA) {
+			survive->base.name = XRT_DEVICE_VIVE_TRACKER_TUNDRA;
+			snprintf(survive->base.str, XRT_DEVICE_NAME_LEN, "Tundra Tracker Gen3 (libsurvive)");
 		}
 
 		survive->base.device_type = XRT_DEVICE_TYPE_GENERIC_TRACKER;
@@ -1141,13 +1177,15 @@ _create_controller_device(struct survive_system *sys,
 	survive->base.orientation_tracking_supported = true;
 	survive->base.position_tracking_supported = true;
 
-	survive->last_inputs = U_TYPED_ARRAY_CALLOC(struct xrt_input, survive->base.num_inputs);
-	survive->num_last_inputs = survive->base.num_inputs;
-	for (size_t i = 0; i < survive->base.num_inputs; i++) {
+	survive->last_inputs = U_TYPED_ARRAY_CALLOC(struct xrt_input, survive->base.input_count);
+	survive->num_last_inputs = survive->base.input_count;
+	for (size_t i = 0; i < survive->base.input_count; i++) {
 		survive->last_inputs[i] = survive->base.inputs[i];
 	}
 
 	SURVIVE_DEBUG(survive, "Created Controller %d", idx);
+
+	u_var_add_root(survive, "Survive Device", true);
 
 	return true;
 }
@@ -1160,7 +1198,7 @@ add_device(struct survive_system *ss, const struct SurviveSimpleConfigEvent *e)
 {
 	struct SurviveSimpleObject *sso = e->object;
 
-	U_LOG_IFL_D(ss->ll, "Got device config from survive");
+	U_LOG_IFL_D(ss->log_level, "Got device config from survive");
 
 	enum SurviveSimpleObject_type type = survive_simple_object_get_type(sso);
 
@@ -1172,7 +1210,7 @@ add_device(struct survive_system *ss, const struct SurviveSimpleConfigEvent *e)
 
 	} else if (type == SurviveSimpleObject_OBJECT) {
 		struct vive_controller_config config = {0};
-		vive_config_parse_controller(&config, conf_str, ss->ll);
+		vive_config_parse_controller(&config, conf_str, ss->log_level);
 
 		switch (config.variant) {
 		case CONTROLLER_VIVE_WAND:
@@ -1180,16 +1218,18 @@ add_device(struct survive_system *ss, const struct SurviveSimpleConfigEvent *e)
 		case CONTROLLER_INDEX_RIGHT:
 		case CONTROLLER_TRACKER_GEN1:
 		case CONTROLLER_TRACKER_GEN2:
-			U_LOG_IFL_D(ss->ll, "Adding controller: %s.", config.firmware.model_number);
+		case CONTROLLER_TRACKER_GEN3:
+		case CONTROLLER_TRACKER_TUNDRA:
+			U_LOG_IFL_D(ss->log_level, "Adding controller: %s.", config.firmware.model_number);
 			_create_controller_device(ss, sso, &config);
 			break;
 		default:
-			U_LOG_IFL_D(ss->ll, "Skip non controller obj %s.", config.firmware.model_number);
-			U_LOG_IFL_T(ss->ll, "json: %s", conf_str);
+			U_LOG_IFL_D(ss->log_level, "Skip non controller obj %s.", config.firmware.model_number);
+			U_LOG_IFL_T(ss->log_level, "json: %s", conf_str);
 			break;
 		}
 	} else {
-		U_LOG_IFL_D(ss->ll, "Skip non OBJECT obj.");
+		U_LOG_IFL_D(ss->log_level, "Skip non OBJECT obj.");
 	}
 }
 
@@ -1203,7 +1243,7 @@ add_connected_devices(struct survive_system *ss)
 	os_nanosleep(250 * 1000 * 1000);
 
 	size_t objs = survive_simple_get_object_count(ss->ctx);
-	U_LOG_IFL_D(ss->ll, "Object count: %zu", objs);
+	U_LOG_IFL_D(ss->log_level, "Object count: %zu", objs);
 
 	timepoint_ns start = os_monotonic_get_ns();
 
@@ -1216,7 +1256,7 @@ add_connected_devices(struct survive_system *ss)
 	     sso = survive_simple_get_next_object(ss->ctx, sso)) {
 		enum SurviveSimpleObject_type t = survive_simple_object_get_type(sso);
 		const char *name = survive_simple_object_name(sso);
-		U_LOG_IFL_D(ss->ll, "Object name %s: type %d", name, t);
+		U_LOG_IFL_D(ss->log_level, "Object name %s: type %d", name, t);
 
 		// we only want to wait for configs of HMDs and controllers / trackers.
 		// Note: HMDs will be of type SurviveSimpleObject_OBJECT until the config is loaded.
@@ -1225,28 +1265,28 @@ add_connected_devices(struct survive_system *ss)
 		}
 	}
 
-	U_LOG_IFL_D(ss->ll, "Waiting for %d configs", configs_to_wait_for);
+	U_LOG_IFL_D(ss->log_level, "Waiting for %d configs", configs_to_wait_for);
 	while (configs_gotten < configs_to_wait_for) {
 		struct SurviveSimpleEvent event = {0};
 		while (survive_simple_next_event(ss->ctx, &event) != SurviveSimpleEventType_None) {
 			if (event.event_type == SurviveSimpleEventType_ConfigEvent) {
 				_process_event(ss, &event);
 				configs_gotten++;
-				U_LOG_IFL_D(ss->ll, "Got config from device: %d/%d", configs_gotten,
+				U_LOG_IFL_D(ss->log_level, "Got config from device: %d/%d", configs_gotten,
 				            configs_to_wait_for);
 			} else {
-				U_LOG_IFL_T(ss->ll, "Skipping event type %d", event.event_type);
+				U_LOG_IFL_T(ss->log_level, "Skipping event type %d", event.event_type);
 			}
 		}
 
 		if (time_ns_to_s(os_monotonic_get_ns() - start) > ss->wait_timeout) {
-			U_LOG_IFL_D(ss->ll, "Timed out after getting configs for %d/%d devices", configs_gotten,
+			U_LOG_IFL_D(ss->log_level, "Timed out after getting configs for %d/%d devices", configs_gotten,
 			            configs_to_wait_for);
 			break;
 		}
 		os_nanosleep(500 * 1000);
 	}
-	U_LOG_IFL_D(ss->ll, "Waiting for configs took %f ms", time_ns_to_ms_f(os_monotonic_get_ns() - start));
+	U_LOG_IFL_D(ss->log_level, "Waiting for configs took %f ms", time_ns_to_ms_f(os_monotonic_get_ns() - start));
 	return true;
 }
 
@@ -1276,52 +1316,9 @@ run_event_thread(void *ptr)
 	return NULL;
 }
 
-
-static void
-survive_get_user_config(struct survive_system *ss)
-{
-	// Set defaults
-	ss->wait_timeout = DEFAULT_WAIT_TIMEOUT;
-
-	// Open and parse file
-	struct u_config_json wrap = {0};
-	u_config_json_open_or_create_main_file(&wrap);
-	if (!wrap.file_loaded) {
-		return;
-	}
-
-	// Find the dict we care about in the file. It might not be there; if so return early.
-	cJSON *config_json = cJSON_GetObjectItemCaseSensitive(wrap.root, "config_survive");
-	if (config_json == NULL) {
-		return;
-	}
-
-	// Get wait timeout key. No need to null-check - read u_json_get_float.
-	cJSON *wait_timeout = cJSON_GetObjectItemCaseSensitive(config_json, "wait_timeout");
-	u_json_get_float(wait_timeout, &ss->wait_timeout);
-
-	// Log
-	U_LOG_D("Wait timeout is %f seconds!", ss->wait_timeout);
-
-	// Clean up after ourselves
-	cJSON_Delete(wrap.root);
-	return;
-}
-
 int
-survive_device_autoprobe(struct xrt_auto_prober *xap,
-                         cJSON *attached_data,
-                         bool no_hmds,
-                         struct xrt_prober *xp,
-                         struct xrt_device **out_xdevs)
+survive_get_devices(struct xrt_device **out_xdevs, struct vive_config **out_vive_config)
 {
-	if (survive_already_initialized) {
-		U_LOG_I(
-		    "Skipping libsurvive initialization, already "
-		    "initialized");
-		return 0;
-	}
-
 	SurviveSimpleContext *actx = NULL;
 #if 1
 	char *survive_args[] = {
@@ -1337,7 +1334,7 @@ survive_device_autoprobe(struct xrt_auto_prober *xap,
 
 	if (!actx) {
 		U_LOG_E("failed to init survive");
-		return false;
+		return 0;
 	}
 
 	struct survive_system *ss = U_TYPED_CALLOC(struct survive_system);
@@ -1351,74 +1348,53 @@ survive_device_autoprobe(struct xrt_auto_prober *xap,
 	ss->base.offset.position.y = 0.0f;
 	ss->base.offset.position.z = 0.0f;
 	ss->base.offset.orientation.w = 1.0f;
+	ss->timecode_offset_ms = (struct u_var_draggable_f32){
+	    .val = debug_get_float_option_survive_timecode_offset_ms(),
+	    .min = -20.0,
+	    .step = 0.1,
+	    .max = +20.0,
+	};
 
-	ss->ll = debug_get_log_option_survive_log();
+	ss->log_level = debug_get_log_option_survive_log();
 
-	survive_get_user_config(ss);
+	ss->wait_timeout = DEFAULT_WAIT_TIMEOUT;
+
 
 	while (!add_connected_devices(ss)) {
-		U_LOG_IFL_E(ss->ll, "Failed to get device config from survive");
+		U_LOG_IFL_E(ss->log_level, "Failed to get device config from survive");
 		continue;
 	}
 
-	// U_LOG_D("Survive HMD %p, controller %p %p", (void *)ss->hmd,
-	//        (void *)ss->controllers[0], (void *)ss->controllers[1]);
-
-	if (ss->ll <= U_LOGGING_DEBUG) {
+	if (ss->log_level <= U_LOGGING_DEBUG) {
 		if (ss->hmd) {
 			u_device_dump_config(&ss->hmd->base, __func__, "libsurvive");
 		}
 	}
 
 	int out_idx = 0;
-	if (ss->hmd && !no_hmds) {
-		out_xdevs[out_idx++] = &ss->hmd->base;
-	}
 
-	bool found_controllers = false;
+	if (ss->hmd != NULL) {
+		out_xdevs[out_idx++] = &ss->hmd->base;
+		*out_vive_config = &ss->hmd->hmd.config;
+	}
 
 	for (int i = 0; i < MAX_TRACKED_DEVICE_COUNT; i++) {
 
 		if (out_idx == XRT_MAX_DEVICES_PER_PROBE - 1) {
-			U_LOG_IFL_W(ss->ll, "Probed max of %d devices, ignoring further devices",
+			U_LOG_IFL_W(ss->log_level, "Probed max of %d devices, ignoring further devices",
 			            XRT_MAX_DEVICES_PER_PROBE);
 			return out_idx;
 		}
 
 		if (ss->controllers[i] != NULL) {
 			out_xdevs[out_idx++] = &ss->controllers[i]->base;
-			found_controllers = true;
 		}
 	}
-
-#ifdef XRT_BUILD_DRIVER_HANDTRACKING
-	// We want to hit this codepath when we find a HMD but no controllers.
-	if ((ss->hmd != NULL) && !found_controllers) {
-		struct t_stereo_camera_calibration *cal = NULL;
-
-		struct xrt_pose head_in_left_cam;
-		vive_get_stereo_camera_calibration(&ss->hmd->hmd.config, &cal, &head_in_left_cam);
-
-		struct xrt_device *ht = ht_device_create(xp, cal);
-		if (ht != NULL) { // Returns NULL if there's a problem and the hand tracker can't start. By no means a
-			          // fatal error.
-			struct xrt_device *wrap =
-			    multi_create_tracking_override(XRT_TRACKING_OVERRIDE_ATTACHED, ht, &ss->hmd->base,
-			                                   XRT_INPUT_GENERIC_HEAD_POSE, &head_in_left_cam);
-			out_xdevs[out_idx++] = wrap;
-		}
-		// Don't need it anymore. And it's not even created unless we hit this codepath, which is somewhat hard.
-		t_stereo_camera_calibration_reference(&cal, NULL);
-	}
-#endif
-
-
-	survive_already_initialized = true;
 
 	// Mutex before thread.
 	int ret = os_mutex_init(&ss->lock);
 	if (ret != 0) {
-		U_LOG_IFL_E(ss->ll, "Failed to init mutex!");
+		U_LOG_IFL_E(ss->log_level, "Failed to init mutex!");
 		survive_device_destroy((struct xrt_device *)ss->hmd);
 		for (int i = 0; i < MAX_TRACKED_DEVICE_COUNT; i++) {
 			survive_device_destroy((struct xrt_device *)ss->controllers[i]);
@@ -1426,14 +1402,19 @@ survive_device_autoprobe(struct xrt_auto_prober *xap,
 		return 0;
 	}
 
+	os_thread_helper_init(&ss->event_thread);
 	ret = os_thread_helper_start(&ss->event_thread, run_event_thread, ss);
 	if (ret != 0) {
-		U_LOG_IFL_E(ss->ll, "Failed to start event thread!");
+		U_LOG_IFL_E(ss->log_level, "Failed to start event thread!");
 		survive_device_destroy((struct xrt_device *)ss->hmd);
 		for (int i = 0; i < MAX_TRACKED_DEVICE_COUNT; i++) {
 			survive_device_destroy((struct xrt_device *)ss->controllers[i]);
 		}
 		return 0;
 	}
+
+	u_var_add_root(ss, "Survive system", true);
+	u_var_add_draggable_f32(ss, &ss->timecode_offset_ms, "Timecode offset(ms)");
+
 	return out_idx;
 }

@@ -1,181 +1,96 @@
-// Copyright 2019, Collabora, Ltd.
+// Copyright 2019-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  OpenGL functions to drive the gui.
+ * @brief  OpenGL helper functions for drawing GUI elements.
  * @author Jakob Bornecrantz <jakob@collabora.com>
+ * @author Moses Turner <moses@collabora.com>
  * @ingroup gui
  */
 
-#include "xrt/xrt_frame.h"
-#include "util/u_misc.h"
-#include "ogl/ogl_api.h"
+#include "math/m_api.h"
 
-#include "gui_common.h"
-
-#include <pthread.h>
+#include "gui_ogl.h"
+#include "gui_imgui.h"
 
 
-/*!
- * An @ref xrt_frame_sink that shows sunk frames in the GUI.
- * @implements xrt_frame_sink
- * @implements xrt_frame_node
+/*
+ *
+ * Helpers.
+ *
  */
-struct gui_ogl_sink
-{
-	struct gui_ogl_texture tex;
-
-	struct xrt_frame_sink sink;
-	struct xrt_frame_node node;
-
-	struct xrt_frame *frame;
-
-	pthread_mutex_t mutex;
-
-	bool running;
-};
 
 static void
-push_frame(struct xrt_frame_sink *xs, struct xrt_frame *xf)
+get_uvs(ImVec2 *uv0, ImVec2 *uv1, bool rotate_180, bool flip_y)
 {
-	struct gui_ogl_sink *s = container_of(xs, struct gui_ogl_sink, sink);
+	// Flip direction of y (x) if we are rotating.
+	float u0 = rotate_180 ? 1.f : 0.f;
+	float u1 = rotate_180 ? 0.f : 1.f;
 
-	// The fields are protected.
-	pthread_mutex_lock(&s->mutex);
+	// Flip direction of v (y) if either flip_y or rotate_180 is true.
+	float v0 = (rotate_180 ^ flip_y) ? 1.f : 0.f;
+	float v1 = (rotate_180 ^ flip_y) ? 0.f : 1.f;
 
-	// If we are in the process of shutting down, don't take the reference.
-	if (s->running) {
-		xrt_frame_reference(&s->frame, xf);
-	}
-
-	// Done
-	pthread_mutex_unlock(&s->mutex);
+	// Note: We can't easily do 90 or 270-degree rotations: https://github.com/ocornut/imgui/issues/3267
+	*uv0 = (ImVec2){u0, v0};
+	*uv1 = (ImVec2){u1, v1};
 }
 
-static void
-break_apart(struct xrt_frame_node *node)
+
+/*
+ *
+ * 'Exported' functions.
+ *
+ */
+
+void
+gui_ogl_draw_image(uint32_t width, uint32_t height, uint32_t tex_id, float scale, bool rotate_180, bool flip_y)
 {
-	struct gui_ogl_sink *s = container_of(node, struct gui_ogl_sink, node);
+	ImVec2 uv0, uv1;
+	get_uvs(&uv0, &uv1, rotate_180, flip_y);
 
-	// Stop receiving any more reference.
-	pthread_mutex_lock(&s->mutex);
-	s->running = false;
-	pthread_mutex_unlock(&s->mutex);
+	// Need to go via ints to get integer steps.
+	int w = (float)width * scale;
+	int h = (float)height * scale;
 
-	// Release any frame waiting for upload.
-	xrt_frame_reference(&s->frame, NULL);
-}
+	ImVec2 size = {(float)w, (float)h};
+	ImVec4 white = {1, 1, 1, 1};
+	ImVec4 black = {0, 0, 0, 1};
+	ImTextureID id = (ImTextureID)(intptr_t)tex_id;
 
-static void
-destroy(struct xrt_frame_node *node)
-{
-	struct gui_ogl_sink *s = container_of(node, struct gui_ogl_sink, node);
-
-	glDeleteTextures(1, &s->tex.id);
-
-	pthread_mutex_destroy(&s->mutex);
-
-	free(s);
-}
-
-static void
-update_r8g8b8(struct gui_ogl_sink *s, GLint w, GLint h, uint8_t *data)
-{
-	glBindTexture(GL_TEXTURE_2D, s->tex.id);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
-	glBindTexture(GL_TEXTURE_2D, 0);
-}
-
-static void
-update_l8(struct gui_ogl_sink *s, GLint w, GLint h, uint8_t *data)
-{
-	glBindTexture(GL_TEXTURE_2D, s->tex.id);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, w, h, 0, GL_RED, GL_UNSIGNED_BYTE, data);
-	GLint swizzleMask[] = {GL_RED, GL_RED, GL_RED, GL_ONE};
-	glTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_RGBA, swizzleMask);
-	glBindTexture(GL_TEXTURE_2D, 0);
+	igImageBg(id, size, uv0, uv1, white, white, black);
 }
 
 void
-gui_ogl_sink_update(struct gui_ogl_texture *tex)
+gui_ogl_draw_background(uint32_t width, uint32_t height, uint32_t tex_id, bool rotate_180, bool flip_y)
 {
-	struct gui_ogl_sink *s = container_of(tex, struct gui_ogl_sink, tex);
-	(void)s;
+	ImVec2 uv0, uv1;
+	get_uvs(&uv0, &uv1, rotate_180, flip_y);
 
-	// Take the frame no need to adjust reference.
-	pthread_mutex_lock(&s->mutex);
-	struct xrt_frame *frame = s->frame;
-	s->frame = NULL;
-	pthread_mutex_unlock(&s->mutex);
+	const ImU32 white = 0xffffffff;
+	ImTextureID id = (ImTextureID)(intptr_t)tex_id;
 
-	if (frame == NULL) {
-		return;
-	}
+	ImGuiIO *io = igGetIO();
 
-	GLint w, h;
-	uint8_t *data;
+	float in_w = (float)width;
+	float in_h = (float)height;
+	float out_w = io->DisplaySize.x;
+	float out_h = io->DisplaySize.y;
 
-	w = frame->width;
-	h = frame->height;
+	float scale_w = (float)out_w / in_w; // 128 / 1280 = 0.1
+	float scale_h = (float)out_h / in_h; // 128 / 800 =  0.16
 
-	if (tex->w != (uint32_t)w || tex->h != (uint32_t)h) {
-		tex->w = w;
-		tex->h = h;
+	float scale = MIN(scale_w, scale_h); // 0.1
 
-		// Automatically set the half scaling.
-		if (tex->w >= 1024 || tex->h >= 1024) {
-			tex->half = true;
-		}
-	}
+	float inside_w = in_w * scale;
+	float inside_h = in_h * scale;
 
-	tex->seq = frame->source_sequence;
-	data = frame->data;
+	float translate_x = (out_w - inside_w) / 2; // Should be 0 for 1280x800
+	float translate_y = (out_h - inside_h) / 2; // Should be (1280 - 800) / 2 = 240
 
-	switch (frame->format) {
-	case XRT_FORMAT_R8G8B8: update_r8g8b8(s, w, h, data); break;
-	case XRT_FORMAT_L8: update_l8(s, w, h, data); break;
-	default: break;
-	}
+	ImVec2 p_min = {translate_x, translate_y};
+	ImVec2 p_max = {translate_x + inside_w, translate_y + inside_h};
 
-	xrt_frame_reference(&frame, NULL);
-}
-
-struct gui_ogl_texture *
-gui_ogl_sink_create(const char *name, struct xrt_frame_context *xfctx, struct xrt_frame_sink **out_sink)
-{
-	struct gui_ogl_sink *s = U_TYPED_CALLOC(struct gui_ogl_sink);
-	int ret = 0;
-
-	s->sink.push_frame = push_frame;
-	s->node.break_apart = break_apart;
-	s->node.destroy = destroy;
-	s->tex.name = name;
-	s->tex.w = 256;
-	s->tex.h = 256;
-	s->running = true;
-
-	ret = pthread_mutex_init(&s->mutex, NULL);
-	if (ret != 0) {
-		free(s);
-		return NULL;
-	}
-
-	// Temporary texture
-	glGenTextures(1, &s->tex.id);
-	glBindTexture(GL_TEXTURE_2D, s->tex.id);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	GLint w = 1;
-	GLint h = 1;
-	struct xrt_colour_rgb_u8 pink = {255, 0, 255};
-
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGB, GL_UNSIGNED_BYTE, &pink.r);
-
-	glBindTexture(GL_TEXTURE_2D, 0);
-
-	xrt_frame_context_add(xfctx, &s->node);
-
-	*out_sink = &s->sink;
-
-	return &s->tex;
+	ImDrawList *bg = igGetBackgroundDrawList();
+	ImDrawList_AddImage(bg, id, p_min, p_max, uv0, uv1, white);
 }

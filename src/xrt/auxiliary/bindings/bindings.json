@@ -1,9 +1,182 @@
 {
+	"$schema": "./bindings.schema.json",
 	"profiles": {
+		"/virtual_profiles/ext/palm_pose": {
+			"title": "Ext Palm Pose",
+			"type": "tracked_controller",
+			"extension": "XR_EXT_palm_pose",
+			"monado_device": "XRT_DEVICE_SIMPLE_CONTROLLER",
+			"subaction_paths": [
+				"/user/hand/left",
+				"/user/hand/right"
+			],
+			"subpaths": {
+				"/input/palm_ext": {
+					"type": "pose",
+					"localized_name": "Palm Pose",
+					"components": ["pose"],
+					"monado_bindings": {
+						"pose": "XRT_INPUT_GENERIC_PALM_POSE"
+					}
+				}
+			}
+		},
+
+		"/virtual_profiles/ext/hand_interaction_poses": {
+			"title": "Ext Hand Interaction Poses",
+			"type": "tracked_controller",
+			"monado_device": "XRT_DEVICE_EXT_HAND_INTERACTION",
+			"extension": "XR_EXT_hand_interaction",
+			"subaction_paths": [
+				"/user/hand/left",
+				"/user/hand/right"
+			],
+			"subpaths": {
+				"/input/pinch_ext": {
+					"type": "pose",
+					"localized_name": "Pinch",
+					"components": ["pose"],
+					"monado_bindings": {
+						"pose": "XRT_INPUT_HAND_PINCH_POSE"
+					}
+				},
+				"/input/poke_ext": {
+					"type": "pose",
+					"localized_name": "Poke",
+					"components": ["pose"],
+					"monado_bindings": {
+						"pose": "XRT_INPUT_HAND_POKE_POSE"
+					}
+				}
+			}
+		},
+
+		"/virtual_profiles/mndx/winmr_system_button": {
+			"title": "WinMR system button",
+			"type": "tracked_controller",
+			"monado_device": "XRT_DEVICE_WMR_CONTROLLER",
+			"extension": "XR_MNDX_system_buttons",
+			"subaction_paths": [
+				"/user/hand/left",
+				"/user/hand/right"
+			],
+			"subpaths": {
+				"/input/system": {
+					"type": "button",
+					"localized_name": "System",
+					"components": ["click"],
+					"monado_bindings": {
+						"click": "XRT_INPUT_WMR_HOME_CLICK"
+					}
+				}
+			}
+		},
+
+		"/virtual_profiles/mndx/samsung_odyssey_system_button": {
+			"title": "Samsung Odyssey system button",
+			"type": "tracked_controller",
+			"monado_device": "XRT_DEVICE_SAMSUNG_ODYSSEY_CONTROLLER",
+			"extension": "XR_MNDX_system_buttons",
+			"subaction_paths": [
+				"/user/hand/left",
+				"/user/hand/right"
+			],
+			"subpaths": {
+				"/input/system": {
+					"type": "button",
+					"localized_name": "System",
+					"components": ["click"],
+					"monado_bindings": {
+						"click": "XRT_INPUT_ODYSSEY_CONTROLLER_HOME_CLICK"
+					}
+				}
+			}
+		},
+
+		"/virtual_profiles/mndx/hp_reverb_g2_system_button": {
+			"title": "HP Reverb G2 system button",
+			"type": "tracked_controller",
+			"monado_device": "XRT_DEVICE_HP_REVERB_G2_CONTROLLER",
+			"extension": "XR_MNDX_system_buttons",
+			"subaction_paths": [
+				"/user/hand/left",
+				"/user/hand/right"
+			],
+			"subpaths": {
+				"/input/system": {
+					"type": "button",
+					"localized_name": "System",
+					"components": ["click"],
+					"monado_bindings": {
+						"click": "XRT_INPUT_G2_CONTROLLER_HOME_CLICK"
+					}
+				}
+			}
+		},
+
+		"/interaction_profiles/ext/hand_interaction_ext": {
+			"title": "Ext Hand Interaction",
+			"type": "tracked_controller",
+			"monado_device": "XRT_DEVICE_EXT_HAND_INTERACTION",
+			"extension": "XR_EXT_hand_interaction",
+			"extended_by": ["ext/palm_pose", "ext/hand_interaction_poses"],
+			"subaction_paths": [
+				"/user/hand/left",
+				"/user/hand/right"
+			],
+			"subpaths": {
+				"/input/grip": {
+					"type": "pose",
+					"localized_name": "Grip",
+					"components": ["pose"],
+					"monado_bindings": {
+						"pose": "XRT_INPUT_HAND_GRIP_POSE"
+					}
+				},
+				"/input/aim": {
+					"type": "pose",
+					"localized_name": "Aim",
+					"components": ["pose"],
+					"monado_bindings": {
+						"pose": "XRT_INPUT_HAND_AIM_POSE"
+					}
+				},
+				"/input/pinch_ext": {
+					"type": "trigger",
+					"localized_name": "Pinch",
+					"components": ["value", "ready_ext"],
+					"monado_bindings": {
+						"value": "XRT_INPUT_HAND_PINCH_VALUE",
+						"ready_ext": "XRT_INPUT_HAND_PINCH_READY"
+					}
+				},
+				"/input/aim_activate_ext": {
+					"type": "trigger",
+					"localized_name": "Aim Activate",
+					"components": ["value", "ready_ext"],
+					"monado_bindings": {
+						"value": "XRT_INPUT_HAND_AIM_ACTIVATE_VALUE",
+						"ready_ext": "XRT_INPUT_HAND_AIM_ACTIVATE_READY"
+					}
+				},
+				"/input/grasp_ext": {
+					"type": "trigger",
+					"localized_name": "Grasp",
+					"components": ["value", "ready_ext"],
+					"monado_bindings": {
+						"value": "XRT_INPUT_HAND_GRASP_VALUE",
+						"ready_ext": "XRT_INPUT_HAND_GRASP_READY"
+					}
+				}
+			}
+		},
+
 		"/interaction_profiles/khr/simple_controller": {
 			"title": "Khronos Simple Controller",
 			"type": "tracked_controller",
+			"steamvr_controllertype": "khr_simple_controller",
 			"monado_device": "XRT_DEVICE_SIMPLE_CONTROLLER",
+			"extended_by": ["ext/palm_pose", "ext/hand_interaction_poses"],
 			"subaction_paths": [
 				"/user/hand/left",
 				"/user/hand/right"
@@ -12,7 +185,7 @@
 				"/input/select": {
 					"type": "button",
 					"localized_name": "Select",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_SIMPLE_SELECT_CLICK"
 					}
@@ -20,7 +193,7 @@
 				"/input/menu": {
 					"type": "button",
 					"localized_name": "Menu",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_SIMPLE_MENU_CLICK"
 					}
@@ -28,7 +201,7 @@
 				"/input/grip": {
 					"type": "pose",
 					"localized_name": "Grip",
-					"features": ["pose"],
+					"components": ["pose"],
 					"monado_bindings": {
 						"pose": "XRT_INPUT_SIMPLE_GRIP_POSE"
 					}
@@ -36,7 +209,7 @@
 				"/input/aim": {
 					"type": "pose",
 					"localized_name": "Aim",
-					"features": ["pose"],
+					"components": ["pose"],
 					"monado_bindings": {
 						"pose": "XRT_INPUT_SIMPLE_AIM_POSE"
 					}
@@ -44,7 +217,7 @@
 				"/output/haptic": {
 					"type": "vibration",
 					"localized_name": "Haptic",
-					"features": ["haptic"],
+					"components": ["haptic"],
 					"monado_bindings": {
 						"haptic": "XRT_OUTPUT_NAME_SIMPLE_VIBRATION"
 					}
@@ -56,6 +229,7 @@
 			"title": "Google Daydream Controller",
 			"type": "tracked_controller",
 			"monado_device": "XRT_DEVICE_DAYDREAM",
+			"extended_by": ["ext/palm_pose", "ext/hand_interaction_poses"],
 			"subaction_paths": [
 				"/user/hand/left",
 				"/user/hand/right"
@@ -64,7 +238,7 @@
 				"/input/select": {
 					"type": "button",
 					"localized_name": "Select",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_DAYDREAM_BAR_CLICK"
 					}
@@ -72,7 +246,12 @@
 				"/input/trackpad": {
 					"type": "trackpad",
 					"localized_name": "Trackpad",
-					"features": ["touch", "click", "position"],
+					"components": ["touch", "click", "position"],
+					"dpad_emulation": {
+						"position": "position",
+						"activate": "touch",
+						"center": true
+					},
 					"monado_bindings": {
 						"touch": "XRT_INPUT_DAYDREAM_TOUCHPAD_TOUCH",
 						"click": "XRT_INPUT_DAYDREAM_TOUCHPAD_CLICK",
@@ -82,7 +261,7 @@
 				"/input/grip": {
 					"type": "pose",
 					"localized_name": "Grip",
-					"features": ["pose"],
+					"components": ["pose"],
 					"monado_bindings": {
 						"pose": "XRT_INPUT_DAYDREAM_POSE"
 					}
@@ -90,7 +269,7 @@
 				"/input/aim": {
 					"type": "pose",
 					"localized_name": "Aim",
-					"features": ["pose"],
+					"components": ["pose"],
 					"monado_bindings": {
 						"pose": "XRT_INPUT_DAYDREAM_POSE"
 					}
@@ -101,7 +280,9 @@
 		"/interaction_profiles/htc/vive_controller": {
 			"title": "HTC Vive Controller",
 			"type": "tracked_controller",
+			"steamvr_controllertype": "vive_controller",
 			"monado_device": "XRT_DEVICE_VIVE_WAND",
+			"extended_by": ["ext/palm_pose", "ext/hand_interaction_poses"],
 			"subaction_paths": [
 				"/user/hand/left",
 				"/user/hand/right"
@@ -110,7 +291,7 @@
 				"/input/system": {
 					"type": "button",
 					"localized_name": "System",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_VIVE_SYSTEM_CLICK"
 					}
@@ -118,15 +299,16 @@
 				"/input/squeeze": {
 					"type": "button",
 					"localized_name": "Squeeze",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_VIVE_SQUEEZE_CLICK"
 					}
 				},
 				"/input/menu": {
 					"type": "button",
+					"steamvr_path": "/input/application_menu",
 					"localized_name": "Menu",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click":  "XRT_INPUT_VIVE_MENU_CLICK"
 					}
@@ -134,7 +316,7 @@
 				"/input/trigger": {
 					"type": "trigger",
 					"localized_name": "Trigger",
-					"features": ["click", "value"],
+					"components": ["click", "value"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_VIVE_TRIGGER_CLICK",
 						"value": "XRT_INPUT_VIVE_TRIGGER_VALUE"
@@ -143,7 +325,12 @@
 				"/input/trackpad": {
 					"type": "trackpad",
 					"localized_name": "Trackpad",
-					"features": ["click", "touch", "position"],
+					"components": ["click", "touch", "position"],
+					"dpad_emulation": {
+						"position": "position",
+						"activate": "click",
+						"center": true
+					},
 					"monado_bindings": {
 						"click": "XRT_INPUT_VIVE_TRACKPAD_CLICK",
 						"touch": "XRT_INPUT_VIVE_TRACKPAD_TOUCH",
@@ -153,7 +340,7 @@
 				"/input/grip": {
 					"type": "pose",
 					"localized_name": "Grip",
-					"features": ["pose"],
+					"components": ["pose"],
 					"monado_bindings": {
 						"pose": "XRT_INPUT_VIVE_GRIP_POSE"
 					}
@@ -161,7 +348,7 @@
 				"/input/aim": {
 					"type": "pose",
 					"localized_name": "Aim",
-					"features": ["pose"],
+					"components": ["pose"],
 					"monado_bindings": {
 						"pose": "XRT_INPUT_VIVE_AIM_POSE"
 					}
@@ -169,7 +356,7 @@
 				"/output/haptic": {
 					"type": "vibration",
 					"localized_name": "Haptic",
-					"features": ["haptic"],
+					"components": ["haptic"],
 					"monado_bindings": {
 						"haptic": "XRT_OUTPUT_NAME_VIVE_HAPTIC"
 					}
@@ -180,7 +367,9 @@
 		"/interaction_profiles/htc/vive_pro": {
 			"title": "HTC Vive Pro",
 			"type": "tracked_hmd",
+			"steamvr_controllertype": "vive_pro",
 			"monado_device": "XRT_DEVICE_VIVE_PRO",
+			"extended_by": ["ext/palm_pose", "ext/hand_interaction_poses"],
 			"subaction_paths": [
 				"/user/head"
 			],
@@ -188,7 +377,7 @@
 				"/input/system": {
 					"type": "button",
 					"localized_name": "System",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_VIVEPRO_SYSTEM_CLICK"
 					}
@@ -196,7 +385,7 @@
 				"/input/volume_up": {
 					"type": "button",
 					"localized_name": "Volume Up",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_VIVEPRO_VOLUP_CLICK"
 					}
@@ -204,7 +393,7 @@
 				"/input/volume_down": {
 					"type": "button",
 					"localized_name": "Volume Down",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_VIVEPRO_VOLDN_CLICK"
 					}
@@ -212,7 +401,7 @@
 				"/input/mute_mic": {
 					"type": "button",
 					"localized_name": "Mute Microphone",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_VIVEPRO_MUTE_MIC_CLICK"
 					}
@@ -223,7 +412,13 @@
 		"/interaction_profiles/microsoft/motion_controller": {
 			"title": "Microsoft Mixed Reality Motion Controller",
 			"type": "tracked_controller",
+			"steamvr_controllertype": "holographic_controller",
 			"monado_device": "XRT_DEVICE_WMR_CONTROLLER",
+			"extended_by": [
+				"ext/palm_pose",
+				"ext/hand_interaction_poses",
+				"mndx/winmr_system_button"
+			],
 			"subaction_paths": [
 				"/user/hand/left",
 				"/user/hand/right"
@@ -232,7 +427,7 @@
 				"/input/menu": {
 					"type": "button",
 					"localized_name": "Menu",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_WMR_MENU_CLICK"
 					}
@@ -240,7 +435,7 @@
 				"/input/squeeze": {
 					"type": "button",
 					"localized_name": "Squeeze",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_WMR_SQUEEZE_CLICK"
 					}
@@ -248,7 +443,7 @@
 				"/input/trigger": {
 					"type": "trigger",
 					"localized_name": "Trigger",
-					"features": ["value"],
+					"components": ["value"],
 					"monado_bindings": {
 						"value": "XRT_INPUT_WMR_TRIGGER_VALUE"
 					}
@@ -256,7 +451,11 @@
 				"/input/thumbstick": {
 					"type": "joystick",
 					"localized_name": "Thumbstick",
-					"features": ["click", "position"],
+					"components": ["click", "position"],
+					"dpad_emulation": {
+						"position": "position",
+						"center": false
+					},
 					"monado_bindings": {
 						"click": "XRT_INPUT_WMR_THUMBSTICK_CLICK",
 						"position": "XRT_INPUT_WMR_THUMBSTICK"
@@ -265,7 +464,12 @@
 				"/input/trackpad": {
 					"type": "trackpad",
 					"localized_name": "Trackpad",
-					"features": ["click", "touch", "position"],
+					"components": ["click", "touch", "position"],
+					"dpad_emulation": {
+						"position": "position",
+						"activate": "click",
+						"center": true
+					},
 					"monado_bindings": {
 						"click": "XRT_INPUT_WMR_TRACKPAD_CLICK",
 						"touch": "XRT_INPUT_WMR_TRACKPAD_TOUCH",
@@ -275,7 +479,7 @@
 				"/input/grip": {
 					"type": "pose",
 					"localized_name": "Grip",
-					"features": ["pose"],
+					"components": ["pose"],
 					"monado_bindings": {
 						"pose": "XRT_INPUT_WMR_GRIP_POSE"
 					}
@@ -283,7 +487,7 @@
 				"/input/aim": {
 					"type": "pose",
 					"localized_name": "Aim",
-					"features": ["pose"],
+					"components": ["pose"],
 					"monado_bindings":  {
 						"pose": "XRT_INPUT_WMR_AIM_POSE"
 					}
@@ -291,7 +495,7 @@
 				"/output/haptic": {
 					"type": "vibration",
 					"localized_name": "Haptic",
-					"features": ["haptic"],
+					"components": ["haptic"],
 					"monado_bindings": {
 						"haptic": "XRT_OUTPUT_NAME_WMR_HAPTIC"
 					}
@@ -302,7 +506,9 @@
 		"/interaction_profiles/microsoft/xbox_controller": {
 			"title": "Microsoft Xbox Controller",
 			"type": "untracked_controller",
+			"steamvr_controllertype": "gamepad",
 			"monado_device": "XRT_DEVICE_XBOX_CONTROLLER",
+			"extended_by": ["ext/palm_pose", "ext/hand_interaction_poses"],
 			"subaction_paths": [
 				"/user/gamepad"
 			],
@@ -310,7 +516,7 @@
 				"/input/menu": {
 					"type": "button",
 					"localized_name": "Menu",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_XBOX_MENU_CLICK"
 					}
@@ -318,7 +524,7 @@
 				"/input/view": {
 					"type": "button",
 					"localized_name": "View",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_XBOX_VIEW_CLICK"
 					}
@@ -326,7 +532,7 @@
 				"/input/a": {
 					"type": "button",
 					"localized_name": "A",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_XBOX_A_CLICK"
 					}
@@ -334,7 +540,7 @@
 				"/input/b": {
 					"type": "button",
 					"localized_name": "B",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_XBOX_B_CLICK"
 					}
@@ -342,7 +548,7 @@
 				"/input/x": {
 					"type": "button",
 					"localized_name": "X",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_XBOX_X_CLICK"
 					}
@@ -350,7 +556,7 @@
 				"/input/y": {
 					"type": "button",
 					"localized_name": "Y",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_XBOX_Y_CLICK"
 					}
@@ -358,7 +564,7 @@
 				"/input/dpad_down": {
 					"type": "button",
 					"localized_name": "DPAD down",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_XBOX_DPAD_DOWN_CLICK"
 					}
@@ -366,7 +572,7 @@
 				"/input/dpad_right": {
 					"type": "button",
 					"localized_name": "DPAD right",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_XBOX_DPAD_RIGHT_CLICK"
 					}
@@ -374,7 +580,7 @@
 				"/input/dpad_up": {
 					"type": "button",
 					"localized_name": "DPAD up",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_XBOX_DPAD_UP_CLICK"
 					}
@@ -382,7 +588,7 @@
 				"/input/dpad_left": {
 					"type": "button",
 					"localized_name": "DPAD left",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_XBOX_DPAD_LEFT_CLICK"
 					}
@@ -390,7 +596,7 @@
 				"/input/shoulder_left": {
 					"type": "button",
 					"localized_name": "Shoulder left",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_XBOX_SHOULDER_LEFT_CLICK"
 					}
@@ -398,7 +604,7 @@
 				"/input/shoulder_right": {
 					"type": "button",
 					"localized_name": "Shoulder right",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_XBOX_SHOULDER_RIGHT_CLICK"
 					}
@@ -406,7 +612,11 @@
 				"/input/thumbstick_left": {
 					"type": "joystick",
 					"localized_name": "Left Thumbstick",
-					"features": ["click", "position"],
+					"components": ["click", "position"],
+					"dpad_emulation": {
+						"position": "position",
+						"center": false
+					},
 					"monado_bindings": {
 						"click": "XRT_INPUT_XBOX_THUMBSTICK_LEFT_CLICK",
 						"position": "XRT_INPUT_XBOX_THUMBSTICK_LEFT"
@@ -415,7 +625,11 @@
 				"/input/thumbstick_right": {
 					"type": "joystick",
 					"localized_name": "Right Thumbstick",
-					"features": ["click", "position"],
+					"components": ["click", "position"],
+					"dpad_emulation": {
+						"position": "position",
+						"center": false
+					},
 					"monado_bindings": {
 						"click": "XRT_INPUT_XBOX_THUMBSTICK_RIGHT_CLICK",
 						"position": "XRT_INPUT_XBOX_THUMBSTICK_RIGHT"
@@ -424,7 +638,7 @@
 				"/input/trigger_left": {
 					"type": "trigger",
 					"localized_name": "Left Trigger",
-					"features": ["value"],
+					"components": ["value"],
 					"monado_bindings": {
 						"value": "XRT_INPUT_XBOX_LEFT_TRIGGER_VALUE"
 					}
@@ -432,7 +646,7 @@
 				"/input/trigger_right": {
 					"type": "trigger",
 					"localized_name": "Right Trigger",
-					"features": ["value"],
+					"components": ["value"],
 					"monado_bindings": {
 						"value": "XRT_INPUT_XBOX_RIGHT_TRIGGER_VALUE"
 					}
@@ -440,7 +654,7 @@
 				"/output/haptic_left": {
 					"type": "vibration",
 					"localized_name": "Left Haptic",
-					"features": ["haptic"],
+					"components": ["haptic"],
 					"monado_bindings": {
 						"haptic": "XRT_OUTPUT_NAME_XBOX_HAPTIC_LEFT"
 					}
@@ -448,7 +662,7 @@
 				"/output/haptic_right": {
 					"type": "vibration",
 					"localized_name": "Right Haptic",
-					"features": ["haptic"],
+					"components": ["haptic"],
 					"monado_bindings": {
 						"haptic": "XRT_OUTPUT_NAME_XBOX_HAPTIC_RIGHT"
 					}
@@ -456,7 +670,7 @@
 				"/output/haptic_left_trigger": {
 					"type": "vibration",
 					"localized_name": "Left Trigger Haptic",
-					"features": ["haptic"],
+					"components": ["haptic"],
 					"monado_bindings": {
 						"haptic": "XRT_OUTPUT_NAME_XBOX_HAPTIC_LEFT_TRIGGER"
 					}
@@ -464,7 +678,7 @@
 				"/output/haptic_right_trigger": {
 					"type": "vibration",
 					"localized_name": "Right Trigger Haptic",
-					"features": ["haptic"],
+					"components": ["haptic"],
 					"monado_bindings": {
 						"haptic": "XRT_OUTPUT_NAME_XBOX_HAPTIC_RIGHT_TRIGGER"
 					}
@@ -476,6 +690,7 @@
 			"title": "Oculus Go Controller",
 			"type": "untracked_controller",
 			"monado_device": "XRT_DEVICE_GO_CONTROLLER",
+			"extended_by": ["ext/palm_pose", "ext/hand_interaction_poses"],
 			"subaction_paths": [
 				"/user/hand/left",
 				"/user/hand/right"
@@ -484,7 +699,7 @@
 				"/input/system": {
 					"type": "button",
 					"localized_name": "System",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_GO_SYSTEM_CLICK"
 					}
@@ -492,7 +707,7 @@
 				"/input/trigger": {
 					"type": "button",
 					"localized_name": "Trigger",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_GO_TRIGGER_CLICK"
 					}
@@ -500,7 +715,7 @@
 				"/input/back": {
 					"type": "button",
 					"localized_name": "Back",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_GO_BACK_CLICK"
 					}
@@ -508,7 +723,12 @@
 				"/input/trackpad": {
 					"type": "trackpad",
 					"localized_name": "Trackpad",
-					"features": ["click", "touch", "position"],
+					"components": ["click", "touch", "position"],
+					"dpad_emulation": {
+						"position": "position",
+						"activate": "click",
+						"center": true
+					},
 					"monado_bindings": {
 						"click": "XRT_INPUT_GO_TRACKPAD_CLICK",
 						"touch": "XRT_INPUT_GO_TRACKPAD_TOUCH",
@@ -518,7 +738,7 @@
 				"/input/grip": {
 					"type": "pose",
 					"localized_name": "Grip",
-					"features": ["pose"],
+					"components": ["pose"],
 					"monado_bindings": {
 						"pose": "XRT_INPUT_GO_GRIP_POSE"
 					}
@@ -526,7 +746,7 @@
 				"/input/aim": {
 					"type": "pose",
 					"localized_name": "Aim",
-					"features": ["pose"],
+					"components": ["pose"],
 					"monado_bindings": {
 						"pose": "XRT_INPUT_GO_AIM_POSE"
 					}
@@ -537,7 +757,9 @@
 		"/interaction_profiles/oculus/touch_controller": {
 			"title": "Oculus Touch Controller",
 			"type": "tracked_controller",
+			"steamvr_controllertype": "oculus_touch",
 			"monado_device": "XRT_DEVICE_TOUCH_CONTROLLER",
+			"extended_by": ["ext/palm_pose", "ext/hand_interaction_poses"],
 			"subaction_paths": [
 				"/user/hand/left",
 				"/user/hand/right"
@@ -546,7 +768,7 @@
 				"/input/x": {
 					"type": "button",
 					"localized_name": "X",
-					"features": ["click", "touch"],
+					"components": ["click", "touch"],
 					"side": "left",
 					"monado_bindings": {
 						"click": "XRT_INPUT_TOUCH_X_CLICK",
@@ -556,7 +778,7 @@
 				"/input/y": {
 					"type": "button",
 					"localized_name": "Y",
-					"features": ["click", "touch"],
+					"components": ["click", "touch"],
 					"side": "left",
 					"monado_bindings": {
 						"click": "XRT_INPUT_TOUCH_Y_CLICK",
@@ -566,7 +788,7 @@
 				"/input/menu": {
 					"type": "button",
 					"localized_name": "Menu",
-					"features": ["click"],
+					"components": ["click"],
 					"side": "left",
 					"monado_bindings": {
 						"click": "XRT_INPUT_TOUCH_MENU_CLICK"
@@ -575,7 +797,7 @@
 				"/input/a": {
 					"type": "button",
 					"localized_name": "A",
-					"features": ["click", "touch"],
+					"components": ["click", "touch"],
 					"side": "right",
 					"monado_bindings": {
 						"click": "XRT_INPUT_TOUCH_A_CLICK",
@@ -585,7 +807,7 @@
 				"/input/b": {
 					"type": "button",
 					"localized_name": "B",
-					"features": ["click", "touch"],
+					"components": ["click", "touch"],
 					"side": "right",
 					"monado_bindings": {
 						"click": "XRT_INPUT_TOUCH_B_CLICK",
@@ -595,7 +817,7 @@
 				"/input/system": {
 					"type": "button",
 					"localized_name": "System",
-					"features": ["click"],
+					"components": ["click"],
 					"side": "right",
 					"monado_bindings": {
 						"click": "XRT_INPUT_TOUCH_SYSTEM_CLICK"
@@ -604,7 +826,7 @@
 				"/input/squeeze": {
 					"type": "trigger",
 					"localized_name": "Squeeze",
-					"features": ["value"],
+					"components": ["value"],
 					"monado_bindings": {
 						"value": "XRT_INPUT_TOUCH_SQUEEZE_VALUE"
 					}
@@ -612,7 +834,7 @@
 				"/input/trigger": {
 					"type": "trigger",
 					"localized_name": "Trigger",
-					"features": ["touch", "value"],
+					"components": ["touch", "value"],
 					"monado_bindings": {
 						"touch": "XRT_INPUT_TOUCH_TRIGGER_TOUCH",
 						"value": "XRT_INPUT_TOUCH_TRIGGER_VALUE"
@@ -621,7 +843,11 @@
 				"/input/thumbstick": {
 					"type": "joystick",
 					"localized_name": "Thumbstick",
-					"features": ["click", "touch", "position"],
+					"components": ["click", "touch", "position"],
+					"dpad_emulation": {
+						"position": "position",
+						"center": false
+					},
 					"monado_bindings": {
 						"click": "XRT_INPUT_TOUCH_THUMBSTICK_CLICK",
 						"touch": "XRT_INPUT_TOUCH_THUMBSTICK_TOUCH",
@@ -631,7 +857,7 @@
 				"/input/thumbrest": {
 					"type": "button",
 					"localized_name": "Thumb Rest",
-					"features": ["touch"],
+					"components": ["touch"],
 					"monado_bindings": {
 						"touch": "XRT_INPUT_TOUCH_THUMBREST_TOUCH"
 					}
@@ -639,7 +865,7 @@
 				"/input/grip": {
 					"type": "pose",
 					"localized_name": "Grip",
-					"features": ["pose"],
+					"components": ["pose"],
 					"monado_bindings": {
 						"pose": "XRT_INPUT_TOUCH_GRIP_POSE"
 					}
@@ -647,7 +873,7 @@
 				"/input/aim": {
 					"type": "pose",
 					"localized_name": "Aim",
-					"features": ["pose"],
+					"components": ["pose"],
 					"monado_bindings": {
 						"pose": "XRT_INPUT_TOUCH_AIM_POSE"
 					}
@@ -655,7 +881,7 @@
 				"/output/haptic": {
 					"type": "vibration",
 					"localized_name": "Haptic",
-					"features": ["haptic"],
+					"components": ["haptic"],
 					"monado_bindings": {
 						"haptic": "XRT_OUTPUT_NAME_TOUCH_HAPTIC"
 					}
@@ -666,7 +892,9 @@
 		"/interaction_profiles/valve/index_controller": {
 			"title": "Valve Index Controller",
 			"type": "tracked_controller",
+			"steamvr_controllertype": "knuckles",
 			"monado_device": "XRT_DEVICE_INDEX_CONTROLLER",
+			"extended_by": ["ext/palm_pose", "ext/hand_interaction_poses"],
 			"subaction_paths": [
 				"/user/hand/left",
 				"/user/hand/right"
@@ -675,7 +903,7 @@
 				"/input/system": {
 					"type": "button",
 					"localized_name": "System",
-					"features": ["click", "touch"],
+					"components": ["click", "touch"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_INDEX_SYSTEM_CLICK",
 						"touch": "XRT_INPUT_INDEX_SYSTEM_TOUCH"
@@ -684,7 +912,7 @@
 				"/input/a": {
 					"type": "button",
 					"localized_name": "A",
-					"features": ["click", "touch"],
+					"components": ["click", "touch"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_INDEX_A_CLICK",
 						"touch": "XRT_INPUT_INDEX_A_TOUCH"
@@ -693,7 +921,7 @@
 				"/input/b": {
 					"type": "button",
 					"localized_name": "B",
-					"features": ["click", "touch"],
+					"components": ["click", "touch"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_INDEX_B_CLICK",
 						"touch": "XRT_INPUT_INDEX_B_TOUCH"
@@ -702,7 +930,7 @@
 				"/input/squeeze": {
 					"type": "trigger",
 					"localized_name": "Squeeze",
-					"features": ["force", "value"],
+					"components": ["force", "value"],
 					"monado_bindings": {
 						"value": "XRT_INPUT_INDEX_SQUEEZE_VALUE",
 						"force": "XRT_INPUT_INDEX_SQUEEZE_FORCE"
@@ -711,7 +939,7 @@
 				"/input/trigger": {
 					"type": "trigger",
 					"localized_name": "Trigger",
-					"features": ["click", "touch", "value"],
+					"components": ["click", "touch", "value"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_INDEX_TRIGGER_CLICK",
 						"touch": "XRT_INPUT_INDEX_TRIGGER_TOUCH",
@@ -720,8 +948,13 @@
 				},
 				"/input/thumbstick": {
 					"type": "joystick",
+					"steamvr_path": "/input/thumbstick",
 					"localized_name": "Thumbstick",
-					"features": ["click", "touch", "position"],
+					"components": ["click", "touch", "position"],
+					"dpad_emulation": {
+						"position": "position",
+						"center": false
+					},
 					"monado_bindings": {
 						"click": "XRT_INPUT_INDEX_THUMBSTICK_CLICK",
 						"touch": "XRT_INPUT_INDEX_THUMBSTICK_TOUCH",
@@ -731,7 +964,12 @@
 				"/input/trackpad": {
 					"type": "trackpad",
 					"localized_name": "Trackpad",
-					"features": ["touch", "force", "position"],
+					"components": ["touch", "force", "position"],
+					"dpad_emulation": {
+						"position": "position",
+						"activate": "force",
+						"center": true
+					},
 					"monado_bindings": {
 						"force": "XRT_INPUT_INDEX_TRACKPAD_FORCE",
 						"touch": "XRT_INPUT_INDEX_TRACKPAD_TOUCH",
@@ -741,7 +979,7 @@
 				"/input/grip": {
 					"type": "pose",
 					"localized_name": "Grip",
-					"features": ["pose"],
+					"components": ["pose"],
 					"monado_bindings": {
 						"pose": "XRT_INPUT_INDEX_GRIP_POSE"
 					}
@@ -749,7 +987,7 @@
 				"/input/aim": {
 					"type": "pose",
 					"localized_name": "Aim",
-					"features": ["pose"],
+					"components": ["pose"],
 					"monado_bindings": {
 						"pose": "XRT_INPUT_INDEX_AIM_POSE"
 					}
@@ -757,9 +995,305 @@
 				"/output/haptic": {
 					"type": "vibration",
 					"localized_name": "Haptic",
-					"features": ["haptic"],
+					"components": ["haptic"],
 					"monado_bindings": {
 						"haptic": "XRT_OUTPUT_NAME_INDEX_HAPTIC"
+					}
+				}
+			}
+		},
+
+		"/interaction_profiles/hp/mixed_reality_controller": {
+			"title": "HP Reverb G2 Controller",
+			"type": "tracked_controller",
+			"monado_device": "XRT_DEVICE_HP_REVERB_G2_CONTROLLER",
+			"extension": "XR_EXT_hp_mixed_reality_controller",
+			"extended_by": [
+				"ext/palm_pose",
+				"ext/hand_interaction_poses",
+				"mndx/hp_reverb_g2_system_button"
+			],
+			"subaction_paths": [
+				"/user/hand/left",
+				"/user/hand/right"
+			],
+			"subpaths": {
+				"/input/x": {
+					"type": "button",
+					"localized_name": "X",
+					"components": ["click"],
+					"side": "left",
+					"monado_bindings": {
+						"click": "XRT_INPUT_G2_CONTROLLER_X_CLICK"
+					}
+				},
+				"/input/y": {
+					"type": "button",
+					"localized_name": "Y",
+					"components": ["click"],
+					"side": "left",
+					"monado_bindings": {
+						"click": "XRT_INPUT_G2_CONTROLLER_Y_CLICK"
+					}
+				},
+				"/input/a": {
+					"type": "button",
+					"localized_name": "A",
+					"components": ["click"],
+					"side": "right",
+					"monado_bindings": {
+						"click": "XRT_INPUT_G2_CONTROLLER_A_CLICK"
+					}
+				},
+				"/input/b": {
+					"type": "button",
+					"localized_name": "B",
+					"components": ["click"],
+					"side": "right",
+					"monado_bindings": {
+						"click": "XRT_INPUT_G2_CONTROLLER_B_CLICK"
+					}
+				},
+				"/input/menu": {
+					"type": "button",
+					"localized_name": "Menu",
+					"components": ["click"],
+					"monado_bindings": {
+						"click": "XRT_INPUT_G2_CONTROLLER_MENU_CLICK"
+					}
+				},
+				"/input/squeeze": {
+					"type": "trigger",
+					"localized_name": "Squeeze",
+					"components": ["value"],
+					"monado_bindings": {
+						"value": "XRT_INPUT_G2_CONTROLLER_SQUEEZE_VALUE"
+					}
+				},
+				"/input/trigger": {
+					"type": "trigger",
+					"localized_name": "Trigger",
+					"components": ["value"],
+					"monado_bindings": {
+						"value": "XRT_INPUT_G2_CONTROLLER_TRIGGER_VALUE"
+					}
+				},
+				"/input/thumbstick": {
+					"type": "joystick",
+					"localized_name": "Thumbstick",
+					"components": ["click", "position"],
+					"dpad_emulation": {
+						"position": "position",
+						"center": false
+					},
+					"monado_bindings": {
+						"click": "XRT_INPUT_G2_CONTROLLER_THUMBSTICK_CLICK",
+						"position": "XRT_INPUT_G2_CONTROLLER_THUMBSTICK"
+					}
+				},
+				"/input/grip": {
+					"type": "pose",
+					"localized_name": "Grip",
+					"components": ["pose"],
+					"monado_bindings": {
+						"pose": "XRT_INPUT_G2_CONTROLLER_GRIP_POSE"
+					}
+				},
+				"/input/aim": {
+					"type": "pose",
+					"localized_name": "Aim",
+					"components": ["pose"],
+					"monado_bindings": {
+						"pose": "XRT_INPUT_G2_CONTROLLER_AIM_POSE"
+					}
+				},
+				"/output/haptic": {
+					"type": "vibration",
+					"localized_name": "Haptic",
+					"components": ["haptic"],
+					"monado_bindings": {
+						"haptic": "XRT_OUTPUT_NAME_G2_CONTROLLER_HAPTIC"
+					}
+				}
+			}
+		},
+
+		"/interaction_profiles/samsung/odyssey_controller": {
+			"title": "Samsung Odyssey Controller",
+			"type": "tracked_controller",
+			"monado_device": "XRT_DEVICE_SAMSUNG_ODYSSEY_CONTROLLER",
+			"extension": "XR_EXT_samsung_odyssey_controller",
+			"extended_by": [
+				"ext/palm_pose",
+				"ext/hand_interaction_poses",
+				"mndx/samsung_odyssey_system_button"
+			],
+			"subaction_paths": [
+				"/user/hand/left",
+				"/user/hand/right"
+			],
+			"subpaths": {
+				"/input/menu": {
+					"type": "button",
+					"localized_name": "Menu",
+					"components": ["click"],
+					"monado_bindings": {
+						"click": "XRT_INPUT_ODYSSEY_CONTROLLER_MENU_CLICK"
+					}
+				},
+				"/input/squeeze": {
+					"type": "button",
+					"localized_name": "Squeeze",
+					"components": ["click"],
+					"monado_bindings": {
+						"click": "XRT_INPUT_ODYSSEY_CONTROLLER_SQUEEZE_CLICK"
+					}
+				},
+				"/input/trigger": {
+					"type": "trigger",
+					"localized_name": "Trigger",
+					"components": ["value"],
+					"monado_bindings": {
+						"value": "XRT_INPUT_ODYSSEY_CONTROLLER_TRIGGER_VALUE"
+					}
+				},
+				"/input/thumbstick": {
+					"type": "joystick",
+					"localized_name": "Thumbstick",
+					"components": ["click", "position"],
+					"dpad_emulation": {
+						"position": "position",
+						"center": false
+					},
+					"monado_bindings": {
+						"click": "XRT_INPUT_ODYSSEY_CONTROLLER_THUMBSTICK_CLICK",
+						"position": "XRT_INPUT_ODYSSEY_CONTROLLER_THUMBSTICK"
+					}
+				},
+				"/input/trackpad": {
+					"type": "trackpad",
+					"localized_name": "Trackpad",
+					"components": ["click", "touch", "position"],
+					"dpad_emulation": {
+						"position": "position",
+						"activate": "click",
+						"center": true
+					},
+					"monado_bindings": {
+						"click": "XRT_INPUT_ODYSSEY_CONTROLLER_TRACKPAD_CLICK",
+						"touch": "XRT_INPUT_ODYSSEY_CONTROLLER_TRACKPAD_TOUCH",
+						"position": "XRT_INPUT_ODYSSEY_CONTROLLER_TRACKPAD"
+					}
+				},
+				"/input/grip": {
+					"type": "pose",
+					"localized_name": "Grip",
+					"components": ["pose"],
+					"monado_bindings": {
+						"pose": "XRT_INPUT_ODYSSEY_CONTROLLER_GRIP_POSE"
+					}
+				},
+				"/input/aim": {
+					"type": "pose",
+					"localized_name": "Aim",
+					"components": ["pose"],
+					"monado_bindings":  {
+						"pose": "XRT_INPUT_ODYSSEY_CONTROLLER_AIM_POSE"
+					}
+				},
+				"/output/haptic": {
+					"type": "vibration",
+					"localized_name": "Haptic",
+					"components": ["haptic"],
+					"monado_bindings": {
+						"haptic": "XRT_OUTPUT_NAME_ODYSSEY_CONTROLLER_HAPTIC"
+					}
+				}
+			}
+		},
+
+		"/interaction_profiles/ml/ml2_controller": {
+			"title": "Magic Leap 2 Controller",
+			"type": "tracked_controller",
+			"monado_device": "XRT_DEVICE_ML2_CONTROLLER",
+			"extension": "XR_ML_ml2_controller_interaction",
+			"extended_by": ["ext/palm_pose", "ext/hand_interaction_poses"],
+			"subaction_paths": [
+				"/user/hand/left",
+				"/user/hand/right"
+			],
+			"subpaths": {
+				"/input/menu": {
+					"type": "button",
+					"localized_name": "Menu",
+					"components": ["click"],
+					"monado_bindings": {
+						"click": "XRT_INPUT_ML2_CONTROLLER_MENU_CLICK"
+					}
+				},
+				"/input/home": {
+					"type": "button",
+					"localized_name": "Select",
+					"components": ["click"],
+					"monado_bindings": {
+						"click": "XRT_INPUT_ML2_CONTROLLER_SELECT_CLICK"
+					}
+				},
+				"/input/trigger": {
+					"type": "button",
+					"localized_name": "Trigger",
+					"components": ["click", "value"],
+					"monado_bindings": {
+						"click": "XRT_INPUT_ML2_CONTROLLER_TRIGGER_CLICK",
+						"value": "XRT_INPUT_ML2_CONTROLLER_TRIGGER_VALUE"
+					}
+				},
+				"/input/trackpad": {
+					"type": "trackpad",
+					"localized_name": "Trackpad",
+					"components": ["click", "force", "touch", "position"],
+					"dpad_emulation": {
+						"position": "position",
+						"activate": "click",
+						"center": true
+					},
+					"monado_bindings": {
+						"click": "XRT_INPUT_ML2_CONTROLLER_TRACKPAD_CLICK",
+						"touch": "XRT_INPUT_ML2_CONTROLLER_TRACKPAD_TOUCH",
+						"force": "XRT_INPUT_ML2_CONTROLLER_TRACKPAD_FORCE",
+						"position": "XRT_INPUT_ML2_CONTROLLER_TRACKPAD"
+					}
+				},
+				"/input/grip": {
+					"type": "pose",
+					"localized_name": "Grip",
+					"components": ["pose"],
+					"monado_bindings": {
+						"pose": "XRT_INPUT_ML2_CONTROLLER_GRIP_POSE"
+					}
+				},
+				"/input/aim": {
+					"type": "pose",
+					"localized_name": "Aim",
+					"components": ["pose"],
+					"monado_bindings": {
+						"pose": "XRT_INPUT_ML2_CONTROLLER_AIM_POSE"
+					}
+				},
+				"/input/shoulder": {
+					"type": "button",
+					"localized_name": "Shoulder",
+					"components": ["click"],
+					"monado_bindings": {
+						"click": "XRT_INPUT_ML2_CONTROLLER_SHOULDER_CLICK"
+					}
+				},
+				"/output/haptic": {
+					"type": "vibration",
+					"localized_name": "Haptic",
+					"components": ["haptic"],
+					"monado_bindings": {
+						"haptic": "XRT_OUTPUT_NAME_ML2_CONTROLLER_VIBRATION"
 					}
 				}
 			}
@@ -770,6 +1304,7 @@
 			"type": "tracked_controller",
 			"monado_device": "XRT_DEVICE_HAND_INTERACTION",
 			"extension": "XR_MSFT_hand_interaction",
+			"extended_by": ["ext/palm_pose", "ext/hand_interaction_poses"],
 			"subaction_paths": [
 				"/user/hand/left",
 				"/user/hand/right"
@@ -778,7 +1313,7 @@
 				"/input/select": {
 					"type": "trigger",
 					"localized_name": "Select",
-					"features": ["value"],
+					"components": ["value"],
 					"monado_bindings": {
 						"value": "XRT_INPUT_HAND_SELECT_VALUE"
 					}
@@ -786,7 +1321,7 @@
 				"/input/squeeze": {
 					"type": "trigger",
 					"localized_name": "Squeeze",
-					"features": ["value"],
+					"components": ["value"],
 					"monado_bindings": {
 						"value": "XRT_INPUT_HAND_SQUEEZE_VALUE"
 					}
@@ -794,7 +1329,7 @@
 				"/input/grip": {
 					"type": "pose",
 					"localized_name": "Grip",
-					"features": ["pose"],
+					"components": ["pose"],
 					"monado_bindings": {
 						"pose": "XRT_INPUT_HAND_GRIP_POSE"
 					}
@@ -802,7 +1337,7 @@
 				"/input/aim": {
 					"type": "pose",
 					"localized_name": "Aim",
-					"features": ["pose"],
+					"components": ["pose"],
 					"monado_bindings": {
 						"pose": "XRT_INPUT_HAND_AIM_POSE"
 					}
@@ -815,6 +1350,7 @@
 			"type": "tracked_controller",
 			"monado_device": "XRT_DEVICE_PSMV",
 			"extension": "XR_MNDX_ball_on_a_stick_controller",
+			"extended_by": ["ext/palm_pose", "ext/hand_interaction_poses"],
 			"subaction_paths": [
 				"/user/hand/left",
 				"/user/hand/right"
@@ -823,7 +1359,7 @@
 				"/input/system": {
 					"type": "button",
 					"localized_name": "System",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_PSMV_PS_CLICK"
 					}
@@ -831,7 +1367,7 @@
 				"/input/menu": {
 					"type": "button",
 					"localized_name": "Menu",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_PSMV_MOVE_CLICK"
 					}
@@ -839,7 +1375,7 @@
 				"/input/start": {
 					"type": "button",
 					"localized_name": "Start",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_PSMV_START_CLICK"
 					}
@@ -847,7 +1383,7 @@
 				"/input/select": {
 					"type": "button",
 					"localized_name": "Select",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_PSMV_SELECT_CLICK"
 					}
@@ -855,7 +1391,7 @@
 				"/input/square_mndx": {
 					"type": "button",
 					"localized_name": "Square",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_PSMV_SQUARE_CLICK"
 					}
@@ -863,7 +1399,7 @@
 				"/input/cross_mndx": {
 					"type": "button",
 					"localized_name": "Cross",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_PSMV_CROSS_CLICK"
 					}
@@ -871,7 +1407,7 @@
 				"/input/circle_mndx": {
 					"type": "button",
 					"localized_name": "Circle",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_PSMV_CIRCLE_CLICK"
 					}
@@ -879,7 +1415,7 @@
 				"/input/triangle_mndx": {
 					"type": "button",
 					"localized_name": "Triangle",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_PSMV_TRIANGLE_CLICK"
 					}
@@ -887,7 +1423,7 @@
 				"/input/trigger": {
 					"type": "trigger",
 					"localized_name": "Trigger",
-					"features": ["value"],
+					"components": ["value"],
 					"monado_bindings": {
 						"value": "XRT_INPUT_PSMV_TRIGGER_VALUE"
 					}
@@ -895,7 +1431,7 @@
 				"/input/grip": {
 					"type": "pose",
 					"localized_name": "Grip",
-					"features": ["pose"],
+					"components": ["pose"],
 					"monado_bindings": {
 						"pose": "XRT_INPUT_PSMV_GRIP_POSE"
 					}
@@ -903,7 +1439,7 @@
 				"/input/ball_mndx": {
 					"type": "pose",
 					"localized_name": "Ball",
-					"features": ["pose"],
+					"components": ["pose"],
 					"monado_bindings": {
 						"pose": "XRT_INPUT_PSMV_BALL_CENTER_POSE"
 					}
@@ -911,7 +1447,7 @@
 				"/input/body_center_mndx": {
 					"type": "pose",
 					"localized_name": "Body Center",
-					"features": ["pose"],
+					"components": ["pose"],
 					"monado_bindings": {
 						"pose": "XRT_INPUT_PSMV_BODY_CENTER_POSE"
 					}
@@ -919,7 +1455,7 @@
 				"/input/aim": {
 					"type": "pose",
 					"localized_name": "aim",
-					"features": ["pose"],
+					"components": ["pose"],
 					"monado_bindings": {
 						"pose": "XRT_INPUT_PSMV_AIM_POSE"
 					}
@@ -927,7 +1463,7 @@
 				"/output/haptic": {
 					"type": "vibration",
 					"localized_name": "Haptic",
-					"features": ["haptic"],
+					"components": ["haptic"],
 					"monado_bindings": {
 						"haptic": "XRT_OUTPUT_NAME_PSMV_RUMBLE_VIBRATION"
 					}
@@ -940,6 +1476,7 @@
 			"type": "tracked_controller",
 			"monado_device": "XRT_DEVICE_HYDRA",
 			"extension": "XR_MNDX_hydra",
+			"extended_by": ["ext/palm_pose", "ext/hand_interaction_poses"],
 			"subaction_paths": [
 				"/user/hand/left",
 				"/user/hand/right"
@@ -948,7 +1485,7 @@
 				"/input/1": {
 					"type": "button",
 					"localized_name": "1",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_HYDRA_1_CLICK"
 					}
@@ -956,7 +1493,7 @@
 				"/input/2": {
 					"type": "button",
 					"localized_name": "2",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_HYDRA_2_CLICK"
 					}
@@ -964,7 +1501,7 @@
 				"/input/3": {
 					"type": "button",
 					"localized_name": "3",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_HYDRA_3_CLICK"
 					}
@@ -972,7 +1509,7 @@
 				"/input/4": {
 					"type": "button",
 					"localized_name": "4",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_HYDRA_4_CLICK"
 					}
@@ -980,7 +1517,7 @@
 				"/input/bumper": {
 					"type": "button",
 					"localized_name": "Bumper",
-					"features": ["click"],
+					"components": ["click"],
 					"monado_bindings": {
 						"click": "XRT_INPUT_HYDRA_BUMPER_CLICK"
 					}
@@ -988,7 +1525,11 @@
 				"/input/thumbstick": {
 					"type": "joystick",
 					"localized_name": "Thumbstick",
-					"features": ["click", "position"],
+					"components": ["click", "position"],
+					"dpad_emulation": {
+						"position": "position",
+						"center": false
+					},
 					"monado_bindings": {
 						"click": "XRT_INPUT_HYDRA_JOYSTICK_CLICK",
 						"position": "XRT_INPUT_HYDRA_JOYSTICK_VALUE"
@@ -997,7 +1538,7 @@
 				"/input/trigger": {
 					"type": "trigger",
 					"localized_name": "Trigger",
-					"features": ["value"],
+					"components": ["value"],
 					"monado_bindings": {
 						"value": "XRT_INPUT_HYDRA_TRIGGER_VALUE"
 					}
@@ -1005,9 +1546,235 @@
 				"/input/grip": {
 					"type": "pose",
 					"localized_name": "Grip",
-					"features": ["pose"],
+					"components": ["pose"],
 					"monado_bindings": {
 						"pose": "XRT_INPUT_HYDRA_POSE"
+					}
+				}
+			}
+		},
+
+		"/interaction_profiles/ext/eye_gaze_interaction": {
+			"title": "Extension Eye Gaze Interaction",
+			"type": "eye_tracker",
+			"monado_device": "XRT_DEVICE_EYE_GAZE_INTERACTION",
+			"extension": "XR_EXT_eye_gaze_interaction",
+			"extended_by": ["ext/palm_pose", "ext/hand_interaction_poses"],
+			"subaction_paths": [
+				"/user/eyes_ext"
+			],
+			"subpaths": {
+				"/input/gaze_ext": {
+					"type": "pose",
+					"localized_name": "Gaze",
+					"components": ["pose"],
+					"monado_bindings": {
+						"pose": "XRT_INPUT_GENERIC_EYE_GAZE_POSE"
+					}
+				}
+			}
+		},
+		"/interaction_profiles/htc/vive_tracker_htcx": {
+			"title": "HTC Vive Tracker",
+			"type": "tracked_controller",
+			"monado_device": "XRT_DEVICE_VIVE_TRACKER",
+			"extension": "XR_HTCX_vive_tracker_interaction",
+			"extended_by": ["ext/palm_pose", "ext/hand_interaction_poses"],
+			"subaction_paths": [
+				"/user/hand/left",
+				"/user/hand/right"
+			],
+			"subpaths": {
+				"/input/system": {
+					"type": "button",
+					"localized_name": "System",
+					"components": ["click"],
+					"monado_bindings": {
+						"click": "XRT_INPUT_VIVE_TRACKER_SYSTEM_CLICK"
+					}
+				},
+				"/input/squeeze": {
+					"type": "button",
+					"localized_name": "Squeeze",
+					"components": ["click"],
+					"monado_bindings": {
+						"click": "XRT_INPUT_VIVE_TRACKER_SQUEEZE_CLICK"
+					}
+				},
+				"/input/menu": {
+					"type": "button",
+					"localized_name": "Menu",
+					"components": ["click"],
+					"monado_bindings": {
+						"click":  "XRT_INPUT_VIVE_TRACKER_MENU_CLICK"
+					}
+				},
+				"/input/trigger": {
+					"type": "trigger",
+					"localized_name": "Trigger",
+					"components": ["value"],
+					"monado_bindings": {
+						"value": "XRT_INPUT_VIVE_TRACKER_TRIGGER_VALUE"
+					}
+				},
+				"/input/trackpad": {
+					"type": "trackpad",
+					"localized_name": "Trackpad",
+					"components": ["click", "touch", "position"],
+					"monado_bindings": {
+						"click": "XRT_INPUT_VIVE_TRACKER_TRACKPAD_CLICK",
+						"touch": "XRT_INPUT_VIVE_TRACKER_TRACKPAD_TOUCH",
+						"position": "XRT_INPUT_VIVE_TRACKER_TRACKPAD"
+					}
+				},
+				"/input/grip": {
+					"type": "pose",
+					"localized_name": "Grip",
+					"components": ["pose"],
+					"monado_bindings": {
+						"pose": "XRT_INPUT_VIVE_TRACKER_GRIP_POSE"
+					}
+				},
+				"/output/haptic": {
+					"type": "vibration",
+					"localized_name": "Haptic",
+					"components": ["haptic"],
+					"monado_bindings": {
+						"haptic": "XRT_OUTPUT_NAME_VIVE_TRACKER_HAPTIC"
+					}
+				}
+			}
+		},
+
+		"/interaction_profiles/oppo/mr_controller_oppo": {
+			"title": "OPPO MR Controller",
+			"type": "tracked_controller",
+			"monado_device": "XRT_DEVICE_OPPO_MR_CONTROLLER",
+			"subaction_paths": [
+				"/user/hand/left",
+				"/user/hand/right"
+			],
+			"subpaths": {
+				"/input/x": {
+					"type": "button",
+					"localized_name": "X",
+					"components": ["click", "touch"],
+					"side": "left",
+					"monado_bindings": {
+						"click": "XRT_INPUT_OPPO_MR_X_CLICK",
+						"touch": "XRT_INPUT_OPPO_MR_X_TOUCH"
+					}
+				},
+				"/input/y": {
+					"type": "button",
+					"localized_name": "Y",
+					"components": ["click", "touch"],
+					"side": "left",
+					"monado_bindings": {
+						"click": "XRT_INPUT_OPPO_MR_Y_CLICK",
+						"touch": "XRT_INPUT_OPPO_MR_Y_TOUCH"
+					}
+				},
+				"/input/menu": {
+					"type": "button",
+					"localized_name": "Menu",
+					"components": ["click"],
+					"side": "left",
+					"monado_bindings": {
+						"click": "XRT_INPUT_OPPO_MR_MENU_CLICK"
+					}
+				},
+				"/input/heartrate_oppo": {
+					"type": "heartrate",
+					"localized_name": "HeartRate",
+					"components": ["value"],
+					"side": "left",
+					"monado_bindings": {
+						"value": "XRT_INPUT_OPPO_MR_HEART_RATE_VALUE"
+					}
+				},
+				"/input/a": {
+					"type": "button",
+					"localized_name": "A",
+					"components": ["click", "touch"],
+					"side": "right",
+					"monado_bindings": {
+						"click": "XRT_INPUT_OPPO_MR_A_CLICK",
+						"touch": "XRT_INPUT_OPPO_MR_A_TOUCH"
+					}
+				},
+				"/input/b": {
+					"type": "button",
+					"localized_name": "B",
+					"components": ["click", "touch"],
+					"side": "right",
+					"monado_bindings": {
+						"click": "XRT_INPUT_OPPO_MR_B_CLICK",
+						"touch": "XRT_INPUT_OPPO_MR_B_TOUCH"
+					}
+				},
+				"/input/home": {
+					"type": "button",
+					"localized_name": "Home",
+					"components": ["click"],
+					"side": "right",
+					"monado_bindings": {
+						"click": "XRT_INPUT_OPPO_MR_HOME_CLICK"
+					}
+				},
+				"/input/squeeze": {
+					"type": "trigger",
+					"localized_name": "Squeeze",
+					"components": ["value"],
+					"monado_bindings": {
+						"value": "XRT_INPUT_OPPO_MR_SQUEEZE_VALUE"
+					}
+				},
+				"/input/trigger": {
+					"type": "trigger",
+					"localized_name": "Trigger",
+					"components": ["touch", "value"],
+					"monado_bindings": {
+						"touch": "XRT_INPUT_OPPO_MR_TRIGGER_TOUCH",
+						"value": "XRT_INPUT_OPPO_MR_TRIGGER_VALUE"
+					}
+				},
+				"/input/grip": {
+					"type": "pose",
+					"localized_name": "Grip",
+					"components": ["pose"],
+					"monado_bindings": {
+						"pose": "XRT_INPUT_OPPO_MR_GRIP_POSE"
+					}
+				},
+				"/input/aim": {
+					"type": "pose",
+					"localized_name": "Aim",
+					"components": ["pose"],
+					"monado_bindings": {
+						"pose": "XRT_INPUT_OPPO_MR_AIM_POSE"
+					}
+				},
+				"/input/thumbstick": {
+					"type": "joystick",
+					"localized_name": "Thumbstick",
+					"components": ["click", "touch", "position"],
+					"dpad_emulation": {
+						"position": "position",
+						"center": false
+					},
+					"monado_bindings": {
+						"click": "XRT_INPUT_OPPO_MR_THUMBSTICK_CLICK",
+						"touch": "XRT_INPUT_OPPO_MR_THUMBSTICK_TOUCH",
+						"position": "XRT_INPUT_OPPO_MR_THUMBSTICK"
+					}
+				},
+				"/output/haptic": {
+					"type": "vibration",
+					"localized_name": "Haptic",
+					"components": ["haptic"],
+					"monado_bindings": {
+						"haptic": "XRT_OUTPUT_NAME_OPPO_MR_HAPTIC"
 					}
 				}
 			}

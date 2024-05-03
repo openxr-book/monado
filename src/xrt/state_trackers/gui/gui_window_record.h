@@ -27,6 +27,7 @@ struct gui_ogl_texture;
 
 enum gui_record_bitrate
 {
+	GUI_RECORD_BITRATE_32768,
 	GUI_RECORD_BITRATE_4096,
 	GUI_RECORD_BITRATE_2048,
 	GUI_RECORD_BITRATE_1024,
@@ -34,6 +35,8 @@ enum gui_record_bitrate
 
 enum gui_record_pipeline
 {
+	GUI_RECORD_PIPELINE_SOFTWARE_ULTRAFAST,
+	GUI_RECORD_PIPELINE_SOFTWARE_VERYFAST,
 	GUI_RECORD_PIPELINE_SOFTWARE_FAST,
 	GUI_RECORD_PIPELINE_SOFTWARE_MEDIUM,
 	GUI_RECORD_PIPELINE_SOFTWARE_SLOW,
@@ -55,7 +58,8 @@ struct gui_record_window
 	{
 		struct xrt_frame_context xfctx;
 
-		int scale;
+		float scale;
+		bool rotate_180;
 
 		struct xrt_frame_sink *sink;
 		struct gui_ogl_texture *ogl;
@@ -101,7 +105,15 @@ void
 gui_window_record_render(struct gui_record_window *rw, struct gui_program *p);
 
 /*!
- * Frees all resources assocciated with a record window. Make sure to only call
+ * Draw the sink image as the background to the background of the render view.
+ * Basically the main window in which all ImGui windows lives in, not to a
+ * ImGui window.
+ */
+void
+gui_window_record_to_background(struct gui_record_window *rw, struct gui_program *p);
+
+/*!
+ * Frees all resources associated with a record window. Make sure to only call
  * this function on the main gui thread, and that nothing is pushing into the
  * record windows sink.
  */

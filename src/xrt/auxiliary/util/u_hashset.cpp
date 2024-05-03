@@ -37,7 +37,7 @@ struct u_hashset
 extern "C" int
 u_hashset_create(struct u_hashset **out_hashset)
 {
-	auto hs = new u_hashset;
+	auto *hs = new u_hashset;
 	*out_hashset = hs;
 	return 0;
 }
@@ -81,12 +81,12 @@ u_hashset_insert_item(struct u_hashset *hs, struct u_hashset_item *item)
 extern "C" int
 u_hashset_create_and_insert_str(struct u_hashset *hs, const char *str, size_t length, struct u_hashset_item **out_item)
 {
-	struct u_hashset_item *dummy = NULL;
+	struct u_hashset_item *unused = NULL;
 	struct u_hashset_item *item = NULL;
 	size_t size = 0;
 	int ret;
 
-	ret = u_hashset_find_str(hs, str, length, &dummy);
+	ret = u_hashset_find_str(hs, str, length, &unused);
 	if (ret >= 0) {
 		return -1;
 	}
@@ -159,7 +159,7 @@ u_hashset_clear_and_call_for_each(struct u_hashset *hs, u_hashset_callback cb, v
 
 	hs->map.clear();
 
-	for (auto n : tmp) {
+	for (auto *n : tmp) {
 		cb(n, priv);
 	}
 }

@@ -3,24 +3,24 @@
 /*!
  * @file
  * @brief  Implementation exposing Android-specific IPC client code to C.
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup ipc_android
  */
 
 #include "ipc_client_android.h"
 
 #include "org.freedesktop.monado.ipc.hpp"
-#include "wrap/android.app.h"
-
 
 #include "xrt/xrt_config_android.h"
-#include "android/android_load_class.hpp"
 #include "util/u_logging.h"
+
+#include "android/android_load_class.hpp"
+
+#include "wrap/android.app.h"
 
 using wrap::android::app::Activity;
 using wrap::org::freedesktop::monado::ipc::Client;
-using xrt::auxiliary::android::getAppInfo;
-using xrt::auxiliary::android::loadClassFromPackage;
+using xrt::auxiliary::android::loadClassFromRuntimeApk;
 
 struct ipc_client_android
 {
@@ -51,15 +51,7 @@ ipc_client_android_create(struct _JavaVM *vm, void *activity)
 
 	jni::init(vm);
 	try {
-		auto info = getAppInfo(XRT_ANDROID_PACKAGE, (jobject)activity);
-		if (info.isNull()) {
-			U_LOG_E("Could not get application info for package '%s'",
-			        "org.freedesktop.monado.openxr_runtime");
-			return nullptr;
-		}
-
-		auto clazz = loadClassFromPackage(info, (jobject)activity, Client::getFullyQualifiedTypeName());
-
+		auto clazz = loadClassFromRuntimeApk((jobject)activity, Client::getFullyQualifiedTypeName());
 		if (clazz.isNull()) {
 			U_LOG_E("Could not load class '%s' from package '%s'", Client::getFullyQualifiedTypeName(),
 			        XRT_ANDROID_PACKAGE);
