@@ -1,6 +1,5 @@
 Source: monado
 Maintainer: Rylie Pavlik <rylie@ryliepavlik.com>
-Uploaders: Andrew Lee (李健秋) <ajqlee@debian.org>
 Section: libs
 Priority: optional
 Build-Depends: debhelper-compat (= 12),
@@ -32,7 +31,7 @@ Build-Depends: debhelper-compat (= 12),
                libxxf86vm-dev,
                pandoc <!nodoc>,
                pkg-config
-Standards-Version: 4.6.0
+Standards-Version: 4.6.2
 Vcs-Browser: https://gitlab.freedesktop.org/monado/monado/-/tree/ubuntu/focal
 Vcs-Git: https://gitlab.freedesktop.org/monado/monado.git -b ubuntu/focal
 Homepage: https://monado.freedesktop.org/

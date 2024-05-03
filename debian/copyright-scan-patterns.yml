@@ -1,5 +1,17 @@
 ---
+check:
+  suffixes:
+  - cmake
+  - kt
+  - xml
+  - inl
+  - aidl
+  - comp
+  - frag
+  - vert
+  - 1
 ignore:
   pattern:
   - .reuse/*
   - .gitlab-ci
+  - LICENSES/*
