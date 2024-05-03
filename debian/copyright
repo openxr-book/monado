@@ -7,16 +7,20 @@ Copyright: 2018-2024, Collabora, Ltd.
 License: BSL-1.0
 
 Files: .cmake-format.py
-Copyright: 2021-2022, Collabora, Ltd.
-License: BSL-1.0
+Copyright: 2021, 2022, Collabora, Ltd.
+License: CC0-1.0
 
 Files: CMakePresets.json
   vcpkg.json
 Copyright: 2018-2021, Collabora, Ltd.
 License: BSL-1.0
 
+Files: CompilerFlags.cmake
+Copyright: 2018-2024, Collabora, Ltd.
+License: BSL-1.0
+
 Files: cmake/*
-Copyright: 2018-2023, Collabora, Ltd.
+Copyright: 2018-2024, Collabora, Ltd.
 License: BSL-1.0
 
 Files: cmake/.cmake-format.json
@@ -33,9 +37,9 @@ License: BSL-1.0
 
 Files: cmake/FindEGL.cmake
 Copyright: 2019, 2021, Rylie Pavlik <rylie.pavlik@collabora.com>
-  2014, Martin Gräßlin <mgraesslin@kde.org>
-  2014, Alex Merry <alex.merry@kde.org>
-License: BSL-1.0
+ 2014, Martin Gräßlin <mgraesslin@kde.org>
+ 2014, Alex Merry <alex.merry@kde.org>
+License: BSD-3-clause
 
 Files: cmake/FindEigen3.cmake
 Copyright: 2009, Benoit Jacob <jacob.benoit.1@gmail.com>
@@ -113,7 +117,7 @@ Copyright: 2018-2023, Collabora, Ltd. and the Monado contributors
 License: BSL-1.0
 
 Files: doc/CHANGELOG.md
-Copyright: 2020, Collabora, Ltd. and the Monado contributors
+Copyright: 2020-2022, Collabora, Ltd. and the Monado contributors
 License: CC0-1.0
 
 Files: doc/changes/*
@@ -152,12 +156,21 @@ Files: doc/changes/xrt/*
 Copyright: 2020, Collabora, Ltd. and the Monado contributors
 License: CC0-1.0
 
+Files: doc/doxygen-awesome-css/*
+Copyright: 2021-2023, jothepro
+License: Expat
+
+Files: doc/doxygen-awesome-css/doxygen-awesome-darkmode-toggle.js
+  doc/doxygen-awesome-css/doxygen-awesome-paragraph-link.js
+Copyright: 2021-2023, jothepro
+License: Apache-2.0 and/or Expat
+
 Files: doc/example_configs/*
 Copyright: 2018-2020, Collabora, Ltd. and the Monado contributors
 License: BSL-1.0
 
 Files: doc/hand-tracking-mercury.md
-Copyright: 2018-2022, Collabora, Ltd.
+Copyright: 2018-2024, Collabora, Ltd.
 License: BSL-1.0
 
 Files: gradlew
@@ -165,11 +178,24 @@ Copyright: 2015-2021, the original authors.
 License: Apache-2.0
 
 Files: scripts/*
-Copyright: 2018-2023, Collabora, Ltd.
+Copyright: 2018-2024, Collabora, Ltd.
+License: BSL-1.0
+
+Files: src/*
+Copyright: 2018-2024, Collabora, Ltd.
 License: BSL-1.0
 
 Files: src/external/Catch2/*
 Copyright: 2022, Two Blue Cubes Ltd.
+License: BSL-1.0
+
+Files: src/external/android-jni-wrap/wrap/android.hardware.display.cpp
+  src/external/android-jni-wrap/wrap/android.hardware.display.h
+  src/external/android-jni-wrap/wrap/android.hardware.display.impl.h
+  src/external/android-jni-wrap/wrap/java.io.cpp
+  src/external/android-jni-wrap/wrap/java.io.h
+  src/external/android-jni-wrap/wrap/java.io.impl.h
+Copyright: 2021-2024, Qualcomm Innovation Center, Inc.
 License: BSL-1.0
 
 Files: src/external/cjson/*
@@ -183,7 +209,7 @@ License: Apache-2.0
 
 Files: src/external/flexkalman/flexkalman/AbsolutePositionLeverArmMeasurement.h
   src/external/flexkalman/flexkalman/SO3.h
-Copyright: 2019, 2020, Collabora, Ltd.
+Copyright: 2018-2024, Collabora, Ltd.
 License: Apache-2.0 or BSL-1.0
 
 Files: src/external/flexkalman/flexkalman/AbsolutePositionMeasurement.h
@@ -206,8 +232,8 @@ Copyright: 2013-2022, David Herberth
 License: Expat
 
 Files: src/external/glad/include/*
-Copyright: 2007-2022, The Khronos Group Inc.
-License: Khronos
+Copyright: 2007-2024, The Khronos Group Inc.
+License: Apache-2.0
 
 Files: src/external/glad/include/KHR/*
 Copyright: 2008-2018, The Khronos Group Inc.
@@ -247,7 +273,7 @@ Files: src/external/hungarian/*
 Copyright: 2016, mcximing
 License: BSD-2-clause
 
-Files: src/external/imgui/*
+Files: src/external/imgui/imgui/*
 Copyright: 2015, Stephan Dilly
   2014-2020, Omar Cornut
 License: Expat
@@ -312,19 +338,23 @@ Files: src/external/openvr_includes/CHANGELOG.md
 Copyright: 2018-2020, Collabora, Ltd.
 License: BSL-1.0
 
+Files: src/external/openvr_includes/openvr.h
+Copyright: 2015, Valve Corporation
+License: BSD-3-clause
+
 Files: src/external/openvr_includes/openvr_driver.h
 Copyright: 2015-2020, Valve Corporation
 License: BSD-3-clause
 
 Files: src/external/openxr_includes/*
-Copyright: 2007-2022, The Khronos Group Inc.
+Copyright: 2007-2024, The Khronos Group Inc.
 License: Apache-2.0 or Expat
 
-Files: src/external/openxr_includes/openxr/loader_interfaces.h
-Copyright: 2017-2022, The Khronos Group Inc.
-  2017, Valve Corporation
-  2017, LunarG, Inc.
-License: Apache-2.0
+Files: src/external/openxr_includes/openxr/XR_MNDX_ball_on_a_stick_controller.h
+  src/external/openxr_includes/openxr/XR_MNDX_hydra.h
+  src/external/openxr_includes/openxr/XR_MNDX_system_buttons.h
+Copyright: 2018-2024, Collabora, Ltd.
+License: BSL-1.0
 
 Files: src/external/renderdoc_api/*
 Copyright: 2019-2022, Baldur Karlsson
@@ -335,12 +365,12 @@ Copyright: 2017, Sean Barrett
 License: Expat or Unlicense
 
 Files: src/external/tinyceres/*
-Copyright: 2015, 2019, 2021, 2022, Google Inc.
- 2018-2022, Collabora, Ltd.
+Copyright: 2021, 2022, Collabora, Ltd.
+ 2015, 2019, 2021, 2022, Google Inc.
 License: BSD-3-clause
 
 Files: src/external/tinyceres/README.md
-Copyright: 2022, Collabora, Ltd.
+Copyright: 2021, 2022, Collabora, Ltd.
 License: CC0-1.0
 
 Files: src/external/tinyceres/include/*
@@ -377,29 +407,29 @@ Copyright: 2012-2021, Free Software Foundation, Inc.
 License: BSD-3-clause
 
 Files: src/external/util-headers/*
+Copyright: 2009, 2010, Iowa State University.
+License: BSL-1.0
+
+Files: src/external/util-headers/util/Finally.h
 Copyright: 2016, Sensics, Inc.
 License: BSL-1.0
 
 Files: src/external/util-headers/util/FixedLengthStringFunctions.h
 Copyright: 2022, Collabora, Ltd.
-  2015, Sensics, Inc.
+ 2015, Sensics, Inc.
 License: BSL-1.0
 
-Files: src/external/util-headers/util/Stride.h
-Copyright: 2009, 2010, Iowa State University.
-License: BSL-1.0
-
-Files: src/xrt/*
-Copyright: 2018-2023, Collabora, Ltd.
-License: BSL-1.0
+Files: src/external/valve-file-vdf/*
+Copyright: 2016 Matthias Moeller
+License: Expat
 
 Files: src/xrt/auxiliary/android/android_looper.cpp
   src/xrt/auxiliary/android/android_looper.h
-Copyright: 2021, Qualcomm Innovation Center, Inc.
+Copyright: 2021-2024, Qualcomm Innovation Center, Inc.
 License: BSL-1.0
 
 Files: src/xrt/auxiliary/android/src/main/java/org/freedesktop/monado/auxiliary/SystemUiController.kt
-Copyright: 2021, Qualcomm Innovation Center, Inc.
+Copyright: 2021-2024, Qualcomm Innovation Center, Inc.
 License: BSL-1.0
 
 Files: src/xrt/auxiliary/bindings/bindings.json
@@ -412,7 +442,7 @@ License: BSL-1.0
 
 Files: src/xrt/auxiliary/math/m_filter_one_euro.c
 Copyright: 2021, 2022, Jan Schmidt
-  2019-2021, Collabora, Ltd.
+ 2019-2023, Collabora, Ltd.
 License: BSL-1.0
 
 Files: src/xrt/auxiliary/math/m_filter_one_euro.h
@@ -423,8 +453,8 @@ License: BSL-1.0
 Files: src/xrt/auxiliary/math/m_imu_3dof.c
   src/xrt/auxiliary/math/m_imu_3dof.h
 Copyright: 2020, Collabora, Ltd.
-  2013, Jakob Bornecrantz.
-  2013, Fredrik Hultin.
+ 2013, Jakob Bornecrantz.
+ 2013, Fredrik Hultin.
 License: BSL-1.0
 
 Files: src/xrt/auxiliary/math/m_quatexpmap.cpp
@@ -448,49 +478,44 @@ Copyright: 2020, 2021, Moses Turner.
 License: BSL-1.0
 
 Files: src/xrt/compositor/main/comp_window_peek.c
-  src/xrt/compositor/main/comp_window_peek.h
-Copyright: 2020, 2022, Simon Zeni <simon@bl4ckb0ne.ca>
+Copyright: 2022, Simon Zeni <simon@bl4ckb0ne.ca>
+ 2022, 2023, Collabora, Ltd.
+License: BSL-1.0
+
+Files: src/xrt/compositor/main/comp_window_peek.h
+Copyright: 2022, Simon Zeni <simon@bl4ckb0ne.ca>
 License: BSL-1.0
 
 Files: src/xrt/compositor/shaders/*
-Copyright: 2020-2022, Collabora Ltd.
-License: BSL-1.0
-
-Files: src/xrt/compositor/shaders/cube.frag
-  src/xrt/compositor/shaders/cube.vert
-Copyright: 2020, 2022, Simon Zeni <simon@bl4ckb0ne.ca>
+Copyright: 2021-2023, Collabora Ltd.
 License: BSL-1.0
 
 Files: src/xrt/compositor/shaders/mesh.frag
 Copyright: 2019, Collabora, Ltd.
-  2017, James Sarrett.
-  2017, Bastiaan Olij.
+ 2017, James Sarrett.
+ 2017, Bastiaan Olij.
 License: BSL-1.0
 
 Files: src/xrt/compositor/shaders/mesh.vert
-Copyright: 2018-2023, Collabora, Ltd.
+Copyright: 2018-2024, Collabora, Ltd.
 License: BSL-1.0
 
 Files: src/xrt/drivers/android/android_sensors.c
-Copyright: 2020, Collabora, Ltd.
-  2015, Joey Ferwerda.
-  2013, Jakob Bornecrantz.
-  2013, Fredrik Hultin.
+Copyright: 2020-2023, Collabora, Ltd.
+ 2015, Joey Ferwerda.
+ 2013, Jakob Bornecrantz.
+ 2013, Fredrik Hultin.
 License: BSL-1.0
 
 Files: src/xrt/drivers/hdk/hdk_device.cpp
-Copyright: 2019, Collabora, Ltd.
-  2014-2018, Sensics, Inc.
-  2014, Kevin M. Godby
+Copyright: 2019-2023, Collabora, Ltd.
+ 2014-2018, Sensics, Inc.
+ 2014, Kevin M. Godby
 License: BSL-1.0
 
-Files: src/xrt/drivers/hydra/*
-Copyright: 2019, Collabora, Ltd.
-  2011, Iowa State University
-License: BSL-1.0
-
-Files: src/xrt/drivers/hydra/hydra_interface.h
-Copyright: 2018-2023, Collabora, Ltd.
+Files: src/xrt/drivers/hydra/hydra_driver.c
+Copyright: 2019-2021, Collabora, Ltd.
+ 2009-2011, Iowa State University
 License: BSL-1.0
 
 Files: src/xrt/drivers/illixr/*
@@ -499,17 +524,17 @@ License: BSL-1.0
 
 Files: src/xrt/drivers/north_star/*
 Copyright: 2020, Nova King.
-  2019-2021, Collabora, Ltd.
+ 2019-2021, Collabora, Ltd.
 License: BSL-1.0
 
 Files: src/xrt/drivers/north_star/distortion_3d/*
 Copyright: 2020, Nova King.
-  2020, Hesham Wahba.
+ 2020, Hesham Wahba.
 License: BSD-3-clause
 
 Files: src/xrt/drivers/north_star/exampleconfigs/*
 Copyright: 2020, Nova King.
-  2019, 2020, Collabora, Ltd.
+ 2019, 2020, Collabora, Ltd.
 License: BSL-1.0
 
 Files: src/xrt/drivers/north_star/exampleconfigs/v1_deckx_50cm.*
@@ -517,38 +542,48 @@ Copyright: 2021, CombineReality
 License: BSL-1.0
 
 Files: src/xrt/drivers/north_star/ns_hmd.c
-Copyright: 2020, Nova King.
-  2020, Moses Turner.
-  2020, Collabora, Ltd.
+Copyright: 2020-2023, Collabora, Ltd.
+ 2020, Nova King.
+ 2020, Moses Turner.
 License: BSL-1.0
 
 Files: src/xrt/drivers/north_star/ns_hmd.h
 Copyright: 2021, Moses Turner.
-  2020, Nova King.
-  2019, Collabora, Ltd.
+ 2020, Nova King.
+ 2019, Collabora, Ltd.
+License: BSL-1.0
+
+Files: src/xrt/drivers/pssense/*
+Copyright: 2023, Jarett Millard
+ 2023, Collabora, Ltd.
 License: BSL-1.0
 
 Files: src/xrt/drivers/psvr/*
 Copyright: 2019-2022, Collabora, Ltd.
-  2016, Joey Ferwerda.
+ 2016, Joey Ferwerda.
 License: BSL-1.0
 
 Files: src/xrt/drivers/psvr/psvr_interface.h
   src/xrt/drivers/psvr/psvr_prober.c
-Copyright: 2018-2023, Collabora, Ltd.
+Copyright: 2018-2024, Collabora, Ltd.
 License: BSL-1.0
 
 Files: src/xrt/drivers/qwerty/*
 Copyright: 2021, Mateo de Mayo.
 License: BSL-1.0
 
+Files: src/xrt/drivers/qwerty/qwerty_interface.h
+Copyright: 2023, Collabora, Ltd.
+ 2021, Mateo de Mayo.
+License: BSL-1.0
+
 Files: src/xrt/drivers/realsense/rs_ddev.c
-Copyright: 2020, Nova King.
-  2019-2021, Collabora, Ltd.
+Copyright: 2020-2023, Collabora, Ltd.
+ 2020, Nova King.
 License: BSL-1.0
 
 Files: src/xrt/drivers/rift_s/*
-Copyright: 2020-2022, Jan Schmidt
+Copyright: 2020-2023, Jan Schmidt
 License: BSL-1.0
 
 Files: src/xrt/drivers/rift_s/rift_s.c
@@ -559,33 +594,36 @@ Files: src/xrt/drivers/rift_s/rift_s.c
   src/xrt/drivers/rift_s/rift_s_tracker.c
   src/xrt/drivers/rift_s/rift_s_tracker.h
 Copyright: 2019-2022, Jan Schmidt
-  2016, Philipp Zabel
-  2013, Jakob Bornecrantz.
-  2013, Fredrik Hultin.
+ 2016, Philipp Zabel
+ 2013, Jakob Bornecrantz.
+ 2013, Fredrik Hultin.
 License: BSL-1.0
 
 Files: src/xrt/drivers/rift_s/rift_s_camera.c
   src/xrt/drivers/rift_s/rift_s_interface.h
 Copyright: 2021, 2022, Jan Schmidt
-  2019-2021, Collabora, Ltd.
+ 2019-2023, Collabora, Ltd.
 License: BSL-1.0
 
 Files: src/xrt/drivers/rift_s/rift_s_protocol.c
 Copyright: 2019, Lucas Teske <lucas@teske.com.br>
-  2019, 2020, Jan Schmidt
-  2016, Philipp Zabel
-  2013, Jakob Bornecrantz.
-  2013, Fredrik Hultin.
+ 2019, 2020, Jan Schmidt
+ 2016, Philipp Zabel
+ 2013, Jakob Bornecrantz.
+ 2013, Fredrik Hultin.
 License: BSL-1.0
 
 Files: src/xrt/drivers/rift_s/rift_s_protocol.h
 Copyright: 2019, Lucas Teske <lucas@teske.com.br>
-  2019, 2020, Jan Schmidt
+ 2019, 2020, Jan Schmidt
 License: BSL-1.0
 
-Files: src/xrt/drivers/simula/*
-Copyright: 2020, 2021, Moses Turner.
-  2020, 2021, Collabora, Ltd.
+Files: src/xrt/drivers/rift_s/rift_s_tracker.c
+Copyright: 2023, Collabora, Ltd.
+ 2019-2022, Jan Schmidt
+ 2016, Philipp Zabel
+ 2013, Jakob Bornecrantz.
+ 2013, Fredrik Hultin.
 License: BSL-1.0
 
 Files: src/xrt/drivers/simula/svr_interface.h

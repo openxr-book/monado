@@ -1,5 +1,5 @@
 #!/bin/sh
-# Copyright 2020-2024, Rylie Pavlik <rylie@ryliepavlik.com>
+# SPDX-FileCopyrightText: 2020-2024, Rylie Pavlik <rylie@ryliepavlik.com>
 # SPDX-License-Identifier: CC0-1.0
 
 # Packages produced this way are for automated use only and shouldn't be uploaded to the Debian archive.
