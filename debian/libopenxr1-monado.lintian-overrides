@@ -1,4 +1,4 @@
 # This is never linked directly against. It is placed in the main library directory
 # so that it can be found by the loader using an unqualified name, to allow multiple architectures
 # to have an active OpenXR runtime (the same one) at the same time.
-libopenxr1-monado: sharedobject-in-library-directory-missing-soname usr/lib/*/libopenxr_monado.so
+libopenxr1-monado: sharedobject-in-library-directory-missing-soname [usr/lib/*/libopenxr_monado.so]
