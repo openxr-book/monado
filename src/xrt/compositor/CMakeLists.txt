@@ -1,4 +1,4 @@
-# Copyright 2019-2022, Collabora, Ltd.
+# Copyright 2019-2024, Collabora, Ltd.
 # SPDX-License-Identifier: BSL-1.0
 
 ###
@@ -41,8 +41,9 @@ endif()
 
 if(XRT_HAVE_EGL)
 	target_sources(
-		comp_client PRIVATE client/comp_gl_eglimage_swapchain.c
-				    client/comp_gl_eglimage_swapchain.h
+		comp_client
+		PRIVATE client/comp_gl_eglimage_swapchain.c client/comp_gl_eglimage_swapchain.h
+			client/comp_egl_client.c client/comp_egl_client.h
 		)
 endif()
 
@@ -54,8 +55,16 @@ if(XRT_HAVE_OPENGL_GLX AND XRT_HAVE_XLIB)
 	target_link_libraries(comp_client PRIVATE OpenGL::GLX)
 endif()
 
-if(XRT_HAVE_EGL)
-	target_sources(comp_client PRIVATE client/comp_egl_client.c client/comp_egl_client.h)
+if(XRT_HAVE_OPENGL AND WIN32)
+	target_sources(
+		comp_client PRIVATE client/comp_gl_win32_client.c client/comp_gl_win32_client.h
+				    client/comp_gl_win32_glue.c
+		)
+endif()
+
+if(XRT_HAVE_D3D11 OR XRT_HAVE_D3D12)
+	target_link_libraries(comp_client PRIVATE aux_d3d)
+	target_sources(comp_client PRIVATE client/comp_d3d_common.cpp client/comp_d3d_common.hpp)
 endif()
 
 if(XRT_HAVE_D3D11)
@@ -63,8 +72,71 @@ if(XRT_HAVE_D3D11)
 		comp_client PRIVATE client/comp_d3d11_client.cpp client/comp_d3d11_client.h
 				    client/comp_d3d11_glue.c
 		)
-	target_link_libraries(comp_client PRIVATE aux_d3d)
 endif()
+
+if(XRT_HAVE_D3D12)
+	target_sources(
+		comp_client PRIVATE client/comp_d3d12_client.cpp client/comp_d3d12_client.h
+				    client/comp_d3d12_glue.c
+		)
+endif()
+
+##
+# Render library
+#
+
+if(XRT_HAVE_VULKAN)
+	set(SHADERS
+	    shaders/blit.comp
+	    shaders/clear.comp
+	    shaders/distortion.comp
+	    shaders/layer.comp
+	    shaders/mesh.frag
+	    shaders/mesh.vert
+	    shaders/layer_cylinder.frag
+	    shaders/layer_cylinder.vert
+	    shaders/layer_equirect2.frag
+	    shaders/layer_equirect2.vert
+	    shaders/layer_projection.vert
+	    shaders/layer_quad.vert
+	    shaders/layer_shared.frag
+		)
+
+	spirv_shaders(
+		SHADER_HEADERS
+		SPIRV_VERSION
+		1.0 # Currently targeting Vulkan 1.0
+		SOURCES
+		${SHADERS}
+		)
+
+	add_library(
+		comp_render STATIC
+		${SHADER_HEADERS}
+		render/render_buffer.c
+		render/render_compute.c
+		render/render_distortion.c
+		render/render_gfx.c
+		render/render_interface.h
+		render/render_resources.c
+		render/render_shaders.c
+		render/render_sub_alloc.c
+		render/render_util.c
+		)
+	# The aux_vk library needs to be public to include Vulkan.
+	target_link_libraries(
+		comp_render
+		PUBLIC xrt-interfaces aux_vk
+		PRIVATE aux_util aux_os
+		)
+	# So it can be used without any other compositor libraries.
+	target_include_directories(comp_render PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+	# Shaders - marked SYSTEM so we get no warnings
+	target_include_directories(comp_render SYSTEM PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+
+	add_subdirectory(shaders)
+endif()
+
 ##
 # Util library
 #
@@ -74,6 +146,12 @@ if(XRT_HAVE_VULKAN)
 		comp_util STATIC
 		util/comp_base.h
 		util/comp_base.c
+		util/comp_render.h
+		util/comp_render_cs.c
+		util/comp_render_gfx.c
+		util/comp_render_helpers.h
+		util/comp_scratch.c
+		util/comp_scratch.h
 		util/comp_semaphore.h
 		util/comp_semaphore.c
 		util/comp_swapchain.h
@@ -86,61 +164,16 @@ if(XRT_HAVE_VULKAN)
 	target_link_libraries(
 		comp_util
 		PUBLIC xrt-interfaces
-		PRIVATE aux_util aux_os aux_vk
+		PRIVATE aux_util aux_os aux_vk comp_render
 		)
-	target_include_directories(comp_util PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-endif()
-
-##
-# Render library
-#
-
-if(XRT_HAVE_VULKAN)
-	spirv_shaders(
-		SHADER_HEADERS
-		SPIRV_VERSION
-		1.0 # Currently targeting Vulkan 1.0
-		SOURCES
-		shaders/clear.comp
-		shaders/distortion.comp
-		shaders/mesh.frag
-		shaders/mesh.vert
-		shaders/layer.frag
-		shaders/layer.vert
-		shaders/equirect1.vert
-		shaders/equirect1.frag
-		shaders/equirect2.vert
-		shaders/equirect2.frag
-		)
-
-	add_library(
-		comp_render STATIC
-		${SHADER_HEADERS}
-		render/render_buffer.c
-		render/render_compute.c
-		render/render_gfx.c
-		render/render_interface.h
-		render/render_resources.c
-		render/render_shaders.c
-		render/render_util.c
-		)
-	target_link_libraries(
-		comp_render
-		PUBLIC xrt-interfaces
-		PRIVATE aux_util aux_os aux_vk
-		)
-	target_include_directories(comp_render PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-	# Shaders - marked SYSTEM so we get no warnings
-	target_include_directories(comp_render SYSTEM PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
-
-	add_subdirectory(shaders)
+	target_include_directories(comp_util PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 endif()
 
 ##
 # Main library
 #
 
-if(XRT_FEATURE_COMPOSITOR_MAIN)
+if(XRT_MODULE_COMPOSITOR_MAIN)
 
 	add_library(
 		comp_main STATIC
@@ -155,10 +188,8 @@ if(XRT_FEATURE_COMPOSITOR_MAIN)
 		main/comp_target_swapchain.c
 		main/comp_target_swapchain.h
 		main/comp_window.h
-		main/comp_layer.h
-		main/comp_layer.c
-		main/comp_layer_renderer.h
-		main/comp_layer_renderer.c
+		main/comp_mirror_to_debug_gui.c
+		main/comp_mirror_to_debug_gui.h
 		)
 	target_link_libraries(
 		comp_main
@@ -170,7 +201,7 @@ if(XRT_FEATURE_COMPOSITOR_MAIN)
 			comp_util
 			comp_render
 		)
-	target_include_directories(comp_main PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+	target_include_directories(comp_main PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 	if(XRT_HAVE_XCB)
 		target_sources(comp_main PRIVATE main/comp_window_xcb.c)
@@ -187,6 +218,10 @@ if(XRT_FEATURE_COMPOSITOR_MAIN)
 					  main/comp_window_direct_nvidia.c
 			)
 		target_link_libraries(comp_main PRIVATE ${X11_X11_LIB})
+	endif()
+	if(XRT_FEATURE_WINDOW_PEEK)
+		target_sources(comp_main PRIVATE main/comp_window_peek.c)
+		target_link_libraries(comp_main PRIVATE SDL2::SDL2)
 	endif()
 	if(WIN32)
 		target_sources(comp_main PRIVATE main/comp_window_mswin.c)
@@ -209,7 +244,9 @@ if(XRT_FEATURE_COMPOSITOR_MAIN)
 
 		set(WL_PROTOS_XML ${WL_PROTOS_PKG_DIR}/stable/xdg-shell/xdg-shell.xml)
 
-		target_include_directories(comp_main SYSTEM PRIVATE ${WL_PROTOS_DIR})
+		target_include_directories(
+			comp_main SYSTEM PRIVATE ${WL_PROTOS_DIR} ${WAYLAND_INCLUDE_DIRS}
+			)
 		target_link_libraries(comp_main PRIVATE ${WAYLAND_LIBRARIES})
 
 		if(XRT_HAVE_WAYLAND_DIRECT)
@@ -259,15 +296,13 @@ if(XRT_FEATURE_COMPOSITOR_MAIN)
 	endif()
 endif()
 
-
 ###
 # Null compositor
 #
 
-if(XRT_FEATURE_COMPOSITOR_NULL)
+if(XRT_MODULE_COMPOSITOR_NULL)
 	add_subdirectory(null)
 endif()
-
 
 ###
 # Multi client compositor library
@@ -284,7 +319,7 @@ target_link_libraries(
 	)
 target_include_directories(comp_multi PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
-if(XRT_FEATURE_COMPOSITOR_MAIN)
+if(XRT_MODULE_COMPOSITOR_MAIN)
 	target_link_libraries(comp_main PRIVATE comp_multi)
 endif()
 

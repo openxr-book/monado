@@ -1,9 +1,10 @@
-// Copyright 2018-2020, Collabora, Ltd.
+// Copyright 2018-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Holds system related entrypoints.
  * @author Jakob Bornecrantz <jakob@collabora.com>
+ * @author Korcan Hussein <korcan.hussein@collabora.com>
  * @ingroup oxr_main
  */
 
@@ -25,6 +26,15 @@
 
 DEBUG_GET_ONCE_NUM_OPTION(scale_percentage, "OXR_VIEWPORT_SCALE_PERCENTAGE", 100)
 
+static enum xrt_form_factor
+convert_form_factor(XrFormFactor form_factor)
+{
+	switch (form_factor) {
+	case XR_FORM_FACTOR_HANDHELD_DISPLAY: return XRT_FORM_FACTOR_HANDHELD;
+	case XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY: return XRT_FORM_FACTOR_HMD;
+	default: return XRT_FORM_FACTOR_HMD;
+	}
+}
 
 static bool
 oxr_system_matches(struct oxr_logger *log, struct oxr_system *sys, XrFormFactor form_factor)
@@ -59,6 +69,13 @@ oxr_system_select(struct oxr_logger *log,
 		                 form_factor, systems[0]->form_factor);
 	}
 
+	struct xrt_device *xdev = GET_XDEV_BY_ROLE(selected, head);
+	if (xdev->form_factor_check_supported &&
+	    !xrt_device_is_form_factor_available(xdev, convert_form_factor(form_factor))) {
+		return oxr_error(log, XR_ERROR_FORM_FACTOR_UNAVAILABLE, "request form factor %i is unavailable now",
+		                 form_factor);
+	}
+
 	*out_selected = selected;
 
 	return XR_SUCCESS;
@@ -67,7 +84,7 @@ oxr_system_select(struct oxr_logger *log,
 XrResult
 oxr_system_verify_id(struct oxr_logger *log, const struct oxr_instance *inst, XrSystemId systemId)
 {
-	if (systemId != 1) {
+	if (systemId != XRT_SYSTEM_ID) {
 		return oxr_error(log, XR_ERROR_SYSTEM_INVALID, "Invalid system %" PRIu64, systemId);
 	}
 	return XR_SUCCESS;
@@ -90,20 +107,29 @@ oxr_system_get_by_id(struct oxr_logger *log, struct oxr_instance *inst, XrSystem
 
 
 XrResult
-oxr_system_fill_in(struct oxr_logger *log, struct oxr_instance *inst, XrSystemId systemId, struct oxr_system *sys)
+oxr_system_fill_in(
+    struct oxr_logger *log, struct oxr_instance *inst, XrSystemId systemId, uint32_t view_count, struct oxr_system *sys)
 {
 	//! @todo handle other subaction paths?
 
 	sys->inst = inst;
 	sys->systemId = systemId;
 	sys->form_factor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
-	sys->view_config_type = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+	if (view_count == 1) {
+		sys->view_config_type = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_MONO;
+	} else if (view_count == 2) {
+		sys->view_config_type = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+	} else {
+		assert(false && "view_count must be 1 or 2");
+	}
+	U_LOG_D("sys->view_config_type = %d", sys->view_config_type);
+	sys->dynamic_roles_cache = (struct xrt_system_roles)XRT_SYSTEM_ROLES_INIT;
 
 #ifdef XR_USE_GRAPHICS_API_VULKAN
 	sys->vulkan_enable2_instance = VK_NULL_HANDLE;
 	sys->suggested_vulkan_physical_device = VK_NULL_HANDLE;
 #endif
-#ifdef XR_USE_GRAPHICS_API_D3D11
+#if defined(XR_USE_GRAPHICS_API_D3D11) || defined(XR_USE_GRAPHICS_API_D3D12)
 	U_ZERO(&(sys->suggested_d3d_luid));
 	sys->suggested_d3d_luid_valid = false;
 #endif
@@ -123,40 +149,30 @@ oxr_system_fill_in(struct oxr_logger *log, struct oxr_instance *inst, XrSystemId
 
 	struct xrt_system_compositor_info *info = &sys->xsysc->info;
 
-	uint32_t w0 = (uint32_t)(info->views[0].recommended.width_pixels * scale);
-	uint32_t h0 = (uint32_t)(info->views[0].recommended.height_pixels * scale);
-	uint32_t w1 = (uint32_t)(info->views[1].recommended.width_pixels * scale);
-	uint32_t h1 = (uint32_t)(info->views[1].recommended.height_pixels * scale);
-
-	uint32_t w0_2 = info->views[0].max.width_pixels;
-	uint32_t h0_2 = info->views[0].max.height_pixels;
-	uint32_t w1_2 = info->views[1].max.width_pixels;
-	uint32_t h1_2 = info->views[1].max.height_pixels;
-
 #define imin(a, b) (a < b ? a : b)
+	for (uint32_t i = 0; i < view_count; ++i) {
+		uint32_t w = (uint32_t)(info->views[i].recommended.width_pixels * scale);
+		uint32_t h = (uint32_t)(info->views[i].recommended.height_pixels * scale);
+		uint32_t w_2 = info->views[i].max.width_pixels;
+		uint32_t h_2 = info->views[i].max.height_pixels;
 
-	w0 = imin(w0, w0_2);
-	h0 = imin(h0, h0_2);
-	w1 = imin(w1, w1_2);
-	h1 = imin(h1, h1_2);
+		w = imin(w, w_2);
+		h = imin(h, h_2);
+
+		sys->views[i].recommendedImageRectWidth = w;
+		sys->views[i].maxImageRectWidth = w_2;
+		sys->views[i].recommendedImageRectHeight = h;
+		sys->views[i].maxImageRectHeight = h_2;
+		sys->views[i].recommendedSwapchainSampleCount = info->views[i].recommended.sample_count;
+		sys->views[i].maxSwapchainSampleCount = info->views[i].max.sample_count;
+	}
 
 #undef imin
 
-	// clang-format off
-	sys->views[0].recommendedImageRectWidth       = w0;
-	sys->views[0].maxImageRectWidth               = w0_2;
-	sys->views[0].recommendedImageRectHeight      = h0;
-	sys->views[0].maxImageRectHeight              = h0_2;
-	sys->views[0].recommendedSwapchainSampleCount = info->views[0].recommended.sample_count;
-	sys->views[0].maxSwapchainSampleCount         = info->views[0].max.sample_count;
 
-	sys->views[1].recommendedImageRectWidth       = w1;
-	sys->views[1].maxImageRectWidth               = w1_2;
-	sys->views[1].recommendedImageRectHeight      = h1;
-	sys->views[1].maxImageRectHeight              = h1_2;
-	sys->views[1].recommendedSwapchainSampleCount = info->views[1].recommended.sample_count;
-	sys->views[1].maxSwapchainSampleCount         = info->views[1].max.sample_count;
-	// clang-format on
+	/*
+	 * Blend mode support.
+	 */
 
 	assert(info->supported_blend_mode_count <= ARRAY_SIZE(sys->blend_modes));
 	assert(info->supported_blend_mode_count != 0);
@@ -167,6 +183,48 @@ oxr_system_fill_in(struct oxr_logger *log, struct oxr_instance *inst, XrSystemId
 	}
 	sys->blend_mode_count = (uint32_t)info->supported_blend_mode_count;
 
+
+	/*
+	 * Reference space support.
+	 */
+
+	static_assert(5 <= ARRAY_SIZE(sys->reference_spaces), "Not enough space in array");
+
+	if (sys->xso->semantic.view != NULL) {
+		sys->reference_spaces[sys->reference_space_count++] = XR_REFERENCE_SPACE_TYPE_VIEW;
+	}
+
+	if (sys->xso->semantic.local != NULL) {
+		sys->reference_spaces[sys->reference_space_count++] = XR_REFERENCE_SPACE_TYPE_LOCAL;
+	}
+
+#ifdef OXR_HAVE_EXT_local_floor
+	if (sys->inst->extensions.EXT_local_floor) {
+		if (sys->xso->semantic.local_floor != NULL) {
+			sys->reference_spaces[sys->reference_space_count++] = XR_REFERENCE_SPACE_TYPE_LOCAL_FLOOR_EXT;
+		} else {
+			oxr_warn(log,
+			         "XR_EXT_local_floor enabled but system doesn't support local_floor,"
+			         " breaking spec by not exposing the reference space.");
+		}
+	}
+#endif
+
+	if (sys->xso->semantic.stage != NULL) {
+		sys->reference_spaces[sys->reference_space_count++] = XR_REFERENCE_SPACE_TYPE_STAGE;
+	}
+
+#ifdef OXR_HAVE_MSFT_unbounded_reference_space
+	if (sys->inst->extensions.MSFT_unbounded_reference_space && sys->xso->semantic.unbounded != NULL) {
+		sys->reference_spaces[sys->reference_space_count++] = XR_REFERENCE_SPACE_TYPE_UNBOUNDED_MSFT;
+	}
+#endif
+
+
+	/*
+	 * Done.
+	 */
+
 	return XR_SUCCESS;
 }
 
@@ -174,24 +232,74 @@ bool
 oxr_system_get_hand_tracking_support(struct oxr_logger *log, struct oxr_instance *inst)
 {
 	struct oxr_system *sys = &inst->system;
-	struct xrt_device *left = GET_XDEV_BY_ROLE(sys, left);
-	struct xrt_device *right = GET_XDEV_BY_ROLE(sys, right);
+	struct xrt_device *ht_left = GET_XDEV_BY_ROLE(sys, hand_tracking_left);
+	struct xrt_device *ht_right = GET_XDEV_BY_ROLE(sys, hand_tracking_right);
 
-	bool left_supported = left && left->hand_tracking_supported;
-	bool right_supported = right && right->hand_tracking_supported;
+	bool left_supported = ht_left && ht_left->hand_tracking_supported;
+	bool right_supported = ht_right && ht_right->hand_tracking_supported;
+
 	return left_supported || right_supported;
+}
+
+bool
+oxr_system_get_eye_gaze_support(struct oxr_logger *log, struct oxr_instance *inst)
+{
+	struct oxr_system *sys = &inst->system;
+	struct xrt_device *eyes = GET_XDEV_BY_ROLE(sys, eyes);
+
+	return eyes && eyes->eye_gaze_supported;
+}
+
+bool
+oxr_system_get_force_feedback_support(struct oxr_logger *log, struct oxr_instance *inst)
+{
+	struct oxr_system *sys = &inst->system;
+	struct xrt_device *ffb_left = GET_XDEV_BY_ROLE(sys, hand_tracking_left);
+	struct xrt_device *ffb_right = GET_XDEV_BY_ROLE(sys, hand_tracking_right);
+
+	bool left_supported = ffb_left && ffb_left->force_feedback_supported;
+	bool right_supported = ffb_right && ffb_right->force_feedback_supported;
+
+	return left_supported || right_supported;
+}
+
+void
+oxr_system_get_face_tracking_htc_support(struct oxr_logger *log,
+                                         struct oxr_instance *inst,
+                                         bool *supports_eye,
+                                         bool *supports_lip)
+{
+	struct oxr_system *sys = &inst->system;
+	struct xrt_device *face_xdev = GET_XDEV_BY_ROLE(sys, face);
+
+	if (supports_eye)
+		*supports_eye = false;
+	if (supports_lip)
+		*supports_lip = false;
+
+	if (face_xdev == NULL || !face_xdev->face_tracking_supported || face_xdev->inputs == NULL) {
+		return;
+	}
+
+	for (size_t input_idx = 0; input_idx < face_xdev->input_count; ++input_idx) {
+		const struct xrt_input *input = &face_xdev->inputs[input_idx];
+		if (supports_eye != NULL && input->name == XRT_INPUT_HTC_EYE_FACE_TRACKING) {
+			*supports_eye = true;
+		}
+		if (supports_lip != NULL && input->name == XRT_INPUT_HTC_LIP_FACE_TRACKING) {
+			*supports_lip = true;
+		}
+	}
 }
 
 XrResult
 oxr_system_get_properties(struct oxr_logger *log, struct oxr_system *sys, XrSystemProperties *properties)
 {
-	properties->vendorId = 42;
 	properties->systemId = sys->systemId;
+	properties->vendorId = sys->xsys->properties.vendor_id;
+	memcpy(properties->systemName, sys->xsys->properties.name, sizeof(properties->systemName));
 
 	struct xrt_device *xdev = GET_XDEV_BY_ROLE(sys, head);
-
-	// The magical 247 number, is to silence warnings.
-	snprintf(properties->systemName, XR_MAX_SYSTEM_NAME_SIZE, "Monado: %.*s", 247, xdev->str);
 
 	// Get from compositor.
 	struct xrt_system_compositor_info *info = sys->xsysc ? &sys->xsysc->info : NULL;
@@ -218,6 +326,65 @@ oxr_system_get_properties(struct oxr_logger *log, struct oxr_system *sys, XrSyst
 		hand_tracking_props->supportsHandTracking = oxr_system_get_hand_tracking_support(log, sys->inst);
 	}
 
+#ifdef OXR_HAVE_EXT_eye_gaze_interaction
+	XrSystemEyeGazeInteractionPropertiesEXT *eye_gaze_props = NULL;
+	if (sys->inst->extensions.EXT_eye_gaze_interaction) {
+		eye_gaze_props =
+		    OXR_GET_OUTPUT_FROM_CHAIN(properties, XR_TYPE_SYSTEM_EYE_GAZE_INTERACTION_PROPERTIES_EXT,
+		                              XrSystemEyeGazeInteractionPropertiesEXT);
+	}
+
+	if (eye_gaze_props) {
+		eye_gaze_props->supportsEyeGazeInteraction = oxr_system_get_eye_gaze_support(log, sys->inst);
+	}
+#endif
+
+#ifdef OXR_HAVE_MNDX_force_feedback_curl
+	XrSystemForceFeedbackCurlPropertiesMNDX *force_feedback_props = NULL;
+	if (sys->inst->extensions.MNDX_force_feedback_curl) {
+		force_feedback_props =
+		    OXR_GET_OUTPUT_FROM_CHAIN(properties, XR_TYPE_SYSTEM_FORCE_FEEDBACK_CURL_PROPERTIES_MNDX,
+		                              XrSystemForceFeedbackCurlPropertiesMNDX);
+	}
+
+	if (force_feedback_props) {
+		force_feedback_props->supportsForceFeedbackCurl = oxr_system_get_force_feedback_support(log, sys->inst);
+	}
+#endif
+
+#ifdef OXR_HAVE_FB_passthrough
+	XrSystemPassthroughPropertiesFB *passthrough_props = NULL;
+	XrSystemPassthroughProperties2FB *passthrough_props2 = NULL;
+	if (sys->inst->extensions.FB_passthrough) {
+		passthrough_props = OXR_GET_OUTPUT_FROM_CHAIN(properties, XR_TYPE_SYSTEM_PASSTHROUGH_PROPERTIES_FB,
+		                                              XrSystemPassthroughPropertiesFB);
+		if (passthrough_props) {
+			passthrough_props->supportsPassthrough = true;
+		}
+
+		passthrough_props2 = OXR_GET_OUTPUT_FROM_CHAIN(properties, XR_TYPE_SYSTEM_PASSTHROUGH_PROPERTIES2_FB,
+		                                               XrSystemPassthroughProperties2FB);
+		if (passthrough_props2) {
+			passthrough_props2->capabilities = XR_PASSTHROUGH_CAPABILITY_BIT_FB;
+		}
+	}
+#endif
+
+#ifdef OXR_HAVE_HTC_facial_tracking
+	XrSystemFacialTrackingPropertiesHTC *htc_facial_tracking_props = NULL;
+	if (sys->inst->extensions.HTC_facial_tracking) {
+		htc_facial_tracking_props = OXR_GET_OUTPUT_FROM_CHAIN(
+		    properties, XR_TYPE_SYSTEM_FACIAL_TRACKING_PROPERTIES_HTC, XrSystemFacialTrackingPropertiesHTC);
+	}
+
+	if (htc_facial_tracking_props) {
+		bool supports_eye = false;
+		bool supports_lip = false;
+		oxr_system_get_face_tracking_htc_support(log, sys->inst, &supports_eye, &supports_lip);
+		htc_facial_tracking_props->supportEyeFacialTracking = supports_eye;
+		htc_facial_tracking_props->supportLipFacialTracking = supports_lip;
+	}
+#endif // OXR_HAVE_HTC_facial_tracking
 	return XR_SUCCESS;
 }
 
@@ -285,7 +452,11 @@ oxr_system_enumerate_view_conf_views(struct oxr_logger *log,
 	if (viewConfigurationType != sys->view_config_type) {
 		return oxr_error(log, XR_ERROR_VIEW_CONFIGURATION_TYPE_UNSUPPORTED, "Invalid view configuration type");
 	}
-
-	OXR_TWO_CALL_FILL_IN_HELPER(log, viewCapacityInput, viewCountOutput, views, 2, view_configuration_view_fill_in,
-	                            sys->views, XR_SUCCESS);
+	if (sys->view_config_type == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_MONO) {
+		OXR_TWO_CALL_FILL_IN_HELPER(log, viewCapacityInput, viewCountOutput, views, 1,
+		                            view_configuration_view_fill_in, sys->views, XR_SUCCESS);
+	} else {
+		OXR_TWO_CALL_FILL_IN_HELPER(log, viewCapacityInput, viewCountOutput, views, 2,
+		                            view_configuration_view_fill_in, sys->views, XR_SUCCESS);
+	}
 }

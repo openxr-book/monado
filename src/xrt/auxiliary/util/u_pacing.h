@@ -4,7 +4,7 @@
  * @file
  * @brief  Shared pacing code.
  * @author Jakob Bornecrantz <jakob@collabora.com>
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup aux_util
  */
 
@@ -33,9 +33,17 @@ extern "C" {
  */
 enum u_timing_point
 {
-	U_TIMING_POINT_WAKE_UP, //!< Woke up after sleeping in wait frame.
-	U_TIMING_POINT_BEGIN,   //!< Began CPU side work for GPU.
-	U_TIMING_POINT_SUBMIT,  //!< Submitted work to the GPU.
+	//! Woke up after sleeping in "wait frame".
+	U_TIMING_POINT_WAKE_UP,
+
+	//! Began CPU side work for GPU.
+	U_TIMING_POINT_BEGIN,
+
+	//! Began submitting work to the GPU, only used by the compositor.
+	U_TIMING_POINT_SUBMIT_BEGIN,
+
+	//! Finished submitting work to the GPU, only used by the compositor.
+	U_TIMING_POINT_SUBMIT_END,
 };
 
 
@@ -135,6 +143,27 @@ struct u_pacing_compositor
 	             uint64_t when_ns);
 
 	/*!
+	 * Provide frame timing information about GPU start and stop time.
+	 *
+	 * Depend on when the information is delivered this can be called at any
+	 * point of the following frames.
+	 *
+	 * @param[in] upc          The compositor pacing helper.
+	 * @param[in] frame_id     The frame ID to record for.
+	 * @param[in] gpu_start_ns When the GPU work startred.
+	 * @param[in] gpu_end_ns   When the GPU work stopped.
+	 * @param[in] when_ns      When the informatioon collected, nominally
+	 *                         from @ref os_monotonic_get_ns.
+	 *
+	 * @see @ref frame-pacing.
+	 */
+	void (*info_gpu)(struct u_pacing_compositor *upc,
+	                 int64_t frame_id,
+	                 uint64_t gpu_start_ns,
+	                 uint64_t gpu_end_ns,
+	                 uint64_t when_ns);
+
+	/*!
 	 * Provide a vblank timing information, derived from the
 	 * VK_EXT_display_control extension. Since the extension only says when
 	 * a vblank happened (somewhat inaccurate as well) but not if a specific
@@ -231,6 +260,22 @@ u_pc_info(struct u_pacing_compositor *upc,
 {
 	upc->info(upc, frame_id, desired_present_time_ns, actual_present_time_ns, earliest_present_time_ns,
 	          present_margin_ns, when_ns);
+}
+
+
+/*!
+ * @copydoc u_pacing_compositor::info_gpu
+ *
+ * Helper for calling through the function pointer.
+ *
+ * @public @memberof u_pacing_compositor
+ * @ingroup aux_pacing
+ */
+static inline void
+u_pc_info_gpu(
+    struct u_pacing_compositor *upc, int64_t frame_id, uint64_t gpu_start_ns, uint64_t gpu_end_ns, uint64_t when_ns)
+{
+	upc->info_gpu(upc, frame_id, gpu_start_ns, gpu_end_ns, when_ns);
 }
 
 /*!
@@ -365,6 +410,30 @@ struct u_pacing_app
 	void (*mark_gpu_done)(struct u_pacing_app *upa, int64_t frame_id, uint64_t when_ns);
 
 	/*!
+	 * Latch a frame for rendering for delivery to the native compositor,
+	 * may be called multiple times for the same frame should the app be on
+	 * a frame cadence that is lower then the native compositor.
+	 *
+	 * @param     upa             App pacer struct.
+	 * @param[in] frame_id        The frame ID of the latched frame.
+	 * @param[in] when_ns         Time when the latching happened.
+	 * @param[in] system_frame_id The ID of the system frame that is
+	 *                            latching the app's frame.
+	 */
+	void (*latched)(struct u_pacing_app *upa, int64_t frame_id, uint64_t when_ns, int64_t system_frame_id);
+
+	/*!
+	 * Mark a frame as completely retired, will never be latched (used by
+	 * the native compositor again) as a new frame has been latched or a
+	 * shutdown condition has been met.
+	 *
+	 * @param     upa                 App pacer struct.
+	 * @param[in] frame_id            The frame ID of the latched frame.
+	 * @param[in] when_ns             Time when the latching happened.
+	 */
+	void (*retired)(struct u_pacing_app *upa, int64_t frame_id, uint64_t when_ns);
+
+	/*!
 	 * Add a new sample point from the main render loop.
 	 *
 	 * This is called in the main renderer loop that tightly submits frames to the
@@ -484,6 +553,34 @@ u_pa_info(struct u_pacing_app *upa,
           uint64_t extra_ns)
 {
 	upa->info(upa, predicted_display_time_ns, predicted_display_period_ns, extra_ns);
+}
+
+/*!
+ * @copydoc u_pacing_app::latched
+ *
+ * Helper for calling through the function pointer.
+ *
+ * @public @memberof u_pacing_app
+ * @ingroup aux_pacing
+ */
+static inline void
+u_pa_latched(struct u_pacing_app *upa, int64_t frame_id, uint64_t when_ns, int64_t system_frame_id)
+{
+	upa->latched(upa, frame_id, when_ns, system_frame_id);
+}
+
+/*!
+ * @copydoc u_pacing_app::retired
+ *
+ * Helper for calling through the function pointer.
+ *
+ * @public @memberof u_pacing_app
+ * @ingroup aux_pacing
+ */
+static inline void
+u_pa_retired(struct u_pacing_app *upa, int64_t frame_id, uint64_t when_ns)
+{
+	upa->retired(upa, frame_id, when_ns);
 }
 
 /*!

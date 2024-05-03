@@ -1,7 +1,7 @@
 #!/bin/sh
 # Copyright 2019, Collabora, Ltd.
 # SPDX-License-Identifier: BSL-1.0
-# Author: Ryan Pavlik <ryan.pavlik@collabora.com>
+# Author: Rylie Pavlik <rylie.pavlik@collabora.com>
 
 # Run both format-project and codespell-project, making a patch if any changes can be auto-made.
 # Intended mainly for use in CI, but can be used elsewhere.
@@ -42,13 +42,19 @@ PATCH_NAME=fixes.diff
     echo "Running clang-format..."
     echo
     ./format-project.sh
+
+    echo "Running cmake-format..."
+    echo
+    ./format-cmake.sh
+
+    
     (
         cd ..
         mkdir -p $PATCH_DIR
         # Can't use tee because it hides the exit code
         if git diff --patch --exit-code > $PATCH_DIR/$PATCH_NAME; then
             echo
-            echo "clang-format and codespell changed nothing."
+            echo "clang-format, cmake-format and codespell changed nothing."
         else
             echo
             echo "clang-format and/or codespell made at least one change, please apply the patch in the job artifacts and seen below!"

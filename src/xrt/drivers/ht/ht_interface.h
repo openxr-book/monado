@@ -16,6 +16,7 @@
 #include "tracking/t_tracking.h"
 #include "tracking/t_hand_tracking.h"
 #include "xrt/xrt_prober.h"
+#include "xrt/xrt_tracking.h"
 
 
 #ifdef __cplusplus
@@ -30,24 +31,13 @@ extern "C" {
  */
 
 /*!
- * Create a hand tracker device.
- *
- * @ingroup drv_ht
- */
-struct xrt_device *
-ht_device_create_index(struct xrt_prober *xp, struct t_stereo_camera_calibration *calib);
-
-/*!
- * Create hand tracker for WMR devices.
- *
- * @note The frame context comes from the WMR device.
+ * Create hand tracker.
  *
  * @ingroup drv_ht
  *
- * @param xfctx WMR context to attach the tracker to
+ * @param xfctx Frame context to attach the tracker to
  * @param calib Calibration struct for stereo camera
- * @param output_space What the origin of the output data should be
- * @param algorithm_choice Which algorithm to use for hand tracking
+ * @param create_info Additional creation options
  * @param out_sinks Sinks to stream camera data to
  * @param out_device Newly created hand tracker "device"
  * @return int 0 on success
@@ -55,19 +45,10 @@ ht_device_create_index(struct xrt_prober *xp, struct t_stereo_camera_calibration
 int
 ht_device_create(struct xrt_frame_context *xfctx,
                  struct t_stereo_camera_calibration *calib,
-                 enum t_hand_tracking_output_space output_space,
-                 enum t_hand_tracking_algorithm algorithm_choice,
-                 struct t_image_boundary_info boundary_info,
+                 struct t_hand_tracking_create_info create_info,
                  struct xrt_slam_sinks **out_sinks,
                  struct xrt_device **out_device);
 
-#ifdef XRT_BUILD_DRIVER_DEPTHAI
-struct xrt_device *
-ht_device_create_depthai_ov9282(void);
-
-struct xrt_auto_prober *
-ht_create_auto_prober();
-#endif
 
 /*!
  * @dir drivers/ht

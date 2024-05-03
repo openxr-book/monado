@@ -3,7 +3,7 @@
 /*!
  * @file
  * @brief  Microsoft Windows window code.
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @author Lubosz Sarnecki <lubosz.sarnecki@collabora.com>
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @ingroup comp_main
@@ -145,21 +145,30 @@ comp_window_mswin_fullscreen(struct comp_window_mswin *w)
 }
 
 static VkResult
-comp_window_mswin_create_surface(struct comp_window_mswin *w, VkSurfaceKHR *vk_surface)
+comp_window_mswin_create_surface(struct comp_window_mswin *w, VkSurfaceKHR *out_surface)
 {
 	struct vk_bundle *vk = get_vk(w);
 	VkResult ret;
+
 	VkWin32SurfaceCreateInfoKHR surface_info = {
 	    .sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR,
 	    .hinstance = w->instance,
 	    .hwnd = w->window,
 	};
 
-	ret = vk->vkCreateWin32SurfaceKHR(vk->instance, &surface_info, NULL, vk_surface);
+	VkSurfaceKHR surface = VK_NULL_HANDLE;
+	ret = vk->vkCreateWin32SurfaceKHR( //
+	    vk->instance,                  //
+	    &surface_info,                 //
+	    NULL,                          //
+	    &surface);                     //
 	if (ret != VK_SUCCESS) {
 		COMP_ERROR(w->base.base.c, "vkCreateWin32SurfaceKHR: %s", vk_result_string(ret));
 		return ret;
 	}
+
+	VK_NAME_SURFACE(vk, surface, "comp_window_mswin surface");
+	*out_surface = surface;
 
 	return VK_SUCCESS;
 }
@@ -393,3 +402,47 @@ comp_window_mswin_create(struct comp_compositor *c)
 
 	return &w->base.base;
 }
+
+
+/*
+ *
+ * Factory
+ *
+ */
+
+static const char *instance_extensions[] = {
+    VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
+};
+
+static bool
+detect(const struct comp_target_factory *ctf, struct comp_compositor *c)
+{
+	return false;
+}
+
+static bool
+create_target(const struct comp_target_factory *ctf, struct comp_compositor *c, struct comp_target **out_ct)
+{
+	struct comp_target *ct = comp_window_mswin_create(c);
+	if (ct == NULL) {
+		return false;
+	}
+
+	*out_ct = ct;
+
+	return true;
+}
+
+const struct comp_target_factory comp_target_factory_mswin = {
+    .name = "Microsoft Windows(TM)",
+    .identifier = "mswin",
+    .requires_vulkan_for_create = false,
+    .is_deferred = true,
+    .required_instance_version = 0,
+    .required_instance_extensions = instance_extensions,
+    .required_instance_extension_count = ARRAY_SIZE(instance_extensions),
+    .optional_device_extensions = NULL,
+    .optional_device_extension_count = 0,
+    .detect = detect,
+    .create_target = create_target,
+};

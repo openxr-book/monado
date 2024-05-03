@@ -3,17 +3,13 @@
 /*!
  * @file
  * @brief  Simple Application subclass.
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  */
 package org.freedesktop.monado.openxr_runtime;
 
 import android.app.Application;
-
 import dagger.hilt.android.HiltAndroidApp;
 
-/**
- * Subclass required for Hilt usage.
- */
+/** Subclass required for Hilt usage. */
 @HiltAndroidApp
-public class MonadoOpenXrApplication extends Application {
-}
+public class MonadoOpenXrApplication extends Application {}

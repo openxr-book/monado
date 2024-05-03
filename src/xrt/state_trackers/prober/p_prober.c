@@ -1,13 +1,15 @@
-// Copyright 2019-2022, Collabora, Ltd.
+// Copyright 2019-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Main prober code.
  * @author Jakob Bornecrantz <jakob@collabora.com>
+ * @author Korcan Hussein <korcan.hussein@collabora.com>
  * @ingroup st_prober
  */
 
 #include "xrt/xrt_config_drivers.h"
+#include "xrt/xrt_system.h"
 #include "xrt/xrt_settings.h"
 
 #include "util/u_var.h"
@@ -85,10 +87,13 @@ static xrt_result_t
 p_unlock_list(struct xrt_prober *xp, struct xrt_prober_device ***devices);
 
 static int
-p_dump(struct xrt_prober *xp);
+p_dump(struct xrt_prober *xp, bool use_stdout);
 
 static xrt_result_t
-p_create_system(struct xrt_prober *xp, struct xrt_system_devices **out_xsysd);
+p_create_system(struct xrt_prober *xp,
+                struct xrt_session_event_sink *broadcast,
+                struct xrt_system_devices **out_xsysd,
+                struct xrt_space_overseer **out_xso);
 
 static int
 p_select_device(struct xrt_prober *xp, struct xrt_device **xdevs, size_t xdev_count);
@@ -109,10 +114,12 @@ static int
 p_list_video_devices(struct xrt_prober *xp, xrt_prober_list_video_func_t cb, void *ptr);
 
 static int
-p_get_entries(struct xrt_prober *xp,
-              size_t *out_num_entries,
-              struct xrt_prober_entry ***out_entries,
-              struct xrt_auto_prober ***out_auto_probers);
+p_get_builders(struct xrt_prober *xp,
+               size_t *out_builder_count,
+               struct xrt_builder ***out_builders,
+               size_t *out_num_entries,
+               struct xrt_prober_entry ***out_entries,
+               struct xrt_auto_prober ***out_auto_probers);
 
 static int
 p_get_string_descriptor(struct xrt_prober *xp,
@@ -193,8 +200,12 @@ p_dev_get_usb_dev(struct prober *p,
 }
 
 int
-p_dev_get_bluetooth_dev(
-    struct prober *p, uint64_t id, uint16_t vendor_id, uint16_t product_id, struct prober_device **out_pdev)
+p_dev_get_bluetooth_dev(struct prober *p,
+                        uint64_t id,
+                        uint16_t vendor_id,
+                        uint16_t product_id,
+                        const char *product_name,
+                        struct prober_device **out_pdev)
 {
 	struct prober_device *pdev;
 
@@ -224,6 +235,7 @@ p_dev_get_bluetooth_dev(
 	pdev->base.product_id = product_id;
 	pdev->base.bus = XRT_BUS_TYPE_BLUETOOTH;
 	pdev->bluetooth.id = id;
+	snprintf(pdev->bluetooth.product, ARRAY_SIZE(pdev->bluetooth.product), "%s", product_name);
 
 	*out_pdev = pdev;
 
@@ -245,13 +257,8 @@ fill_out_product(struct prober *p, struct prober_device *pdev)
 	char *str = NULL;
 	int ret = 0;
 	do {
-		if (strlen(pdev->base.product_name)) {
-
-			ret = snprintf(str, ret, "%s device: %s", bus, pdev->base.product_name);
-		} else {
-			ret = snprintf(str, ret, "Unknown %s device: %04x:%04x", bus, pdev->base.vendor_id,
-			               pdev->base.product_id);
-		}
+		ret = snprintf(str, ret, "Unknown %s device: %04x:%04x", bus, pdev->base.vendor_id,
+		               pdev->base.product_id);
 		if (ret <= 0) {
 			return;
 		}
@@ -438,7 +445,7 @@ initialize(struct prober *p, struct xrt_prober_entry_lists *lists)
 	p->base.open_hid_interface = p_open_hid_interface;
 	p->base.open_video_device = p_open_video_device;
 	p->base.list_video_devices = p_list_video_devices;
-	p->base.get_entries = p_get_entries;
+	p->base.get_builders = p_get_builders;
 	p->base.get_string_descriptor = p_get_string_descriptor;
 	p->base.can_open = p_can_open;
 	p->base.destroy = p_destroy;
@@ -831,6 +838,40 @@ find_builder_by_identifier(struct prober *p, const char *ident)
 	return NULL;
 }
 
+static void
+print_system_devices(u_pp_delegate_t dg, struct xrt_system_devices *xsysd)
+{
+	struct xrt_system_roles roles = XRT_SYSTEM_ROLES_INIT;
+	xrt_system_devices_get_roles(xsysd, &roles);
+
+	u_pp(dg, "\n\tGot devices:");
+
+	for (uint32_t i = 0; i < xsysd->xdev_count; i++) {
+		u_pp(dg, "\n\t\t%u: %s", i, xsysd->xdevs[i]->str);
+	}
+
+	u_pp(dg, "\n\tIn roles:");
+
+#define PH(IDENT)                                                                                                      \
+	u_pp(dg, "\n\t\t%s: %s, view count: %lu", #IDENT,                                                              \
+	     xsysd->static_roles.IDENT ? xsysd->static_roles.IDENT->str : "<none>",                                    \
+	     xsysd->static_roles.IDENT ? xsysd->static_roles.IDENT->hmd->view_count : 0)
+#define P(IDENT) u_pp(dg, "\n\t\t%s: %s", #IDENT, xsysd->static_roles.IDENT ? xsysd->static_roles.IDENT->str : "<none>")
+#define PD(IDENT) u_pp(dg, "\n\t\t%s: %s", #IDENT, roles.IDENT >= 0 ? xsysd->xdevs[roles.IDENT]->str : "<none>")
+
+	PH(head);
+	P(eyes);
+	P(face);
+	PD(left);
+	PD(right);
+	PD(gamepad);
+	P(hand_tracking.left);
+	P(hand_tracking.right);
+
+#undef P
+#undef PD
+}
+
 
 /*
  *
@@ -925,24 +966,25 @@ p_unlock_list(struct xrt_prober *xp, struct xrt_prober_device ***devices)
 }
 
 static int
-p_dump(struct xrt_prober *xp)
+p_dump(struct xrt_prober *xp, bool use_stdout)
 {
 	XRT_TRACE_MARKER();
 
 	struct prober *p = (struct prober *)xp;
-	XRT_MAYBE_UNUSED ssize_t k = 0;
-	XRT_MAYBE_UNUSED size_t j = 0;
 
 	for (size_t i = 0; i < p->device_count; i++) {
 		struct prober_device *pdev = &p->devices[i];
-		p_dump_device(p, pdev, (int)i);
+		p_dump_device(p, pdev, (int)i, use_stdout);
 	}
 
 	return 0;
 }
 
 static xrt_result_t
-p_create_system(struct xrt_prober *xp, struct xrt_system_devices **out_xsysd)
+p_create_system(struct xrt_prober *xp,
+                struct xrt_session_event_sink *broadcast,
+                struct xrt_system_devices **out_xsysd,
+                struct xrt_space_overseer **out_xso)
 {
 	XRT_TRACE_MARKER();
 
@@ -1040,10 +1082,24 @@ p_create_system(struct xrt_prober *xp, struct xrt_system_devices **out_xsysd)
 
 	if (select != NULL) {
 		u_pp(dg, "\n\tUsing builder %s: %s", select->identifier, select->name);
-		xret = xrt_builder_open_system(select, p->json.root, xp, out_xsysd);
-		u_pp(dg, "\n\tResult: ");
-		u_pp_xrt_result(dg, xret);
+		xret = xrt_builder_open_system( //
+		    select,                     //
+		    p->json.root,               //
+		    xp,                         //
+		    broadcast,                  //
+		    out_xsysd,                  //
+		    out_xso);                   //
+
+		if (xret == XRT_SUCCESS) {
+			print_system_devices(dg, *out_xsysd);
+		}
+	} else {
+		u_pp(dg, "\n\tNo builder can be used to create a head device");
+		xret = XRT_ERROR_DEVICE_CREATION_FAILED;
 	}
+
+	u_pp(dg, "\n\tResult: ");
+	u_pp_xrt_result(dg, xret);
 
 	P_INFO(p, "%s", sink.buffer);
 
@@ -1153,7 +1209,7 @@ p_open_hid_interface(struct xrt_prober *xp,
 
 #elif defined(XRT_OS_WINDOWS)
 	(void)ret;
-	U_LOG_E("HID devices not yet supported on Windows, can not open interface (%i)", interface);
+	U_LOG_E("HID devices not yet supported on Windows, cannot open interface (%i)", interface);
 	return -1;
 #else
 #error "no port of hid code"
@@ -1260,16 +1316,23 @@ p_list_video_devices(struct xrt_prober *xp, xrt_prober_list_video_func_t cb, voi
 }
 
 static int
-p_get_entries(struct xrt_prober *xp,
-              size_t *out_num_entries,
-              struct xrt_prober_entry ***out_entries,
-              struct xrt_auto_prober ***out_auto_probers)
+p_get_builders(struct xrt_prober *xp,
+               size_t *out_builder_count,
+               struct xrt_builder ***out_builders,
+               size_t *out_entry_count,
+               struct xrt_prober_entry ***out_entries,
+               struct xrt_auto_prober ***out_auto_probers)
 {
 	XRT_TRACE_MARKER();
 
 	struct prober *p = (struct prober *)xp;
-	*out_num_entries = p->num_entries;
+
+	*out_builder_count = p->builder_count;
+	*out_builders = p->builders;
+
+	*out_entry_count = p->num_entries;
 	*out_entries = p->entries;
+
 	*out_auto_probers = p->auto_probers;
 
 	return 0;
@@ -1298,7 +1361,7 @@ p_get_string_descriptor(struct xrt_prober *xp,
 	}
 #else
 	if (pdev->base.bus == XRT_BUS_TYPE_USB) {
-		P_WARN(p, "Can not get usb descriptors (libusb-dev not installed)!");
+		P_WARN(p, "Cannot get usb descriptors (libusb-dev not installed)!");
 		return ret;
 	}
 #endif
@@ -1315,7 +1378,7 @@ p_get_string_descriptor(struct xrt_prober *xp,
 			               u.arr[3], u.arr[2], u.arr[1], u.arr[0]);
 		}; break;
 		case XRT_PROBER_STRING_PRODUCT:
-			ret = snprintf((char *)buffer, max_length, "%s", pdev->base.product_name);
+			ret = snprintf((char *)buffer, max_length, "%s", pdev->bluetooth.product);
 			break;
 		default: ret = 0; break;
 		}
@@ -1344,7 +1407,7 @@ p_can_open(struct xrt_prober *xp, struct xrt_prober_device *xpdev)
 
 	// No backend compiled in to judge the ability to open the device.
 	if (!has_been_queried) {
-		P_WARN(p, "Can not tell if '%s' can be opened, assuming yes!", pdev->usb.product);
+		P_WARN(p, "Cannot tell if '%s' can be opened, assuming yes!", pdev->usb.product);
 		return true;
 	}
 

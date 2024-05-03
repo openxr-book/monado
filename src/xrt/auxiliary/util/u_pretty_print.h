@@ -6,6 +6,7 @@
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @ingroup aux_pretty
  */
+#pragma once
 
 #include "xrt/xrt_defines.h"
 
@@ -83,6 +84,14 @@ u_pp_xrt_input_name(struct u_pp_delegate dg, enum xrt_input_name name);
  */
 void
 u_pp_xrt_result(struct u_pp_delegate dg, xrt_result_t xret);
+
+/*!
+ * Pretty prints the @ref xrt_reference_space_type.
+ *
+ * @ingroup aux_pretty
+ */
+void
+u_pp_xrt_reference_space_type(struct u_pp_delegate dg, enum xrt_reference_space_type type);
 
 
 /*

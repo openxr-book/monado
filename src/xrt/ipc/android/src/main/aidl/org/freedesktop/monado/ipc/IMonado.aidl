@@ -3,7 +3,7 @@
 /*!
  * @file
  * @brief  Interface to bootstrap the Monado IPC connection.
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup ipc_android
  */
 
@@ -22,11 +22,6 @@ interface IMonado {
      * Provide the surface we inject into the activity, back to the service.
      */
     void passAppSurface(in Surface surface);
-
-    /*!
-     * Asking service to create surface and attach it to the display matches given display id.
-     */
-    boolean createSurface(int displayId, boolean focusable);
 
     /*!
      * Asking service whether it has the capbility to draw over other apps or not.

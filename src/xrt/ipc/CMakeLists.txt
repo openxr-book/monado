@@ -29,6 +29,7 @@ endforeach()
 
 set(IPC_COMMON_SOURCES
     ${CMAKE_CURRENT_BINARY_DIR}/ipc_protocol_generated.h
+    shared/ipc_message_channel.h
     shared/ipc_shmem.c
     shared/ipc_shmem.h
     shared/ipc_utils.c
@@ -39,6 +40,13 @@ add_library(ipc_shared STATIC ${IPC_COMMON_SOURCES})
 target_include_directories(
 	ipc_shared PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}
 	)
+
+if(WIN32)
+	target_sources(ipc_shared PRIVATE shared/ipc_message_channel_windows.cpp)
+else()
+	target_sources(ipc_shared PRIVATE shared/ipc_message_channel_unix.c)
+endif()
+
 target_link_libraries(ipc_shared PRIVATE aux_util)
 
 if(RT_LIBRARY)
@@ -54,13 +62,27 @@ add_library(
 	${CMAKE_CURRENT_BINARY_DIR}/ipc_client_generated.h
 	client/ipc_client.h
 	client/ipc_client_compositor.c
+	client/ipc_client_connection.c
 	client/ipc_client_device.c
 	client/ipc_client_hmd.c
 	client/ipc_client_instance.c
+	client/ipc_client_session.c
+	client/ipc_client_space_overseer.c
+	client/ipc_client_system.c
+	client/ipc_client_system_devices.c
 	)
 target_include_directories(
 	ipc_client PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}
 	)
+if(WIN32)
+	if(XRT_SERVICE_EXECUTABLE)
+		target_compile_definitions(
+			ipc_client PUBLIC XRT_SERVICE_EXECUTABLE="${XRT_SERVICE_EXECUTABLE}.exe"
+			)
+	endif()
+
+	target_link_libraries(ipc_client PRIVATE winmm)
+endif()
 target_link_libraries(ipc_client PRIVATE aux_util ipc_shared)
 
 ###
@@ -80,7 +102,7 @@ target_include_directories(
 	PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
 	PRIVATE ${CMAKE_CURRENT_BINARY_DIR}
 	)
-target_link_libraries(ipc_server PRIVATE aux_util ipc_shared)
+target_link_libraries(ipc_server PRIVATE aux_util aux_util_process aux_util_debug_gui ipc_shared)
 
 if(XRT_HAVE_SYSTEMD)
 	target_include_directories(ipc_server PRIVATE ${SYSTEMD_INCLUDE_DIRS})
@@ -111,4 +133,11 @@ elseif(XRT_HAVE_LINUX)
 	target_sources(
 		ipc_server PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_linux.c
 		)
+elseif(WIN32)
+	target_sources(
+		ipc_server
+		PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_windows.cpp
+		)
+
+	target_link_libraries(ipc_server PRIVATE winmm)
 endif()

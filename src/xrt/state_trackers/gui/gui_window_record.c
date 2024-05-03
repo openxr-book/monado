@@ -12,6 +12,8 @@
 
 #include "os/os_threading.h"
 
+#include "math/m_api.h"
+
 #include "util/u_var.h"
 #include "util/u_misc.h"
 #include "util/u_sink.h"
@@ -32,6 +34,7 @@
 #include "gstreamer/gst_pipeline.h"
 #endif
 
+#include "gui_ogl.h"
 #include "gui_imgui.h"
 #include "gui_common.h"
 #include "gui_window_record.h"
@@ -196,28 +199,44 @@ draw_gst(struct gui_record_window *rw)
 static void
 window_draw_misc(struct gui_record_window *rw)
 {
-	if (!igCollapsingHeaderBoolPtr("Misc", NULL, ImGuiTreeNodeFlags_None)) {
-		return;
-	}
+	igSliderFloat("", &rw->texture.scale, 20.0, 300.f, "Scale %f%%", ImGuiSliderFlags_None);
 
 	static ImVec2 button_dims = {0, 0};
-	bool plus = igButton("+", button_dims);
+
 	igSameLine(0.0f, 4.0f);
 	bool minus = igButton("-", button_dims);
+
 	igSameLine(0.0f, 4.0f);
+	bool plus = igButton("+", button_dims);
 
-	if (rw->texture.scale == 1) {
-		igText("Scale 100%%");
-	} else {
-		igText("Scale 1/%i", rw->texture.scale);
+	static const double scales[] = {
+	    25.0, 50.0, 100.0, 200.0, 300.0,
+	};
+
+	if (plus) {
+		for (uint32_t i = 0; i < ARRAY_SIZE(scales); i++) {
+			if (rw->texture.scale >= scales[i]) {
+				continue;
+			}
+			rw->texture.scale = scales[i];
+			break;
+		}
+	} else if (minus) {
+		// Initial length always greater then 0 so safe.
+		for (uint32_t i = ARRAY_SIZE(scales); i-- > 0;) {
+			if (rw->texture.scale <= scales[i]) {
+				continue;
+			}
+			rw->texture.scale = scales[i];
+			break;
+		}
 	}
 
-	if (plus && rw->texture.scale > 1) {
-		rw->texture.scale--;
-	}
-	if (minus && rw->texture.scale < 6) {
-		rw->texture.scale++;
-	}
+	igSameLine(0, 30);
+
+	igCheckbox("Rotate 180 degrees", &rw->texture.rotate_180);
+
+	igSameLine(0, 30);
 
 	igText("Sequence %u", (uint32_t)rw->texture.ogl->seq);
 }
@@ -278,13 +297,29 @@ gui_window_record_init(struct gui_record_window *rw)
 
 
 	// Setup the preview texture.
-	rw->texture.scale = 2;
+	// 50% scale.
+	rw->texture.scale = 50.0;
 	struct xrt_frame_sink *tmp = NULL;
 	rw->texture.ogl = gui_ogl_sink_create("View", &rw->texture.xfctx, &tmp);
 	u_sink_create_to_r8g8b8_r8g8b8a8_r8g8b8x8_or_l8(&rw->texture.xfctx, tmp, &tmp);
 	u_sink_simple_queue_create(&rw->texture.xfctx, tmp, &rw->texture.sink);
 
 	return true;
+}
+
+void
+gui_window_record_to_background(struct gui_record_window *rw, struct gui_program *p)
+{
+	struct gui_ogl_texture *tex = rw->texture.ogl;
+
+	gui_ogl_sink_update(tex);
+
+	gui_ogl_draw_background(    //
+	    (uint32_t)tex->w,       // width
+	    (uint32_t)tex->h,       // height
+	    tex->id,                // tex_id
+	    rw->texture.rotate_180, // rotate_180
+	    false);                 // flip_y
 }
 
 void
@@ -295,23 +330,23 @@ gui_window_record_render(struct gui_record_window *rw, struct gui_program *p)
 
 	gui_ogl_sink_update(rw->texture.ogl);
 
+	window_draw_misc(rw);
+
 	struct gui_ogl_texture *tex = rw->texture.ogl;
 
-	int w = tex->w / rw->texture.scale;
-	int h = tex->h / rw->texture.scale;
+	gui_ogl_draw_image(             //
+	    (uint32_t)tex->w,           // width
+	    (uint32_t)tex->h,           // height
+	    tex->id,                    // tex_id
+	    rw->texture.scale / 100.0f, // scale
+	    rw->texture.rotate_180,     // rotate_180
+	    false);                     // flip_y
 
-	ImVec2 size = {(float)w, (float)h};
-	ImVec2 uv0 = {0, 0};
-	ImVec2 uv1 = {1, 1};
-	ImVec4 white = {1, 1, 1, 1};
-	ImTextureID id = (ImTextureID)(intptr_t)tex->id;
-	igImage(id, size, uv0, uv1, white, white);
 
 #ifdef XRT_HAVE_GST
 	draw_gst(rw);
 #endif
 
-	window_draw_misc(rw);
 
 	// Pop the ID making everything unique.
 	igPopID();

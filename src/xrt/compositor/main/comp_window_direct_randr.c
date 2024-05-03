@@ -149,8 +149,9 @@ comp_window_direct_randr_destroy(struct comp_target *ct)
 		free(d->name);
 	}
 
-	if (w_direct->displays != NULL)
+	if (w_direct->displays != NULL) {
 		free(w_direct->displays);
+	}
 
 	if (w_direct->dpy) {
 		XCloseDisplay(w_direct->dpy);
@@ -220,8 +221,10 @@ comp_window_direct_randr_init(struct comp_target *ct)
 	}
 
 	struct comp_window_direct_randr_display *d = comp_window_direct_randr_current_display(w_direct);
-	ct->c->settings.preferred.width = d->primary_mode.width;
-	ct->c->settings.preferred.height = d->primary_mode.height;
+
+	// Make the compositor use this size.
+	VkExtent2D extent = {d->primary_mode.width, d->primary_mode.height};
+	comp_target_swapchain_override_extents(&w_direct->base, extent);
 
 	return true;
 }
@@ -230,11 +233,13 @@ static struct comp_window_direct_randr_display *
 comp_window_direct_randr_current_display(struct comp_window_direct_randr *w)
 {
 	int index = w->base.base.c->settings.display;
-	if (index == -1)
+	if (index == -1) {
 		index = 0;
+	}
 
-	if (w->display_count <= (uint32_t)index)
+	if (w->display_count <= (uint32_t)index) {
 		return NULL;
+	}
 
 	return &w->displays[index];
 }
@@ -315,12 +320,15 @@ append_randr_display(struct comp_window_direct_randr *w,
 	int n = xcb_randr_get_screen_resources_modes_length(resources_reply);
 
 	xcb_randr_mode_info_t *mode_info = NULL;
-	for (int i = 0; i < n; i++)
-		if (mode_infos[i].id == output_modes[0])
+	for (int i = 0; i < n; i++) {
+		if (mode_infos[i].id == output_modes[0]) {
 			mode_info = &mode_infos[i];
+		}
+	}
 
-	if (mode_info == NULL)
+	if (mode_info == NULL) {
 		COMP_ERROR(w->base.base.c, "No mode with id %d found??", output_modes[0]);
+	}
 
 
 	struct comp_window_direct_randr_display d = {
@@ -337,8 +345,13 @@ append_randr_display(struct comp_window_direct_randr *w,
 
 	U_ARRAY_REALLOC_OR_FREE(w->displays, struct comp_window_direct_randr_display, w->display_count);
 
-	if (w->displays == NULL)
+	if (w->displays == NULL) {
 		COMP_ERROR(w->base.base.c, "Unable to reallocate randr_displays");
+
+		// Reset the count.
+		w->display_count = 0;
+		return;
+	}
 
 	w->displays[w->display_count - 1] = d;
 }
@@ -451,3 +464,49 @@ comp_window_direct_randr_get_outputs(struct comp_window_direct_randr *w)
 	free(non_desktop_reply);
 	free(resources_reply);
 }
+
+
+/*
+ *
+ * Factory
+ *
+ */
+
+static const char *instance_extensions[] = {
+    VK_KHR_DISPLAY_EXTENSION_NAME,
+    VK_EXT_DIRECT_MODE_DISPLAY_EXTENSION_NAME,
+    VK_EXT_ACQUIRE_XLIB_DISPLAY_EXTENSION_NAME,
+};
+
+static bool
+detect(const struct comp_target_factory *ctf, struct comp_compositor *c)
+{
+	return false;
+}
+
+static bool
+create_target(const struct comp_target_factory *ctf, struct comp_compositor *c, struct comp_target **out_ct)
+{
+	struct comp_target *ct = comp_window_direct_randr_create(c);
+	if (ct == NULL) {
+		return false;
+	}
+
+	*out_ct = ct;
+
+	return true;
+}
+
+const struct comp_target_factory comp_target_factory_direct_randr = {
+    .name = "X11(RandR) Direct-Mode",
+    .identifier = "x11_direct",
+    .requires_vulkan_for_create = false,
+    .is_deferred = false,
+    .required_instance_version = 0,
+    .required_instance_extensions = instance_extensions,
+    .required_instance_extension_count = ARRAY_SIZE(instance_extensions),
+    .optional_device_extensions = NULL,
+    .optional_device_extension_count = 0,
+    .detect = detect,
+    .create_target = create_target,
+};

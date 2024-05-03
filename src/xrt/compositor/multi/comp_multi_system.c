@@ -1,24 +1,31 @@
-// Copyright 2019-2022, Collabora, Ltd.
+// Copyright 2019-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Multi client wrapper compositor.
  * @author Pete Black <pblack@collabora.com>
  * @author Jakob Bornecrantz <jakob@collabora.com>
+ * @author Korcan Hussein <korcan.hussein@collabora.com>
  * @ingroup comp_multi
  */
 
-#include "os/os_threading.h"
-#include "xrt/xrt_gfx_native.h"
+#include "xrt/xrt_config_os.h"
+#include "xrt/xrt_session.h"
 
 #include "os/os_time.h"
+#include "os/os_threading.h"
 
 #include "util/u_var.h"
 #include "util/u_misc.h"
 #include "util/u_time.h"
+#include "util/u_wait.h"
 #include "util/u_debug.h"
 #include "util/u_trace_marker.h"
 #include "util/u_distortion_mesh.h"
+
+#ifdef XRT_OS_LINUX
+#include "util/u_linux.h"
+#endif
 
 #include "multi/comp_multi_private.h"
 #include "multi/comp_multi_interface.h"
@@ -45,12 +52,16 @@ static void
 do_projection_layer(struct xrt_compositor *xc, struct multi_compositor *mc, struct multi_layer_entry *layer, uint32_t i)
 {
 	struct xrt_device *xdev = layer->xdev;
-	struct xrt_swapchain *l_xcs = layer->xscs[0];
-	struct xrt_swapchain *r_xcs = layer->xscs[1];
 
-	if (l_xcs == NULL || r_xcs == NULL) {
-		U_LOG_E("Invalid swap chain for projection layer #%u!", i);
-		return;
+	// Cast away
+	struct xrt_layer_data *data = (struct xrt_layer_data *)&layer->data;
+
+	// Do not need to copy the reference, but should verify the pointers for consistency
+	for (uint32_t j = 0; j < data->view_count; j++) {
+		if (layer->xscs[j] == NULL) {
+			U_LOG_E("Invalid swap chain for projection layer #%u!", i);
+			return;
+		}
 	}
 
 	if (xdev == NULL) {
@@ -58,10 +69,7 @@ do_projection_layer(struct xrt_compositor *xc, struct multi_compositor *mc, stru
 		return;
 	}
 
-	// Cast away
-	struct xrt_layer_data *data = (struct xrt_layer_data *)&layer->data;
-
-	xrt_comp_layer_stereo_projection(xc, xdev, l_xcs, r_xcs, data);
+	xrt_comp_layer_projection(xc, xdev, layer->xscs, data);
 }
 
 static void
@@ -71,14 +79,20 @@ do_projection_layer_depth(struct xrt_compositor *xc,
                           uint32_t i)
 {
 	struct xrt_device *xdev = layer->xdev;
-	struct xrt_swapchain *l_xcs = layer->xscs[0];
-	struct xrt_swapchain *r_xcs = layer->xscs[1];
-	struct xrt_swapchain *l_d_xcs = layer->xscs[2];
-	struct xrt_swapchain *r_d_xcs = layer->xscs[3];
 
-	if (l_xcs == NULL || r_xcs == NULL || l_d_xcs == NULL || r_d_xcs == NULL) {
-		U_LOG_E("Invalid swap chain for projection layer #%u!", i);
-		return;
+	struct xrt_swapchain *xsc[XRT_MAX_VIEWS];
+	struct xrt_swapchain *d_xsc[XRT_MAX_VIEWS];
+	// Cast away
+	struct xrt_layer_data *data = (struct xrt_layer_data *)&layer->data;
+
+	for (uint32_t j = 0; j < data->view_count; j++) {
+		xsc[j] = layer->xscs[j];
+		d_xsc[j] = layer->xscs[j + data->view_count];
+
+		if (xsc[j] == NULL || d_xsc[j] == NULL) {
+			U_LOG_E("Invalid swap chain for projection layer #%u!", i);
+			return;
+		}
 	}
 
 	if (xdev == NULL) {
@@ -86,10 +100,8 @@ do_projection_layer_depth(struct xrt_compositor *xc,
 		return;
 	}
 
-	// Cast away
-	struct xrt_layer_data *data = (struct xrt_layer_data *)&layer->data;
 
-	xrt_comp_layer_stereo_projection_depth(xc, xdev, l_xcs, r_xcs, l_d_xcs, r_d_xcs, data);
+	xrt_comp_layer_projection_depth(xc, xdev, xsc, d_xsc, data);
 }
 
 static bool
@@ -213,20 +225,7 @@ overlay_sort_func(const void *a, const void *b)
 }
 
 static void
-log_frame_time_diff(uint64_t frame_time_ns, uint64_t display_time_ns)
-{
-	int64_t diff_ns = (int64_t)frame_time_ns - (int64_t)display_time_ns;
-	bool late = false;
-	if (diff_ns < 0) {
-		diff_ns = -diff_ns;
-		late = true;
-	}
-
-	U_LOG_W("Frame %s by %.2fms!", late ? "late" : "early", time_ns_to_ms_f(diff_ns));
-}
-
-static void
-transfer_layers_locked(struct multi_system_compositor *msc, uint64_t display_time_ns)
+transfer_layers_locked(struct multi_system_compositor *msc, uint64_t display_time_ns, int64_t system_frame_id)
 {
 	COMP_TRACE_MARKER();
 
@@ -234,44 +233,62 @@ transfer_layers_locked(struct multi_system_compositor *msc, uint64_t display_tim
 
 	struct multi_compositor *array[MULTI_MAX_CLIENTS] = {0};
 
+	// To mark latching.
+	uint64_t now_ns = os_monotonic_get_ns();
+
 	size_t count = 0;
 	for (size_t k = 0; k < ARRAY_SIZE(array); k++) {
-		if (msc->clients[k] == NULL) {
-			continue;
-		}
+		struct multi_compositor *mc = msc->clients[k];
 
-		array[count++] = msc->clients[k];
-
-		// Even if it's not shown, make sure that frames are delivered.
-		multi_compositor_deliver_any_frames(msc->clients[k], display_time_ns);
-	}
-
-	// Sort the stack array
-	qsort(array, count, sizeof(struct multi_compositor *), overlay_sort_func);
-
-	for (size_t k = 0; k < count; k++) {
-		struct multi_compositor *mc = array[k];
-
+		// Array can be empty
 		if (mc == NULL) {
 			continue;
 		}
+
+		// Even if it's not shown, make sure that frames are delivered.
+		multi_compositor_deliver_any_frames(mc, display_time_ns);
 
 		// None of the data in this slot is valid, don't check access it.
 		if (!mc->delivered.active) {
 			continue;
 		}
 
-		uint64_t frame_time_ns = mc->delivered.display_time_ns;
-		if (!time_is_within_half_ms(frame_time_ns, display_time_ns)) {
-			log_frame_time_diff(frame_time_ns, display_time_ns);
+		// The client isn't visible, do not submit it's layers.
+		if (!mc->state.visible) {
+			// Need to drop delivered frame as it shouldn't be reused.
+			multi_compositor_retire_delivered_locked(mc, now_ns);
+			continue;
 		}
+
+		// Just in case.
+		if (!mc->state.session_active) {
+			U_LOG_W("Session is visible but not active.");
+
+			// Need to drop delivered frame as it shouldn't be reused.
+			multi_compositor_retire_delivered_locked(mc, now_ns);
+			continue;
+		}
+
+		// The list_and_timing_lock is held when callign this function.
+		multi_compositor_latch_frame_locked(mc, now_ns, system_frame_id);
+
+		array[count++] = msc->clients[k];
+	}
+
+	// Sort the stack array
+	qsort(array, count, sizeof(struct multi_compositor *), overlay_sort_func);
+
+	// Copy all active layers.
+	for (size_t k = 0; k < count; k++) {
+		struct multi_compositor *mc = array[k];
+		assert(mc != NULL);
 
 		for (uint32_t i = 0; i < mc->delivered.layer_count; i++) {
 			struct multi_layer_entry *layer = &mc->delivered.layers[i];
 
 			switch (layer->data.type) {
-			case XRT_LAYER_STEREO_PROJECTION: do_projection_layer(xc, mc, layer, i); break;
-			case XRT_LAYER_STEREO_PROJECTION_DEPTH: do_projection_layer_depth(xc, mc, layer, i); break;
+			case XRT_LAYER_PROJECTION: do_projection_layer(xc, mc, layer, i); break;
+			case XRT_LAYER_PROJECTION_DEPTH: do_projection_layer_depth(xc, mc, layer, i); break;
 			case XRT_LAYER_QUAD: do_quad_layer(xc, mc, layer, i); break;
 			case XRT_LAYER_CUBE: do_cube_layer(xc, mc, layer, i); break;
 			case XRT_LAYER_CYLINDER: do_cylinder_layer(xc, mc, layer, i); break;
@@ -339,36 +356,116 @@ broadcast_timings_to_pacers(struct multi_system_compositor *msc,
 }
 
 static void
-wait_frame(struct xrt_compositor *xc, int64_t frame_id, uint64_t wake_up_time_ns)
+wait_frame(struct os_precise_sleeper *sleeper, struct xrt_compositor *xc, int64_t frame_id, uint64_t wake_up_time_ns)
 {
 	COMP_TRACE_MARKER();
 
+	// Wait until the given wake up time.
+	u_wait_until(sleeper, wake_up_time_ns);
+
 	uint64_t now_ns = os_monotonic_get_ns();
-	if (now_ns < wake_up_time_ns) {
-		os_nanosleep(wake_up_time_ns - now_ns);
-	}
 
-	now_ns = os_monotonic_get_ns();
-
+	// Signal that we woke up.
 	xrt_comp_mark_frame(xc, frame_id, XRT_COMPOSITOR_FRAME_POINT_WOKE, now_ns);
+}
+
+static void
+update_session_state_locked(struct multi_system_compositor *msc)
+{
+	struct xrt_compositor *xc = &msc->xcn->base;
+
+	//! @todo Make this not be hardcoded.
+	const struct xrt_begin_session_info begin_session_info = {
+	    .view_type = XRT_VIEW_TYPE_STEREO,
+	    .ext_hand_tracking_enabled = false,
+	    .ext_eye_gaze_interaction_enabled = false,
+	    .ext_hand_interaction_enabled = false,
+	    .htc_facial_tracking_enabled = false,
+	};
+
+	switch (msc->sessions.state) {
+	case MULTI_SYSTEM_STATE_INIT_WARM_START:
+		// Produce at least one frame on init.
+		msc->sessions.state = MULTI_SYSTEM_STATE_STOPPING;
+		xrt_comp_begin_session(xc, &begin_session_info);
+		U_LOG_I("Doing warm start, %u active app session(s).", (uint32_t)msc->sessions.active_count);
+		break;
+
+	case MULTI_SYSTEM_STATE_STOPPED:
+		if (msc->sessions.active_count == 0) {
+			break;
+		}
+
+		msc->sessions.state = MULTI_SYSTEM_STATE_RUNNING;
+		xrt_comp_begin_session(xc, &begin_session_info);
+		U_LOG_I("Started native session, %u active app session(s).", (uint32_t)msc->sessions.active_count);
+		break;
+
+	case MULTI_SYSTEM_STATE_RUNNING:
+		if (msc->sessions.active_count > 0) {
+			break;
+		}
+
+		msc->sessions.state = MULTI_SYSTEM_STATE_STOPPING;
+		U_LOG_D("Stopping native session, %u active app session(s).", (uint32_t)msc->sessions.active_count);
+		break;
+
+	case MULTI_SYSTEM_STATE_STOPPING:
+		// Just in case
+		if (msc->sessions.active_count > 0) {
+			msc->sessions.state = MULTI_SYSTEM_STATE_RUNNING;
+			U_LOG_D("Restarting native session, %u active app session(s).",
+			        (uint32_t)msc->sessions.active_count);
+			break;
+		}
+
+		msc->sessions.state = MULTI_SYSTEM_STATE_STOPPED;
+		xrt_comp_end_session(xc);
+		U_LOG_I("Stopped native session, %u active app session(s).", (uint32_t)msc->sessions.active_count);
+		break;
+
+	case MULTI_SYSTEM_STATE_INVALID:
+	default:
+		U_LOG_E("Got invalid state %u", msc->sessions.state);
+		msc->sessions.state = MULTI_SYSTEM_STATE_STOPPING;
+		assert(false);
+	}
 }
 
 static int
 multi_main_loop(struct multi_system_compositor *msc)
 {
-	COMP_TRACE_MARKER();
+	U_TRACE_SET_THREAD_NAME("Multi Client Module");
+	os_thread_helper_name(&msc->oth, "Multi Client Module");
 
-	os_thread_helper_name(&(msc->oth), "Multi-Compositor");
+#ifdef XRT_OS_LINUX
+	// Try to raise priority of this thread.
+	u_linux_try_to_set_realtime_priority_on_thread(U_LOGGING_INFO, "Multi Client Module");
+#endif
 
 	struct xrt_compositor *xc = &msc->xcn->base;
 
-	//! @todo Don't make this a hack.
-	enum xrt_view_type view_type = XRT_VIEW_TYPE_STEREO;
+	// For wait frame.
+	struct os_precise_sleeper sleeper = {0};
+	os_precise_sleeper_init(&sleeper);
 
-	xrt_comp_begin_session(xc, view_type);
-
+	// Protect the thread state and the sessions state.
 	os_thread_helper_lock(&msc->oth);
+
 	while (os_thread_helper_is_running_locked(&msc->oth)) {
+
+		// Updates msc->sessions.active depending on active client sessions.
+		update_session_state_locked(msc);
+
+		if (msc->sessions.state == MULTI_SYSTEM_STATE_STOPPED) {
+			// Sleep and wait to be signaled.
+			os_thread_helper_wait_locked(&msc->oth);
+
+			// Loop back to running and session check.
+			continue;
+		}
+
+		// Unlock the thread after the checks has been done.
 		os_thread_helper_unlock(&msc->oth);
 
 		int64_t frame_id = -1;
@@ -390,7 +487,7 @@ multi_main_loop(struct multi_system_compositor *msc)
 		broadcast_timings_to_clients(msc, predicted_display_time_ns);
 
 		// Now we can wait.
-		wait_frame(xc, frame_id, wake_up_time_ns);
+		wait_frame(&sleeper, xc, frame_id, wake_up_time_ns);
 
 		uint64_t now_ns = os_monotonic_get_ns();
 		uint64_t diff_ns = predicted_display_time_ns - now_ns;
@@ -399,21 +496,46 @@ multi_main_loop(struct multi_system_compositor *msc)
 		broadcast_timings_to_pacers(msc, predicted_display_time_ns, predicted_display_period_ns, diff_ns);
 
 		xrt_comp_begin_frame(xc, frame_id);
-		xrt_comp_layer_begin(xc, frame_id, 0, 0);
+
+		//! @todo Pick the blend mode from primary client.
+		enum xrt_blend_mode blend_mode = XRT_BLEND_MODE_OPAQUE;
+
+		//! @todo Pick a good display time.
+		uint64_t display_time_ns = 0;
+
+		// Prepare data.
+		struct xrt_layer_frame_data data = {
+		    .frame_id = frame_id,
+		    .display_time_ns = display_time_ns,
+		    .env_blend_mode = blend_mode,
+		};
+		xrt_comp_layer_begin(xc, &data);
 
 		// Make sure that the clients doesn't go away while we transfer layers.
 		os_mutex_lock(&msc->list_and_timing_lock);
-		transfer_layers_locked(msc, predicted_display_time_ns);
+		transfer_layers_locked(msc, predicted_display_time_ns, frame_id);
 		os_mutex_unlock(&msc->list_and_timing_lock);
 
-		xrt_comp_layer_commit(xc, frame_id, XRT_GRAPHICS_SYNC_HANDLE_INVALID);
+		xrt_comp_layer_commit(xc, XRT_GRAPHICS_SYNC_HANDLE_INVALID);
 
 		// Re-lock the thread for check in while statement.
 		os_thread_helper_lock(&msc->oth);
 	}
 
-	xrt_comp_end_session(xc);
+	// Clean up the sessions state.
+	switch (msc->sessions.state) {
+	case MULTI_SYSTEM_STATE_RUNNING:
+	case MULTI_SYSTEM_STATE_STOPPING:
+		U_LOG_I("Stopped native session, shutting down.");
+		xrt_comp_end_session(xc);
+		break;
+	case MULTI_SYSTEM_STATE_STOPPED: break;
+	default: assert(false);
+	}
+
 	os_thread_helper_unlock(&msc->oth);
+
+	os_precise_sleeper_deinit(&sleeper);
 
 	return 0;
 }
@@ -439,16 +561,16 @@ system_compositor_set_state(struct xrt_system_compositor *xsc, struct xrt_compos
 	(void)msc;
 
 	//! @todo Locking?
-	if (mc->state.sent.visible != visible || mc->state.sent.focused != focused) {
-		mc->state.sent.visible = visible;
-		mc->state.sent.focused = focused;
+	if (mc->state.visible != visible || mc->state.focused != focused) {
+		mc->state.visible = visible;
+		mc->state.focused = focused;
 
-		union xrt_compositor_event xce = {0};
-		xce.type = XRT_COMPOSITOR_EVENT_STATE_CHANGE;
-		xce.state.visible = visible;
-		xce.state.focused = focused;
+		union xrt_session_event xse = XRT_STRUCT_INIT;
+		xse.type = XRT_SESSION_EVENT_STATE_CHANGE;
+		xse.state.visible = visible;
+		xse.state.focused = focused;
 
-		multi_compositor_push_event(mc, &xce);
+		return multi_compositor_push_event(mc, &xse);
 	}
 
 	return XRT_SUCCESS;
@@ -474,13 +596,58 @@ system_compositor_set_main_app_visibility(struct xrt_system_compositor *xsc, str
 	struct multi_compositor *mc = multi_compositor(xc);
 	(void)msc;
 
-	union xrt_compositor_event xce = {0};
-	xce.type = XRT_COMPOSITOR_EVENT_OVERLAY_CHANGE;
-	xce.overlay.visible = visible;
+	union xrt_session_event xse = XRT_STRUCT_INIT;
+	xse.type = XRT_SESSION_EVENT_OVERLAY_CHANGE;
+	xse.overlay.visible = visible;
 
-	multi_compositor_push_event(mc, &xce);
+	return multi_compositor_push_event(mc, &xse);
+}
 
-	return XRT_SUCCESS;
+static xrt_result_t
+system_compositor_notify_loss_pending(struct xrt_system_compositor *xsc,
+                                      struct xrt_compositor *xc,
+                                      uint64_t loss_time_ns)
+{
+	struct multi_system_compositor *msc = multi_system_compositor(xsc);
+	struct multi_compositor *mc = multi_compositor(xc);
+	(void)msc;
+
+	union xrt_session_event xse = XRT_STRUCT_INIT;
+	xse.type = XRT_SESSION_EVENT_LOSS_PENDING;
+	xse.loss_pending.loss_time_ns = loss_time_ns;
+
+	return multi_compositor_push_event(mc, &xse);
+}
+
+static xrt_result_t
+system_compositor_notify_lost(struct xrt_system_compositor *xsc, struct xrt_compositor *xc)
+{
+	struct multi_system_compositor *msc = multi_system_compositor(xsc);
+	struct multi_compositor *mc = multi_compositor(xc);
+	(void)msc;
+
+	union xrt_session_event xse = XRT_STRUCT_INIT;
+	xse.type = XRT_SESSION_EVENT_LOST;
+
+	return multi_compositor_push_event(mc, &xse);
+}
+
+static xrt_result_t
+system_compositor_notify_display_refresh_changed(struct xrt_system_compositor *xsc,
+                                                 struct xrt_compositor *xc,
+                                                 float from_display_refresh_rate_hz,
+                                                 float to_display_refresh_rate_hz)
+{
+	struct multi_system_compositor *msc = multi_system_compositor(xsc);
+	struct multi_compositor *mc = multi_compositor(xc);
+	(void)msc;
+
+	union xrt_session_event xse = XRT_STRUCT_INIT;
+	xse.type = XRT_SESSION_EVENT_DISPLAY_REFRESH_RATE_CHANGE;
+	xse.display.from_display_refresh_rate_hz = from_display_refresh_rate_hz;
+	xse.display.to_display_refresh_rate_hz = to_display_refresh_rate_hz;
+
+	return multi_compositor_push_event(mc, &xse);
 }
 
 
@@ -493,11 +660,12 @@ system_compositor_set_main_app_visibility(struct xrt_system_compositor *xsc, str
 static xrt_result_t
 system_compositor_create_native_compositor(struct xrt_system_compositor *xsc,
                                            const struct xrt_session_info *xsi,
+                                           struct xrt_session_event_sink *xses,
                                            struct xrt_compositor_native **out_xcn)
 {
 	struct multi_system_compositor *msc = multi_system_compositor(xsc);
 
-	return multi_compositor_create(msc, xsi, out_xcn);
+	return multi_compositor_create(msc, xsi, xses, out_xcn);
 }
 
 static void
@@ -524,10 +692,30 @@ system_compositor_destroy(struct xrt_system_compositor *xsc)
  *
  */
 
+void
+multi_system_compositor_update_session_status(struct multi_system_compositor *msc, bool active)
+{
+	os_thread_helper_lock(&msc->oth);
+
+	if (active) {
+		assert(msc->sessions.active_count < UINT32_MAX);
+		msc->sessions.active_count++;
+
+		// If the thread is sleeping wake it up.
+		os_thread_helper_signal_locked(&msc->oth);
+	} else {
+		assert(msc->sessions.active_count > 0);
+		msc->sessions.active_count--;
+	}
+
+	os_thread_helper_unlock(&msc->oth);
+}
+
 xrt_result_t
 comp_multi_create_system_compositor(struct xrt_compositor_native *xcn,
                                     struct u_pacing_app_factory *upaf,
                                     const struct xrt_system_compositor_info *xsci,
+                                    bool do_warm_start,
                                     struct xrt_system_compositor **out_xsysc)
 {
 	struct multi_system_compositor *msc = U_TYPED_CALLOC(struct multi_system_compositor);
@@ -536,10 +724,15 @@ comp_multi_create_system_compositor(struct xrt_compositor_native *xcn,
 	msc->xmcc.set_state = system_compositor_set_state;
 	msc->xmcc.set_z_order = system_compositor_set_z_order;
 	msc->xmcc.set_main_app_visibility = system_compositor_set_main_app_visibility;
+	msc->xmcc.notify_loss_pending = system_compositor_notify_loss_pending;
+	msc->xmcc.notify_lost = system_compositor_notify_lost;
+	msc->xmcc.notify_display_refresh_changed = system_compositor_notify_display_refresh_changed;
 	msc->base.xmcc = &msc->xmcc;
 	msc->base.info = *xsci;
 	msc->upaf = upaf;
 	msc->xcn = xcn;
+	msc->sessions.active_count = 0;
+	msc->sessions.state = do_warm_start ? MULTI_SYSTEM_STATE_INIT_WARM_START : MULTI_SYSTEM_STATE_STOPPED;
 
 	os_mutex_init(&msc->list_and_timing_lock);
 

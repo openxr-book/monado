@@ -1,6 +1,6 @@
 // Copyright 2020-2021, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
-// Author: Ryan Pavlik <ryan.pavlik@collabora.com>
+// Author: Rylie Pavlik <rylie.pavlik@collabora.com>
 
 #pragma once
 
@@ -12,6 +12,7 @@ class DexClassLoader;
 } // namespace dalvik::system
 
 namespace java::lang {
+class Class;
 class ClassLoader;
 } // namespace java::lang
 
@@ -45,10 +46,23 @@ class DexClassLoader : public ObjectWrapperBase {
                                     jni::Object parentClassLoader);
 
     /*!
+     * Wrapper for the loadClass method
+     *
+     * Java prototype:
+     * `public java.lang.Class<?> loadClass(java.lang.String) throws
+     * java.lang.ClassNotFoundException;`
+     *
+     * JNI signature: (Ljava/lang/String;)Ljava/lang/Class;
+     *
+     */
+    java::lang::Class loadClass(std::string const &name);
+
+    /*!
      * Class metadata
      */
     struct Meta : public MetaBase {
         jni::method_t init;
+        jni::method_t loadClass;
 
         /*!
          * Singleton accessor

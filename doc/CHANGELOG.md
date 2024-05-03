@@ -48,7 +48,7 @@ SPDX-FileCopyrightText: 2020 Collabora, Ltd. and the Monado contributors
     length, normalize if not within float epsilon.
     ([!659](https://gitlab.freedesktop.org/monado/monado/merge_requests/659))
 - Drivers
-  - North Star: Fix memory leak in math code.
+  - ns: Fix memory leak in math code.
     ([!564](https://gitlab.freedesktop.org/monado/monado/merge_requests/564))
   - psvr: Rename some variables for better readability.
     ([!597](https://gitlab.freedesktop.org/monado/monado/merge_requests/597))
@@ -439,7 +439,7 @@ SPDX-FileCopyrightText: 2020 Collabora, Ltd. and the Monado contributors
 - Major changes
   - Centralise the logging functionality in Monado to a single util helper.
     Previously most of our logging was done via fprints and gated behind booleans,
-    now there are common functions to call and a predfined set of levels.
+    now there are common functions to call and a predefined set of levels.
     ([!408](https://gitlab.freedesktop.org/monado/monado/merge_requests/408),
     [!409](https://gitlab.freedesktop.org/monado/monado/merge_requests/409))
 - XRT Interface
@@ -587,7 +587,7 @@ SPDX-FileCopyrightText: 2020 Collabora, Ltd. and the Monado contributors
     copies the FDs to the client.
     ([!359](https://gitlab.freedesktop.org/monado/monado/merge_requests/359))
   - client: When we give a image fd to the either OpenGL or Vulkan it is consumed
-    and can not be rused. So make sure that it is set to an invalid fd value on the
+    and cannot be reused. So make sure that it is set to an invalid fd value on the
     `xrt_image_fd` on the owning `xrt_swapchain_fd`.
     ([!359](https://gitlab.freedesktop.org/monado/monado/merge_requests/359))
   - main: We were alpha blending all layers previously, but now we support the

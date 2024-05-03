@@ -1,4 +1,4 @@
-// Copyright 2019-2022, Collabora, Ltd.
+// Copyright 2019-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -77,6 +77,7 @@ vk_get_instance_functions(struct vk_bundle *vk)
 	vk->vkGetPhysicalDeviceSurfacePresentModesKHR         = GET_INS_PROC(vk, vkGetPhysicalDeviceSurfacePresentModesKHR);
 	vk->vkGetPhysicalDeviceSurfaceSupportKHR              = GET_INS_PROC(vk, vkGetPhysicalDeviceSurfaceSupportKHR);
 	vk->vkGetPhysicalDeviceFormatProperties               = GET_INS_PROC(vk, vkGetPhysicalDeviceFormatProperties);
+	vk->vkGetPhysicalDeviceFormatProperties2              = GET_INS_PROC(vk, vkGetPhysicalDeviceFormatProperties2KHR);
 	vk->vkGetPhysicalDeviceImageFormatProperties2         = GET_INS_PROC(vk, vkGetPhysicalDeviceImageFormatProperties2);
 	vk->vkGetPhysicalDeviceExternalBufferPropertiesKHR    = GET_INS_PROC(vk, vkGetPhysicalDeviceExternalBufferPropertiesKHR);
 	vk->vkGetPhysicalDeviceExternalFencePropertiesKHR     = GET_INS_PROC(vk, vkGetPhysicalDeviceExternalFencePropertiesKHR);
@@ -133,7 +134,14 @@ vk_get_instance_functions(struct vk_bundle *vk)
 
 #if defined(VK_EXT_display_surface_counter)
 	vk->vkGetPhysicalDeviceSurfaceCapabilities2EXT        = GET_INS_PROC(vk, vkGetPhysicalDeviceSurfaceCapabilities2EXT);
+
 #endif // defined(VK_EXT_display_surface_counter)
+
+#if defined(VK_EXT_debug_utils)
+	vk->vkCreateDebugUtilsMessengerEXT                    = GET_INS_PROC(vk, vkCreateDebugUtilsMessengerEXT);
+	vk->vkSubmitDebugUtilsMessageEXT                      = GET_INS_PROC(vk, vkSubmitDebugUtilsMessageEXT);
+	vk->vkDestroyDebugUtilsMessengerEXT                   = GET_INS_PROC(vk, vkDestroyDebugUtilsMessengerEXT);
+#endif // defined(VK_EXT_debug_utils)
 
 	// end of GENERATED instance loader code - do not modify - used by scripts
 
@@ -210,6 +218,7 @@ vk_get_device_functions(struct vk_bundle *vk)
 	vk->vkCmdCopyImage                              = GET_DEV_PROC(vk, vkCmdCopyImage);
 	vk->vkCmdCopyImageToBuffer                      = GET_DEV_PROC(vk, vkCmdCopyImageToBuffer);
 	vk->vkCmdBlitImage                              = GET_DEV_PROC(vk, vkCmdBlitImage);
+	vk->vkCmdPushConstants                          = GET_DEV_PROC(vk, vkCmdPushConstants);
 	vk->vkEndCommandBuffer                          = GET_DEV_PROC(vk, vkEndCommandBuffer);
 	vk->vkFreeCommandBuffers                        = GET_DEV_PROC(vk, vkFreeCommandBuffers);
 
@@ -300,7 +309,24 @@ vk_get_device_functions(struct vk_bundle *vk)
 	vk->vkGetSwapchainCounterEXT                    = GET_DEV_PROC(vk, vkGetSwapchainCounterEXT);
 	vk->vkRegisterDeviceEventEXT                    = GET_DEV_PROC(vk, vkRegisterDeviceEventEXT);
 	vk->vkRegisterDisplayEventEXT                   = GET_DEV_PROC(vk, vkRegisterDisplayEventEXT);
+
 #endif // defined(VK_EXT_display_control)
+
+#if defined(VK_EXT_image_drm_format_modifier)
+	vk->vkGetImageDrmFormatModifierPropertiesEXT    = GET_DEV_PROC(vk, vkGetImageDrmFormatModifierPropertiesEXT);
+
+#endif // defined(VK_EXT_image_drm_format_modifier)
+
+#if defined(VK_EXT_debug_utils)
+	vk->vkCmdBeginDebugUtilsLabelEXT                = GET_DEV_PROC(vk, vkCmdBeginDebugUtilsLabelEXT);
+	vk->vkCmdEndDebugUtilsLabelEXT                  = GET_DEV_PROC(vk, vkCmdEndDebugUtilsLabelEXT);
+	vk->vkCmdInsertDebugUtilsLabelEXT               = GET_DEV_PROC(vk, vkCmdInsertDebugUtilsLabelEXT);
+	vk->vkQueueBeginDebugUtilsLabelEXT              = GET_DEV_PROC(vk, vkQueueBeginDebugUtilsLabelEXT);
+	vk->vkQueueEndDebugUtilsLabelEXT                = GET_DEV_PROC(vk, vkQueueEndDebugUtilsLabelEXT);
+	vk->vkQueueInsertDebugUtilsLabelEXT             = GET_DEV_PROC(vk, vkQueueInsertDebugUtilsLabelEXT);
+	vk->vkSetDebugUtilsObjectNameEXT                = GET_DEV_PROC(vk, vkSetDebugUtilsObjectNameEXT);
+	vk->vkSetDebugUtilsObjectTagEXT                 = GET_DEV_PROC(vk, vkSetDebugUtilsObjectTagEXT);
+#endif // defined(VK_EXT_debug_utils)
 
 	// end of GENERATED device loader code - do not modify - used by scripts
 	// clang-format on

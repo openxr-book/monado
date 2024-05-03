@@ -1,4 +1,4 @@
-// Copyright 2021, Collabora, Ltd.
+// Copyright 2021-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -16,6 +16,7 @@
 #include "util/u_misc.h"
 #include "util/u_sink.h"
 #include "util/u_var.h"
+#include "util/u_trace_marker.h"
 #include "os/os_threading.h"
 #include "math/m_api.h"
 #include "math/m_filter_fifo.h"
@@ -25,9 +26,12 @@
 #include "math/m_space.h"
 #include "math/m_vec3.h"
 #include "tracking/t_euroc_recorder.h"
+#include "tracking/t_openvr_tracker.h"
 #include "tracking/t_tracking.h"
+#include "tracking/t_vit_loader.h"
 
-#include <slam_tracker.hpp>
+#include "vit/vit_interface.h"
+
 #include <opencv2/core/mat.hpp>
 #include <opencv2/core/version.hpp>
 
@@ -36,7 +40,12 @@
 #include <fstream>
 #include <iomanip>
 #include <map>
+#include <mutex>
 #include <string>
+#include <vector>
+
+//! @todo Get preferred system from systems found at build time
+#define PREFERRED_VIT_SYSTEM_LIBRARY "libbasalt.so"
 
 #define SLAM_TRACE(...) U_LOG_IFL_T(t.log_level, __VA_ARGS__)
 #define SLAM_DEBUG(...) U_LOG_IFL_D(t.log_level, __VA_ARGS__)
@@ -65,189 +74,104 @@
 
 //! @see t_slam_tracker_config
 DEBUG_GET_ONCE_LOG_OPTION(slam_log, "SLAM_LOG", U_LOGGING_INFO)
+DEBUG_GET_ONCE_OPTION(vit_system_library_path, "VIT_SYSTEM_LIBRARY_PATH", PREFERRED_VIT_SYSTEM_LIBRARY)
 DEBUG_GET_ONCE_OPTION(slam_config, "SLAM_CONFIG", nullptr)
+DEBUG_GET_ONCE_BOOL_OPTION(slam_ui, "SLAM_UI", false)
 DEBUG_GET_ONCE_BOOL_OPTION(slam_submit_from_start, "SLAM_SUBMIT_FROM_START", false)
-DEBUG_GET_ONCE_NUM_OPTION(slam_prediction_type, "SLAM_PREDICTION_TYPE", long(SLAM_PRED_SP_SO_IA_SL))
+DEBUG_GET_ONCE_NUM_OPTION(slam_openvr_groundtruth_device, "SLAM_OPENVR_GROUNDTRUTH_DEVICE", 0)
+DEBUG_GET_ONCE_NUM_OPTION(slam_prediction_type, "SLAM_PREDICTION_TYPE", long(SLAM_PRED_IP_IO_IA_IL))
 DEBUG_GET_ONCE_BOOL_OPTION(slam_write_csvs, "SLAM_WRITE_CSVS", false)
 DEBUG_GET_ONCE_OPTION(slam_csv_path, "SLAM_CSV_PATH", "evaluation/")
 DEBUG_GET_ONCE_BOOL_OPTION(slam_timing_stat, "SLAM_TIMING_STAT", true)
 DEBUG_GET_ONCE_BOOL_OPTION(slam_features_stat, "SLAM_FEATURES_STAT", true)
+DEBUG_GET_ONCE_NUM_OPTION(slam_cam_count, "SLAM_CAM_COUNT", 2)
 
 //! Namespace for the interface to the external SLAM tracking system
 namespace xrt::auxiliary::tracking::slam {
 constexpr int UI_TIMING_POSE_COUNT = 192;
 constexpr int UI_FEATURES_POSE_COUNT = 192;
 constexpr int UI_GTDIFF_POSE_COUNT = 192;
-constexpr int NUM_CAMS = 2; //!< This should be used as little as possible to allow setups that are not stereo
 
+using os::Mutex;
 using std::deque;
 using std::ifstream;
 using std::make_shared;
 using std::map;
 using std::ofstream;
+using std::ostream;
 using std::pair;
 using std::shared_ptr;
 using std::string;
 using std::to_string;
+using std::unique_lock;
 using std::vector;
 using std::filesystem::create_directories;
 using Trajectory = map<timepoint_ns, xrt_pose>;
+using timing_sample = vector<timepoint_ns>;
 
 using xrt::auxiliary::math::RelationHistory;
 
-using cv::Mat;
-using cv::MatAllocator;
-using cv::UMatData;
-using cv::UMatUsageFlags;
 
-#define USING_OPENCV_3_3_1 (CV_VERSION_MAJOR == 3 && CV_VERSION_MINOR == 3 && CV_VERSION_REVISION == 1)
-
-#if defined(XRT_HAVE_KIMERA_SLAM) && !USING_OPENCV_3_3_1
-#pragma message "Kimera-VIO uses OpenCV 3.3.1, use that to prevent conflicts"
-#endif
-
-//! @todo These defs should make OpenCV 4 work but it wasn't tested against a
-//! SLAM system that supports that version yet.
-#if CV_VERSION_MAJOR < 4
-#define ACCESS_RW 0
-typedef int AccessFlag;
-#define CV_AUTOSTEP 0x7fffffff // From opencv2/core/core_c.h
-#else
-using cv::ACCESS_RW;
-using cv::AccessFlag;
-#define CV_AUTOSTEP cv::Mat::AUTO_STEP
-#endif
-
-/*!
- * @brief Wraps a @ref xrt_frame with a `cv::Mat` (conversely to @ref FrameMat).
+/*
  *
- * It works by implementing a `cv::MatAllocator` which determines what to do
- * when a `cv::Mat` refcount reaches zero. In that case, it decrements the @ref
- * xrt_frame refcount once the `cv::Mat` own refcount has reached zero.
+ * CSV Writers
  *
- * @note a @ref MatFrame `cv::Mat` can wrap a @ref FrameMat @ref xrt_frame,
- * which in turns wraps a `cv::Mat`, with little overhead, and that is precisely
- * how it is being used in this file when the @ref xrt_frame is a @ref FrameMat.
  */
-class MatFrame final : public MatAllocator
+
+ostream &
+operator<<(ostream &os, const xrt_pose_sample &s)
 {
-public:
-	//! Wraps a @ref xrt_frame in a `cv::Mat`
-	Mat
-	wrap(struct xrt_frame *frame)
-	{
-		SLAM_DASSERT_(frame->format == XRT_FORMAT_L8 || frame->format == XRT_FORMAT_R8G8B8);
-		auto img_type = frame->format == XRT_FORMAT_L8 ? CV_8UC1 : CV_8UC3;
+	timepoint_ns ts = s.timestamp_ns;
+	xrt_vec3 p = s.pose.position;
+	xrt_quat r = s.pose.orientation;
+	os << ts << ",";
+	os << p.x << "," << p.y << "," << p.z << ",";
+	os << r.w << "," << r.x << "," << r.y << "," << r.z << CSV_EOL;
+	return os;
+}
 
-		// Wrap the frame data into a cv::Mat header
-		cv::Mat img{(int)frame->height, (int)frame->width, img_type, frame->data, frame->stride};
-
-		// Enable reference counting for a user-allocated cv::Mat (i.e., using existing frame->data)
-		img.u = this->allocate(img.dims, img.size.p, img.type(), img.data, img.step.p, ACCESS_RW,
-		                       cv::USAGE_DEFAULT);
-		SLAM_DASSERT_(img.u->refcount == 0);
-		img.addref();
-
-		// Keep a reference to the xrt_frame in the cv userdata field for when the cv::Mat reference reaches 0
-		SLAM_DASSERT_(img.u->userdata == NULL); // Should be default-constructed
-		xrt_frame_reference((struct xrt_frame **)&img.u->userdata, frame);
-
-		return img;
+ostream &
+operator<<(ostream &os, const timing_sample &timestamps)
+{
+	for (const timepoint_ns &ts : timestamps) {
+		string delimiter = &ts != &timestamps.back() ? "," : CSV_EOL;
+		os << ts << delimiter;
 	}
+	return os;
+}
 
-	//! Allocates a `cv::UMatData` object which is in charge of reference counting for a `cv::Mat`
-	UMatData *
-	allocate(
-	    int dims, const int *sizes, int type, void *data0, size_t *step, AccessFlag, UMatUsageFlags) const override
-	{
-		SLAM_DASSERT_(dims == 2 && sizes && data0 && step && step[0] != CV_AUTOSTEP);
-		UMatData *u = new UMatData(this);
-		uchar *data = (uchar *)data0;
-		u->data = u->origdata = data;
-		u->size = step[0] * sizes[0];         // Row stride * row count
-		u->flags |= UMatData::USER_ALLOCATED; // External data
-		return u;
-	}
-
-	//! Necessary but unused virtual method for a `cv::MatAllocator`
-	bool
-	allocate(UMatData *, AccessFlag, UMatUsageFlags) const override
-	{
-		SLAM_ASSERT(false, "Shouldn't be reached");
-		return false;
-	}
-
-	//! When `cv::UMatData` refcount reaches zero this method is called, we just
-	//! decrement the original @ref xrt_frame refcount as it is the one in charge
-	//! of the memory.
-	void
-	deallocate(UMatData *u) const override
-	{
-		SLAM_DASSERT_(u->urefcount == 0 && u->refcount == 0);
-		SLAM_DASSERT_(u->flags & UMatData::USER_ALLOCATED);
-		xrt_frame_reference((struct xrt_frame **)&u->userdata, NULL);
-		delete u;
-	}
+struct feature_count_sample
+{
+	timepoint_ns ts;
+	vector<int> counts;
 };
 
-//! Writes poses and their timestamps to a CSV file
-class TrajectoryWriter
+ostream &
+operator<<(ostream &os, const feature_count_sample &s)
+{
+	os << s.ts;
+	for (int count : s.counts) {
+		os << "," << count;
+	}
+	os << CSV_EOL;
+	return os;
+}
+
+//! Writes a CSV file for a particular row type
+template <typename RowType> class CSVWriter
 {
 public:
 	bool enabled; // Modified through UI
 
-private:
-	string directory;
-	string filename;
-	ofstream file;
-	bool created = false;
-
-	void
-	create()
-	{
-		create_directories(directory);
-		file = ofstream{directory + "/" + filename};
-		file << "#timestamp [ns], p_RS_R_x [m], p_RS_R_y [m], p_RS_R_z [m], "
-		        "q_RS_w [], q_RS_x [], q_RS_y [], q_RS_z []" CSV_EOL;
-		file << std::fixed << std::setprecision(CSV_PRECISION);
-	}
-
-
-public:
-	TrajectoryWriter(const string &dir, const string &fn, bool e) : enabled(e), directory(dir), filename(fn) {}
-
-	void
-	push(timepoint_ns ts, const xrt_pose &pose)
-	{
-		if (!enabled) {
-			return;
-		}
-
-		if (!created) {
-			created = true;
-			create();
-		}
-
-		xrt_vec3 p = pose.position;
-		xrt_quat r = pose.orientation;
-		file << ts << ",";
-		file << p.x << "," << p.y << "," << p.z << ",";
-		file << r.w << "," << r.x << "," << r.y << "," << r.z << CSV_EOL;
-	}
-};
-
-//! Writes timestamps measured when estimating a new pose by the SLAM system
-class TimingWriter
-{
-public:
-	bool enabled; // Modified through UI
-
-private:
-	string directory;
-	string filename;
+protected:
 	vector<string> column_names;
+
+private:
+	string directory;
+	string filename;
 	ofstream file;
 	bool created = false;
+	Mutex mutex;
 
 	void
 	create()
@@ -259,60 +183,21 @@ private:
 			string delimiter = &col != &column_names.back() ? "," : CSV_EOL;
 			file << col << delimiter;
 		}
-	}
-
-public:
-	TimingWriter(const string &dir, const string &fn, bool e, const vector<string> &cn)
-	    : enabled(e), directory(dir), filename(fn), column_names(cn)
-	{}
-
-	void
-	push(const vector<timepoint_ns> &timestamps)
-	{
-		if (!enabled) {
-			return;
-		}
-
-		if (!created) {
-			created = true;
-			create();
-		}
-
-		for (const timepoint_ns &ts : timestamps) {
-			string delimiter = &ts != &timestamps.back() ? "," : CSV_EOL;
-			file << ts << delimiter;
-		}
-	}
-};
-
-//! Writes feature information specific to a particular estimated pose
-class FeaturesWriter
-{
-public:
-	bool enabled; // Modified through UI
-
-private:
-	string directory;
-	string filename;
-	ofstream file;
-	bool created = false;
-
-	void
-	create()
-	{
-		create_directories(directory);
-		file = ofstream{directory + "/" + filename};
-		file << "#timestamp, cam0 feature count, cam1 feature count" CSV_EOL;
 		file << std::fixed << std::setprecision(CSV_PRECISION);
 	}
 
-
 public:
-	FeaturesWriter(const string &dir, const string &fn, bool e) : enabled(e), directory(dir), filename(fn) {}
+	CSVWriter(const string &dir, const string &fn, bool e, const vector<string> &cn = {})
+	    : enabled(e), column_names(cn), directory(dir), filename(fn)
+	{}
+
+	virtual ~CSVWriter() {}
 
 	void
-	push(timepoint_ns ts, const vector<int> &counts)
+	push(RowType row)
 	{
+		unique_lock lock(mutex);
+
 		if (!enabled) {
 			return;
 		}
@@ -322,13 +207,41 @@ public:
 			create();
 		}
 
-		file << ts;
-		for (int count : counts) {
-			file << "," << count;
-		}
-		file << CSV_EOL;
+		file << row;
 	}
 };
+
+//! Writes poses and their timestamps to a CSV file
+struct TrajectoryWriter : public CSVWriter<xrt_pose_sample>
+{
+	TrajectoryWriter(const string &dir, const string &fn, bool e) : CSVWriter<xrt_pose_sample>(dir, fn, e)
+	{
+		column_names = {"timestamp [ns]", "p_RS_R_x [m]", "p_RS_R_y [m]", "p_RS_R_z [m]",
+		                "q_RS_w []",      "q_RS_x []",    "q_RS_y []",    "q_RS_z []"};
+	}
+};
+
+//! Writes timestamps measured when estimating a new pose by the SLAM system
+struct TimingWriter : public CSVWriter<timing_sample>
+{
+	TimingWriter(const string &dir, const string &fn, bool e, const vector<string> &cn)
+	    : CSVWriter<timing_sample>(dir, fn, e, cn)
+	{}
+};
+
+//! Writes feature information specific to a particular estimated pose
+struct FeaturesWriter : public CSVWriter<feature_count_sample>
+{
+	FeaturesWriter(const string &dir, const string &fn, bool e, size_t cam_count)
+	    : CSVWriter<feature_count_sample>(dir, fn, e)
+	{
+		column_names.push_back("timestamp");
+		for (size_t i = 0; i < cam_count; i++) {
+			column_names.push_back("cam" + to_string(i) + " feature count");
+		}
+	}
+};
+
 /*!
  * Main implementation of @ref xrt_tracked_slam. This is an adapter class for
  * SLAM tracking that wraps an external SLAM implementation.
@@ -342,37 +255,45 @@ public:
 struct TrackerSlam
 {
 	struct xrt_tracked_slam base = {};
-	struct xrt_frame_node node = {}; //!< Will be called on destruction
-	slam_tracker *slam;              //!< Pointer to the external SLAM system implementation
+	struct xrt_frame_node node = {};       //!< Will be called on destruction
+	struct t_vit_bundle vit;               //!< VIT system function pointers
+	enum vit_tracker_pose_capability caps; //!< VIT tracker bitfield capabilities
+	struct vit_tracker *tracker;           //!< Pointer to the tracker created by the loaded VIT system;
 
-	struct xrt_slam_sinks sinks = {};      //!< Pointers to the sinks below
-	struct xrt_frame_sink left_sink = {};  //!< Sends left camera frames to the SLAM system
-	struct xrt_frame_sink right_sink = {}; //!< Sends right camera frames to the SLAM system
-	struct xrt_imu_sink imu_sink = {};     //!< Sends imu samples to the SLAM system
-	struct xrt_pose_sink gt_sink = {};     //!< Register groundtruth trajectory for stats
-	bool submit;                           //!< Whether to submit data pushed to sinks to the SLAM tracker
+	struct xrt_slam_sinks sinks = {};                            //!< Pointers to the sinks below
+	struct xrt_frame_sink cam_sinks[XRT_TRACKING_MAX_SLAM_CAMS]; //!< Sends camera frames to the SLAM system
+	struct xrt_imu_sink imu_sink = {};                           //!< Sends imu samples to the SLAM system
+	struct xrt_pose_sink gt_sink = {};                           //!< Register groundtruth trajectory for stats
+	struct xrt_hand_masks_sink hand_masks_sink = {};             //!< Register latest masks to ignore
+
+	bool submit;        //!< Whether to submit data pushed to sinks to the SLAM tracker
+	uint32_t cam_count; //!< Number of cameras used for tracking
+
+	struct u_var_button reset_state_btn; //!< Reset tracker state button
 
 	enum u_logging_level log_level; //!< Logging level for the SLAM tracker, set by SLAM_LOG var
-	struct os_thread_helper oth;    //!< Thread where the external SLAM system runs
-	MatFrame *cv_wrapper;           //!< Wraps a xrt_frame in a cv::Mat to send to the SLAM system
 
 	struct xrt_slam_sinks *euroc_recorder; //!< EuRoC dataset recording sinks
+	struct openvr_tracker *ovr_tracker;    //!< OpenVR lighthouse tracker
 
 	// Used mainly for checking that the timestamps come in order
-	timepoint_ns last_imu_ts = INT64_MIN;   //!< Last received IMU sample timestamp
-	timepoint_ns last_left_ts = INT64_MIN;  //!< Last received left image timestamp
-	timepoint_ns last_right_ts = INT64_MIN; //!< Last received right image timestamp
+	timepoint_ns last_imu_ts;                     //!< Last received IMU sample timestamp
+	vector<timepoint_ns> last_cam_ts;             //!< Last received image timestamp per cam
+	struct xrt_hand_masks_sample last_hand_masks; //!< Last received hand masks info
+	Mutex last_hand_masks_mutex;                  //!< Mutex for @ref last_hand_masks
 
 	// Prediction
 
 	//! Type of prediction to use
 	t_slam_prediction_type pred_type;
-	u_var_combo pred_combo;            //!< UI combo box to select @ref pred_type
-	RelationHistory slam_rels{};       //!< A history of relations produced purely from external SLAM tracker data
-	struct m_ff_vec3_f32 *gyro_ff;     //!< Last gyroscope samples
-	struct m_ff_vec3_f32 *accel_ff;    //!< Last accelerometer samples
-	struct u_sink_debug ui_left_sink;  //!< Sink to display left frames in UI
-	struct u_sink_debug ui_right_sink; //!< Sink to display right frames in UI
+	u_var_combo pred_combo;         //!< UI combo box to select @ref pred_type
+	RelationHistory slam_rels{};    //!< A history of relations produced purely from external SLAM tracker data
+	int dbg_pred_every = 1;         //!< Skip X SLAM poses so that you get tracked mostly by the prediction algo
+	int dbg_pred_counter = 0;       //!< SLAM pose counter for prediction debugging
+	struct os_mutex lock_ff;        //!< Lock for gyro_ff and accel_ff.
+	struct m_ff_vec3_f32 *gyro_ff;  //!< Last gyroscope samples
+	struct m_ff_vec3_f32 *accel_ff; //!< Last accelerometer samples
+	vector<u_sink_debug> ui_sink;   //!< Sink to display frames in UI of each camera
 
 	//! Used to correct accelerometer measurements when integrating into the prediction.
 	//! @todo Should be automatically computed instead of required to be filled manually through the UI.
@@ -420,8 +341,7 @@ struct TrackerSlam
 	//! Tracker timing info for performance evaluation
 	struct
 	{
-		bool ext_available = false;         //!< Whether the SLAM system supports the timing extension
-		bool ext_enabled = false;           //!< Whether the timing extension is enabled
+		bool enabled = false;               //!< Whether the timing extension is enabled
 		float dur_ms[UI_TIMING_POSE_COUNT]; //!< Timing durations in ms
 		int idx = 0;                        //!< Index of latest entry in @ref dur_ms
 		u_var_combo start_ts;               //!< UI combo box to select initial timing measurement
@@ -459,8 +379,7 @@ struct TrackerSlam
 		vector<FeatureCounter> fcs; //!< Store feature count info for each camera
 		u_var_curves fcs_ui;        //!< Display of `fcs` in UI
 
-		bool ext_available = false;     //!< Whether the SLAM system supports the features extension
-		bool ext_enabled = false;       //!< Whether the features extension is enabled
+		bool enabled = false;           //!< Whether the features extension is enabled
 		struct u_var_button enable_btn; //!< Toggle extension
 	} features;
 
@@ -486,6 +405,8 @@ struct TrackerSlam
 static void
 timing_ui_setup(TrackerSlam &t)
 {
+	t.timing.enabled = false;
+
 	u_var_add_ro_ftext(&t, "\n%s", "Tracker timing");
 
 	// Setup toggle button
@@ -493,19 +414,38 @@ timing_ui_setup(TrackerSlam &t)
 	u_var_button_cb cb = [](void *t_ptr) {
 		TrackerSlam *t = (TrackerSlam *)t_ptr;
 		u_var_button &btn = t->timing.enable_btn;
-		bool &e = t->timing.ext_enabled;
-		e = !e;
+		bool e = !t->timing.enabled;
 		snprintf(btn.label, sizeof(btn.label), "%s", msg[e]);
-		const auto params = make_shared<FPARAMS_EPET>(e);
-		shared_ptr<void> _;
-		t->slam->use_feature(F_ENABLE_POSE_EXT_TIMING, params, _);
+		vit_result_t vres =
+		    t->vit.tracker_set_pose_capabilities(t->tracker, VIT_TRACKER_POSE_CAPABILITY_TIMING, e);
+		if (vres != VIT_SUCCESS) {
+			U_LOG_IFL_E(t->log_level, "Failed to set tracker timing capability");
+			return;
+		}
+		t->timing.enabled = e;
 	};
 	t.timing.enable_btn.cb = cb;
-	t.timing.enable_btn.disabled = !t.timing.ext_available;
+	t.timing.enable_btn.disabled = (t.caps & VIT_TRACKER_POSE_CAPABILITY_TIMING) == 0;
 	t.timing.enable_btn.ptr = &t;
-	u_var_add_button(&t, &t.timing.enable_btn, msg[t.timing.ext_enabled]);
+	u_var_add_button(&t, &t.timing.enable_btn, msg[t.timing.enabled]);
 
-	// Setup graph
+	// We provide two timing columns by default, even if there is no extension support
+	t.timing.columns = {"sampled", "received_by_monado"};
+
+	// Only fill the timing columns if the tracker supports pose timing
+	if ((t.caps & VIT_TRACKER_POSE_CAPABILITY_TIMING) != 0) {
+		vit_tracker_timing_titles titles = {};
+		vit_result_t vres = t.vit.tracker_get_timing_titles(t.tracker, &titles);
+		if (vres != VIT_SUCCESS) {
+			SLAM_ERROR("Failed to get timing titles from tracker");
+			return;
+		}
+
+		// Copies the titles locally.
+		std::vector<std::string> cols(titles.titles, titles.titles + titles.count);
+
+		t.timing.columns.insert(t.timing.columns.begin() + 1, cols.begin(), cols.end());
+	}
 
 	// Construct null-separated array of options for the combo box
 	using namespace std::string_literals;
@@ -540,28 +480,38 @@ timing_ui_setup(TrackerSlam &t)
 
 //! Updates timing UI with info from a computed pose and returns that info
 static vector<timepoint_ns>
-timing_ui_push(TrackerSlam &t, const pose &p)
+timing_ui_push(TrackerSlam &t, const vit_pose_t *pose, int64_t ts)
 {
 	timepoint_ns now = os_monotonic_get_ns();
-	vector<timepoint_ns> tss = {p.timestamp, now};
+	vector<timepoint_ns> tss = {ts, now};
 
 	// Add extra timestamps if the SLAM tracker provides them
-	shared_ptr<pose_extension> ext = p.find_pose_extension(pose_ext_type::TIMING);
-	if (ext) {
-		pose_ext_timing pet = *std::static_pointer_cast<pose_ext_timing>(ext);
-		tss.insert(tss.begin() + 1, pet.timing.begin(), pet.timing.end());
+	if (t.timing.enabled) {
+		vit_pose_timing timing;
+		vit_result_t vres = t.vit.pose_get_timing(pose, &timing);
+		if (vres != VIT_SUCCESS) {
+			// Even if the timing is enabled, some of the poses already in the queue won't have it enabled.
+			if (vres != VIT_ERROR_NOT_ENABLED) {
+				SLAM_ERROR("Failed to get pose timing");
+			}
+
+			return {};
+		}
+
+		std::vector<int64_t> data(timing.timestamps, timing.timestamps + timing.count);
+		tss.insert(tss.begin() + 1, data.begin(), data.end());
+
+		// The two timestamps to compare in the graph
+		timepoint_ns start = tss.at(t.timing.start_ts_idx);
+		timepoint_ns end = tss.at(t.timing.end_ts_idx);
+
+		// Push to the UI graph
+		float tss_ms = (end - start) / U_TIME_1MS_IN_NS;
+		t.timing.idx = (t.timing.idx + 1) % UI_TIMING_POSE_COUNT;
+		t.timing.dur_ms[t.timing.idx] = tss_ms;
+		constexpr float a = 1.0f / UI_TIMING_POSE_COUNT; // Exponential moving average
+		t.timing.ui.reference_timing = (1 - a) * t.timing.ui.reference_timing + a * tss_ms;
 	}
-
-	// The two timestamps to compare in the graph
-	timepoint_ns start = tss.at(t.timing.start_ts_idx);
-	timepoint_ns end = tss.at(t.timing.end_ts_idx);
-
-	// Push to the UI graph
-	float tss_ms = (end - start) / U_TIME_1MS_IN_NS;
-	t.timing.idx = (t.timing.idx + 1) % UI_TIMING_POSE_COUNT;
-	t.timing.dur_ms[t.timing.idx] = tss_ms;
-	constexpr float a = 1.0f / UI_TIMING_POSE_COUNT; // Exponential moving average
-	t.timing.ui.reference_timing = (1 - a) * t.timing.ui.reference_timing + a * tss_ms;
 
 	return tss;
 }
@@ -576,10 +526,7 @@ timing_ui_push(TrackerSlam &t, const pose &p)
 static void
 features_ui_setup(TrackerSlam &t)
 {
-	// We can't do anything useful if the system doesn't implement the feature
-	if (!t.features.ext_available) {
-		return;
-	}
+	t.features.enabled = false;
 
 	u_var_add_ro_ftext(&t, "\n%s", "Tracker features");
 
@@ -588,20 +535,22 @@ features_ui_setup(TrackerSlam &t)
 	u_var_button_cb cb = [](void *t_ptr) {
 		TrackerSlam *t = (TrackerSlam *)t_ptr;
 		u_var_button &btn = t->features.enable_btn;
-		bool &e = t->features.ext_enabled;
-		e = !e;
+		bool e = !t->features.enabled;
 		snprintf(btn.label, sizeof(btn.label), "%s", msg[e]);
-		const auto params = make_shared<FPARAMS_EPEF>(e);
-		shared_ptr<void> _;
-		t->slam->use_feature(F_ENABLE_POSE_EXT_FEATURES, params, _);
+		vit_result_t vres =
+		    t->vit.tracker_set_pose_capabilities(t->tracker, VIT_TRACKER_POSE_CAPABILITY_FEATURES, e);
+		if (vres != VIT_SUCCESS) {
+			U_LOG_IFL_E(t->log_level, "Failed to set tracker features capability");
+			return;
+		}
+		t->features.enabled = e;
 	};
 	t.features.enable_btn.cb = cb;
-	t.features.enable_btn.disabled = !t.features.ext_available;
+	t.features.enable_btn.disabled = (t.caps & VIT_TRACKER_POSE_CAPABILITY_FEATURES) == 0;
 	t.features.enable_btn.ptr = &t;
-	u_var_add_button(&t, &t.features.enable_btn, msg[t.features.ext_enabled]);
+	u_var_add_button(&t, &t.features.enable_btn, msg[t.features.enabled]);
 
 	// Setup graph
-
 	u_var_curve_getter getter = [](void *fs_ptr, int i) -> u_var_curve_point {
 		auto *fs = (TrackerSlam::Features::FeatureCounter *)fs_ptr;
 		timepoint_ns now = os_monotonic_get_ns();
@@ -620,12 +569,12 @@ features_ui_setup(TrackerSlam &t)
 		return {time_ns_to_s(now - ts), double(count)};
 	};
 
-	t.features.fcs_ui.curve_count = NUM_CAMS;
+	t.features.fcs_ui.curve_count = t.cam_count;
 	t.features.fcs_ui.xlabel = "Last seconds";
 	t.features.fcs_ui.ylabel = "Number of features";
 
-	t.features.fcs.resize(NUM_CAMS);
-	for (int i = 0; i < NUM_CAMS; i++) {
+	t.features.fcs.resize(t.cam_count);
+	for (uint32_t i = 0; i < t.cam_count; ++i) {
 		auto &fc = t.features.fcs[i];
 		fc.cam_name = "Cam" + to_string(i);
 
@@ -640,25 +589,29 @@ features_ui_setup(TrackerSlam &t)
 }
 
 static vector<int>
-features_ui_push(TrackerSlam &t, const pose &ppp)
+features_ui_push(TrackerSlam &t, const vit_pose_t *pose, int64_t ts)
 {
-	if (!t.features.ext_available) {
+	if (!t.features.enabled) {
 		return {};
 	}
-
-	shared_ptr<pose_extension> ext = ppp.find_pose_extension(pose_ext_type::FEATURES);
-	if (!ext) {
-		return {};
-	}
-
-	pose_ext_features pef = *std::static_pointer_cast<pose_ext_features>(ext);
 
 	// Push to the UI graph
 	vector<int> fcs{};
-	for (size_t i = 0; i < pef.features_per_cam.size(); i++) {
-		int count = pef.features_per_cam.at(i).size();
-		t.features.fcs.at(i).addFeatureCount(ppp.timestamp, count);
-		fcs.push_back(count);
+	for (uint32_t i = 0; i < t.cam_count; ++i) {
+		vit_pose_features features = {};
+		vit_result_t vres = t.vit.pose_get_features(pose, i, &features);
+		if (vres != VIT_SUCCESS) {
+			// Even if the features are enabled, some of the poses already in the queue won't have it
+			// enabled.
+			if (vres != VIT_ERROR_NOT_ENABLED) {
+				SLAM_ERROR("Failed to get pose features for camera %u", i);
+			}
+
+			return {};
+		}
+
+		t.features.fcs.at(i).addFeatureCount(ts, features.count);
+		fcs.push_back(features.count);
 	}
 
 	return fcs;
@@ -783,16 +736,31 @@ gt_ui_push(TrackerSlam &t, timepoint_ns ts, xrt_pose tracked_pose)
 static bool
 flush_poses(TrackerSlam &t)
 {
-	pose tracked_pose{};
-	bool got_one = t.slam->try_dequeue_pose(tracked_pose);
 
-	bool dequeued = got_one;
-	while (dequeued) {
+	vit_pose_t *pose = NULL;
+	vit_result_t vres = t.vit.tracker_pop_pose(t.tracker, &pose);
+	if (vres != VIT_SUCCESS) {
+		SLAM_ERROR("Failed to get pose from VIT tracker");
+	}
+
+	if (pose == NULL) {
+		SLAM_TRACE("No poses to flush");
+		return false;
+	}
+
+	do {
 		// New pose
-		pose np = tracked_pose;
-		int64_t nts = np.timestamp;
-		xrt_vec3 npos{np.px, np.py, np.pz};
-		xrt_quat nrot{np.rx, np.ry, np.rz, np.rw};
+		vit_pose_data_t data;
+		vres = t.vit.pose_get_data(pose, &data);
+		if (vres != VIT_SUCCESS) {
+			SLAM_ERROR("Failed to get pose data from VIT tracker");
+			return false;
+		}
+
+		int64_t nts = data.timestamp;
+
+		xrt_vec3 npos{data.px, data.py, data.pz};
+		xrt_quat nrot{data.ox, data.oy, data.oz, data.ow};
 
 		// Last relation
 		xrt_space_relation lr = XRT_SPACE_RELATION_ZERO;
@@ -804,8 +772,9 @@ flush_poses(TrackerSlam &t)
 		double dt = time_ns_to_s(nts - lts);
 
 		SLAM_TRACE("Dequeued SLAM pose ts=%ld p=[%f,%f,%f] r=[%f,%f,%f,%f]", //
-		           nts, np.px, np.py, np.pz, np.rx, np.ry, np.rz, np.rw);
+		           nts, data.px, data.py, data.pz, data.ox, data.oy, data.oz, data.ow);
 
+		// TODO linear velocity from the VIT system
 		// Compute new relation based on new pose and velocities since last pose
 		xrt_space_relation rel{};
 		rel.relation_flags = XRT_SPACE_RELATION_BITMASK_ALL;
@@ -813,36 +782,129 @@ flush_poses(TrackerSlam &t)
 		rel.linear_velocity = (npos - lpos) / dt;
 		math_quat_finite_difference(&lrot, &nrot, dt, &rel.angular_velocity);
 
-		t.slam_rels.push(rel, nts);
+		// Push to relationship history unless we are debugging prediction
+		if (t.dbg_pred_counter % t.dbg_pred_every == 0) {
+			t.slam_rels.push(rel, nts);
+		}
+		t.dbg_pred_counter = (t.dbg_pred_counter + 1) % t.dbg_pred_every;
 
 		gt_ui_push(t, nts, rel.pose);
-		t.slam_traj_writer->push(nts, rel.pose);
+		t.slam_traj_writer->push({nts, rel.pose});
+		xrt_pose_sample pose_sample = {nts, rel.pose};
+		xrt_sink_push_pose(t.euroc_recorder->gt, &pose_sample);
 
-		if (t.timing.ext_enabled) {
-			auto tss = timing_ui_push(t, np);
-			t.slam_times_writer->push(tss);
+		auto tss = timing_ui_push(t, pose, nts);
+		t.slam_times_writer->push(tss);
+
+		if (t.features.enabled) {
+			vector feat_count = features_ui_push(t, pose, nts);
+			t.slam_features_writer->push({nts, feat_count});
 		}
 
-		if (t.features.ext_enabled) {
-			vector feat_count = features_ui_push(t, np);
-			t.slam_features_writer->push(nts, feat_count);
+		t.vit.pose_destroy(pose);
+	} while (t.vit.tracker_pop_pose(t.tracker, &pose) == VIT_SUCCESS && pose);
+
+	return true;
+}
+
+//! Integrates IMU samples on top of a base pose and predicts from that
+static void
+predict_pose_from_imu(TrackerSlam &t,
+                      timepoint_ns when_ns,
+                      xrt_space_relation base_rel, // Pose to integrate IMUs on top of
+                      timepoint_ns base_rel_ts,
+                      struct xrt_space_relation *out_relation)
+{
+	os_mutex_lock(&t.lock_ff);
+
+	// Find oldest imu index i that is newer than latest SLAM pose (or -1)
+	int i = 0;
+	uint64_t imu_ts = UINT64_MAX;
+	xrt_vec3 _;
+	while (m_ff_vec3_f32_get(t.gyro_ff, i, &_, &imu_ts)) {
+		if ((int64_t)imu_ts < base_rel_ts) {
+			i--; // Back to the oldest newer-than-SLAM IMU index (or -1)
+			break;
 		}
-
-		dequeued = t.slam->try_dequeue_pose(tracked_pose);
+		i++;
 	}
 
-	if (!got_one) {
-		SLAM_TRACE("No poses to flush");
+	if (i == -1) {
+		SLAM_WARN("No IMU samples received after latest SLAM pose (and frame)");
 	}
 
-	return got_one;
+	xrt_space_relation integ_rel = base_rel;
+	timepoint_ns integ_rel_ts = base_rel_ts;
+	xrt_quat &o = integ_rel.pose.orientation;
+	xrt_vec3 &p = integ_rel.pose.position;
+	xrt_vec3 &w = integ_rel.angular_velocity;
+	xrt_vec3 &v = integ_rel.linear_velocity;
+	bool clamped = false; // If when_ns is older than the latest IMU ts
+
+	while (i >= 0) { // Decreasing i increases timestamp
+		// Get samples
+		xrt_vec3 g{};
+		xrt_vec3 a{};
+		uint64_t g_ts{};
+		uint64_t a_ts{};
+		bool got = true;
+		got &= m_ff_vec3_f32_get(t.gyro_ff, i, &g, &g_ts);
+		got &= m_ff_vec3_f32_get(t.accel_ff, i, &a, &a_ts);
+		timepoint_ns ts = g_ts;
+
+
+		// Checks
+		if (ts > when_ns) {
+			clamped = true;
+			//! @todo Instead of using same a and g values, do an interpolated sample like this:
+			// a = prev_a + ((when_ns - prev_ts) / (ts - prev_ts)) * (a - prev_a);
+			// g = prev_g + ((when_ns - prev_ts) / (ts - prev_ts)) * (g - prev_g);
+			ts = when_ns; // clamp ts to when_ns
+		}
+		SLAM_DASSERT(got && g_ts == a_ts, "Failure getting synced gyro and accel samples");
+		SLAM_DASSERT(ts >= base_rel_ts, "Accessing imu sample that is older than latest SLAM pose");
+
+		// Update time
+		float dt = (float)time_ns_to_s(ts - integ_rel_ts);
+		integ_rel_ts = ts;
+
+		// Integrate gyroscope
+		xrt_quat angvel_delta{};
+		xrt_vec3 scaled_half_g = g * dt * 0.5f;
+		math_quat_exp(&scaled_half_g, &angvel_delta); // Same as using math_quat_from_angle_vector(g/dt)
+		math_quat_rotate(&o, &angvel_delta, &o);      // Orientation
+		math_quat_rotate_derivative(&o, &g, &w);      // Angular velocity
+
+		// Integrate accelerometer
+		xrt_vec3 world_accel{};
+		math_quat_rotate_vec3(&o, &a, &world_accel);
+		world_accel += t.gravity_correction;
+		v += world_accel * dt;                        // Linear velocity
+		p += v * dt + world_accel * (dt * dt * 0.5f); // Position
+
+		if (clamped) {
+			break;
+		}
+		i--;
+	}
+
+	os_mutex_unlock(&t.lock_ff);
+
+	// Do the prediction based on the updated relation
+	double last_imu_to_now_dt = time_ns_to_s(when_ns - integ_rel_ts);
+	xrt_space_relation predicted_relation{};
+	m_predict_relation(&integ_rel, last_imu_to_now_dt, &predicted_relation);
+
+	*out_relation = predicted_relation;
 }
 
 //! Return our best guess of the relation at time @p when_ns using all the data the tracker has.
 static void
 predict_pose(TrackerSlam &t, timepoint_ns when_ns, struct xrt_space_relation *out_relation)
 {
-	bool valid_pred_type = t.pred_type >= SLAM_PRED_NONE && t.pred_type <= SLAM_PRED_SP_SO_IA_IL;
+	XRT_TRACE_MARKER();
+
+	bool valid_pred_type = t.pred_type >= SLAM_PRED_NONE && t.pred_type < SLAM_PRED_COUNT;
 	SLAM_DASSERT(valid_pred_type, "Invalid prediction type (%d)", t.pred_type);
 
 	// Get last relation computed purely from SLAM data
@@ -869,6 +931,14 @@ predict_pose(TrackerSlam &t, timepoint_ns when_ns, struct xrt_space_relation *ou
 		return;
 	}
 
+
+	if (t.pred_type == SLAM_PRED_IP_IO_IA_IL) {
+		predict_pose_from_imu(t, when_ns, rel, (int64_t)rel_ts, out_relation);
+		return;
+	}
+
+	os_mutex_lock(&t.lock_ff);
+
 	// Update angular velocity with gyro data
 	if (t.pred_type >= SLAM_PRED_SP_SO_IA_SL) {
 		xrt_vec3 avg_gyro{};
@@ -887,6 +957,8 @@ predict_pose(TrackerSlam &t, timepoint_ns when_ns, struct xrt_space_relation *ou
 		rel.linear_velocity += world_accel * slam_to_imu_dt;
 	}
 
+	os_mutex_unlock(&t.lock_ff);
+
 	// Do the prediction based on the updated relation
 	double slam_to_now_dt = time_ns_to_s(when_ns - rel_ts);
 	xrt_space_relation predicted_relation{};
@@ -899,6 +971,8 @@ predict_pose(TrackerSlam &t, timepoint_ns when_ns, struct xrt_space_relation *ou
 static void
 filter_pose(TrackerSlam &t, timepoint_ns when_ns, struct xrt_space_relation *out_relation)
 {
+	XRT_TRACE_MARKER();
+
 	if (t.filter.use_moving_average_filter) {
 		if (out_relation->relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) {
 			xrt_vec3 pos = out_relation->pose.position;
@@ -952,10 +1026,13 @@ static void
 setup_ui(TrackerSlam &t)
 {
 	t.pred_combo.count = SLAM_PRED_COUNT;
-	t.pred_combo.options = "None\0Interpolate SLAM poses\0Also gyro\0Also accel (needs gravity correction)\0\0";
+	t.pred_combo.options = "None\0Interpolate SLAM poses\0Also gyro\0Also accel\0Latest IMU\0";
 	t.pred_combo.value = (int *)&t.pred_type;
-	u_sink_debug_init(&t.ui_left_sink);
-	u_sink_debug_init(&t.ui_right_sink);
+	t.ui_sink = vector<u_sink_debug>(t.cam_count);
+	for (size_t i = 0; i < t.ui_sink.size(); i++) {
+		u_sink_debug_init(&t.ui_sink[i]);
+	}
+	os_mutex_init(&t.lock_ff);
 	m_ff_vec3_f32_alloc(&t.gyro_ff, 1000);
 	m_ff_vec3_f32_alloc(&t.accel_ff, 1000);
 	m_ff_vec3_f32_alloc(&t.filter.pos_ff, 1000);
@@ -964,8 +1041,21 @@ setup_ui(TrackerSlam &t)
 	u_var_add_root(&t, "SLAM Tracker", true);
 	u_var_add_log_level(&t, &t.log_level, "Log Level");
 	u_var_add_bool(&t, &t.submit, "Submit data to SLAM");
+
+	u_var_button_cb reset_state_cb = [](void *t_ptr) {
+		TrackerSlam &t = *(TrackerSlam *)t_ptr;
+
+		vit_result_t vres = t.vit.tracker_reset(t.tracker);
+		if (vres != VIT_SUCCESS) {
+			SLAM_WARN("Failed to reset VIT tracker");
+		}
+	};
+	t.reset_state_btn.cb = reset_state_cb;
+	t.reset_state_btn.ptr = &t;
+	u_var_add_button(&t, &t.reset_state_btn, "Reset tracker state");
+
 	u_var_add_bool(&t, &t.gt.override_tracking, "Track with ground truth (if available)");
-	euroc_recorder_add_ui(t.euroc_recorder, &t);
+	euroc_recorder_add_ui(t.euroc_recorder, &t, "");
 
 	u_var_add_gui_header(&t, NULL, "Trajectory Filter");
 	u_var_add_bool(&t, &t.filter.use_moving_average_filter, "Enable moving average filter");
@@ -982,11 +1072,15 @@ setup_ui(TrackerSlam &t)
 
 	u_var_add_gui_header(&t, NULL, "Prediction");
 	u_var_add_combo(&t, &t.pred_combo, "Prediction Type");
+	u_var_add_i32(&t, &t.dbg_pred_every, "Debug prediction skips (try 30)");
 	u_var_add_ro_ff_vec3_f32(&t, t.gyro_ff, "Gyroscope");
 	u_var_add_ro_ff_vec3_f32(&t, t.accel_ff, "Accelerometer");
 	u_var_add_f32(&t, &t.gravity_correction.z, "Gravity Correction");
-	u_var_add_sink_debug(&t, &t.ui_left_sink, "Left Camera");
-	u_var_add_sink_debug(&t, &t.ui_right_sink, "Right Camera");
+	for (size_t i = 0; i < t.ui_sink.size(); i++) {
+		char label[] = "Camera NNNN";
+		(void)snprintf(label, sizeof(label), "Camera %zu", i);
+		u_var_add_sink_debug(&t, &t.ui_sink[i], label);
+	}
 
 	u_var_add_gui_header(&t, NULL, "Stats");
 	u_var_add_ro_ftext(&t, "\n%s", "Record to CSV files");
@@ -1001,89 +1095,129 @@ setup_ui(TrackerSlam &t)
 }
 
 static void
-add_camera_calibration(const TrackerSlam &t,
-                       const t_stereo_camera_calibration *stereo_calib,
-                       const t_slam_calib_extras *extra_calib)
+add_camera_calibration(const TrackerSlam &t, const t_slam_camera_calibration *calib, uint32_t cam_index)
 {
-	for (int i = 0; i < NUM_CAMS; i++) {
-		const t_camera_calibration &view = stereo_calib->view[i];
-		const auto &extra = extra_calib->cams[i];
-		const auto params = make_shared<FPARAMS_ACC>();
+	const t_camera_calibration &view = calib->base;
 
-		params->cam_index = i;
-		params->width = view.image_size_pixels.w;
-		params->height = view.image_size_pixels.h;
-		params->frequency = extra.frequency;
+	vit_camera_calibration params = {};
+	params.camera_index = cam_index;
+	params.width = view.image_size_pixels.w;
+	params.height = view.image_size_pixels.h;
+	params.frequency = calib->frequency;
 
-		params->fx = view.intrinsics[0][0];
-		params->fy = view.intrinsics[1][1];
-		params->cx = view.intrinsics[0][2];
-		params->cy = view.intrinsics[1][2];
+	params.fx = view.intrinsics[0][0];
+	params.fy = view.intrinsics[1][1];
+	params.cx = view.intrinsics[0][2];
+	params.cy = view.intrinsics[1][2];
 
-		params->distortion_model = view.use_fisheye ? "kb4" : string{"rt"} + to_string(view.distortion_num);
-		if (view.use_fisheye) { // Kannala-brandt pinhole (OpenCV's "fisheye")
-			params->distortion.assign(view.distortion_fisheye, std::end(view.distortion_fisheye));
-			SLAM_ASSERT_(params->distortion.size() == 4);
-		} else { // Radial-tangential pinhole
-			params->distortion.assign(view.distortion, view.distortion + view.distortion_num);
+	switch (view.distortion_model) {
+	case T_DISTORTION_OPENCV_RADTAN_8: {
+		params.model = VIT_CAMERA_DISTORTION_RT8;
+		const size_t size = sizeof(struct t_camera_calibration_rt8_params) + sizeof(double);
+		params.distortion_count = size / sizeof(double);
+		SLAM_ASSERT_(params.distortion_count == 9);
 
-			if (params->distortion_model == "rt8") { // rt8 has a ninth parameter rpmax ("metric_radius")
-				params->distortion.push_back(extra.rpmax);
-			}
-		}
+		memcpy(params.distortion, &view.rt8, size);
 
-		xrt_matrix_4x4 T; // Row major T_imu_cam
-		math_matrix_4x4_transpose(&extra.T_imu_cam, &T);
-		params->t_imu_cam = cv::Matx<float, 4, 4>{T.v};
+		// -1 metric radius tells Basalt to estimate the metric radius on its own.
+		params.distortion[8] = -1.f;
+		break;
+	}
+	case T_DISTORTION_WMR: {
+		params.model = VIT_CAMERA_DISTORTION_RT8;
+		const size_t size = sizeof(struct t_camera_calibration_rt8_params) + sizeof(double);
+		params.distortion_count = size / sizeof(double);
+		SLAM_ASSERT_(params.distortion_count == 9);
 
-		shared_ptr<FRESULT_ACC> result{};
-		t.slam->use_feature(F_ADD_CAMERA_CALIBRATION, params, result);
+		memcpy(params.distortion, &view.wmr, size);
+
+		params.distortion[8] = view.wmr.rpmax;
+
+		break;
+	}
+	case T_DISTORTION_FISHEYE_KB4: {
+		params.model = VIT_CAMERA_DISTORTION_KB4;
+		const size_t size = sizeof(struct t_camera_calibration_kb4_params);
+		params.distortion_count = size / sizeof(double);
+		SLAM_ASSERT_(params.distortion_count == 4);
+
+		memcpy(params.distortion, &view.kb4, size);
+		break;
+	}
+	default:
+		SLAM_ASSERT(false, "SLAM doesn't support distortion type %s",
+		            t_stringify_camera_distortion_model(view.distortion_model));
+		break;
+	}
+
+	xrt_matrix_4x4 T; // Row major T_imu_cam
+	math_matrix_4x4_transpose(&calib->T_imu_cam, &T);
+
+	// Converts the xrt_matrix_4x4 from float to double
+	for (size_t i = 0; i < ARRAY_SIZE(params.transform); ++i)
+		params.transform[i] = T.v[i];
+
+	vit_result_t vres = t.vit.tracker_add_camera_calibration(t.tracker, &params);
+	if (vres != VIT_SUCCESS) {
+		SLAM_ERROR("Failed to add camera calibration for camera %u", cam_index);
 	}
 }
 
 static void
-add_imu_calibration(const TrackerSlam &t, const t_imu_calibration *imu_calib, const t_slam_calib_extras *extra_calib)
+add_imu_calibration(const TrackerSlam &t, const t_slam_imu_calibration *imu_calib)
 {
-	const auto params = make_shared<FPARAMS_AIC>();
-	params->imu_index = 0; // Multiple IMU setups unsupported
-	params->frequency = extra_calib->imu_frequency;
+	vit_imu_calibration_t params = {};
+	params.imu_index = 0;
+	params.frequency = imu_calib->frequency;
 
-	const t_inertial_calibration &accel = imu_calib->accel;
-	params->accel.transform = cv::Matx<double, 3, 3>{&accel.transform[0][0]};
-	params->accel.offset = cv::Matx<double, 3, 1>{&accel.offset[0]};
-	params->accel.bias_std = cv::Matx<double, 3, 1>{&accel.bias_std[0]};
-	params->accel.noise_std = cv::Matx<double, 3, 1>{&accel.noise_std[0]};
+	// TODO improve memcpy size calculation
 
-	const t_inertial_calibration &gyro = imu_calib->gyro;
-	params->gyro.transform = cv::Matx<double, 3, 3>{&gyro.transform[0][0]};
-	params->gyro.offset = cv::Matx<double, 3, 1>{&gyro.offset[0]};
-	params->gyro.bias_std = cv::Matx<double, 3, 1>{&gyro.bias_std[0]};
-	params->gyro.noise_std = cv::Matx<double, 3, 1>{&gyro.noise_std[0]};
+	const t_inertial_calibration &accel = imu_calib->base.accel;
+	memcpy(params.accel.transform, accel.transform, sizeof(double) * 9);
+	memcpy(params.accel.offset, accel.offset, sizeof(double) * 3);
+	memcpy(params.accel.bias_std, accel.bias_std, sizeof(double) * 3);
+	memcpy(params.accel.noise_std, accel.noise_std, sizeof(double) * 3);
 
-	shared_ptr<FRESULT_AIC> result{};
-	t.slam->use_feature(F_ADD_IMU_CALIBRATION, params, result);
+	const t_inertial_calibration &gyro = imu_calib->base.gyro;
+	memcpy(params.gyro.transform, gyro.transform, sizeof(double) * 9);
+	memcpy(params.gyro.offset, gyro.offset, sizeof(double) * 3);
+	memcpy(params.gyro.bias_std, gyro.bias_std, sizeof(double) * 3);
+	memcpy(params.gyro.noise_std, gyro.noise_std, sizeof(double) * 3);
+
+	vit_result_t vres = t.vit.tracker_add_imu_calibration(t.tracker, &params);
+	if (vres != VIT_SUCCESS) {
+		SLAM_ERROR("Failed to add imu calibration");
+	}
 }
 
 static void
-send_calibration(const TrackerSlam &t, const t_slam_tracker_config &c)
+send_calibration(const TrackerSlam &t, const t_slam_calibration &c)
 {
+	vit_tracker_capability_t caps;
+	vit_result_t vres = t.vit.tracker_get_capabilities(t.tracker, &caps);
+	if (vres != VIT_SUCCESS) {
+		SLAM_ERROR("Failed to get VIT tracker capabilities");
+		return;
+	}
+
 	// Try to send camera calibration data to the SLAM system
-	if (c.stereo_calib && c.extra_calib && t.slam->supports_feature(F_ADD_CAMERA_CALIBRATION)) {
-		SLAM_INFO("Sending Camera calibration from Monado");
-		add_camera_calibration(t, c.stereo_calib, c.extra_calib);
+	if ((caps & VIT_TRACKER_CAPABILITY_CAMERA_CALIBRATION) != 0) {
+		for (int i = 0; i < c.cam_count; i++) {
+			SLAM_INFO("Sending Camera %d calibration from Monado", i);
+			add_camera_calibration(t, &c.cams[i], i);
+		}
 	} else {
-		SLAM_INFO("Cameras will use the calibration provided by the SLAM_CONFIG file");
+		SLAM_WARN("Tracker doesn't support camera calibration");
 	}
 
 	// Try to send IMU calibration data to the SLAM system
-	if (c.imu_calib && c.extra_calib && t.slam->supports_feature(F_ADD_IMU_CALIBRATION)) {
+	if ((caps & VIT_TRACKER_CAPABILITY_IMU_CALIBRATION) != 0) {
 		SLAM_INFO("Sending IMU calibration from Monado");
-		add_imu_calibration(t, c.imu_calib, c.extra_calib);
+		add_imu_calibration(t, &c.imu);
 	} else {
-		SLAM_INFO("The IMU will use the calibration provided by the SLAM_CONFIG file");
+		SLAM_WARN("Tracker doesn't support IMU calibration");
 	}
 }
-
 
 } // namespace xrt::auxiliary::tracking::slam
 
@@ -1099,6 +1233,8 @@ using namespace xrt::auxiliary::tracking::slam;
 extern "C" void
 t_slam_get_tracked_pose(struct xrt_tracked_slam *xts, timepoint_ns when_ns, struct xrt_space_relation *out_relation)
 {
+	XRT_TRACE_MARKER();
+
 	auto &t = *container_of(xts, TrackerSlam, base);
 
 	//! @todo This should not be cached, the same timestamp can be requested at a
@@ -1111,10 +1247,10 @@ t_slam_get_tracked_pose(struct xrt_tracked_slam *xts, timepoint_ns when_ns, stru
 	flush_poses(t);
 
 	predict_pose(t, when_ns, out_relation);
-	t.pred_traj_writer->push(when_ns, out_relation->pose);
+	t.pred_traj_writer->push({when_ns, out_relation->pose});
 
 	filter_pose(t, when_ns, out_relation);
-	t.filt_traj_writer->push(when_ns, out_relation->pose);
+	t.filt_traj_writer->push({when_ns, out_relation->pose});
 
 	t.last_rel = *out_relation;
 	t.last_ts = when_ns;
@@ -1126,94 +1262,194 @@ t_slam_get_tracked_pose(struct xrt_tracked_slam *xts, timepoint_ns when_ns, stru
 
 //! Receive and register ground truth to use for trajectory error metrics.
 extern "C" void
-t_slam_gt_sink_push(struct xrt_pose_sink *sink, timepoint_ns ts, struct xrt_pose *pose)
+t_slam_gt_sink_push(struct xrt_pose_sink *sink, xrt_pose_sample *sample)
 {
+	XRT_TRACE_MARKER();
+
 	auto &t = *container_of(sink, TrackerSlam, gt_sink);
 
 	if (t.gt.trajectory->empty()) {
-		t.gt.origin = *pose;
+		t.gt.origin = sample->pose;
 		gt_ui_setup(t);
 	}
 
-	t.gt.trajectory->insert_or_assign(ts, *pose);
+	t.gt.trajectory->insert_or_assign(sample->timestamp_ns, sample->pose);
+	xrt_sink_push_pose(t.euroc_recorder->gt, sample);
+}
+
+//! Receive and register masks to use in the next image
+extern "C" void
+t_slam_hand_mask_sink_push(struct xrt_hand_masks_sink *sink, struct xrt_hand_masks_sample *hand_masks)
+{
+	XRT_TRACE_MARKER();
+
+	auto &t = *container_of(sink, TrackerSlam, hand_masks_sink);
+	unique_lock lock(t.last_hand_masks_mutex);
+	t.last_hand_masks = *hand_masks;
 }
 
 //! Receive and send IMU samples to the external SLAM system
 extern "C" void
-t_slam_imu_sink_push(struct xrt_imu_sink *sink, struct xrt_imu_sample *s)
+t_slam_receive_imu(struct xrt_imu_sink *sink, struct xrt_imu_sample *s)
 {
+	XRT_TRACE_MARKER();
+
 	auto &t = *container_of(sink, TrackerSlam, imu_sink);
 
 	timepoint_ns ts = s->timestamp_ns;
 	xrt_vec3_f64 a = s->accel_m_s2;
 	xrt_vec3_f64 w = s->gyro_rad_secs;
 
+	timepoint_ns now = (timepoint_ns)os_monotonic_get_ns();
+	SLAM_TRACE("[%ld] imu t=%ld  a=[%f,%f,%f] w=[%f,%f,%f]", now, ts, a.x, a.y, a.z, w.x, w.y, w.z);
+	// Check monotonically increasing timestamps
+	if (ts <= t.last_imu_ts) {
+		SLAM_WARN("Sample (%ld) is older than last (%ld)", ts, t.last_imu_ts);
+		return;
+	}
+	t.last_imu_ts = ts;
+
 	//! @todo There are many conversions like these between xrt and
 	//! slam_tracker.hpp types. Implement a casting mechanism to avoid copies.
-	imu_sample sample{ts, a.x, a.y, a.z, w.x, w.y, w.z};
-	if (t.submit) {
-		t.slam->push_imu_sample(sample);
-	}
-	SLAM_TRACE("imu t=%ld a=[%f,%f,%f] w=[%f,%f,%f]", ts, a.x, a.y, a.z, w.x, w.y, w.z);
+	vit_imu_sample_t sample = {};
+	sample.timestamp = ts;
+	sample.ax = a.x;
+	sample.ay = a.y;
+	sample.az = a.z;
+	sample.wx = w.x;
+	sample.wy = w.y;
+	sample.wz = w.z;
 
-	// Check monotonically increasing timestamps
-	SLAM_DASSERT(ts > t.last_imu_ts, "Sample (%ld) is older than last (%ld)", ts, t.last_imu_ts);
-	t.last_imu_ts = ts;
+	if (t.submit) {
+		t.vit.tracker_push_imu_sample(t.tracker, &sample);
+	}
 
 	xrt_sink_push_imu(t.euroc_recorder->imu, s);
 
 	struct xrt_vec3 gyro = {(float)w.x, (float)w.y, (float)w.z};
 	struct xrt_vec3 accel = {(float)a.x, (float)a.y, (float)a.z};
+	os_mutex_lock(&t.lock_ff);
 	m_ff_vec3_f32_push(t.gyro_ff, &gyro, ts);
 	m_ff_vec3_f32_push(t.accel_ff, &accel, ts);
+	os_mutex_unlock(&t.lock_ff);
 }
 
 //! Push the frame to the external SLAM system
 static void
-push_frame(TrackerSlam &t, struct xrt_frame *frame, bool is_left)
+receive_frame(TrackerSlam &t, struct xrt_frame *frame, uint32_t cam_index)
 {
-	SLAM_DASSERT(t.last_left_ts != INT64_MIN || is_left, "First frame was a right frame");
+	XRT_TRACE_MARKER();
 
-	// Construct and send the image sample
-	cv::Mat img = t.cv_wrapper->wrap(frame);
 	SLAM_DASSERT_(frame->timestamp < INT64_MAX);
-	img_sample sample{(int64_t)frame->timestamp, img, is_left};
-	if (t.submit) {
-		t.slam->push_frame(sample);
+
+	// Return early if we don't submit
+	if (!t.submit) {
+		return;
 	}
-	SLAM_TRACE("%s frame t=%lu", is_left ? " left" : "right", frame->timestamp);
+
+	if (cam_index == t.cam_count - 1) {
+		flush_poses(t); // Useful to flush SLAM poses when no openxr app is open
+	}
+
+	SLAM_DASSERT(t.last_cam_ts[0] != INT64_MIN || cam_index == 0, "First frame was not a cam0 frame");
 
 	// Check monotonically increasing timestamps
-	timepoint_ns &last_ts = is_left ? t.last_left_ts : t.last_right_ts;
-	SLAM_DASSERT(sample.timestamp > last_ts, "Frame (%ld) is older than last (%ld)", sample.timestamp, last_ts);
-	last_ts = sample.timestamp;
+	timepoint_ns &last_ts = t.last_cam_ts[cam_index];
+	timepoint_ns ts = (int64_t)frame->timestamp;
+	SLAM_TRACE("[%ld] cam%d frame t=%ld", os_monotonic_get_ns(), cam_index, ts);
+	if (last_ts >= ts) {
+		SLAM_WARN("Frame (%ld) is older than last (%ld)", ts, last_ts);
+	}
+	last_ts = ts;
+
+	// Construct and send the image sample
+	vit_img_sample sample = {};
+	sample.cam_index = cam_index;
+	sample.timestamp = ts;
+
+	sample.data = frame->data;
+	sample.width = frame->width;
+	sample.height = frame->height;
+	sample.stride = frame->stride;
+	sample.size = frame->size;
+
+	// TODO check format before
+	switch (frame->format) {
+	case XRT_FORMAT_L8: sample.format = VIT_IMAGE_FORMAT_L8; break;
+	case XRT_FORMAT_R8G8B8: sample.format = VIT_IMAGE_FORMAT_R8G8B8; break;
+	default: SLAM_ERROR("Unknown image format"); return;
+	}
+
+	xrt_hand_masks_sample hand_masks{};
+	{
+		unique_lock lock(t.last_hand_masks_mutex);
+		hand_masks = t.last_hand_masks;
+	}
+
+	auto &view = hand_masks.views[cam_index];
+	std::vector<vit_mask_t> masks;
+	if (view.enabled) {
+		for (auto &hand : view.hands) {
+			if (!hand.enabled) {
+				continue;
+			}
+			vit_mask_t mask{};
+			mask.x = hand.rect.x;
+			mask.y = hand.rect.y;
+			mask.w = hand.rect.w;
+			mask.h = hand.rect.h;
+			masks.push_back(mask);
+		}
+
+		sample.mask_count = masks.size();
+		sample.masks = masks.empty() ? nullptr : masks.data();
+	}
+
+	{
+		XRT_TRACE_IDENT(slam_push);
+		t.vit.tracker_push_img_sample(t.tracker, &sample);
+	}
 }
 
-extern "C" void
-t_slam_frame_sink_push_left(struct xrt_frame_sink *sink, struct xrt_frame *frame)
-{
-	auto &t = *container_of(sink, TrackerSlam, left_sink);
-	push_frame(t, frame, true);
-	u_sink_debug_push_frame(&t.ui_left_sink, frame);
-	xrt_sink_push_frame(t.euroc_recorder->left, frame);
-}
+#define DEFINE_RECEIVE_CAM(cam_id)                                                                                     \
+	extern "C" void t_slam_receive_cam##cam_id(struct xrt_frame_sink *sink, struct xrt_frame *frame)               \
+	{                                                                                                              \
+		auto &t = *container_of(sink, TrackerSlam, cam_sinks[cam_id]);                                         \
+		receive_frame(t, frame, cam_id);                                                                       \
+		u_sink_debug_push_frame(&t.ui_sink[cam_id], frame);                                                    \
+		xrt_sink_push_frame(t.euroc_recorder->cams[cam_id], frame);                                            \
+	}
 
-extern "C" void
-t_slam_frame_sink_push_right(struct xrt_frame_sink *sink, struct xrt_frame *frame)
-{
-	auto &t = *container_of(sink, TrackerSlam, right_sink);
-	push_frame(t, frame, false);
-	u_sink_debug_push_frame(&t.ui_right_sink, frame);
-	xrt_sink_push_frame(t.euroc_recorder->right, frame);
-}
+DEFINE_RECEIVE_CAM(0)
+DEFINE_RECEIVE_CAM(1)
+DEFINE_RECEIVE_CAM(2)
+DEFINE_RECEIVE_CAM(3)
+DEFINE_RECEIVE_CAM(4)
+
+//! Define a function for each XRT_TRACKING_MAX_SLAM_CAMS and reference it in this array
+void (*t_slam_receive_cam[XRT_TRACKING_MAX_SLAM_CAMS])(xrt_frame_sink *, xrt_frame *) = {
+    t_slam_receive_cam0, //
+    t_slam_receive_cam1, //
+    t_slam_receive_cam2, //
+    t_slam_receive_cam3, //
+    t_slam_receive_cam4, //
+};
+
 
 extern "C" void
 t_slam_node_break_apart(struct xrt_frame_node *node)
 {
 	auto &t = *container_of(node, TrackerSlam, node);
-	t.slam->finalize();
-	t.slam->stop();
-	os_thread_helper_stop_and_wait(&t.oth);
+	if (t.ovr_tracker != NULL) {
+		t_openvr_tracker_stop(t.ovr_tracker);
+	}
+
+	vit_result_t vres = t.vit.tracker_stop(t.tracker);
+	if (vres != VIT_SUCCESS) {
+		SLAM_ERROR("Failed to stop VIT tracker");
+		return;
+	}
+
 	SLAM_DEBUG("SLAM tracker dismantled");
 }
 
@@ -1223,7 +1459,9 @@ t_slam_node_destroy(struct xrt_frame_node *node)
 	auto t_ptr = container_of(node, TrackerSlam, node);
 	auto &t = *t_ptr; // Needed by SLAM_DEBUG
 	SLAM_DEBUG("Destroying SLAM tracker");
-	os_thread_helper_destroy(&t_ptr->oth);
+	if (t.ovr_tracker != NULL) {
+		t_openvr_tracker_destroy(t.ovr_tracker);
+	}
 	delete t.gt.trajectory;
 	delete t.slam_times_writer;
 	delete t.slam_features_writer;
@@ -1231,52 +1469,51 @@ t_slam_node_destroy(struct xrt_frame_node *node)
 	delete t.pred_traj_writer;
 	delete t.filt_traj_writer;
 	u_var_remove_root(t_ptr);
-	u_sink_debug_destroy(&t.ui_left_sink);
-	u_sink_debug_destroy(&t.ui_right_sink);
+	for (size_t i = 0; i < t.ui_sink.size(); i++) {
+		u_sink_debug_destroy(&t.ui_sink[i]);
+	}
 	m_ff_vec3_f32_free(&t.gyro_ff);
 	m_ff_vec3_f32_free(&t.accel_ff);
+	os_mutex_destroy(&t.lock_ff);
 	m_ff_vec3_f32_free(&t.filter.pos_ff);
 	m_ff_vec3_f32_free(&t.filter.rot_ff);
-	delete t_ptr->slam;
-	delete t_ptr->cv_wrapper;
+
+	t_ptr->vit.tracker_destroy(t_ptr->tracker);
+	t_vit_bundle_unload(&t_ptr->vit);
+
 	delete t_ptr;
 }
 
-//! Runs the external SLAM system in a separate thread
-extern "C" void *
-t_slam_run(void *ptr)
-{
-	auto &t = *(TrackerSlam *)ptr;
-	SLAM_DEBUG("SLAM tracker starting");
-	t.slam->start();
-	return NULL;
-}
-
-//! Starts t_slam_run
 extern "C" int
 t_slam_start(struct xrt_tracked_slam *xts)
 {
 	auto &t = *container_of(xts, TrackerSlam, base);
-	int ret = os_thread_helper_start(&t.oth, t_slam_run, &t);
-	SLAM_ASSERT(ret == 0, "Unable to start thread");
+	vit_result_t vres = t.vit.tracker_start(t.tracker);
+	if (vres != VIT_SUCCESS) {
+		SLAM_ERROR("Failed to start VIT tracker");
+		return -1;
+	}
+
 	SLAM_DEBUG("SLAM tracker started");
-	return ret;
+	return 0;
 }
 
 extern "C" void
 t_slam_fill_default_config(struct t_slam_tracker_config *config)
 {
 	config->log_level = debug_get_log_option_slam_log();
+	config->vit_system_library_path = debug_get_option_vit_system_library_path();
 	config->slam_config = debug_get_option_slam_config();
+	config->slam_ui = debug_get_bool_option_slam_ui();
 	config->submit_from_start = debug_get_bool_option_slam_submit_from_start();
+	config->openvr_groundtruth_device = int(debug_get_num_option_slam_openvr_groundtruth_device());
 	config->prediction = t_slam_prediction_type(debug_get_num_option_slam_prediction_type());
 	config->write_csvs = debug_get_bool_option_slam_write_csvs();
 	config->csv_path = debug_get_option_slam_csv_path();
 	config->timing_stat = debug_get_bool_option_slam_timing_stat();
 	config->features_stat = debug_get_bool_option_slam_features_stat();
-	config->stereo_calib = NULL;
-	config->imu_calib = NULL;
-	config->extra_calib = NULL;
+	config->cam_count = int(debug_get_num_option_slam_cam_count());
+	config->slam_calib = NULL;
 }
 
 extern "C" int
@@ -1293,67 +1530,81 @@ t_slam_create(struct xrt_frame_context *xfctx,
 
 	enum u_logging_level log_level = config->log_level;
 
-	// Check that the external SLAM system built is compatible
-	int ima = IMPLEMENTATION_VERSION_MAJOR;
-	int imi = IMPLEMENTATION_VERSION_MINOR;
-	int ipa = IMPLEMENTATION_VERSION_PATCH;
-	int hma = HEADER_VERSION_MAJOR;
-	int hmi = HEADER_VERSION_MINOR;
-	int hpa = HEADER_VERSION_PATCH;
-	U_LOG_IFL_I(log_level, "External SLAM system built %d.%d.%d, expected %d.%d.%d.", ima, imi, ipa, hma, hmi, hpa);
-	if (IMPLEMENTATION_VERSION_MAJOR != HEADER_VERSION_MAJOR) {
-		U_LOG_IFL_E(log_level, "Incompatible external SLAM system found.");
+	std::unique_ptr<TrackerSlam> t_ptr = std::make_unique<TrackerSlam>();
+	TrackerSlam &t = *t_ptr;
+
+	t.log_level = log_level;
+
+	SLAM_INFO("Loading VIT system library from VIT_SYSTEM_LIBRARY_PATH='%s'", config->vit_system_library_path);
+
+	if (!t_vit_bundle_load(&t.vit, config->vit_system_library_path)) {
+		SLAM_ERROR("Failed to load VIT system library from '%s'", config->vit_system_library_path);
 		return -1;
 	}
-	U_LOG_IFL_I(log_level, "Initializing compatible external SLAM system.");
 
 	// Check the user has provided a SLAM_CONFIG file
 	const char *config_file = config->slam_config;
-	bool some_calib = config->stereo_calib || config->imu_calib;
+	bool some_calib = config->slam_calib != nullptr;
 	if (!config_file && !some_calib) {
-		U_LOG_IFL_W(log_level, "Unable to determine sensor calibration, did you forget to set SLAM_CONFIG?");
+		SLAM_WARN("Unable to determine sensor calibration, did you forget to set SLAM_CONFIG?");
 		return -1;
 	}
 
-	auto &t = *(new TrackerSlam{});
-	t.log_level = log_level;
-	t.cv_wrapper = new MatFrame();
+	struct vit_config system_config = {};
+	system_config.file = config_file;
+	system_config.cam_count = config->cam_count;
+	system_config.show_ui = config->slam_ui;
+
+	vit_result_t vres = t.vit.tracker_create(&system_config, &t.tracker);
+	if (vres != VIT_SUCCESS) {
+		SLAM_ERROR("Failed to create VIT tracker (%d)", vres);
+		return -1;
+	}
+
+	vres = t.vit.tracker_get_pose_capabilities(t.tracker, &t.caps);
+	if (vres != VIT_SUCCESS) {
+		SLAM_ERROR("Failed to get VIT tracker pose capabilities (%d)", vres);
+		return -1;
+	}
 
 	t.base.get_tracked_pose = t_slam_get_tracked_pose;
 
-	std::string config_file_string = std::string(config_file ? config_file : "DEFAULT");
-	t.slam = new slam_tracker{config_file_string};
-
 	if (!config_file) {
 		SLAM_INFO("Using calibration from driver and default pipeline settings");
-		send_calibration(t, *config);
+		send_calibration(t, *config->slam_calib); // Not null because of `some_calib`
 	} else {
 		SLAM_INFO("Using sensor calibration provided by the SLAM_CONFIG file");
 	}
 
-	t.slam->initialize();
+	SLAM_ASSERT(t_slam_receive_cam[ARRAY_SIZE(t_slam_receive_cam) - 1] != nullptr, "See `cam_sink_push` docs");
+	t.sinks.cam_count = config->cam_count;
+	for (int i = 0; i < XRT_TRACKING_MAX_SLAM_CAMS; i++) {
+		t.cam_sinks[i].push_frame = t_slam_receive_cam[i];
+		t.sinks.cams[i] = &t.cam_sinks[i];
+	}
 
-	t.left_sink.push_frame = t_slam_frame_sink_push_left;
-	t.right_sink.push_frame = t_slam_frame_sink_push_right;
-	t.imu_sink.push_imu = t_slam_imu_sink_push;
-	t.gt_sink.push_pose = t_slam_gt_sink_push;
-
-	t.sinks.left = &t.left_sink;
-	t.sinks.right = &t.right_sink;
+	t.imu_sink.push_imu = t_slam_receive_imu;
 	t.sinks.imu = &t.imu_sink;
+
+	t.gt_sink.push_pose = t_slam_gt_sink_push;
 	t.sinks.gt = &t.gt_sink;
 
+	t.hand_masks_sink.push_hand_masks = t_slam_hand_mask_sink_push;
+	t.sinks.hand_masks = &t.hand_masks_sink;
+
 	t.submit = config->submit_from_start;
+	t.cam_count = config->cam_count;
 
 	t.node.break_apart = t_slam_node_break_apart;
 	t.node.destroy = t_slam_node_destroy;
 
-	int ret = os_thread_helper_init(&t.oth);
-	SLAM_ASSERT(ret == 0, "Unable to initialize thread");
-
 	xrt_frame_context_add(xfctx, &t.node);
 
-	t.euroc_recorder = euroc_recorder_create(xfctx, NULL, false);
+	t.euroc_recorder = euroc_recorder_create(xfctx, NULL, t.cam_count, false);
+
+	t.last_imu_ts = INT64_MIN;
+	t.last_cam_ts = vector<timepoint_ns>(t.cam_count, INT64_MIN);
+	t.last_hand_masks = xrt_hand_masks_sample{};
 
 	t.pred_type = config->prediction;
 
@@ -1362,53 +1613,32 @@ t_slam_create(struct xrt_frame_context *xfctx,
 
 	t.gt.trajectory = new Trajectory{};
 
-	// Setup timing extension
-
-	// Probe for timing extension.
-	bool has_timing_extension = t.slam->supports_feature(F_ENABLE_POSE_EXT_TIMING);
-	t.timing.ext_available = has_timing_extension;
-
-	// We provide two timing columns by default, even if there is no extension support
-	t.timing.columns = {"sampled", "received_by_monado"};
-
-	if (has_timing_extension) {
-		bool enable_timing_extension = config->timing_stat;
-
-		const auto params = make_shared<FPARAMS_EPET>(enable_timing_extension);
-		shared_ptr<void> result;
-		t.slam->use_feature(F_ENABLE_POSE_EXT_TIMING, params, result);
-		vector<string> cols = *std::static_pointer_cast<FRESULT_EPET>(result);
-
-		t.timing.columns.insert(t.timing.columns.begin() + 1, cols.begin(), cols.end());
-		t.timing.ext_enabled = enable_timing_extension;
-	}
-
-	// Setup features extension
-	bool has_features_extension = t.slam->supports_feature(F_ENABLE_POSE_EXT_FEATURES);
-	t.features.ext_available = has_features_extension;
-	if (has_features_extension) {
-		bool enable_features_extension = config->features_stat;
-
-		const auto params = make_shared<FPARAMS_EPET>(enable_features_extension);
-		shared_ptr<void> _;
-		t.slam->use_feature(F_ENABLE_POSE_EXT_FEATURES, params, _);
-
-		t.features.ext_enabled = enable_features_extension;
-	}
-
 	// Setup CSV files
 	bool write_csvs = config->write_csvs;
 	string dir = config->csv_path;
-	t.slam_times_writer = new TimingWriter{dir, "timing.csv", write_csvs, t.timing.columns};
-	t.slam_features_writer = new FeaturesWriter{dir, "features.csv", write_csvs};
-	t.slam_traj_writer = new TrajectoryWriter{dir, "tracking.csv", write_csvs};
-	t.pred_traj_writer = new TrajectoryWriter{dir, "prediction.csv", write_csvs};
-	t.filt_traj_writer = new TrajectoryWriter{dir, "filtering.csv", write_csvs};
+	t.slam_times_writer = new TimingWriter(dir, "timing.csv", write_csvs, t.timing.columns);
+	t.slam_features_writer = new FeaturesWriter(dir, "features.csv", write_csvs, t.cam_count);
+	t.slam_traj_writer = new TrajectoryWriter(dir, "tracking.csv", write_csvs);
+	t.pred_traj_writer = new TrajectoryWriter(dir, "prediction.csv", write_csvs);
+	t.filt_traj_writer = new TrajectoryWriter(dir, "filtering.csv", write_csvs);
 
 	setup_ui(t);
 
-	*out_xts = &t.base;
-	*out_sink = &t.sinks;
+	// Setup OpenVR groundtruth tracker
+	if (config->openvr_groundtruth_device > 0) {
+		enum openvr_device dev_class = openvr_device(config->openvr_groundtruth_device);
+		const double freq = 1000.0f;
+		t.ovr_tracker = t_openvr_tracker_create(freq, &dev_class, &t.sinks.gt, 1);
+		if (t.ovr_tracker != NULL) {
+			t_openvr_tracker_start(t.ovr_tracker);
+		}
+	}
+
+	// Get ownership
+	TrackerSlam *tracker = t_ptr.release();
+
+	*out_xts = &tracker->base;
+	*out_sink = &tracker->sinks;
 
 	SLAM_DEBUG("SLAM tracker created");
 	return 0;

@@ -80,14 +80,32 @@ if(XRT_HAVE_D3D11)
 	target_sources(st_oxr PRIVATE oxr_session_gfx_d3d11.c oxr_swapchain_d3d11.c oxr_d3d11.cpp)
 endif()
 
+if(XRT_HAVE_D3D12)
+	target_compile_definitions(st_oxr PRIVATE XR_USE_GRAPHICS_API_D3D12)
+	target_sources(st_oxr PRIVATE oxr_session_gfx_d3d12.c oxr_swapchain_d3d12.c oxr_d3d12.cpp)
+	target_link_libraries(st_oxr PRIVATE aux_d3d)
+endif()
+
 if(ANDROID)
 	target_compile_definitions(st_oxr PRIVATE XR_USE_PLATFORM_ANDROID)
 	target_sources(st_oxr PRIVATE oxr_session_gfx_gles_android.c)
 	target_link_libraries(st_oxr PRIVATE aux_android)
 endif()
+if(WIN32)
+	target_link_libraries(st_oxr PRIVATE kernel32)
+	target_compile_definitions(st_oxr PRIVATE XR_USE_PLATFORM_WIN32)
+endif()
+
+if(WIN32 AND XRT_HAVE_OPENGL)
+	target_sources(st_oxr PRIVATE oxr_session_gfx_gl_win32.c)
+endif()
 
 if(WIN32)
 	target_compile_definitions(st_oxr PRIVATE XR_USE_PLATFORM_WIN32)
+endif()
+
+if(XRT_FEATURE_OPENXR_LAYER_PASSTHROUGH)
+	target_sources(st_oxr PRIVATE oxr_api_passthrough.c oxr_passthrough.c)
 endif()
 
 target_link_libraries(

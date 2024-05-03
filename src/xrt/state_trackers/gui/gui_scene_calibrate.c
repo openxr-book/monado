@@ -27,6 +27,7 @@
 
 #include "gui_common.h"
 #include "gui_imgui.h"
+#include "gui_ogl.h"
 
 #include <assert.h>
 
@@ -134,15 +135,14 @@ draw_texture(struct gui_ogl_texture *tex, bool header)
 
 	gui_ogl_sink_update(tex);
 
-	int w = tex->w / (tex->half ? 2 : 1);
-	int h = tex->h / (tex->half ? 2 : 1);
+	gui_ogl_draw_image(          //
+	    (uint32_t)tex->w,        // width
+	    (uint32_t)tex->h,        // height
+	    tex->id,                 // tex_id
+	    tex->half ? 0.5f : 1.0f, // scale
+	    false,                   // rotate_180
+	    false);                  // flip_y
 
-	ImVec2 size = {(float)w, (float)h};
-	ImVec2 uv0 = {0, 0};
-	ImVec2 uv1 = {1, 1};
-	ImVec4 white = {1, 1, 1, 1};
-	ImTextureID id = (ImTextureID)(intptr_t)tex->id;
-	igImage(id, size, uv0, uv1, white, white);
 	igText("Sequence %u", (uint32_t)tex->seq);
 
 	char temp[512];
@@ -354,7 +354,8 @@ scene_render_select(struct gui_scene *scene, struct gui_program *p)
 	if (cs->settings->camera_type == XRT_SETTINGS_CAMERA_TYPE_SLAM) {
 		struct xrt_frame_sink *tmp = cali;
 		struct xrt_slam_sinks sinks;
-		u_sink_combiner_create(cs->xfctx, tmp, &sinks.left, &sinks.right);
+		sinks.cam_count = 2;
+		u_sink_combiner_create(cs->xfctx, tmp, &sinks.cams[0], &sinks.cams[1]);
 
 		xrt_fs_slam_stream_start(cs->xfs, &sinks);
 	} else {

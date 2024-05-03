@@ -90,7 +90,7 @@ static int
 comp_window_xcb_connect(struct comp_window_xcb *w);
 
 static void
-comp_window_xcb_create_window(struct comp_window_xcb *w, uint32_t width, uint32_t height);
+comp_window_xcb_create_window(struct comp_window_xcb *w, VkExtent2D extent);
 
 static void
 comp_window_xcb_get_randr_outputs(struct comp_window_xcb *w);
@@ -105,7 +105,7 @@ static xcb_atom_t
 comp_window_xcb_get_atom(struct comp_window_xcb *w, const char *name);
 
 static VkResult
-comp_window_xcb_create_surface(struct comp_window_xcb *w, VkSurfaceKHR *surface);
+comp_window_xcb_create_surface(struct comp_window_xcb *w, VkSurfaceKHR *out_surface);
 
 static void
 comp_window_xcb_update_window_title(struct comp_target *ct, const char *title);
@@ -237,21 +237,29 @@ comp_window_xcb_init(struct comp_target *ct)
 		}
 
 		if (d->size.width != 0 && d->size.height != 0) {
-			ct->c->settings.preferred.width = d->size.width;
-			ct->c->settings.preferred.height = d->size.height;
 			COMP_DEBUG(ct->c, "Setting window size %dx%d.", d->size.width, d->size.height);
 
-			// TODO: size cb
-			// set_size_cb(settings->width, settings->height);
+			VkExtent2D extent = {d->size.width, d->size.height};
+			comp_target_swapchain_override_extents(&w_xcb->base, extent);
 		}
 	}
 
-	comp_window_xcb_create_window(w_xcb, ct->c->settings.preferred.width, ct->c->settings.preferred.height);
+	// The extent of the window we are about to create.
+	VkExtent2D extent = {ct->c->settings.preferred.width, ct->c->settings.preferred.height};
+
+	// If we require a particular size, use that.
+	if (w_xcb->base.override.compositor_extent) {
+		extent = w_xcb->base.override.extent;
+	}
+
+	// We can now create the window.
+	comp_window_xcb_create_window(w_xcb, extent);
 
 	comp_window_xcb_connect_delete_event(w_xcb);
 
-	if (ct->c->settings.fullscreen)
+	if (ct->c->settings.fullscreen) {
 		comp_window_xcb_set_full_screen(w_xcb);
+	}
 
 	xcb_map_window(w_xcb->connection, w_xcb->window);
 
@@ -292,7 +300,7 @@ comp_window_xcb_connect(struct comp_window_xcb *w)
 }
 
 static void
-comp_window_xcb_create_window(struct comp_window_xcb *w, uint32_t width, uint32_t height)
+comp_window_xcb_create_window(struct comp_window_xcb *w, VkExtent2D extent)
 {
 	w->window = xcb_generate_id(w->connection);
 
@@ -306,8 +314,20 @@ comp_window_xcb_create_window(struct comp_window_xcb *w, uint32_t width, uint32_
 
 	uint32_t value_list = XCB_EVENT_MASK_STRUCTURE_NOTIFY;
 
-	xcb_create_window(w->connection, XCB_COPY_FROM_PARENT, w->window, w->screen->root, x, y, width, height, 0,
-	                  XCB_WINDOW_CLASS_INPUT_OUTPUT, w->screen->root_visual, XCB_CW_EVENT_MASK, &value_list);
+	xcb_create_window(                 //
+	    w->connection,                 // conn
+	    XCB_COPY_FROM_PARENT,          // depth
+	    w->window,                     // wid
+	    w->screen->root,               // parent
+	    x,                             // x
+	    y,                             // y
+	    extent.width,                  // width
+	    extent.height,                 // height
+	    0,                             // border_width
+	    XCB_WINDOW_CLASS_INPUT_OUTPUT, // _class
+	    w->screen->root_visual,        // visual
+	    XCB_CW_EVENT_MASK,             // value_mask
+	    &value_list);                  // value_list
 }
 
 static void
@@ -401,7 +421,7 @@ comp_window_xcb_get_atom(struct comp_window_xcb *w, const char *name)
 }
 
 static VkResult
-comp_window_xcb_create_surface(struct comp_window_xcb *w, VkSurfaceKHR *surface)
+comp_window_xcb_create_surface(struct comp_window_xcb *w, VkSurfaceKHR *out_surface)
 {
 	struct vk_bundle *vk = get_vk(w);
 	VkResult ret;
@@ -412,11 +432,19 @@ comp_window_xcb_create_surface(struct comp_window_xcb *w, VkSurfaceKHR *surface)
 	    .window = w->window,
 	};
 
-	ret = vk->vkCreateXcbSurfaceKHR(vk->instance, &surface_info, NULL, surface);
+	VkSurfaceKHR surface = VK_NULL_HANDLE;
+	ret = vk->vkCreateXcbSurfaceKHR( //
+	    vk->instance,                //
+	    &surface_info,               //
+	    NULL,                        //
+	    &surface);                   //
 	if (ret != VK_SUCCESS) {
 		COMP_ERROR(w->base.base.c, "vkCreateXcbSurfaceKHR: %s", vk_result_string(ret));
 		return ret;
 	}
+
+	VK_NAME_SURFACE(vk, surface, "comp_window_xcb surface");
+	*out_surface = surface;
 
 	return VK_SUCCESS;
 }
@@ -429,3 +457,50 @@ comp_window_xcb_update_window_title(struct comp_target *ct, const char *title)
 	xcb_change_property(w_xcb->connection, XCB_PROP_MODE_REPLACE, w_xcb->window, XCB_ATOM_WM_NAME, XCB_ATOM_STRING,
 	                    8, strlen(title), title);
 }
+
+
+/*
+ *
+ * Factory
+ *
+ */
+
+static const char *instance_extensions[] = {
+    VK_KHR_XCB_SURFACE_EXTENSION_NAME,
+};
+
+static bool
+detect(const struct comp_target_factory *ctf, struct comp_compositor *c)
+{
+	return false;
+}
+
+static bool
+create_target(const struct comp_target_factory *ctf, struct comp_compositor *c, struct comp_target **out_ct)
+{
+	struct comp_target *ct = comp_window_xcb_create(c);
+	if (ct == NULL) {
+		return false;
+	}
+
+	COMP_DEBUG(c, "Using VK_PRESENT_MODE_IMMEDIATE_KHR for xcb window")
+	c->settings.present_mode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+
+	*out_ct = ct;
+
+	return true;
+}
+
+const struct comp_target_factory comp_target_factory_xcb = {
+    .name = "X11(XCB) Windowed",
+    .identifier = "x11",
+    .requires_vulkan_for_create = false,
+    .is_deferred = true,
+    .required_instance_version = 0,
+    .required_instance_extensions = instance_extensions,
+    .required_instance_extension_count = ARRAY_SIZE(instance_extensions),
+    .optional_device_extensions = NULL,
+    .optional_device_extension_count = 0,
+    .detect = detect,
+    .create_target = create_target,
+};

@@ -1,9 +1,11 @@
-// Copyright 2019-2022, Collabora, Ltd.
+// Copyright 2019-2023, Collabora, Ltd.
+// Copyright 2023, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Action related API entrypoint functions.
  * @author Jakob Bornecrantz <jakob@collabora.com>
+ * @author Korcan Hussein <korcan.hussein@collabora.com>
  * @ingroup oxr_api
  */
 
@@ -25,7 +27,7 @@
 #include "bindings/b_generated_bindings.h"
 
 
-typedef bool (*path_verify_fn_t)(const char *, size_t);
+typedef bool (*path_verify_fn_t)(const struct oxr_verify_extension_status *, const char *, size_t);
 
 
 /*
@@ -41,6 +43,7 @@ process_dpad(struct oxr_logger *log,
              struct oxr_dpad_state *state,
              const XrInteractionProfileDpadBindingEXT *dpad,
              path_verify_fn_t dpad_emulator_fn,
+             const struct oxr_verify_extension_status *verify_ext_status,
              const char *prefix,
              const char *ip_str)
 {
@@ -54,7 +57,7 @@ process_dpad(struct oxr_logger *log,
 		                 dpad->binding);
 	}
 
-	if (!dpad_emulator_fn(str, length)) {
+	if (!dpad_emulator_fn(verify_ext_status, str, length)) {
 		return oxr_error(log, XR_ERROR_PATH_UNSUPPORTED,
 		                 "(%s->binding == \"%s\") is not a valid dpad binding path for profile \"%s\"", prefix,
 		                 str, ip_str);
@@ -123,7 +126,7 @@ process_dpad(struct oxr_logger *log,
  *
  */
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrSyncActions(XrSession session, const XrActionsSyncInfo *syncInfo)
 {
 	OXR_TRACE_MARKER();
@@ -131,17 +134,30 @@ oxr_xrSyncActions(XrSession session, const XrActionsSyncInfo *syncInfo)
 	struct oxr_session *sess;
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrSyncActions");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, syncInfo, XR_TYPE_ACTIONS_SYNC_INFO);
 
+	struct xrt_system_roles sys_roles = XRT_STRUCT_INIT;
+	xrt_system_devices_get_roles(sess->sys->xsysd, &sys_roles);
+	{
+		os_mutex_lock(&sess->sys->sync_actions_mutex);
+		if (sess->sys->dynamic_roles_cache.generation_id < sys_roles.generation_id) {
+			sess->sys->dynamic_roles_cache = sys_roles;
+			oxr_session_update_action_bindings(&log, sess);
+		}
+		os_mutex_unlock(&sess->sys->sync_actions_mutex);
+	}
+
 	if (syncInfo->countActiveActionSets == 0) {
-		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE, "(syncInfo->countActiveActionSets == 0)");
+		// nothing to do
+		return XR_SUCCESS;
 	}
 
 	for (uint32_t i = 0; i < syncInfo->countActiveActionSets; i++) {
 		struct oxr_action_set *act_set = NULL;
 		OXR_VERIFY_ACTIONSET_NOT_NULL(&log, syncInfo->activeActionSets[i].actionSet, act_set);
 
-		XrResult res = oxr_verify_subaction_path_sync(&log, sess->sys->inst,
+		XrResult res = oxr_verify_subaction_path_sync(&log, sess->sys->inst, act_set,
 		                                              syncInfo->activeActionSets[i].subactionPath, i);
 		if (res != XR_SUCCESS) {
 			return res;
@@ -151,7 +167,7 @@ oxr_xrSyncActions(XrSession session, const XrActionsSyncInfo *syncInfo)
 	return oxr_action_sync_data(&log, sess, syncInfo->countActiveActionSets, syncInfo->activeActionSets);
 }
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrAttachSessionActionSets(XrSession session, const XrSessionActionSetsAttachInfo *bindInfo)
 {
 	OXR_TRACE_MARKER();
@@ -159,6 +175,7 @@ oxr_xrAttachSessionActionSets(XrSession session, const XrSessionActionSetsAttach
 	struct oxr_session *sess;
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrAttachSessionActionSets");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, bindInfo, XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO);
 
 	if (sess->act_set_attachments != NULL) {
@@ -181,7 +198,7 @@ oxr_xrAttachSessionActionSets(XrSession session, const XrSessionActionSetsAttach
 	return oxr_session_attach_action_sets(&log, sess, bindInfo);
 }
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrSuggestInteractionProfileBindings(XrInstance instance,
                                         const XrInteractionProfileSuggestedBinding *suggestedBindings)
 {
@@ -195,7 +212,7 @@ oxr_xrSuggestInteractionProfileBindings(XrInstance instance,
 	if (suggestedBindings->countSuggestedBindings == 0) {
 		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
 		                 "(suggestedBindings->countSuggestedBindings "
-		                 "== 0) can not suggest 0 bindings");
+		                 "== 0) cannot suggest 0 bindings");
 	}
 
 	XrPath ip = suggestedBindings->interactionProfile;
@@ -212,6 +229,24 @@ oxr_xrSuggestInteractionProfileBindings(XrInstance instance,
 	path_verify_fn_t dpad_path_fn = NULL;
 	path_verify_fn_t dpad_emulator_fn = NULL;
 	bool has_dpad = inst->extensions.EXT_dpad_binding;
+
+#define EXT_NOT_SUPPORTED(EXT)                                                                                         \
+	do {                                                                                                           \
+		return oxr_error(&log, XR_ERROR_PATH_UNSUPPORTED,                                                      \
+		                 "(suggestedBindings->interactionProfile == \"%s\") used but XR_" #EXT                 \
+		                 " not supported by runtime",                                                          \
+		                 ip_str);                                                                              \
+	} while (false)
+
+#define EXT_CHK_ENABLED(EXT)                                                                                           \
+	do {                                                                                                           \
+		if (!inst->extensions.EXT) {                                                                           \
+			return oxr_error(&log, XR_ERROR_PATH_UNSUPPORTED,                                              \
+			                 "(suggestedBindings->interactionProfile == \"%s\") used but XR_" #EXT         \
+			                 " not enabled",                                                               \
+			                 ip_str);                                                                      \
+		}                                                                                                      \
+	} while (false)
 
 	if (ip == inst->path_cache.khr_simple_controller) {
 		subpath_fn = oxr_verify_khr_simple_controller_subpath;
@@ -249,14 +284,85 @@ oxr_xrSuggestInteractionProfileBindings(XrInstance instance,
 		subpath_fn = oxr_verify_valve_index_controller_subpath;
 		dpad_path_fn = oxr_verify_valve_index_controller_dpad_path;
 		dpad_emulator_fn = oxr_verify_valve_index_controller_dpad_emulator;
+	} else if (ip == inst->path_cache.hp_mixed_reality_controller) {
+#ifdef OXR_HAVE_EXT_hp_mixed_reality_controller
+		EXT_CHK_ENABLED(EXT_hp_mixed_reality_controller);
+#else
+		EXT_NOT_SUPPORTED(EXT_hp_mixed_reality_controller);
+#endif
+
+		subpath_fn = oxr_verify_hp_mixed_reality_controller_subpath;
+		dpad_path_fn = oxr_verify_hp_mixed_reality_controller_dpad_path;
+		dpad_emulator_fn = oxr_verify_hp_mixed_reality_controller_dpad_emulator;
+	} else if (ip == inst->path_cache.samsung_odyssey_controller) {
+#ifdef OXR_HAVE_EXT_samsung_odyssey_controller
+		EXT_CHK_ENABLED(EXT_samsung_odyssey_controller);
+#else
+		EXT_NOT_SUPPORTED(EXT_samsung_odyssey_controller);
+#endif
+
+		subpath_fn = oxr_verify_samsung_odyssey_controller_subpath;
+		dpad_path_fn = oxr_verify_samsung_odyssey_controller_dpad_path;
+		dpad_emulator_fn = oxr_verify_samsung_odyssey_controller_dpad_emulator;
+	} else if (ip == inst->path_cache.ml_ml2_controller) {
+#ifdef OXR_HAVE_ML_ml2_controller_interaction
+		EXT_CHK_ENABLED(ML_ml2_controller_interaction);
+#else
+		EXT_NOT_SUPPORTED(EL_ml2_controller_interaction);
+#endif
+
+		subpath_fn = oxr_verify_ml_ml2_controller_subpath;
+		dpad_path_fn = oxr_verify_ml_ml2_controller_dpad_path;
+		dpad_emulator_fn = oxr_verify_ml_ml2_controller_dpad_emulator;
 	} else if (ip == inst->path_cache.mndx_ball_on_a_stick_controller) {
+#ifdef OXR_HAVE_MNDX_ball_on_a_stick_controller
+		EXT_CHK_ENABLED(MNDX_ball_on_a_stick_controller);
+#else
+		EXT_NOT_SUPPORTED(MNDX_ball_on_a_stick_controller);
+#endif
+
 		subpath_fn = oxr_verify_mndx_ball_on_a_stick_controller_subpath;
 		dpad_path_fn = oxr_verify_mndx_ball_on_a_stick_controller_dpad_path;
 		dpad_emulator_fn = oxr_verify_mndx_ball_on_a_stick_controller_dpad_emulator;
 	} else if (ip == inst->path_cache.msft_hand_interaction) {
+#ifdef OXR_HAVE_MSFT_hand_interaction
+		EXT_CHK_ENABLED(MSFT_hand_interaction);
+#else
+		EXT_NOT_SUPPORTED(MSFT_hand_interaction);
+#endif
+
 		subpath_fn = oxr_verify_microsoft_hand_interaction_subpath;
 		dpad_path_fn = oxr_verify_microsoft_hand_interaction_dpad_path;
 		dpad_emulator_fn = oxr_verify_microsoft_hand_interaction_dpad_emulator;
+	} else if (ip == inst->path_cache.ext_eye_gaze_interaction) {
+#ifdef OXR_HAVE_EXT_eye_gaze_interaction
+		EXT_CHK_ENABLED(EXT_eye_gaze_interaction);
+#else
+		EXT_NOT_SUPPORTED(EXT_eye_gaze_interaction);
+#endif
+
+		subpath_fn = oxr_verify_ext_eye_gaze_interaction_subpath;
+		dpad_path_fn = oxr_verify_ext_eye_gaze_interaction_dpad_path;
+		dpad_emulator_fn = oxr_verify_ext_eye_gaze_interaction_dpad_emulator;
+	} else if (ip == inst->path_cache.ext_hand_interaction) {
+#ifdef OXR_HAVE_EXT_hand_interaction
+		EXT_CHK_ENABLED(EXT_hand_interaction);
+#else
+		EXT_NOT_SUPPORTED(EXT_hand_interaction);
+#endif
+		subpath_fn = oxr_verify_ext_hand_interaction_ext_subpath;
+		dpad_path_fn = oxr_verify_ext_hand_interaction_ext_dpad_path;
+		dpad_emulator_fn = oxr_verify_ext_hand_interaction_ext_dpad_emulator;
+	} else if (ip == inst->path_cache.oppo_mr_controller) {
+#ifdef OXR_HAVE_OPPO_controller_interaction
+		EXT_CHK_ENABLED(OPPO_controller_interaction);
+#else
+		EXT_NOT_SUPPORTED(EPPO_controller_interaction);
+#endif
+
+		subpath_fn = oxr_verify_oppo_mr_controller_oppo_subpath;
+		dpad_path_fn = oxr_verify_oppo_mr_controller_oppo_dpad_path;
+		dpad_emulator_fn = oxr_verify_oppo_mr_controller_oppo_dpad_emulator;
 	} else {
 		return oxr_error(&log, XR_ERROR_PATH_UNSUPPORTED,
 		                 "(suggestedBindings->interactionProfile == \"%s\") is not "
@@ -267,6 +373,41 @@ oxr_xrSuggestInteractionProfileBindings(XrInstance instance,
 	// Needed in various paths here.
 	const char *str = NULL;
 	size_t length;
+	const struct oxr_verify_extension_status verify_ext_status = {
+#ifdef OXR_HAVE_EXT_palm_pose
+	    .EXT_palm_pose = inst->extensions.EXT_palm_pose,
+#endif
+#ifdef OXR_HAVE_EXT_hand_interaction
+	    .EXT_hand_interaction = inst->extensions.EXT_hand_interaction,
+#endif
+#ifdef OXR_HAVE_EXT_hp_mixed_reality_controller
+	    .EXT_hp_mixed_reality_controller = inst->extensions.EXT_hp_mixed_reality_controller,
+#endif
+#ifdef OXR_HAVE_EXT_samsung_odyssey_controller
+	    .EXT_samsung_odyssey_controller = inst->extensions.EXT_samsung_odyssey_controller,
+#endif
+#ifdef OXR_HAVE_ML_ml2_controller_interaction
+	    .ML_ml2_controller_interaction = inst->extensions.ML_ml2_controller_interaction,
+#endif
+#ifdef OXR_HAVE_MSFT_hand_interaction
+	    .MSFT_hand_interaction = inst->extensions.MSFT_hand_interaction,
+#endif
+#ifdef OXR_HAVE_MNDX_ball_on_a_stick_controller
+	    .MNDX_ball_on_a_stick_controller = inst->extensions.MNDX_ball_on_a_stick_controller,
+#endif
+#ifdef OXR_HAVE_MNDX_hydra
+	    .MNDX_hydra = inst->extensions.MNDX_hydra,
+#endif
+#ifdef OXR_HAVE_MNDX_system_buttons
+	    .MNDX_system_buttons = inst->extensions.MNDX_system_buttons,
+#endif
+#ifdef OXR_HAVE_EXT_eye_gaze_interaction
+	    .EXT_eye_gaze_interaction = inst->extensions.EXT_eye_gaze_interaction,
+#endif
+#ifdef OXR_HAVE_HTCX_vive_tracker_interaction
+	    .HTCX_vive_tracker_interaction = inst->extensions.HTCX_vive_tracker_interaction,
+#endif
+	};
 
 	for (size_t i = 0; i < suggestedBindings->countSuggestedBindings; i++) {
 		const XrActionSuggestedBinding *s = &suggestedBindings->suggestedBindings[i];
@@ -289,12 +430,12 @@ oxr_xrSuggestInteractionProfileBindings(XrInstance instance,
 			                 i, s->binding);
 		}
 
-		if (subpath_fn(str, length)) {
+		if (subpath_fn(&verify_ext_status, str, length)) {
 			continue;
 		}
 
 #ifdef XR_EXT_dpad_binding
-		if (dpad_path_fn(str, length)) {
+		if (dpad_path_fn(&verify_ext_status, str, length)) {
 			if (!has_dpad) {
 				return oxr_error(
 				    &log, XR_ERROR_PATH_UNSUPPORTED,
@@ -341,7 +482,8 @@ oxr_xrSuggestInteractionProfileBindings(XrInstance instance,
 			         "XrInteractionProfileDpadBindingEXT>",
 			         i);
 
-			ret = process_dpad(&log, inst, &dpad_state, dpad, dpad_emulator_fn, temp, ip_str);
+			ret = process_dpad(&log, inst, &dpad_state, dpad, dpad_emulator_fn, &verify_ext_status, temp,
+			                   ip_str);
 			if (ret != XR_SUCCESS) {
 				// Teardown the state.
 				oxr_dpad_state_deinit(&dpad_state);
@@ -359,7 +501,7 @@ oxr_xrSuggestInteractionProfileBindings(XrInstance instance,
 	return oxr_action_suggest_interaction_profile_bindings(&log, inst, suggestedBindings, &dpad_state);
 }
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrGetCurrentInteractionProfile(XrSession session,
                                    XrPath topLevelUserPath,
                                    XrInteractionProfileState *interactionProfile)
@@ -370,6 +512,7 @@ oxr_xrGetCurrentInteractionProfile(XrSession session,
 	struct oxr_session *sess = NULL;
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrGetCurrentInteractionProfile");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, interactionProfile, XR_TYPE_INTERACTION_PROFILE_STATE);
 
 	// Short hand.
@@ -382,7 +525,7 @@ oxr_xrGetCurrentInteractionProfile(XrSession session,
 	}
 
 	if (!oxr_path_is_valid(&log, inst, topLevelUserPath)) {
-		return oxr_error(&log, XR_ERROR_PATH_INVALID, "(topLevelUserPath == %zu) Is not a valid path",
+		return oxr_error(&log, XR_ERROR_PATH_INVALID, "(topLevelUserPath == %" PRId64 ") Is not a valid path",
 		                 topLevelUserPath);
 	}
 
@@ -409,7 +552,7 @@ oxr_xrGetCurrentInteractionProfile(XrSession session,
 	return oxr_action_get_current_interaction_profile(&log, sess, topLevelUserPath, interactionProfile);
 }
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrGetInputSourceLocalizedName(XrSession session,
                                   const XrInputSourceLocalizedNameGetInfo *getInfo,
                                   uint32_t bufferCapacityInput,
@@ -422,6 +565,7 @@ oxr_xrGetInputSourceLocalizedName(XrSession session,
 	struct oxr_session *sess;
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrGetInputSourceLocalizedName");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, getInfo, XR_TYPE_INPUT_SOURCE_LOCALIZED_NAME_GET_INFO);
 
 	// Short hand.
@@ -439,8 +583,8 @@ oxr_xrGetInputSourceLocalizedName(XrSession session,
 	}
 
 	if (!oxr_path_is_valid(&log, inst, getInfo->sourcePath)) {
-		return oxr_error(&log, XR_ERROR_PATH_INVALID, "(getInfo->sourcePath == %zu) Is not a valid path",
-		                 getInfo->sourcePath);
+		return oxr_error(&log, XR_ERROR_PATH_INVALID,
+		                 "(getInfo->sourcePath == %" PRId64 ") Is not a valid path", getInfo->sourcePath);
 	}
 
 	const XrInputSourceLocalizedNameFlags all = XR_INPUT_SOURCE_LOCALIZED_NAME_USER_PATH_BIT |
@@ -449,11 +593,12 @@ oxr_xrGetInputSourceLocalizedName(XrSession session,
 
 	if ((getInfo->whichComponents & ~all) != 0) {
 		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
-		                 "(getInfo->whichComponents == %08zx) contains invalid bits", getInfo->whichComponents);
+		                 "(getInfo->whichComponents == %08" PRIx64 ") contains invalid bits",
+		                 getInfo->whichComponents);
 	}
 
 	if (getInfo->whichComponents == 0) {
-		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE, "(getInfo->whichComponents == 0) can not be zero");
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE, "(getInfo->whichComponents == 0) cannot be zero");
 	}
 
 	return oxr_action_get_input_source_localized_name(&log, sess, getInfo, bufferCapacityInput, bufferCountOutput,
@@ -467,7 +612,7 @@ oxr_xrGetInputSourceLocalizedName(XrSession session,
  *
  */
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrCreateActionSet(XrInstance instance, const XrActionSetCreateInfo *createInfo, XrActionSet *actionSet)
 {
 	OXR_TRACE_MARKER();
@@ -518,7 +663,7 @@ oxr_xrCreateActionSet(XrInstance instance, const XrActionSetCreateInfo *createIn
 	return XR_SUCCESS;
 }
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrDestroyActionSet(XrActionSet actionSet)
 {
 	OXR_TRACE_MARKER();
@@ -537,7 +682,7 @@ oxr_xrDestroyActionSet(XrActionSet actionSet)
  *
  */
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrCreateAction(XrActionSet actionSet, const XrActionCreateInfo *createInfo, XrAction *action)
 {
 	OXR_TRACE_MARKER();
@@ -602,7 +747,7 @@ oxr_xrCreateAction(XrActionSet actionSet, const XrActionCreateInfo *createInfo, 
 	return XR_SUCCESS;
 }
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrDestroyAction(XrAction action)
 {
 	OXR_TRACE_MARKER();
@@ -614,7 +759,7 @@ oxr_xrDestroyAction(XrAction action)
 	return oxr_handle_destroy(&log, &act->handle);
 }
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrGetActionStateBoolean(XrSession session, const XrActionStateGetInfo *getInfo, XrActionStateBoolean *data)
 {
 	OXR_TRACE_MARKER();
@@ -625,6 +770,7 @@ oxr_xrGetActionStateBoolean(XrSession session, const XrActionStateGetInfo *getIn
 	struct oxr_logger log;
 	XrResult ret;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrGetActionStateBoolean");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, data, XR_TYPE_ACTION_STATE_BOOLEAN);
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, getInfo, XR_TYPE_ACTION_STATE_GET_INFO);
 	OXR_VERIFY_ACTION_NOT_NULL(&log, getInfo->action, act);
@@ -642,7 +788,7 @@ oxr_xrGetActionStateBoolean(XrSession session, const XrActionStateGetInfo *getIn
 	return oxr_action_get_boolean(&log, sess, act->act_key, subaction_paths, data);
 }
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrGetActionStateFloat(XrSession session, const XrActionStateGetInfo *getInfo, XrActionStateFloat *data)
 {
 	OXR_TRACE_MARKER();
@@ -653,6 +799,7 @@ oxr_xrGetActionStateFloat(XrSession session, const XrActionStateGetInfo *getInfo
 	struct oxr_logger log;
 	XrResult ret;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrGetActionStateFloat");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, data, XR_TYPE_ACTION_STATE_FLOAT);
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, getInfo, XR_TYPE_ACTION_STATE_GET_INFO);
 	OXR_VERIFY_ACTION_NOT_NULL(&log, getInfo->action, act);
@@ -670,7 +817,7 @@ oxr_xrGetActionStateFloat(XrSession session, const XrActionStateGetInfo *getInfo
 	return oxr_action_get_vector1f(&log, sess, act->act_key, subaction_paths, data);
 }
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrGetActionStateVector2f(XrSession session, const XrActionStateGetInfo *getInfo, XrActionStateVector2f *data)
 {
 	OXR_TRACE_MARKER();
@@ -681,6 +828,7 @@ oxr_xrGetActionStateVector2f(XrSession session, const XrActionStateGetInfo *getI
 	struct oxr_logger log;
 	XrResult ret;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrGetActionStateVector2f");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, data, XR_TYPE_ACTION_STATE_VECTOR2F);
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, getInfo, XR_TYPE_ACTION_STATE_GET_INFO);
 	OXR_VERIFY_ACTION_NOT_NULL(&log, getInfo->action, act);
@@ -698,7 +846,7 @@ oxr_xrGetActionStateVector2f(XrSession session, const XrActionStateGetInfo *getI
 	return oxr_action_get_vector2f(&log, sess, act->act_key, subaction_paths, data);
 }
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrGetActionStatePose(XrSession session, const XrActionStateGetInfo *getInfo, XrActionStatePose *data)
 {
 	OXR_TRACE_MARKER();
@@ -709,6 +857,7 @@ oxr_xrGetActionStatePose(XrSession session, const XrActionStateGetInfo *getInfo,
 	struct oxr_logger log;
 	XrResult ret;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrGetActionStatePose");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, data, XR_TYPE_ACTION_STATE_POSE);
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, getInfo, XR_TYPE_ACTION_STATE_GET_INFO);
 	OXR_VERIFY_ACTION_NOT_NULL(&log, getInfo->action, act);
@@ -726,7 +875,7 @@ oxr_xrGetActionStatePose(XrSession session, const XrActionStateGetInfo *getInfo,
 	return oxr_action_get_pose(&log, sess, act->act_key, subaction_paths, data);
 }
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrEnumerateBoundSourcesForAction(XrSession session,
                                      const XrBoundSourcesForActionEnumerateInfo *enumerateInfo,
                                      uint32_t sourceCapacityInput,
@@ -739,6 +888,7 @@ oxr_xrEnumerateBoundSourcesForAction(XrSession session,
 	struct oxr_action *act = NULL;
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrEnumerateBoundSourcesForAction");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, enumerateInfo, XR_TYPE_BOUND_SOURCES_FOR_ACTION_ENUMERATE_INFO);
 	OXR_VERIFY_ACTION_NOT_NULL(&log, enumerateInfo->action, act);
 
@@ -759,7 +909,7 @@ oxr_xrEnumerateBoundSourcesForAction(XrSession session,
  *
  */
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrApplyHapticFeedback(XrSession session,
                           const XrHapticActionInfo *hapticActionInfo,
                           const XrHapticBaseHeader *hapticEvent)
@@ -772,6 +922,7 @@ oxr_xrApplyHapticFeedback(XrSession session,
 	struct oxr_logger log;
 	XrResult ret;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrApplyHapticFeedback");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, hapticActionInfo, XR_TYPE_HAPTIC_ACTION_INFO);
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, hapticEvent, XR_TYPE_HAPTIC_VIBRATION);
 	OXR_VERIFY_ACTION_NOT_NULL(&log, hapticActionInfo->action, act);
@@ -789,7 +940,7 @@ oxr_xrApplyHapticFeedback(XrSession session,
 	return oxr_action_apply_haptic_feedback(&log, sess, act->act_key, subaction_paths, hapticEvent);
 }
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrStopHapticFeedback(XrSession session, const XrHapticActionInfo *hapticActionInfo)
 {
 	OXR_TRACE_MARKER();
@@ -800,6 +951,7 @@ oxr_xrStopHapticFeedback(XrSession session, const XrHapticActionInfo *hapticActi
 	struct oxr_logger log;
 	XrResult ret;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrStopHapticFeedback");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, hapticActionInfo, XR_TYPE_HAPTIC_ACTION_INFO);
 	OXR_VERIFY_ACTION_NOT_NULL(&log, hapticActionInfo->action, act);
 

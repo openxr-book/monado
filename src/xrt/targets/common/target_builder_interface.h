@@ -1,4 +1,4 @@
-// Copyright 2022, Collabora, Ltd.
+// Copyright 2022-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -12,38 +12,94 @@
 
 /*
  *
- * Config checking.
+ * Config checking, sorted alphabetically.
  *
  */
 
-#if defined(XRT_BUILD_DRIVER_PSMV) || defined(XRT_BUILD_DRIVER_PSVR) || defined(XRT_DOXYGEN)
-#define T_BUILDER_RGB_TRACKING
+// Always enabled.
+#define T_BUILDER_LEGACY
+
+#if defined(XRT_BUILD_DRIVER_SURVIVE) || defined(XRT_BUILD_DRIVER_VIVE) || defined(XRT_DOXYGEN)
+#define T_BUILDER_LIGHTHOUSE
+#endif
+
+#if defined(XRT_BUILD_DRIVER_STEAMVR_LIGHTHOUSE) || defined(XRT_DOXYGEN)
+#define T_BUILDER_STEAMVR
+#endif
+
+#if defined(XRT_BUILD_DRIVER_NS) || defined(XRT_DOXYGEN)
+#define T_BUILDER_NS
 #endif
 
 #if defined(XRT_BUILD_DRIVER_REMOTE) || defined(XRT_DOXYGEN)
 #define T_BUILDER_REMOTE
 #endif
 
-#if defined(XRT_BUILD_DRIVER_SURVIVE) || defined(XRT_BUILD_DRIVER_VIVE) || defined(XRT_DOXYGEN)
-#define T_BUILDER_LIGHTHOUSE
+#if defined(XRT_BUILD_DRIVER_QWERTY) || defined(XRT_DOXYGEN)
+#define T_BUILDER_QWERTY
 #endif
 
-// Always enabled.
-#define T_BUILDER_LEGACY
+#if defined(XRT_BUILD_DRIVER_PSMV) || defined(XRT_BUILD_DRIVER_PSVR) || defined(XRT_DOXYGEN)
+#define T_BUILDER_RGB_TRACKING
+#endif
+
+#if defined(XRT_BUILD_DRIVER_SIMULATED) || defined(XRT_DOXYGEN)
+#define T_BUILDER_SIMULATED
+#endif
+
+#if defined(XRT_BUILD_DRIVER_SIMULAVR) || defined(XRT_DOXYGEN)
+#define T_BUILDER_SIMULAVR
+#endif
+
+#if defined(XRT_BUILD_DRIVER_WMR) || defined(XRT_DOXYGEN)
+#define T_BUILDER_WMR
+#endif
 
 
 /*
  *
- * Setter upper creation functions.
+ * Setter upper creation functions, sorted alphabetically.
  *
  */
 
-#ifdef T_BUILDER_RGB_TRACKING
+#ifdef T_BUILDER_LEGACY
 /*!
- * RGB tracking based drivers, like @ref drv_psmv and @ref drv_psvr.
+ * Builder used as a fallback for drivers not converted to builders yet.
  */
 struct xrt_builder *
-t_builder_rgb_tracking_create(void);
+t_builder_legacy_create(void);
+#endif
+
+#ifdef T_BUILDER_STEAMVR
+/*!
+ * Builder for SteamVR proprietary wrapper (vive, index, tundra trackers, etc.)
+ */
+struct xrt_builder *
+t_builder_steamvr_create(void);
+#endif
+
+#ifdef T_BUILDER_LIGHTHOUSE
+/*!
+ * Builder for Lighthouse-tracked devices (vive, index, tundra trackers, etc.)
+ */
+struct xrt_builder *
+t_builder_lighthouse_create(void);
+#endif
+
+#ifdef T_BUILDER_NS
+/*!
+ * Builder for NorthStar headsets
+ */
+struct xrt_builder *
+t_builder_north_star_create(void);
+#endif
+
+#ifdef T_BUILDER_QWERTY
+/*!
+ * The qwerty driver builder.
+ */
+struct xrt_builder *
+t_builder_qwerty_create(void);
 #endif
 
 #ifdef T_BUILDER_REMOTE
@@ -54,17 +110,35 @@ struct xrt_builder *
 t_builder_remote_create(void);
 #endif
 
-#ifdef T_BUILDER_LEGACY
+#ifdef T_BUILDER_RGB_TRACKING
 /*!
- * Builder used as a fallback for drivers not converted to builders yet.
+ * RGB tracking based drivers, like @ref drv_psmv and @ref drv_psvr.
  */
 struct xrt_builder *
-t_builder_legacy_create(void);
+t_builder_rgb_tracking_create(void);
+#endif
+
+#ifdef T_BUILDER_SIMULATED
+/*!
+ * Builder for @ref drv_simulated devices.
+ */
+struct xrt_builder *
+t_builder_simulated_create(void);
 #endif
 
 
+#ifdef T_BUILDER_SIMULAVR
 /*!
- * Builder used as a fallback for drivers not converted to builders yet.
+ * Builder for SimulaVR headsets
  */
 struct xrt_builder *
-t_builder_lighthouse_create(void);
+t_builder_simula_create(void);
+#endif
+
+#ifdef T_BUILDER_WMR
+/*!
+ * Builder for Windows Mixed Reality headsets
+ */
+struct xrt_builder *
+t_builder_wmr_create(void);
+#endif

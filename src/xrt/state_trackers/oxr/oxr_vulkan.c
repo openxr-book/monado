@@ -110,6 +110,12 @@ static const char *required_vk_instance_extensions[] = {
     VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME, //
 };
 
+static const char *optional_vk_instance_extensions[] = {
+#if defined(VK_EXT_debug_utils)
+    VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
+#endif
+};
+
 // The device extensions do vary by platform, but in a very regular way.
 // This should match the list in comp_compositor, except it shouldn't include
 // VK_KHR_SWAPCHAIN_EXTENSION_NAME
@@ -166,6 +172,57 @@ static const char *optional_device_extensions[] = {
 #endif
 };
 
+static bool
+vk_check_extension(VkExtensionProperties *props, uint32_t prop_count, const char *ext)
+{
+	for (uint32_t i = 0; i < prop_count; i++) {
+		if (strcmp(props[i].extensionName, ext) == 0) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+static XrResult
+vk_get_instance_ext_props(struct oxr_logger *log,
+                          VkInstance instance,
+                          PFN_vkGetInstanceProcAddr GetInstanceProcAddr,
+                          VkExtensionProperties **out_props,
+                          uint32_t *out_prop_count)
+{
+	PFN_vkEnumerateInstanceExtensionProperties EnumerateInstanceExtensionProperties =
+	    (PFN_vkEnumerateInstanceExtensionProperties)vkGetInstanceProcAddr(NULL,
+	                                                                      "vkEnumerateInstanceExtensionProperties");
+
+	if (!EnumerateInstanceExtensionProperties) {
+		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE,
+		                 "Failed to get EnumerateInstanceExtensionProperties fp");
+	}
+
+	uint32_t prop_count = 0;
+	VkResult res = EnumerateInstanceExtensionProperties(NULL, &prop_count, NULL);
+	if (res != VK_SUCCESS) {
+		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE,
+		                 "Failed to enumerate instance extension properties count (%d)", res);
+	}
+
+
+	VkExtensionProperties *props = U_TYPED_ARRAY_CALLOC(VkExtensionProperties, prop_count);
+
+	res = EnumerateInstanceExtensionProperties(NULL, &prop_count, props);
+	if (res != VK_SUCCESS) {
+		free(props);
+		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE,
+		                 "Failed to enumerate instance extension properties (%d)", res);
+	}
+
+	*out_props = props;
+	*out_prop_count = prop_count;
+
+	return XR_SUCCESS;
+}
+
 XrResult
 oxr_vk_create_vulkan_instance(struct oxr_logger *log,
                               struct oxr_system *sys,
@@ -183,8 +240,36 @@ oxr_vk_create_vulkan_instance(struct oxr_logger *log,
 		return XR_SUCCESS;
 	}
 
+	VkExtensionProperties *props = NULL;
+	uint32_t prop_count = 0;
+	XrResult res = vk_get_instance_ext_props(log, sys->vulkan_enable2_instance, createInfo->pfnGetInstanceProcAddr,
+	                                         &props, &prop_count);
+	if (res != XR_SUCCESS) {
+		return res;
+	}
+
 	struct u_string_list *instance_ext_list = u_string_list_create_from_array(
 	    required_vk_instance_extensions, ARRAY_SIZE(required_vk_instance_extensions));
+
+#if defined(VK_EXT_debug_utils)
+	bool debug_utils_enabled = false;
+#endif
+
+	for (uint32_t i = 0; i < ARRAY_SIZE(optional_vk_instance_extensions); i++) {
+
+		if (optional_vk_instance_extensions[i] == NULL ||
+		    !vk_check_extension(props, prop_count, optional_vk_instance_extensions[i])) {
+			continue;
+		}
+
+		u_string_list_append_unique(instance_ext_list, optional_vk_instance_extensions[i]);
+
+#if defined(VK_EXT_debug_utils)
+		if (strcmp(optional_vk_instance_extensions[i], VK_EXT_DEBUG_UTILS_EXTENSION_NAME) == 0) {
+			debug_utils_enabled = true;
+		}
+#endif
+	}
 
 	for (uint32_t i = 0; i < createInfo->vulkanCreateInfo->enabledExtensionCount; i++) {
 		u_string_list_append_unique(instance_ext_list,
@@ -212,6 +297,12 @@ oxr_vk_create_vulkan_instance(struct oxr_logger *log,
 
 		oxr_log_slog(log, &slog);
 	}
+
+#if defined(VK_EXT_debug_utils)
+	if (*vulkanResult == VK_SUCCESS) {
+		sys->vk.debug_utils_enabled = debug_utils_enabled;
+	}
+#endif
 
 	u_string_list_destroy(&instance_ext_list);
 
@@ -258,18 +349,6 @@ vk_get_device_ext_props(struct oxr_logger *log,
 	return XR_SUCCESS;
 }
 
-static bool
-vk_check_extension(VkExtensionProperties *props, uint32_t prop_count, const char *ext)
-{
-	for (uint32_t i = 0; i < prop_count; i++) {
-		if (strcmp(props[i].extensionName, ext) == 0) {
-			return true;
-		}
-	}
-
-	return false;
-}
-
 static XrResult
 vk_get_device_features(struct oxr_logger *log,
                        VkInstance instance,
@@ -289,6 +368,18 @@ vk_get_device_features(struct oxr_logger *log,
 	    physical_device_features); // pFeatures
 
 	return XR_SUCCESS;
+}
+
+static inline VkBaseInStructure const *
+vk_find_struct_in_chain(const VkBaseInStructure *base, VkStructureType type)
+{
+	while (base != NULL) {
+		if (base->sType == type) {
+			return base;
+		}
+		base = base->pNext;
+	}
+	return NULL;
 }
 
 XrResult
@@ -393,13 +484,23 @@ oxr_vk_create_vulkan_device(struct oxr_logger *log,
 	};
 
 	if (timeline_semaphore_info.timelineSemaphore) {
-		/*
-		 * Insert timeline semaphore request first to override
-		 * any the app may have put on the next chain.
-		 */
-		// Have to cast away const.
-		timeline_semaphore.pNext = (void *)modified_info.pNext;
-		modified_info.pNext = &timeline_semaphore;
+		// Check if the user has already put the struct into the chain
+		const VkBaseInStructure *existing = vk_find_struct_in_chain(
+		    (VkBaseInStructure *)&modified_info, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES);
+		if (existing != NULL) {
+			VkPhysicalDeviceTimelineSemaphoreFeatures *existing_timeline_semaphore_info =
+			    (VkPhysicalDeviceTimelineSemaphoreFeatures *)existing;
+			if (!existing_timeline_semaphore_info->timelineSemaphore) {
+				oxr_warn(log, "Timeline semaphores are explicitly disabled by application");
+				timeline_semaphore_info.timelineSemaphore = VK_FALSE;
+			}
+			// Timeline semaphores are already enabled so we don't have to do anything
+		} else {
+			// Insert struct at the front of the chain
+			// Have to cast away const.
+			timeline_semaphore.pNext = (void *)modified_info.pNext;
+			modified_info.pNext = &timeline_semaphore;
+		}
 	}
 #endif
 
@@ -463,6 +564,10 @@ oxr_vk_get_physical_device(struct oxr_logger *log,
 	GET_PROC(vkGetPhysicalDeviceProperties2);
 	VkResult vk_ret;
 	uint32_t count;
+
+	if (sys->xsysc == NULL) {
+		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, " sys->xsysc == NULL");
+	}
 
 	vk_ret = vkEnumeratePhysicalDevices(vkInstance, &count, NULL);
 	if (vk_ret != VK_SUCCESS) {

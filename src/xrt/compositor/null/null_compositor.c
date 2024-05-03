@@ -1,4 +1,4 @@
-// Copyright 2019-2022, Collabora, Ltd.
+// Copyright 2019-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -8,15 +8,17 @@
  *
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @author Lubosz Sarnecki <lubosz.sarnecki@collabora.com>
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup comp_null
  */
 
-#include "xrt/xrt_gfx_native.h"
+#include "null_compositor.h"
+#include "null_interfaces.h"
 
 #include "os/os_time.h"
 
 #include "util/u_misc.h"
+#include "util/u_pacing.h"
 #include "util/u_time.h"
 #include "util/u_debug.h"
 #include "util/u_verify.h"
@@ -27,12 +29,15 @@
 
 #include "multi/comp_multi_interface.h"
 
-#include "null_compositor.h"
-#include "null_interfaces.h"
 
+#include <stdint.h>
 #include <stdio.h>
-#include <stdarg.h>
 
+static const uint64_t RECOMMENDED_VIEW_WIDTH = 320;
+static const uint64_t RECOMMENDED_VIEW_HEIGHT = 240;
+
+static const uint64_t MAX_VIEW_WIDTH = 1920;
+static const uint64_t MAX_VIEW_HEIGHT = 1080;
 
 DEBUG_GET_ONCE_LOG_OPTION(log, "XRT_COMPOSITOR_LOG", U_LOGGING_INFO)
 
@@ -111,8 +116,17 @@ static const char *optional_device_extensions[] = {
 #error "Need port!"
 #endif
 
+#ifdef VK_KHR_global_priority
+    VK_KHR_GLOBAL_PRIORITY_EXTENSION_NAME,
+#endif
 #ifdef VK_KHR_image_format_list
     VK_KHR_IMAGE_FORMAT_LIST_EXTENSION_NAME,
+#endif
+#ifdef VK_KHR_maintenance1
+    VK_KHR_MAINTENANCE_1_EXTENSION_NAME,
+#endif
+#ifdef VK_KHR_maintenance2
+    VK_KHR_MAINTENANCE_2_EXTENSION_NAME,
 #endif
 #ifdef VK_KHR_timeline_semaphore
     VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME,
@@ -202,6 +216,12 @@ compositor_init_vulkan(struct null_compositor *c)
 	c->sys_info.client_d3d_deviceLUID = vk_res.client_gpu_deviceLUID;
 	c->sys_info.client_d3d_deviceLUID_valid = vk_res.client_gpu_deviceLUID_valid;
 
+	// Tie the lifetimes of swapchains to Vulkan.
+	xrt_result_t xret = comp_swapchain_shared_init(&c->base.cscs, vk);
+	if (xret != XRT_SUCCESS) {
+		return false;
+	}
+
 	return true;
 }
 
@@ -250,21 +270,16 @@ compositor_init_sys_info(struct null_compositor *c, struct xrt_device *xdev)
 	(void)sys_info->client_vk_deviceUUID;
 	(void)sys_info->client_d3d_deviceLUID;
 	(void)sys_info->client_d3d_deviceLUID_valid;
-
+	uint32_t view_count = xdev->hmd->view_count;
 	// clang-format off
-	sys_info->views[0].recommended.width_pixels  = 128;
-	sys_info->views[0].recommended.height_pixels = 128;
-	sys_info->views[0].recommended.sample_count  = 1;
-	sys_info->views[0].max.width_pixels          = 1024;
-	sys_info->views[0].max.height_pixels         = 1024;
-	sys_info->views[0].max.sample_count          = 1;
-
-	sys_info->views[1].recommended.width_pixels  = 128;
-	sys_info->views[1].recommended.height_pixels = 128;
-	sys_info->views[1].recommended.sample_count  = 1;
-	sys_info->views[1].max.width_pixels          = 1024;
-	sys_info->views[1].max.height_pixels         = 1024;
-	sys_info->views[1].max.sample_count          = 1;
+	for (uint32_t i = 0; i < view_count; ++i) {
+		sys_info->views[i].recommended.width_pixels  = RECOMMENDED_VIEW_WIDTH;
+		sys_info->views[i].recommended.height_pixels = RECOMMENDED_VIEW_HEIGHT;
+		sys_info->views[i].recommended.sample_count  = 1;
+		sys_info->views[i].max.width_pixels  = MAX_VIEW_WIDTH;
+		sys_info->views[i].max.height_pixels = MAX_VIEW_HEIGHT;
+		sys_info->views[i].max.sample_count  = 1;
+	}
 	// clang-format on
 
 	// Copy the list directly.
@@ -278,8 +293,8 @@ compositor_init_sys_info(struct null_compositor *c, struct xrt_device *xdev)
 	sys_info->supported_blend_mode_count = (uint8_t)xdev->hmd->blend_mode_count;
 
 	// Refresh rates.
-	sys_info->num_refresh_rates = 1;
-	sys_info->refresh_rates[0] = (float)(1. / time_ns_to_s(c->settings.frame_interval_ns));
+	sys_info->refresh_rate_count = 1;
+	sys_info->refresh_rates_hz[0] = (float)(1. / time_ns_to_s(c->settings.frame_interval_ns));
 
 	return true;
 }
@@ -292,7 +307,7 @@ compositor_init_sys_info(struct null_compositor *c, struct xrt_device *xdev)
  */
 
 static xrt_result_t
-null_compositor_begin_session(struct xrt_compositor *xc, enum xrt_view_type type)
+null_compositor_begin_session(struct xrt_compositor *xc, const struct xrt_begin_session_info *type)
 {
 	struct null_compositor *c = null_compositor(xc);
 	NULL_DEBUG(c, "BEGIN_SESSION");
@@ -399,15 +414,17 @@ null_compositor_discard_frame(struct xrt_compositor *xc, int64_t frame_id)
 }
 
 static xrt_result_t
-null_compositor_layer_commit(struct xrt_compositor *xc, int64_t frame_id, xrt_graphics_sync_handle_t sync_handle)
+null_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sync_handle)
 {
 	COMP_TRACE_MARKER();
 
 	struct null_compositor *c = null_compositor(xc);
 	NULL_TRACE(c, "LAYER_COMMIT");
 
+	int64_t frame_id = c->base.slot.data.frame_id;
+
 	/*
-	 * The null compositor doesn't render and frames, but needs to do
+	 * The null compositor doesn't render any frames, but needs to do
 	 * minimal bookkeeping and handling of arguments. If using the null
 	 * compositor as a base for a new compositor this is where you render
 	 * frames to be displayed to devices or remote clients.
@@ -428,54 +445,14 @@ null_compositor_layer_commit(struct xrt_compositor *xc, int64_t frame_id, xrt_gr
 	// When we are submitting to the GPU.
 	{
 		uint64_t now_ns = os_monotonic_get_ns();
-		u_pc_mark_point(c->upc, U_TIMING_POINT_SUBMIT, frame_id, now_ns);
+		u_pc_mark_point(c->upc, U_TIMING_POINT_SUBMIT_BEGIN, frame_id, now_ns);
+
+		now_ns = os_monotonic_get_ns();
+		u_pc_mark_point(c->upc, U_TIMING_POINT_SUBMIT_END, frame_id, now_ns);
 	}
 
 	// Now is a good point to garbage collect.
-	comp_swapchain_garbage_collect(&c->base.cscgc);
-
-	return XRT_SUCCESS;
-}
-
-static xrt_result_t
-null_compositor_poll_events(struct xrt_compositor *xc, union xrt_compositor_event *out_xce)
-{
-	struct null_compositor *c = null_compositor(xc);
-	NULL_TRACE(c, "POLL_EVENTS");
-
-	/*
-	 * The null compositor does only minimal state keeping. If using the
-	 * null compositor as a base for a new compositor this is where you can
-	 * improve the state tracking. Note this is very often consumed only
-	 * by the multi compositor.
-	 */
-
-	U_ZERO(out_xce);
-
-	switch (c->state) {
-	case NULL_COMP_STATE_UNINITIALIZED:
-		NULL_ERROR(c, "Polled uninitialized compositor");
-		out_xce->state.type = XRT_COMPOSITOR_EVENT_NONE;
-		break;
-	case NULL_COMP_STATE_READY: out_xce->state.type = XRT_COMPOSITOR_EVENT_NONE; break;
-	case NULL_COMP_STATE_PREPARED:
-		NULL_DEBUG(c, "PREPARED -> VISIBLE");
-		out_xce->state.type = XRT_COMPOSITOR_EVENT_STATE_CHANGE;
-		out_xce->state.visible = true;
-		c->state = NULL_COMP_STATE_VISIBLE;
-		break;
-	case NULL_COMP_STATE_VISIBLE:
-		NULL_DEBUG(c, "VISIBLE -> FOCUSED");
-		out_xce->state.type = XRT_COMPOSITOR_EVENT_STATE_CHANGE;
-		out_xce->state.visible = true;
-		out_xce->state.focused = true;
-		c->state = NULL_COMP_STATE_FOCUSED;
-		break;
-	case NULL_COMP_STATE_FOCUSED:
-		// No more transitions.
-		out_xce->state.type = XRT_COMPOSITOR_EVENT_NONE;
-		break;
-	}
+	comp_swapchain_shared_garbage_collect(&c->base.cscs);
 
 	return XRT_SUCCESS;
 }
@@ -489,13 +466,10 @@ null_compositor_destroy(struct xrt_compositor *xc)
 	NULL_DEBUG(c, "NULL_COMP_DESTROY");
 
 	// Make sure we don't have anything to destroy.
-	comp_swapchain_garbage_collect(&c->base.cscgc);
+	comp_swapchain_shared_garbage_collect(&c->base.cscs);
 
-
-	if (vk->cmd_pool != VK_NULL_HANDLE) {
-		vk->vkDestroyCommandPool(vk->device, vk->cmd_pool, NULL);
-		vk->cmd_pool = VK_NULL_HANDLE;
-	}
+	// Must be destroyed before Vulkan.
+	comp_swapchain_shared_destroy(&c->base.cscs, vk);
 
 	if (vk->device != VK_NULL_HANDLE) {
 		vk->vkDestroyDevice(vk->device, NULL);
@@ -535,12 +509,10 @@ null_compositor_create_system(struct xrt_device *xdev, struct xrt_system_composi
 	c->base.base.base.begin_frame = null_compositor_begin_frame;
 	c->base.base.base.discard_frame = null_compositor_discard_frame;
 	c->base.base.base.layer_commit = null_compositor_layer_commit;
-	c->base.base.base.poll_events = null_compositor_poll_events;
 	c->base.base.base.destroy = null_compositor_destroy;
 	c->settings.log_level = debug_get_log_option_log();
 	c->frame.waited.id = -1;
 	c->frame.rendering.id = -1;
-	c->state = NULL_COMP_STATE_READY;
 	c->settings.frame_interval_ns = U_TIME_1S_IN_NS / 20; // 20 FPS
 	c->xdev = xdev;
 
@@ -580,8 +552,8 @@ null_compositor_create_system(struct xrt_device *xdev, struct xrt_system_composi
 
 	// Standard app pacer.
 	struct u_pacing_app_factory *upaf = NULL;
-	xrt_result_t xret = u_pa_factory_create(&upaf);
+	XRT_MAYBE_UNUSED xrt_result_t xret = u_pa_factory_create(&upaf);
 	assert(xret == XRT_SUCCESS && upaf != NULL);
 
-	return comp_multi_create_system_compositor(&c->base.base, upaf, &c->sys_info, out_xsysc);
+	return comp_multi_create_system_compositor(&c->base.base, upaf, &c->sys_info, false, out_xsysc);
 }

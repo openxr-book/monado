@@ -1,4 +1,4 @@
-// Copyright 2019, Collabora, Ltd.
+// Copyright 2019-2023, Collabora, Ltd.
 // Copyright 2014, Kevin M. Godby
 // Copyright 2014-2018, Sensics, Inc.
 // SPDX-License-Identifier: BSL-1.0
@@ -9,7 +9,7 @@
  * Based in part on the corresponding VRPN driver,
  * available under BSL-1.0.
  *
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @author Kevin M. Godby <kevin@godby.org>
  * @ingroup drv_hdk
  */
@@ -110,21 +110,15 @@ hdk_device_destroy(struct xrt_device *xdev)
 	free(hd);
 }
 
-static void
-hdk_device_update_inputs(struct xrt_device *xdev)
-{
-	// Empty
-}
-
 static constexpr uint8_t MSG_LEN_LARGE = 32;
 static constexpr uint8_t MSG_LEN_SMALL = 16;
 
 static int
 hdk_device_update(struct hdk_device *hd)
 {
-	uint8_t buffer[MSG_LEN_LARGE];
+	uint8_t buffer[MSG_LEN_LARGE]{};
 
-	auto bytesRead = os_hid_read(hd->dev, buffer, sizeof(buffer), 0);
+	auto bytesRead = os_hid_read(hd->dev, buffer, sizeof(buffer), 100);
 	if (bytesRead == -1) {
 		if (!hd->disconnect_notified) {
 			HDK_ERROR(hd,
@@ -135,6 +129,9 @@ hdk_device_update(struct hdk_device *hd)
 		}
 		hd->quat_valid = false;
 		return 0;
+	} else if (bytesRead == 0) {
+		HDK_WARN(hd, "Read 0 bytes from device");
+		return 1;
 	}
 	while (bytesRead > 0) {
 		if (bytesRead != MSG_LEN_LARGE && bytesRead != MSG_LEN_SMALL) {
@@ -253,19 +250,6 @@ hdk_device_get_tracked_pose(struct xrt_device *xdev,
 	          hd->quat.w, hd->ang_vel_quat.x, hd->ang_vel_quat.y, hd->ang_vel_quat.z);
 }
 
-static void
-hdk_device_get_view_poses(struct xrt_device *xdev,
-                          const struct xrt_vec3 *default_eye_relation,
-                          uint64_t at_timestamp_ns,
-                          uint32_t view_count,
-                          struct xrt_space_relation *out_head_relation,
-                          struct xrt_fov *out_fovs,
-                          struct xrt_pose *out_poses)
-{
-	u_device_get_view_poses(xdev, default_eye_relation, at_timestamp_ns, view_count, out_head_relation, out_fovs,
-	                        out_poses);
-}
-
 static void *
 hdk_device_run_thread(void *ptr)
 {
@@ -306,9 +290,9 @@ hdk_device_create(struct os_hid_device *dev, enum HDK_VARIANT variant)
 	hd->base.hmd->blend_modes[idx++] = XRT_BLEND_MODE_OPAQUE;
 	hd->base.hmd->blend_mode_count = idx;
 
-	hd->base.update_inputs = hdk_device_update_inputs;
+	hd->base.update_inputs = u_device_noop_update_inputs;
 	hd->base.get_tracked_pose = hdk_device_get_tracked_pose;
-	hd->base.get_view_poses = hdk_device_get_view_poses;
+	hd->base.get_view_poses = u_device_get_view_poses;
 	hd->base.destroy = hdk_device_destroy;
 	hd->base.inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;
 	hd->base.name = XRT_DEVICE_GENERIC_HMD;
@@ -476,9 +460,16 @@ hdk_device_create(struct os_hid_device *dev, enum HDK_VARIANT variant)
 	// XRT_DISTORTION_MODEL_PANOTOOLS;
 	// }
 
+	int ret = os_thread_helper_init(&hd->imu_thread);
+	if (ret != 0) {
+		HDK_ERROR(hd, "Failed to start imu thread!");
+		hdk_device_destroy((struct xrt_device *)hd);
+		return 0;
+	}
+
 	if (hd->dev) {
 		// Mutex before thread.
-		int ret = os_mutex_init(&hd->lock);
+		ret = os_mutex_init(&hd->lock);
 		if (ret != 0) {
 			HDK_ERROR(hd, "Failed to init mutex!");
 			hdk_device_destroy(&hd->base);

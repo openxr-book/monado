@@ -1,17 +1,20 @@
-// Copyright 2020, Collabora, Ltd.
+// Copyright 2020,2024 Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Main driver code for @ref st_ovrd.
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @author Christoph Haag <christoph.haag@collabora.com>
+ * @author Daniel Willmott <web@dan-w.com>
+ * @author Moses Turner <moses@collabora.com>
+ * @author Korcan Hussein <korcan.hussein@collabora.com>
  * @ingroup st_ovrd
  */
 
 #include <cstring>
 #include <thread>
-#include <sstream>
 
+#include "math/m_api.h"
 #include "ovrd_log.hpp"
 #include "openvr_driver.h"
 
@@ -24,7 +27,10 @@ extern "C" {
 #include "os/os_time.h"
 #include "util/u_debug.h"
 #include "util/u_device.h"
+#include "util/u_builders.h"
+#include "util/u_hand_tracking.h"
 
+#include "xrt/xrt_space.h"
 #include "xrt/xrt_system.h"
 #include "xrt/xrt_defines.h"
 #include "xrt/xrt_device.h"
@@ -32,6 +38,7 @@ extern "C" {
 
 #include "bindings/b_generated_bindings.h"
 }
+#include "math/m_vec3.h"
 
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
@@ -47,8 +54,11 @@ DEBUG_GET_ONCE_NUM_OPTION(scale_percentage, "XRT_COMPOSITOR_SCALE_PERCENTAGE", 1
 
 #define MODELNUM_LEN (XRT_DEVICE_NAME_LEN + 9) // "[Monado] "
 
-//#define DUMP_POSE
-//#define DUMP_POSE_CONTROLLERS
+#define OPENVR_BONE_COUNT 31
+
+// Debug define(s), always off.
+#undef DUMP_POSE
+#undef DUMP_POSE_CONTROLLERS
 
 
 /*
@@ -132,6 +142,227 @@ apply_pose(struct xrt_space_relation *rel, vr::DriverPose_t *m_pose)
 	}
 }
 
+#define OPENVR_BONE_COUNT 31
+
+// these are currently only used for the root and wrist transforms, but are kept here as they are useful for debugging.
+vr::VRBoneTransform_t rightOpenPose[OPENVR_BONE_COUNT] = {
+    {{0.000000f, 0.000000f, 0.000000f, 1.000000f}, {1.000000f, -0.000000f, -0.000000f, 0.000000f}}, // Root
+    {{0.034038f, 0.036503f, 0.164722f, 1.000000f}, {-0.055147f, -0.078608f, 0.920279f, -0.379296f}},
+    //
+    {{0.012083f, 0.028070f, 0.025050f, 1.000000f}, {0.567418f, -0.464112f, 0.623374f, -0.272106f}}, // Thumb
+    {{-0.040406f, -0.000000f, 0.000000f, 1.000000f}, {0.994838f, 0.082939f, 0.019454f, 0.055130f}},
+    {{-0.032517f, -0.000000f, -0.000000f, 1.000000f}, {0.974793f, -0.003213f, 0.021867f, -0.222015f}},
+    {{-0.030464f, 0.000000f, 0.000000f, 1.000000f}, {1.000000f, -0.000000f, -0.000000f, 0.000000f}},
+    //
+    {{-0.000632f, 0.026866f, 0.015002f, 1.000000f}, {0.421979f, -0.644251f, 0.422133f, 0.478202f}}, // Index
+    {{-0.074204f, 0.005002f, -0.000234f, 1.000000f}, {0.995332f, 0.007007f, -0.039124f, 0.087949f}},
+    {{-0.043930f, 0.000000f, 0.000000f, 1.000000f}, {0.997891f, 0.045808f, 0.002142f, -0.045943f}},
+    {{-0.028695f, -0.000000f, -0.000000f, 1.000000f}, {0.999649f, 0.001850f, -0.022782f, -0.013409f}},
+    {{-0.022821f, -0.000000f, 0.000000f, 1.000000f}, {1.000000f, -0.000000f, 0.000000f, -0.000000f}},
+    //
+    {{-0.002177f, 0.007120f, 0.016319f, 1.000000f}, {0.541276f, -0.546723f, 0.460749f, 0.442520f}}, // Middle
+    {{-0.070953f, -0.000779f, -0.000997f, 1.000000f}, {0.980294f, -0.167261f, -0.078959f, 0.069368f}},
+    {{-0.043108f, -0.000000f, -0.000000f, 1.000000f}, {0.997947f, 0.018493f, 0.013192f, 0.059886f}},
+    {{-0.033266f, -0.000000f, -0.000000f, 1.000000f}, {0.997394f, -0.003328f, -0.028225f, -0.066315f}},
+    {{-0.025892f, 0.000000f, -0.000000f, 1.000000f}, {0.999195f, -0.000000f, 0.000000f, 0.040126f}},
+    //
+    {{-0.000513f, -0.006545f, 0.016348f, 1.000000f}, {0.550143f, -0.516692f, 0.429888f, 0.495548f}}, // Ring
+    {{-0.065876f, -0.001786f, -0.000693f, 1.000000f}, {0.990420f, -0.058696f, -0.101820f, 0.072495f}},
+    {{-0.040697f, -0.000000f, -0.000000f, 1.000000f}, {0.999545f, -0.002240f, 0.000004f, 0.030081f}},
+    {{-0.028747f, 0.000000f, 0.000000f, 1.000000f}, {0.999102f, -0.000721f, -0.012693f, 0.040420f}},
+    {{-0.022430f, 0.000000f, -0.000000f, 1.000000f}, {1.000000f, 0.000000f, 0.000000f, 0.000000f}},
+
+    {{0.002478f, -0.018981f, 0.015214f, 1.000000f}, {0.523940f, -0.526918f, 0.326740f, 0.584025f}}, // Pinky
+    {{-0.062878f, -0.002844f, -0.000332f, 1.000000f}, {0.986609f, -0.059615f, -0.135163f, 0.069132f}},
+    {{-0.030220f, -0.000000f, -0.000000f, 1.000000f}, {0.994317f, 0.001896f, -0.000132f, 0.106446f}},
+    {{-0.018187f, -0.000000f, -0.000000f, 1.000000f}, {0.995931f, -0.002010f, -0.052079f, -0.073526f}},
+    {{-0.018018f, -0.000000f, 0.000000f, 1.000000f}, {1.000000f, 0.000000f, 0.000000f, 0.000000f}},
+
+    {{0.006059f, 0.056285f, 0.060064f, 1.000000f}, {0.737238f, 0.202745f, -0.594267f, -0.249441f}}, // Aux
+    {{0.040416f, -0.043018f, 0.019345f, 1.000000f}, {-0.290331f, 0.623527f, 0.663809f, 0.293734f}},
+    {{0.039354f, -0.075674f, 0.047048f, 1.000000f}, {-0.187047f, 0.678062f, 0.659285f, 0.265683f}},
+    {{0.038340f, -0.090987f, 0.082579f, 1.000000f}, {-0.183037f, 0.736793f, 0.634757f, 0.143936f}},
+    {{0.031806f, -0.087214f, 0.121015f, 1.000000f}, {-0.003659f, 0.758407f, 0.639342f, 0.126678f}},
+};
+
+vr::VRBoneTransform_t leftOpenPose[OPENVR_BONE_COUNT] = {
+    {{0.000000f, 0.000000f, 0.000000f, 1.000000f}, {1.000000f, -0.000000f, -0.000000f, 0.000000f}},   // Root
+                                                                                                      //
+    {{-0.034038f, 0.036503f, 0.164722f, 1.000000f}, {-0.055147f, -0.078608f, -0.920279f, 0.379296f}}, // Thumb
+    {{-0.012083f, 0.028070f, 0.025050f, 1.000000f}, {0.464112f, 0.567418f, 0.272106f, 0.623374f}},
+    {{0.040406f, 0.000000f, -0.000000f, 1.000000f}, {0.994838f, 0.082939f, 0.019454f, 0.055130f}},
+    {{0.032517f, 0.000000f, 0.000000f, 1.000000f}, {0.974793f, -0.003213f, 0.021867f, -0.222015f}},
+    {{0.030464f, -0.000000f, -0.000000f, 1.000000f}, {1.000000f, -0.000000f, -0.000000f, 0.000000f}},
+    //
+    {{0.000632f, 0.026866f, 0.015002f, 1.000000f}, {0.644251f, 0.421979f, -0.478202f, 0.422133f}}, // Index
+    {{0.074204f, -0.005002f, 0.000234f, 1.000000f}, {0.995332f, 0.007007f, -0.039124f, 0.087949f}},
+    {{0.043930f, -0.000000f, -0.000000f, 1.000000f}, {0.997891f, 0.045808f, 0.002142f, -0.045943f}},
+    {{0.028695f, 0.000000f, 0.000000f, 1.000000f}, {0.999649f, 0.001850f, -0.022782f, -0.013409f}},
+    {{0.022821f, 0.000000f, -0.000000f, 1.000000f}, {1.000000f, -0.000000f, 0.000000f, -0.000000f}},
+    //
+    {{0.002177f, 0.007120f, 0.016319f, 1.000000f}, {0.546723f, 0.541276f, -0.442520f, 0.460749f}}, // Middle
+    {{0.070953f, 0.000779f, 0.000997f, 1.000000f}, {0.980294f, -0.167261f, -0.078959f, 0.069368f}},
+    {{0.043108f, 0.000000f, 0.000000f, 1.000000f}, {0.997947f, 0.018493f, 0.013192f, 0.059886f}},
+    {{0.033266f, 0.000000f, 0.000000f, 1.000000f}, {0.997394f, -0.003328f, -0.028225f, -0.066315f}},
+    {{0.025892f, -0.000000f, 0.000000f, 1.000000f}, {0.999195f, -0.000000f, 0.000000f, 0.040126f}},
+
+    {{0.000513f, -0.006545f, 0.016348f, 1.000000f}, {0.516692f, 0.550143f, -0.495548f, 0.429888f}}, // Ring
+    {{0.065876f, 0.001786f, 0.000693f, 1.000000f}, {0.990420f, -0.058696f, -0.101820f, 0.072495f}},
+    {{0.040697f, 0.000000f, 0.000000f, 1.000000f}, {0.999545f, -0.002240f, 0.000004f, 0.030081f}},
+    {{0.028747f, -0.000000f, -0.000000f, 1.000000f}, {0.999102f, -0.000721f, -0.012693f, 0.040420f}},
+    {{0.022430f, -0.000000f, 0.000000f, 1.000000f}, {1.000000f, 0.000000f, 0.000000f, 0.000000f}},
+
+    {{-0.002478f, -0.018981f, 0.015214f, 1.000000f}, {0.526918f, 0.523940f, -0.584025f, 0.326740f}}, // Pinky
+    {{0.062878f, 0.002844f, 0.000332f, 1.000000f}, {0.986609f, -0.059615f, -0.135163f, 0.069132f}},
+    {{0.030220f, 0.000000f, 0.000000f, 1.000000f}, {0.994317f, 0.001896f, -0.000132f, 0.106446f}},
+    {{0.018187f, 0.000000f, 0.000000f, 1.000000f}, {0.995931f, -0.002010f, -0.052079f, -0.073526f}},
+    {{0.018018f, 0.000000f, -0.000000f, 1.000000f}, {1.000000f, 0.000000f, 0.000000f, 0.000000f}},
+
+    {{-0.006059f, 0.056285f, 0.060064f, 1.000000f}, {0.737238f, 0.202745f, 0.594267f, 0.249441f}}, // Aux
+    {{-0.040416f, -0.043018f, 0.019345f, 1.000000f}, {-0.290331f, 0.623527f, -0.663809f, -0.293734f}},
+    {{-0.039354f, -0.075674f, 0.047048f, 1.000000f}, {-0.187047f, 0.678062f, -0.659285f, -0.265683f}},
+    {{-0.038340f, -0.090987f, 0.082579f, 1.000000f}, {-0.183037f, 0.736793f, -0.634757f, -0.143936f}},
+    {{-0.031806f, -0.087214f, 0.121015f, 1.000000f}, {-0.003659f, 0.758407f, -0.639342f, -0.126678f}},
+};
+
+template <class T, class U>
+void
+convert_quaternion(const T &p_quatA, U &p_quatB)
+{
+	p_quatB.x = p_quatA.x;
+	p_quatB.y = p_quatA.y;
+	p_quatB.z = p_quatA.z;
+	p_quatB.w = p_quatA.w;
+}
+
+xrt_quat
+apply_bone_hand_transform(xrt_quat p_rot, xrt_hand hand)
+{
+	std::swap(p_rot.x, p_rot.z);
+	p_rot.z *= -1.f;
+	if (hand == XRT_HAND_RIGHT)
+		return p_rot;
+
+	p_rot.x *= -1.f;
+	p_rot.y *= -1.f;
+	return p_rot;
+}
+
+void
+metacarpal_joints_to_bone_transform(struct xrt_hand_joint_set *hand_joint_set,
+                                    vr::VRBoneTransform_t *out_bone_transforms,
+                                    xrt_hand hand)
+{
+	struct xrt_hand_joint_value *joint_values = hand_joint_set->values.hand_joint_set_default;
+
+	// Apply orientations for four-finger metacarpals.
+	for (int joint :
+	     {XRT_HAND_JOINT_THUMB_METACARPAL, XRT_HAND_JOINT_INDEX_METACARPAL, XRT_HAND_JOINT_MIDDLE_METACARPAL,
+	      XRT_HAND_JOINT_RING_METACARPAL, XRT_HAND_JOINT_LITTLE_METACARPAL}) {
+		struct xrt_hand_joint_value *current_joint = &joint_values[joint];
+		struct xrt_hand_joint_value *parent_joint = &joint_values[XRT_HAND_JOINT_WRIST];
+
+		xrt_quat diff_openxr;
+		// These should do the exact same things.
+		xrt_quat parent_inv;
+		math_quat_invert(&parent_joint->relation.pose.orientation, &parent_inv);
+		math_quat_rotate(&parent_inv, &current_joint->relation.pose.orientation, &diff_openxr);
+		xrt_quat diff_openvr = apply_bone_hand_transform(diff_openxr, hand);
+
+
+		/**
+		 * * if you try applying the metacarpal transforms without the magic quaternion, everything from the
+		 * metacarpals onwards is rotated 90 degrees.
+		 * In the neutral pose sample, all the metacarpals have a
+		 * rotation relatively close to {w=0.5, x=0.5, y=-0.5, z=0.5} which is an Important Quaternion because
+		 * it probably represents some 90 degree rotation. Maybe, and this was just a random guess, if I took
+		 * the regular metacarpal orientations and rotated them by that quat, everything would work.
+		 */
+		xrt_quat magic_prerotate = XRT_QUAT_IDENTITY;
+		magic_prerotate.w = 0.5;
+		magic_prerotate.x = 0.5;
+		magic_prerotate.y = -0.5;
+		magic_prerotate.z = 0.5;
+
+		if (hand == XRT_HAND_RIGHT) {
+			magic_prerotate.y *= -1.f;
+			magic_prerotate.x *= -1.f;
+		}
+
+		xrt_quat final_diff;
+		math_quat_rotate(&magic_prerotate, &diff_openvr, &final_diff);
+		convert_quaternion(final_diff, out_bone_transforms[joint].orientation);
+
+		xrt_vec3 global_diff_from_this_to_parent =
+		    m_vec3_sub(current_joint->relation.pose.position, parent_joint->relation.pose.position);
+
+		xrt_vec3 translation_wrist_rel;
+		math_quat_rotate_vec3(&parent_inv, &global_diff_from_this_to_parent, &translation_wrist_rel);
+
+		// Y = X?
+		out_bone_transforms[joint].position.v[0] = translation_wrist_rel.y;
+		out_bone_transforms[joint].position.v[1] = translation_wrist_rel.x;
+		out_bone_transforms[joint].position.v[2] = -translation_wrist_rel.z;
+		out_bone_transforms[joint].position.v[3] = 1.f;
+
+		if (hand == XRT_HAND_RIGHT)
+			out_bone_transforms[joint].position.v[1] *= -1.f;
+	}
+}
+
+void
+flexion_joints_to_bone_transform(struct xrt_hand_joint_set *hand_joint_set,
+                                 vr::VRBoneTransform_t *out_bone_transforms,
+                                 xrt_hand hand)
+{
+	struct xrt_hand_joint_value *joint_values = hand_joint_set->values.hand_joint_set_default;
+
+	// Apply orientations for four-finger pxm and onward
+	int parent = -1;
+	for (int joint = XRT_HAND_JOINT_THUMB_METACARPAL; joint < XRT_HAND_JOINT_COUNT; joint++) {
+		if (u_hand_joint_is_metacarpal((xrt_hand_joint)joint)) {
+			parent = joint;
+			continue;
+		}
+		struct xrt_hand_joint_value *current_joint = &joint_values[joint];
+		struct xrt_hand_joint_value *parent_joint = &joint_values[parent];
+
+
+		xrt_quat diff_openxr;
+		math_quat_unrotate(&parent_joint->relation.pose.orientation, &current_joint->relation.pose.orientation,
+		                   &diff_openxr);
+
+		xrt_quat diff_openvr = apply_bone_hand_transform(diff_openxr, hand);
+		convert_quaternion(diff_openvr, out_bone_transforms[joint].orientation);
+		xrt_vec3 global_diff_from_this_to_parent =
+		    m_vec3_sub(current_joint->relation.pose.position, parent_joint->relation.pose.position);
+
+
+		float bone_length = m_vec3_len(global_diff_from_this_to_parent);
+		// OpenVR left hand has +X forward. Weird, huh?
+		out_bone_transforms[joint].position = {bone_length, 0, 0, 1};
+
+		if (hand == XRT_HAND_RIGHT)
+			out_bone_transforms[joint].position.v[0] *= -1.f;
+
+		parent = joint;
+	}
+}
+
+void
+hand_joint_set_to_bone_transform(struct xrt_hand_joint_set hand_joint_set,
+                                 vr::VRBoneTransform_t *out_bone_transforms,
+                                 xrt_hand hand)
+{
+	// fill bone transforms with a default open pose to manipulate later
+	for (int i : {XRT_HAND_JOINT_WRIST, XRT_HAND_JOINT_PALM}) {
+		out_bone_transforms[i] = hand == XRT_HAND_LEFT ? leftOpenPose[i] : rightOpenPose[i];
+	}
+
+	metacarpal_joints_to_bone_transform(&hand_joint_set, out_bone_transforms, hand);
+	flexion_joints_to_bone_transform(&hand_joint_set, out_bone_transforms, hand);
+}
+
 class CDeviceDriver_Monado_Controller : public vr::ITrackedDeviceServerDriver
 {
 public:
@@ -179,7 +410,9 @@ public:
 			break;
 		case XRT_DEVICE_VIVE_WAND: m_render_model = "vr_controller_vive_1_5"; break;
 		case XRT_DEVICE_VIVE_TRACKER_GEN1:
-		case XRT_DEVICE_VIVE_TRACKER_GEN2: m_render_model = "{htc}vr_tracker_vive_1_0"; break;
+		case XRT_DEVICE_VIVE_TRACKER_GEN2:
+		case XRT_DEVICE_VIVE_TRACKER_GEN3:
+		case XRT_DEVICE_VIVE_TRACKER_TUNDRA: m_render_model = "{htc}vr_tracker_vive_1_0"; break;
 		case XRT_DEVICE_PSMV:
 		case XRT_DEVICE_HYDRA:
 		case XRT_DEVICE_DAYDREAM:
@@ -256,6 +489,34 @@ public:
 		m_output_controls.push_back(out);
 		ovrd_log("Added output %s\n", steamvr_control_path);
 	}
+
+	void
+	AddSkeletonControl(const char *steamvr_skeleton_name,
+	                   const char *steamvr_control_path,
+	                   enum xrt_input_name monado_input_name)
+	{
+		enum xrt_input_type monado_input_type = XRT_GET_INPUT_TYPE(monado_input_name);
+
+		SteamVRDriverControlInput in;
+
+		in.monado_input_type = monado_input_type;
+		in.steamvr_control_path = steamvr_control_path;
+		in.monado_input_name = monado_input_name;
+		in.component.has_component = false;
+
+		vr::EVRInputError err = vr::VRDriverInput()->CreateSkeletonComponent(
+		    m_ulPropertyContainer, steamvr_skeleton_name, steamvr_control_path, "/pose/raw",
+		    vr::VRSkeletalTracking_Full, NULL, OPENVR_BONE_COUNT, &in.control_handle);
+		if (err) {
+			ovrd_log("Error adding skeletal input: %i", err);
+			return;
+		}
+
+
+		m_skeletal_input_control = in;
+		ovrd_log("Added skeleton input %s\n", steamvr_control_path);
+	}
+
 	void
 	AddEmulatedIndexControls()
 	{
@@ -301,6 +562,22 @@ public:
 
 			AddControl("/input/trackpad/y", XRT_INPUT_INDEX_TRACKPAD, &y);
 
+			if (m_xdev->hand_tracking_supported) {
+				ovrd_log("Enabling skeletal input as this device supports it");
+
+				// skeletal input compatibility with games is a bit funky with any controllers
+				// other than the index controller, so only do skeletal input with index
+				// emulation
+				const std::string str_hand = m_hand == XRT_HAND_LEFT ? "left" : "right";
+
+
+				AddSkeletonControl(("/input/skeleton/" + str_hand).c_str(),
+				                   ("/skeleton/hand/" + str_hand).c_str(),
+				                   XRT_INPUT_GENERIC_HAND_TRACKING_RIGHT);
+				RunFrame();
+			} else
+				ovrd_log("Not enabling skeletal input as this device does not support it");
+
 
 			AddOutputControl(XRT_OUTPUT_NAME_INDEX_HAPTIC, "/output/haptic");
 		}
@@ -344,11 +621,13 @@ public:
 			AddOutputControl(XRT_OUTPUT_NAME_PSMV_RUMBLE_VIBRATION, "/output/haptic");
 		} break;
 
-		case XRT_DEVICE_TOUCH_CONTROLLER: break;  // TODO
-		case XRT_DEVICE_WMR_CONTROLLER: break;    // TODO
-		case XRT_DEVICE_XBOX_CONTROLLER: break;   // TODO
-		case XRT_DEVICE_VIVE_TRACKER_GEN1: break; // TODO
-		case XRT_DEVICE_VIVE_TRACKER_GEN2: break; // TODO
+		case XRT_DEVICE_TOUCH_CONTROLLER: break;    // TODO
+		case XRT_DEVICE_WMR_CONTROLLER: break;      // TODO
+		case XRT_DEVICE_XBOX_CONTROLLER: break;     // TODO
+		case XRT_DEVICE_VIVE_TRACKER_GEN1: break;   // TODO
+		case XRT_DEVICE_VIVE_TRACKER_GEN2: break;   // TODO
+		case XRT_DEVICE_VIVE_TRACKER_GEN3: break;   // TODO
+		case XRT_DEVICE_VIVE_TRACKER_TUNDRA: break; // TODO
 		case XRT_DEVICE_REALSENSE: break;
 		case XRT_DEVICE_DEPTHAI: break;
 
@@ -360,6 +639,9 @@ public:
 		case XRT_DEVICE_HAND_TRACKER: break;      // shouldn't happen
 		case XRT_DEVICE_GENERIC_HMD:
 		case XRT_DEVICE_VIVE_PRO: break; // no
+		case XRT_DEVICE_EXT_HAND_INTERACTION: break;
+
+		default: break;
 		}
 	}
 
@@ -399,6 +681,7 @@ public:
 		case XRT_INPUT_TYPE_POSE:
 			//! @todo how to handle poses?
 		case XRT_INPUT_TYPE_HAND_TRACKING:
+		case XRT_INPUT_TYPE_FACE_TRACKING:
 		case XRT_INPUT_TYPE_VEC3_MINUS_ONE_TO_ONE: break;
 		}
 	}
@@ -611,7 +894,6 @@ public:
 		         m_pose.qRotation.y, m_pose.qRotation.z, m_pose.qRotation.w, m_pose.vecPosition[0],
 		         m_pose.vecPosition[1], m_pose.vecPosition[2]);
 #endif
-
 		vr::HmdQuaternion_t identityquat{1, 0, 0, 0};
 		m_pose.qWorldFromDriverRotation = identityquat;
 		m_pose.qDriverFromHeadRotation = identityquat;
@@ -681,6 +963,36 @@ public:
 				//       value);
 			}
 		}
+
+		if (m_xdev->hand_tracking_supported && m_skeletal_input_control.control_handle) {
+			vr::VRBoneTransform_t bone_transforms[OPENVR_BONE_COUNT];
+
+			timepoint_ns now_ns = os_monotonic_get_ns();
+			struct xrt_hand_joint_set out_joint_set_value;
+			uint64_t out_timestamp_ns;
+
+			m_xdev->get_hand_tracking(m_xdev,
+			                          m_hand == XRT_HAND_LEFT ? XRT_INPUT_GENERIC_HAND_TRACKING_LEFT
+			                                                  : XRT_INPUT_GENERIC_HAND_TRACKING_RIGHT,
+			                          now_ns, &out_joint_set_value, &out_timestamp_ns);
+
+			hand_joint_set_to_bone_transform(out_joint_set_value, bone_transforms, m_hand);
+			// hand_joint_set_to_bone_transforms(out_joint_set_value, bone_transforms);
+
+			vr::EVRInputError err = vr::VRDriverInput()->UpdateSkeletonComponent(
+			    m_skeletal_input_control.control_handle, vr::VRSkeletalMotionRange_WithoutController,
+			    bone_transforms, OPENVR_BONE_COUNT);
+			if (err != vr::VRInputError_None) {
+				ovrd_log("error updating skeleton: %i ", err);
+			}
+
+			err = vr::VRDriverInput()->UpdateSkeletonComponent(m_skeletal_input_control.control_handle,
+			                                                   vr::VRSkeletalMotionRange_WithController,
+			                                                   bone_transforms, OPENVR_BONE_COUNT);
+			if (err != vr::VRInputError_None) {
+				ovrd_log("error updating skeleton: %i ", err);
+			}
+		}
 	}
 
 
@@ -715,6 +1027,8 @@ public:
 	bool m_emulate_index_controller = false;
 
 	std::vector<struct SteamVRDriverControlInput> m_input_controls;
+	struct SteamVRDriverControlInput m_skeletal_input_control;
+
 	std::vector<struct SteamVRDriverControlOutput> m_output_controls;
 
 private:
@@ -865,6 +1179,10 @@ CDeviceDriver_Monado::Activate(vr::TrackedDeviceIndex_t unObjectId)
 
 	m_ulPropertyContainer = vr::VRProperties()->TrackedDeviceToPropertyContainer(unObjectId);
 	//! @todo: proper serial and model number
+
+	vr::VRProperties()->SetInt32Property(m_ulPropertyContainer, vr::Prop_DeviceClass_Int32, vr::TrackedDeviceClass_HMD);
+	vr::VRProperties()->SetStringProperty(m_ulPropertyContainer, vr::Prop_TrackingSystemName_String, "monado");
+	vr::VRProperties()->SetStringProperty(m_ulPropertyContainer, vr::Prop_ManufacturerName_String, "Monado");
 	vr::VRProperties()->SetStringProperty(m_ulPropertyContainer, vr::Prop_ModelNumber_String, m_xdev->str);
 	vr::VRProperties()->SetFloatProperty(m_ulPropertyContainer, vr::Prop_UserIpdMeters_Float, m_flIPD);
 	vr::VRProperties()->SetFloatProperty(m_ulPropertyContainer, vr::Prop_UserHeadToEyeDepthMeters_Float, 0.f);
@@ -885,7 +1203,8 @@ CDeviceDriver_Monado::Activate(vr::TrackedDeviceIndex_t unObjectId)
 	create_translation_rotation_matrix(&m_view_pose[0], &left);
 	vr::HmdMatrix34_t right;
 	create_translation_rotation_matrix(&m_view_pose[1], &right);
-	vr::VRServerDriverHost()->TrackedDeviceDisplayTransformUpdated(m_trackedDeviceIndex, left, right);
+
+	vr::VRServerDriverHost()->SetDisplayEyeToHead(m_trackedDeviceIndex, left, right);
 
 
 	m_poseUpdateThread = new std::thread(&CDeviceDriver_Monado::PoseUpdateThreadFunction, this);
@@ -1126,7 +1445,9 @@ public:
 
 private:
 	struct xrt_instance *m_xinst = NULL;
+	struct xrt_system *m_xsys = NULL;
 	struct xrt_system_devices *m_xsysd = NULL;
+	struct xrt_space_overseer *m_xso = NULL;
 	struct xrt_device *m_xhmd = NULL;
 
 	CDeviceDriver_Monado *m_MonadoDeviceDriver = NULL;
@@ -1156,31 +1477,43 @@ CServerDriver_Monado::Init(vr::IVRDriverContext *pDriverContext)
 		return vr::VRInitError_Init_HmdNotFound;
 	}
 
-	xret = xrt_instance_create_system(m_xinst, &m_xsysd, NULL);
+	xret = xrt_instance_create_system(m_xinst, &m_xsys, &m_xsysd, &m_xso, NULL);
 	if (xret < 0) {
 		ovrd_log("Failed to create system devices\n");
 		xrt_instance_destroy(&m_xinst);
 		return vr::VRInitError_Init_HmdNotFound;
 	}
-	if (m_xsysd->roles.head == NULL) {
+	if (m_xsysd->static_roles.head == NULL) {
 		ovrd_log("Didn't get a HMD device!\n");
+		xrt_space_overseer_destroy(&m_xso);
+		xrt_system_devices_destroy(&m_xsysd);
+		xrt_system_destroy(&m_xsys);
 		xrt_instance_destroy(&m_xinst);
 		return vr::VRInitError_Init_HmdNotFound;
 	}
 
-	m_xhmd = m_xsysd->roles.head;
+	m_xhmd = m_xsysd->static_roles.head;
 
 	ovrd_log("Selected HMD %s\n", m_xhmd->str);
 	m_MonadoDeviceDriver = new CDeviceDriver_Monado(m_xinst, m_xhmd);
 	//! @todo provide a serial number
 	vr::VRServerDriverHost()->TrackedDeviceAdded(m_xhmd->str, vr::TrackedDeviceClass_HMD, m_MonadoDeviceDriver);
 
-	struct xrt_device *left_xdev = m_xsysd->roles.left;
-	struct xrt_device *right_xdev = m_xsysd->roles.right;
+	xrt_system_roles system_roles = XRT_SYSTEM_ROLES_INIT;
+	xrt_system_devices_get_roles(m_xsysd, &system_roles);
+
+	struct xrt_device *left_xdev = nullptr;
+	if (system_roles.left >= 0 && system_roles.left < XRT_SYSTEM_MAX_DEVICES) {
+		left_xdev = m_xsysd->xdevs[system_roles.left];
+	}
+	struct xrt_device *right_xdev = nullptr;
+	if (system_roles.right >= 0 && system_roles.right < XRT_SYSTEM_MAX_DEVICES) {
+		right_xdev = m_xsysd->xdevs[system_roles.right];
+	}
 
 	// use steamvr room setup instead
 	struct xrt_vec3 offset = {0, 0, 0};
-	u_device_setup_tracking_origins(m_xhmd, left_xdev, right_xdev, &offset);
+	u_builder_setup_tracking_origins(m_xhmd, left_xdev, right_xdev, &offset);
 
 	if (left_xdev) {
 		m_left = new CDeviceDriver_Monado_Controller(m_xinst, left_xdev, XRT_HAND_LEFT);
@@ -1202,7 +1535,9 @@ CServerDriver_Monado::Cleanup()
 		m_MonadoDeviceDriver = NULL;
 	}
 
+	xrt_space_overseer_destroy(&m_xso);
 	xrt_system_devices_destroy(&m_xsysd);
+	xrt_system_destroy(&m_xsys);
 	m_xhmd = NULL;
 	m_left->m_xdev = NULL;
 	m_right->m_xdev = NULL;
@@ -1281,7 +1616,9 @@ CServerDriver_Monado::RunFrame()
 			ovrd_log("Device interaction started %d\n", event.trackedDeviceIndex);
 			break;
 		case vr::VREvent_IpdChanged: ovrd_log("ipd changed to %fm\n", event.data.ipd.ipdMeters); break;
-		case vr::VREvent_ActionBindingReloaded: ovrd_log("action binding reloaded\n"); break;
+		// This event currently spams the console, so is currently commented out. see
+		// https://github.com/ValveSoftware/SteamVR-for-Linux/issues/307
+		// case vr::VREvent_ActionBindingReloaded: ovrd_log("action binding reloaded\n"); break;
 		case vr::VREvent_StatusUpdate: ovrd_log("EVRState: %d\n", event.data.status.statusState); break;
 
 		case vr::VREvent_TrackedDeviceRoleChanged:
@@ -1304,7 +1641,7 @@ CServerDriver_Monado::RunFrame()
 
 /*
  *
- * Whatchdog code
+ * Watchdog code
  *
  */
 
@@ -1338,14 +1675,14 @@ WatchdogThreadFunction()
 		// on windows send the event when the Y key is pressed.
 		if ((0x01 & GetAsyncKeyState('Y')) != 0) {
 			// Y key was pressed.
-			vr::VRWatchdogHost()->WatchdogWakeUp();
+			vr::VRWatchdogHost()->WatchdogWakeUp(vr::TrackedDeviceClass_HMD);
 		}
 		std::this_thread::sleep_for(std::chrono::microseconds(500));
 #else
 		ovrd_log("Watchdog wakeup\n");
 		// for the other platforms, just send one every five seconds
 		std::this_thread::sleep_for(std::chrono::seconds(1));
-		vr::VRWatchdogHost()->WatchdogWakeUp();
+		vr::VRWatchdogHost()->WatchdogWakeUp(vr::ETrackedDeviceClass::TrackedDeviceClass_HMD);
 #endif
 	}
 

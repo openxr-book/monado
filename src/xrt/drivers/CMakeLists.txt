@@ -13,26 +13,31 @@ if(XRT_BUILD_DRIVER_ARDUINO)
 		drv_arduino STATIC arduino/arduino_device.c arduino/arduino_interface.h
 				   arduino/arduino_prober.c
 		)
-	target_link_libraries(drv_arduino PRIVATE xrt-interfaces aux_util aux_os)
+	target_link_libraries(drv_arduino PRIVATE xrt-interfaces aux_util aux_os aux_os_ble)
 	list(APPEND ENABLED_DRIVERS arduino)
 endif()
+
+add_library(drv_cemu STATIC ht_ctrl_emu/ht_ctrl_emu.cpp ht_ctrl_emu/ht_ctrl_emu_interface.h)
+target_link_libraries(drv_cemu PRIVATE xrt-interfaces aux_generated_bindings aux_util)
+list(APPEND ENABLED_HEADSET_DRIVERS drv_cemu)
 
 if(XRT_BUILD_DRIVER_DAYDREAM)
 	add_library(
 		drv_daydream STATIC daydream/daydream_device.c daydream/daydream_device.h
 				    daydream/daydream_interface.h daydream/daydream_prober.c
 		)
-	target_link_libraries(drv_daydream PRIVATE xrt-interfaces aux_util aux_os)
+	target_link_libraries(drv_daydream PRIVATE xrt-interfaces aux_util aux_os aux_os_ble)
 	list(APPEND ENABLED_DRIVERS daydream)
 endif()
 
 if(XRT_BUILD_DRIVER_DEPTHAI)
-	add_library(drv_depthai STATIC depthai/depthai_driver.cpp depthai/depthai_tracked_device.c depthai/depthai_interface.h)
+	add_library(drv_depthai STATIC depthai/depthai_driver.cpp depthai/depthai_interface.h)
 	target_link_libraries(
 		drv_depthai
 		PRIVATE
 			xrt-interfaces
 			aux_os
+			aux_util
 			aux_tracking
 			${OpenCV_LIBRARIES}
 			depthai::core
@@ -43,9 +48,17 @@ if(XRT_BUILD_DRIVER_DEPTHAI)
 endif()
 
 if(XRT_BUILD_DRIVER_SIMULATED)
-	add_library(drv_simulated STATIC simulated/simulated_hmd.c simulated/simulated_interface.h simulated/simulated_prober.c)
+	add_library(
+		drv_simulated STATIC simulated/simulated_controller.c simulated/simulated_hmd.c
+				     simulated/simulated_interface.h simulated/simulated_prober.c
+		)
 	target_link_libraries(drv_simulated PRIVATE xrt-interfaces aux_util)
 	list(APPEND ENABLED_HEADSET_DRIVERS simulated)
+endif()
+
+if(XRT_BUILD_DRIVER_TWRAP)
+	add_library(drv_twrap STATIC twrap/twrap_slam.c twrap/twrap_interface.h)
+	target_link_libraries(drv_twrap PRIVATE xrt-interfaces aux_util)
 endif()
 
 if(XRT_BUILD_DRIVER_QWERTY)
@@ -57,8 +70,7 @@ if(XRT_BUILD_DRIVER_QWERTY)
 		qwerty/qwerty_prober.c
 		qwerty/qwerty_sdl.c
 		)
-	target_link_libraries(drv_qwerty PRIVATE xrt-interfaces aux_util ${SDL2_LIBRARIES})
-	target_include_directories(drv_qwerty PRIVATE ${SDL2_INCLUDE_DIRS})
+	target_link_libraries(drv_qwerty PRIVATE xrt-interfaces aux_util SDL2::SDL2)
 	list(APPEND ENABLED_DRIVERS qwerty)
 
 	add_library(drv_qwerty_includes INTERFACE)
@@ -93,15 +105,31 @@ if(XRT_BUILD_DRIVER_NS)
 		north_star/ns_hmd.h
 		north_star/ns_hmd.c
 		north_star/ns_interface.h
-		north_star/ns_prober.c
 		)
 	target_link_libraries(drv_ns PRIVATE xrt-interfaces aux_math xrt-external-cjson)
 	list(APPEND ENABLED_HEADSET_DRIVERS ns)
 endif()
 
+if(XRT_BUILD_DRIVER_XREAL_AIR)
+	add_library(
+		drv_xreal_air STATIC xreal_air/xreal_air_hmd.h xreal_air/xreal_air_hmd.c
+				     xreal_air/xreal_air_interface.h xreal_air/xreal_air_packet.c
+		)
+	target_link_libraries(
+		drv_xreal_air PRIVATE xrt-interfaces HIDAPI::hidapi aux_util xrt-external-cjson
+		)
+	target_include_directories(drv_xreal_air PRIVATE ${HIDAPI_INCLUDE_DIRS})
+	list(APPEND ENABLED_HEADSET_DRIVERS xreal_air)
+endif()
+
 if(XRT_BUILD_DRIVER_ULV2)
 	add_library(drv_ulv2 STATIC ultraleap_v2/ulv2_driver.cpp ultraleap_v2/ulv2_interface.h)
 	target_link_libraries(drv_ulv2 PRIVATE xrt-interfaces aux_util aux_math LeapV2::LeapV2)
+endif()
+
+if(XRT_BUILD_DRIVER_ULV5)
+	add_library(drv_ulv5 STATIC ultraleap_v5/ulv5_driver.cpp ultraleap_v5/ulv5_interface.h)
+	target_link_libraries(drv_ulv5 PRIVATE xrt-interfaces aux_util aux_math LeapSDK::LeapC)
 endif()
 
 if(XRT_BUILD_DRIVER_OHMD)
@@ -113,14 +141,45 @@ if(XRT_BUILD_DRIVER_OHMD)
 	list(APPEND ENABLED_HEADSET_DRIVERS openhmd)
 endif()
 
+if(XRT_BUILD_DRIVER_OPENGLOVES)
+	add_library(
+		drv_opengloves STATIC
+		opengloves/opengloves_interface.h
+		opengloves/opengloves_device.c
+		opengloves/opengloves_prober.c
+		opengloves/opengloves_device.h
+		opengloves/communication/serial/opengloves_serial.h
+		opengloves/communication/serial/opengloves_serial.c
+		opengloves/encoding/alpha_encoding.h
+		opengloves/encoding/alpha_encoding.cpp
+		opengloves/encoding/encoding.h
+		opengloves/communication/bluetooth/opengloves_bt_serial.h
+		opengloves/communication/bluetooth/opengloves_bt_serial.c
+		opengloves/communication/opengloves_communication.h
+		opengloves/communication/serial/opengloves_prober_serial.h
+		opengloves/communication/serial/opengloves_prober_serial.c
+		opengloves/communication/bluetooth/opengloves_prober_bt.h
+		opengloves/communication/bluetooth/opengloves_prober_bt.c
+		)
+	target_link_libraries(drv_opengloves PRIVATE xrt-interfaces aux_util aux_os bluetooth)
+	list(APPEND ENABLED_DRIVERS opengloves)
+
+endif()
+
 if(XRT_BUILD_DRIVER_PSMV)
 	add_library(drv_psmv STATIC psmv/psmv_driver.c psmv/psmv_interface.h)
 	target_link_libraries(
 		drv_psmv
-		PRIVATE xrt-interfaces
+		PRIVATE xrt-interfaces aux_util
 		PUBLIC aux_os aux_tracking
 		)
 	list(APPEND ENABLED_DRIVERS psmv)
+endif()
+
+if(XRT_BUILD_DRIVER_PSSENSE)
+	add_library(drv_pssense STATIC pssense/pssense_driver.c pssense/pssense_interface.h)
+	target_link_libraries(drv_pssense PRIVATE aux_os aux_util)
+	list(APPEND ENABLED_DRIVERS pssense)
 endif()
 
 if(XRT_BUILD_DRIVER_PSVR)
@@ -160,7 +219,65 @@ if(XRT_BUILD_DRIVER_REMOTE)
 		remote/r_internal.h
 		)
 	target_link_libraries(drv_remote PRIVATE xrt-interfaces aux_util aux_vive)
+	if(WIN32)
+		target_link_libraries(drv_remote PRIVATE ws2_32)
+	endif()
 	list(APPEND ENABLED_HEADSET_DRIVERS remote)
+endif()
+
+if(XRT_BUILD_DRIVER_ROKID)
+	add_library(drv_rokid STATIC rokid/rokid_hmd.c rokid/rokid_interface.h)
+	target_link_libraries(
+		drv_rokid
+		PRIVATE
+			xrt-interfaces
+			aux_util
+			aux_os
+			aux_math
+			${LIBUSB1_LIBRARIES}
+		)
+	target_include_directories(drv_rokid PUBLIC ${LIBUSB1_INCLUDE_DIRS})
+	list(APPEND ENABLED_HEADSET_DRIVERS rokid)
+endif()
+
+if(XRT_BUILD_DRIVER_RIFT_S)
+	add_library(
+		drv_rift_s STATIC
+		rift_s/rift_s_interface.h
+		rift_s/rift_s_camera.c
+		rift_s/rift_s_camera.h
+		rift_s/rift_s_controller.c
+		rift_s/rift_s_controller.h
+		rift_s/rift_s_firmware.c
+		rift_s/rift_s_firmware.h
+		rift_s/rift_s_hmd.c
+		rift_s/rift_s_hmd.h
+		rift_s/rift_s_protocol.c
+		rift_s/rift_s_protocol.h
+		rift_s/rift_s_radio.c
+		rift_s/rift_s_radio.h
+		rift_s/rift_s_tracker.c
+		rift_s/rift_s_tracker.h
+		rift_s/rift_s_util.cpp
+		rift_s/rift_s_util.h
+		rift_s/rift_s.c
+		rift_s/rift_s.h
+		)
+	target_include_directories(drv_rift_s SYSTEM PRIVATE ${EIGEN3_INCLUDE_DIR})
+	target_link_libraries(
+		drv_rift_s
+		PRIVATE
+			xrt-interfaces
+			aux_util
+			aux_util_sink
+			aux_math
+			xrt-external-cjson
+			xrt-external-tinyceres
+		)
+	if(XRT_BUILD_DRIVER_HANDTRACKING)
+		target_link_libraries(drv_rift_s PRIVATE drv_ht)
+	endif()
+	list(APPEND ENABLED_HEADSET_DRIVERS rift-s)
 endif()
 
 set(VIVE_CONFIG_INCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/vive")
@@ -177,6 +294,8 @@ if(XRT_BUILD_DRIVER_VIVE)
 		vive/vive_controller.c
 		vive/vive_lighthouse.h
 		vive/vive_lighthouse.c
+		vive/vive_source.h
+		vive/vive_source.c
 		)
 	target_link_libraries(
 		drv_vive
@@ -191,15 +310,10 @@ if(XRT_BUILD_DRIVER_VIVE)
 	target_link_libraries(drv_vive PRIVATE ${ZLIB_LIBRARIES})
 	target_include_directories(drv_vive PRIVATE ${ZLIB_INCLUDE_DIRS})
 	list(APPEND ENABLED_HEADSET_DRIVERS vive)
-
-	if(XRT_BUILD_DRIVER_HANDTRACKING)
-		target_link_libraries(drv_vive PRIVATE drv_ht)
-		target_link_libraries(drv_vive PRIVATE drv_cemu)
-	endif()
 endif()
 
 if(XRT_HAVE_V4L2)
-	add_library(drv_v4l2 STATIC v4l2/v4l2_driver.c)
+	add_library(drv_v4l2 STATIC v4l2/v4l2_driver.h v4l2/v4l2_driver.c)
 	target_link_libraries(drv_v4l2 PRIVATE xrt-interfaces aux_os aux_util)
 	list(APPEND ENABLED_DRIVERS v4l2)
 endif()
@@ -221,28 +335,15 @@ if(XRT_BUILD_DRIVER_HANDTRACKING)
 			aux_util
 			aux_math
 			t_ht_mercury
-			t_ht_old_rgb
 			hand_async
 		)
 
-	if(XRT_BUILD_DRIVER_DEPTHAI)
-		target_sources(drv_ht PRIVATE ht/ht_prober.c)
-		target_link_libraries(drv_ht PRIVATE drv_depthai)
-	endif()
-
 	target_include_directories(drv_ht PRIVATE ${OpenCV_INCLUDE_DIRS} ${EIGEN3_INCLUDE_DIR})
 	list(APPEND ENABLED_DRIVERS ht)
-
-	add_library(drv_cemu STATIC ht_ctrl_emu/ht_ctrl_emu.cpp ht_ctrl_emu/ht_ctrl_emu_interface.h)
-	target_link_libraries(drv_cemu PRIVATE xrt-interfaces aux_generated_bindings aux_util)
-	list(APPEND ENABLED_HEADSET_DRIVERS drv_cemu)
 endif()
 
 if(XRT_BUILD_DRIVER_SURVIVE)
-	add_library(
-		drv_survive STATIC survive/survive_driver.c 
-				   survive/survive_interface.h 
-		)
+	add_library(drv_survive STATIC survive/survive_driver.c survive/survive_interface.h)
 	target_link_libraries(
 		drv_survive
 		PRIVATE
@@ -254,11 +355,6 @@ if(XRT_BUILD_DRIVER_SURVIVE)
 			PkgConfig::SURVIVE
 		)
 	list(APPEND ENABLED_HEADSET_DRIVERS survive)
-
-	if(XRT_BUILD_DRIVER_HANDTRACKING)
-		target_link_libraries(drv_survive PRIVATE drv_ht)
-		target_link_libraries(drv_survive PRIVATE drv_cemu)
-	endif()
 endif()
 
 if(XRT_BUILD_DRIVER_ANDROID)
@@ -303,10 +399,18 @@ if(XRT_BUILD_DRIVER_WMR)
 		wmr/wmr_common.h
 		wmr/wmr_config.c
 		wmr/wmr_config.h
+		wmr/wmr_controller_base.c
+		wmr/wmr_controller_base.h
+		wmr/wmr_controller_og.c
+		wmr/wmr_controller_hp.c
+		wmr/wmr_controller.c
+		wmr/wmr_controller.h
 		wmr/wmr_bt_controller.c
 		wmr/wmr_bt_controller.h
 		wmr/wmr_hmd.c
 		wmr/wmr_hmd.h
+		wmr/wmr_hmd_controller.c
+		wmr/wmr_hmd_controller.h
 		wmr/wmr_interface.h
 		wmr/wmr_prober.c
 		wmr/wmr_protocol.c
@@ -321,6 +425,7 @@ if(XRT_BUILD_DRIVER_WMR)
 		PRIVATE
 			xrt-interfaces
 			aux_util
+			aux_util_sink # TODO remove this when converted to builders.
 			aux_math
 			aux_tracking
 			xrt-external-cjson
@@ -354,6 +459,39 @@ if(XRT_BUILD_DRIVER_EUROC)
 		)
 	target_include_directories(drv_euroc PRIVATE ${OpenCV_INCLUDE_DIRS})
 	list(APPEND ENABLED_DRIVERS euroc)
+endif()
+
+if(XRT_BUILD_DRIVER_SIMULAVR)
+	add_library(drv_svr STATIC simula/svr_hmd.c simula/svr_interface.h)
+	target_link_libraries(drv_svr PRIVATE xrt-interfaces aux_math xrt-external-cjson)
+	list(APPEND ENABLED_HEADSET_DRIVERS svr)
+endif()
+
+if(XRT_BUILD_DRIVER_STEAMVR_LIGHTHOUSE)
+	add_library(
+		drv_steamvr_lh STATIC
+		steamvr_lh/steamvr_lh.cpp
+		steamvr_lh/device.cpp
+		steamvr_lh/interfaces/driver_manager.cpp
+		steamvr_lh/interfaces/iobuffer.cpp
+		steamvr_lh/interfaces/resources.cpp
+		steamvr_lh/interfaces/settings.cpp
+		steamvr_lh/interfaces/blockqueue.cpp
+		steamvr_lh/interfaces/paths.cpp
+		)
+	target_link_libraries(
+		drv_steamvr_lh
+		PRIVATE
+			aux_util
+			aux_math
+			aux_vive
+			xrt-interfaces
+			xrt-external-openvr
+			xrt-external-cjson
+			xrt-external-vdf
+			${CMAKE_DL_LIBS}
+		)
+	list(APPEND ENABLED_HEADSET_DRIVERS steamvr_lh)
 endif()
 
 if(XRT_BUILD_SAMPLES)

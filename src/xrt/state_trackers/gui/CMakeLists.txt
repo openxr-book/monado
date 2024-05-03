@@ -1,4 +1,4 @@
-# Copyright 2019-2021, Collabora, Ltd.
+# Copyright 2019-2024, Collabora, Ltd.
 # SPDX-License-Identifier: BSL-1.0
 
 # c-imgui doesn't do well with IPO - lots of warnings.
@@ -9,16 +9,22 @@ add_library(
 	gui_common.h
 	gui_imgui.h
 	gui_ogl.c
+	gui_ogl.h
+	gui_ogl_sink.c
 	gui_prober.c
 	gui_scene.cpp
 	gui_scene_calibrate.c
 	gui_scene_debug.c
+	gui_scene_hand_tracking_demo.c
+	gui_scene_record_euroc.c
 	gui_scene_main_menu.c
 	gui_scene_record.c
 	gui_scene_remote.c
 	gui_scene_video.c
 	gui_scene_tracking_overrides.c
 	gui_stb.c
+	gui_widget_native_images.c
+	gui_widget_native_images.h
 	gui_window_record.c
 	gui_window_record.h
 	)
@@ -28,6 +34,7 @@ target_link_libraries(
 	PRIVATE
 		xrt-external-stb
 		aux_util
+		aux_util_sink
 		aux_os
 		aux_ogl
 		drv_includes
@@ -41,6 +48,10 @@ endif()
 
 if(XRT_BUILD_DRIVER_DEPTHAI)
 	target_link_libraries(st_gui PRIVATE drv_depthai)
+endif()
+
+if(XRT_BUILD_DRIVER_HANDTRACKING)
+	target_link_libraries(st_gui PRIVATE drv_ht)
 endif()
 
 if(XRT_BUILD_DRIVER_REMOTE)

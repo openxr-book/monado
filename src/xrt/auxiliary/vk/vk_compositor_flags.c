@@ -1,4 +1,4 @@
-// Copyright 2019-2022, Collabora, Ltd.
+// Copyright 2019-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -44,8 +44,8 @@ check_feature(VkFormat format,
 {
 	if ((format_features & flag) == 0) {
 		U_LOG_E("vk_csci_get_image_usage_flags: %s requested but %s not supported for format %s (%08x) (%08x)",
-		        xrt_swapchain_usage_string(usage), vk_format_feature_string(flag), vk_format_string(format),
-		        format_features, flag);
+		        xrt_swapchain_usage_flag_string(usage, false), vk_format_feature_flag_string(flag, false),
+		        vk_format_string(format), format_features, flag);
 		return false;
 	}
 	return true;
@@ -57,6 +57,20 @@ check_feature(VkFormat format,
  * 'Exported' functions.
  *
  */
+
+VkExternalMemoryHandleTypeFlags
+vk_cb_get_buffer_external_handle_type(struct vk_bundle *vk)
+{
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
+	return VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT_KHR;
+#elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER)
+	return VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID;
+#elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_WIN32_HANDLE)
+	return VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+#else
+#error "need port"
+#endif
+}
 
 VkAccessFlags
 vk_csci_get_barrier_access_mask(enum xrt_swapchain_usage_bits bits)
@@ -164,76 +178,107 @@ vk_csci_get_image_usage_flags(struct vk_bundle *vk, VkFormat format, enum xrt_sw
 
 	VkImageUsageFlags image_usage = 0;
 
-	if ((bits & XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL) != 0) {
-		if (!check_feature(format, XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL, prop.optimalTilingFeatures,
-		                   VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT)) {
-			return 0;
-		}
-		image_usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+#define TEST(XRT_BIT, VK_FORMAT_BIT, VK_USAGE_BIT)                                                                     \
+	if ((bits & XRT_BIT) != 0) {                                                                                   \
+		if (!check_feature(format, XRT_BIT, prop.optimalTilingFeatures, VK_FORMAT_BIT)) {                      \
+			return 0;                                                                                      \
+		}                                                                                                      \
+		image_usage |= VK_USAGE_BIT;                                                                           \
 	}
 
-	if ((prop.optimalTilingFeatures & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT) != 0) {
-		image_usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-	}
+	// clang-format off
+	TEST(XRT_SWAPCHAIN_USAGE_COLOR,            VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT,         VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)
+	TEST(XRT_SWAPCHAIN_USAGE_INPUT_ATTACHMENT, VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT,         VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT)
+	TEST(XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL,    VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)
+	TEST(XRT_SWAPCHAIN_USAGE_TRANSFER_SRC,     VK_FORMAT_FEATURE_TRANSFER_SRC_BIT,             VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
+	TEST(XRT_SWAPCHAIN_USAGE_TRANSFER_DST,     VK_FORMAT_FEATURE_TRANSFER_DST_BIT,             VK_IMAGE_USAGE_TRANSFER_DST_BIT)
+	TEST(XRT_SWAPCHAIN_USAGE_SAMPLED,          VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT,            VK_IMAGE_USAGE_SAMPLED_BIT)
+	TEST(XRT_SWAPCHAIN_USAGE_UNORDERED_ACCESS, VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT,            VK_IMAGE_USAGE_STORAGE_BIT)
+	// clang-format on
 
-	if ((bits & XRT_SWAPCHAIN_USAGE_COLOR) != 0) {
-		if (!check_feature(format, XRT_SWAPCHAIN_USAGE_COLOR, prop.optimalTilingFeatures,
-		                   VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT)) {
-			return 0;
-		}
-		image_usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-	}
-	if ((bits & XRT_SWAPCHAIN_USAGE_TRANSFER_SRC) != 0) {
-		if (!check_feature(format, XRT_SWAPCHAIN_USAGE_TRANSFER_SRC, prop.optimalTilingFeatures,
-		                   VK_FORMAT_FEATURE_TRANSFER_SRC_BIT)) {
-			return 0;
-		}
-		image_usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-	}
-	if ((bits & XRT_SWAPCHAIN_USAGE_TRANSFER_DST) != 0) {
-		if (!check_feature(format, XRT_SWAPCHAIN_USAGE_TRANSFER_DST, prop.optimalTilingFeatures,
-		                   VK_FORMAT_FEATURE_TRANSFER_DST_BIT)) {
-			return 0;
-		}
-		image_usage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-	}
-	if ((bits & XRT_SWAPCHAIN_USAGE_SAMPLED) != 0) {
-		if (!check_feature(format, XRT_SWAPCHAIN_USAGE_SAMPLED, prop.optimalTilingFeatures,
-		                   VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT)) {
-			return 0;
-		}
-		image_usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
-	}
-	if ((bits & XRT_SWAPCHAIN_USAGE_INPUT_ATTACHMENT) != 0) {
-		image_usage |= VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
-	}
+#undef TEST
 
-	// For compositors to be able to read it.
-	if (true) {
-		VkFormatFeatureFlags format_features = prop.optimalTilingFeatures;
-		VkFormatFeatureFlags flag = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
-		if ((format_features & flag) == 0) {
-			U_LOG_E("%s: Compositor needs %s but not supported for format %s (%08x) (%08x)", __func__,
-			        vk_format_feature_string(flag), vk_format_string(format), format_features, flag);
-			return 0;
-		}
-
-		image_usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
-	}
+	/*
+	 * Should not be handled here.
+	 *
+	 * XRT_SWAPCHAIN_USAGE_MUTABLE_FORMAT
+	 */
 
 	return image_usage;
 }
 
 VkExternalMemoryHandleTypeFlags
-vk_csci_get_image_external_handle_type(struct vk_bundle *vk)
+vk_csci_get_image_external_handle_type(struct vk_bundle *vk, struct xrt_image_native *xin)
 {
 #if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
 	return VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT_KHR;
 #elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER)
 	return VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID;
 #elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_WIN32_HANDLE)
-	return VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+	return (xin && xin->is_dxgi_handle) ? VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE_KMT_BIT
+	                                    : VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
 #else
 #error "need port"
 #endif
+}
+
+void
+vk_csci_get_image_external_support(struct vk_bundle *vk,
+                                   VkFormat image_format,
+                                   enum xrt_swapchain_usage_bits bits,
+                                   VkExternalMemoryHandleTypeFlags handle_type,
+                                   bool *out_importable,
+                                   bool *out_exportable)
+{
+	VkImageUsageFlags image_usage = vk_csci_get_image_usage_flags(vk, image_format, bits);
+
+	// In->pNext
+	VkPhysicalDeviceExternalImageFormatInfo external_image_format_info = {
+	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO,
+	    .handleType = handle_type,
+	};
+
+	// In
+	VkPhysicalDeviceImageFormatInfo2 format_info = {
+	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2,
+	    .pNext = &external_image_format_info,
+	    .format = image_format,
+	    .type = VK_IMAGE_TYPE_2D,
+	    .tiling = VK_IMAGE_TILING_OPTIMAL,
+	    .usage = image_usage,
+	};
+
+	// Out->pNext
+	VkExternalImageFormatProperties external_format_properties = {
+	    .sType = VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES,
+	};
+
+	// Out
+	VkImageFormatProperties2 format_properties = {
+	    .sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2,
+	    .pNext = &external_format_properties,
+	};
+
+	VkResult ret =
+	    vk->vkGetPhysicalDeviceImageFormatProperties2(vk->physical_device, &format_info, &format_properties);
+	if (ret != VK_SUCCESS) {
+		VK_ERROR(vk, "vkGetPhysicalDeviceImageFormatProperties2: %s", vk_result_string(ret));
+		if (out_importable) {
+			*out_importable = false;
+		}
+		if (out_exportable) {
+			*out_exportable = false;
+		}
+		return;
+	}
+
+	VkExternalMemoryFeatureFlags features =
+	    external_format_properties.externalMemoryProperties.externalMemoryFeatures;
+
+	if (out_importable) {
+		*out_importable = (features & VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT) != 0;
+	}
+	if (out_exportable) {
+		*out_exportable = (features & VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT) != 0;
+	}
 }

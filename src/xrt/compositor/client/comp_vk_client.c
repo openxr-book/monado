@@ -1,4 +1,4 @@
-// Copyright 2019-2022, Collabora, Ltd.
+// Copyright 2019-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -11,9 +11,15 @@
 #include "util/u_misc.h"
 #include "util/u_handles.h"
 #include "util/u_trace_marker.h"
+#include "util/u_debug.h"
 
 #include "comp_vk_client.h"
 
+//! We are not allowed to touch the queue in xrDestroySwapchain
+#define BREAK_OPENXR_SPEC_IN_DESTROY_SWAPCHAIN (true)
+
+// Prefixed with OXR since the only user right now is the OpenXR state tracker.
+DEBUG_GET_ONCE_LOG_OPTION(vulkan_log, "OXR_VULKAN_LOG", U_LOGGING_INFO)
 
 /*!
  * Down-cast helper.
@@ -27,6 +33,15 @@ client_vk_swapchain(struct xrt_swapchain *xsc)
 }
 
 /*!
+ * Helper to get the native swapchain.
+ */
+static inline struct xrt_swapchain *
+to_native_swapchain(struct xrt_swapchain *xsc)
+{
+	return &client_vk_swapchain(xsc)->xscn->base;
+}
+
+/*!
  * Down-cast helper.
  *
  * @private @memberof client_vk_compositor
@@ -35,6 +50,41 @@ static inline struct client_vk_compositor *
 client_vk_compositor(struct xrt_compositor *xc)
 {
 	return (struct client_vk_compositor *)xc;
+}
+
+/*!
+ * Helper to get the native swapchain.
+ */
+static inline struct xrt_compositor *
+to_native_compositor(struct xrt_compositor *xc)
+{
+	return &client_vk_compositor(xc)->xcn->base;
+}
+
+
+/*
+ *
+ * Transition helpers.
+ *
+ */
+
+static xrt_result_t
+submit_image_barrier(struct client_vk_swapchain *sc, VkCommandBuffer cmd_buffer)
+{
+	COMP_TRACE_MARKER();
+
+	struct client_vk_compositor *c = sc->c;
+	struct vk_bundle *vk = &c->vk;
+	VkResult ret;
+
+	// Note we do not submit a fence here, it's not needed.
+	ret = vk_cmd_pool_submit_cmd_buffer(vk, &c->pool, cmd_buffer);
+	if (ret != VK_SUCCESS) {
+		VK_ERROR(vk, "vk_cmd_pool_submit_cmd_buffer: %s %u", vk_result_string(ret), ret);
+		return XRT_ERROR_FAILED_TO_SUBMIT_VULKAN_COMMANDS;
+	}
+
+	return XRT_SUCCESS;
 }
 
 
@@ -69,6 +119,8 @@ setup_semaphore(struct client_vk_compositor *c)
 		return XRT_ERROR_VULKAN;
 	}
 
+	VK_NAME_SEMAPHORE(vk, semaphore, "timeline semaphore");
+
 	c->sync.semaphore = semaphore;
 	c->sync.xcsem = xcsem; // No need to reference.
 
@@ -84,10 +136,7 @@ setup_semaphore(struct client_vk_compositor *c)
  */
 
 static bool
-submit_handle(struct client_vk_compositor *c,
-              int64_t frame_id,
-              xrt_graphics_sync_handle_t sync_handle,
-              xrt_result_t *out_xret)
+submit_handle(struct client_vk_compositor *c, xrt_graphics_sync_handle_t sync_handle, xrt_result_t *out_xret)
 {
 	// Did we get a ready made handle, assume it's in the command stream and call commit directly.
 	if (!xrt_graphics_sync_handle_is_valid(sync_handle)) {
@@ -95,12 +144,12 @@ submit_handle(struct client_vk_compositor *c,
 	}
 
 	// Commit consumes the sync_handle.
-	*out_xret = xrt_comp_layer_commit(&c->xcn->base, frame_id, sync_handle);
+	*out_xret = xrt_comp_layer_commit(&c->xcn->base, sync_handle);
 	return true;
 }
 
 static bool
-submit_semaphore(struct client_vk_compositor *c, int64_t frame_id, xrt_result_t *out_xret)
+submit_semaphore(struct client_vk_compositor *c, xrt_result_t *out_xret)
 {
 #ifdef VK_KHR_timeline_semaphore
 	if (c->sync.xcsem == NULL) {
@@ -144,7 +193,6 @@ submit_semaphore(struct client_vk_compositor *c, int64_t frame_id, xrt_result_t 
 
 	*out_xret = xrt_comp_layer_commit_with_semaphore( //
 	    &c->xcn->base,                                // xc
-	    frame_id,                                     // frame_id
 	    c->sync.xcsem,                                // xcsem
 	    values[0]);                                   // value
 
@@ -155,7 +203,7 @@ submit_semaphore(struct client_vk_compositor *c, int64_t frame_id, xrt_result_t 
 }
 
 static bool
-submit_fence(struct client_vk_compositor *c, int64_t frame_id, xrt_result_t *out_xret)
+submit_fence(struct client_vk_compositor *c, xrt_result_t *out_xret)
 {
 	xrt_graphics_sync_handle_t sync_handle = XRT_GRAPHICS_SYNC_HANDLE_INVALID;
 	struct vk_bundle *vk = &c->vk;
@@ -186,12 +234,12 @@ submit_fence(struct client_vk_compositor *c, int64_t frame_id, xrt_result_t *out
 		}
 	}
 
-	*out_xret = xrt_comp_layer_commit(&c->xcn->base, frame_id, sync_handle);
+	*out_xret = xrt_comp_layer_commit(&c->xcn->base, sync_handle);
 	return true;
 }
 
 static bool
-submit_fallback(struct client_vk_compositor *c, int64_t frame_id, xrt_result_t *out_xret)
+submit_fallback(struct client_vk_compositor *c, xrt_result_t *out_xret)
 {
 	struct vk_bundle *vk = &c->vk;
 
@@ -199,10 +247,12 @@ submit_fallback(struct client_vk_compositor *c, int64_t frame_id, xrt_result_t *
 		COMP_TRACE_IDENT(device_wait_idle);
 
 		// Last course of action fallback.
-		vk->vkDeviceWaitIdle(vk->device);
+		os_mutex_lock(&vk->queue_mutex);
+		vk->vkQueueWaitIdle(vk->queue);
+		os_mutex_unlock(&vk->queue_mutex);
 	}
 
-	*out_xret = xrt_comp_layer_commit(&c->xcn->base, frame_id, XRT_GRAPHICS_SYNC_HANDLE_INVALID);
+	*out_xret = xrt_comp_layer_commit(&c->xcn->base, XRT_GRAPHICS_SYNC_HANDLE_INVALID);
 	return true;
 }
 
@@ -223,7 +273,11 @@ client_vk_swapchain_destroy(struct xrt_swapchain *xsc)
 	struct vk_bundle *vk = &c->vk;
 
 	// Make sure images are not used anymore.
-	vk->vkDeviceWaitIdle(vk->device);
+	if (BREAK_OPENXR_SPEC_IN_DESTROY_SWAPCHAIN) {
+		os_mutex_lock(&vk->queue_mutex);
+		vk->vkQueueWaitIdle(vk->queue);
+		os_mutex_unlock(&vk->queue_mutex);
+	}
 
 	for (uint32_t i = 0; i < sc->base.base.image_count; i++) {
 		if (sc->base.images[i] != VK_NULL_HANDLE) {
@@ -249,33 +303,13 @@ client_vk_swapchain_acquire_image(struct xrt_swapchain *xsc, uint32_t *out_index
 	COMP_TRACE_MARKER();
 
 	struct client_vk_swapchain *sc = client_vk_swapchain(xsc);
-	struct vk_bundle *vk = &sc->c->vk;
-
+	xrt_result_t xret;
 	uint32_t index = 0;
 
 	// Pipe down call into native swapchain.
-	xrt_result_t xret = xrt_swapchain_acquire_image(&sc->xscn->base, &index);
+	xret = xrt_swapchain_acquire_image(&sc->xscn->base, &index);
 	if (xret != XRT_SUCCESS) {
 		return xret;
-	}
-
-	VkResult ret;
-
-
-	COMP_TRACE_IDENT(submit);
-
-	// Acquire ownership and complete layout transition
-	VkSubmitInfo submitInfo = {
-	    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-	    .commandBufferCount = 1,
-	    .pCommandBuffers = &sc->acquire[index],
-	};
-
-	// Note we do not submit a fence here, it's not needed.
-	ret = vk_locked_submit(vk, vk->queue, 1, &submitInfo, VK_NULL_HANDLE);
-	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "Could not submit to queue: %d", ret);
-		return XRT_ERROR_FAILED_TO_SUBMIT_VULKAN_COMMANDS;
 	}
 
 	// Finally done.
@@ -289,10 +323,25 @@ client_vk_swapchain_wait_image(struct xrt_swapchain *xsc, uint64_t timeout_ns, u
 {
 	COMP_TRACE_MARKER();
 
-	struct client_vk_swapchain *sc = client_vk_swapchain(xsc);
-
 	// Pipe down call into native swapchain.
-	return xrt_swapchain_wait_image(&sc->xscn->base, timeout_ns, index);
+	return xrt_swapchain_wait_image(to_native_swapchain(xsc), timeout_ns, index);
+}
+
+static xrt_result_t
+client_vk_swapchain_barrier_image(struct xrt_swapchain *xsc, enum xrt_barrier_direction direction, uint32_t index)
+{
+	COMP_TRACE_MARKER();
+
+	struct client_vk_swapchain *sc = client_vk_swapchain(xsc);
+	VkCommandBuffer cmd_buffer = VK_NULL_HANDLE;
+
+	switch (direction) {
+	case XRT_BARRIER_TO_APP: cmd_buffer = sc->acquire[index]; break;
+	case XRT_BARRIER_TO_COMP: cmd_buffer = sc->release[index]; break;
+	default: assert(false);
+	}
+
+	return submit_image_barrier(sc, cmd_buffer);
 }
 
 static xrt_result_t
@@ -300,52 +349,43 @@ client_vk_swapchain_release_image(struct xrt_swapchain *xsc, uint32_t index)
 {
 	COMP_TRACE_MARKER();
 
-	struct client_vk_swapchain *sc = client_vk_swapchain(xsc);
-	struct vk_bundle *vk = &sc->c->vk;
-
-	VkResult ret;
-
-	{
-		COMP_TRACE_IDENT(submit);
-
-		// Release ownership and begin layout transition
-		VkSubmitInfo submitInfo = {
-		    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-		    .commandBufferCount = 1,
-		    .pCommandBuffers = &sc->release[index],
-		};
-
-		// Note we do not submit a fence here, it's not needed.
-		ret = vk_locked_submit(vk, vk->queue, 1, &submitInfo, VK_NULL_HANDLE);
-		if (ret != VK_SUCCESS) {
-			VK_ERROR(vk, "Could not submit to queue: %d", ret);
-			return XRT_ERROR_FAILED_TO_SUBMIT_VULKAN_COMMANDS;
-		}
-	}
-
-	COMP_TRACE_IDENT(release_image);
-
 	// Pipe down call into native swapchain.
-	return xrt_swapchain_release_image(&sc->xscn->base, index);
+	return xrt_swapchain_release_image(to_native_swapchain(xsc), index);
 }
 
+static xrt_result_t
+client_vk_compositor_passthrough_create(struct xrt_compositor *xc, const struct xrt_passthrough_create_info *info)
+{
+	struct client_vk_compositor *c = client_vk_compositor(xc);
+
+	// Pipe down call into native compositor.
+	return xrt_comp_create_passthrough(&c->xcn->base, info);
+}
+
+static xrt_result_t
+client_vk_compositor_passthrough_layer_create(struct xrt_compositor *xc,
+                                              const struct xrt_passthrough_layer_create_info *info)
+{
+	struct client_vk_compositor *c = client_vk_compositor(xc);
+
+	// Pipe down call into native compositor.
+	return xrt_comp_create_passthrough_layer(&c->xcn->base, info);
+}
+
+static xrt_result_t
+client_vk_compositor_passthrough_destroy(struct xrt_compositor *xc)
+{
+	struct client_vk_compositor *c = client_vk_compositor(xc);
+
+	// Pipe down call into native compositor.
+	return xrt_comp_destroy_passthrough(&c->xcn->base);
+}
 
 /*
  *
  * Compositor functions.
  *
  */
-
-static xrt_result_t
-client_vk_compositor_poll_events(struct xrt_compositor *xc, union xrt_compositor_event *out_xce)
-{
-	COMP_TRACE_MARKER();
-
-	struct client_vk_compositor *c = client_vk_compositor(xc);
-
-	// Pipe down call into native compositor.
-	return xrt_comp_poll_events(&c->xcn->base, out_xce);
-}
 
 static void
 client_vk_compositor_destroy(struct xrt_compositor *xc)
@@ -361,30 +401,29 @@ client_vk_compositor_destroy(struct xrt_compositor *xc)
 	}
 	xrt_compositor_semaphore_reference(&c->sync.xcsem, NULL);
 
-	if (vk->cmd_pool != VK_NULL_HANDLE) {
-		// Make sure that any of the command buffers from this command
-		// pool are n used here, this pleases the validation layer.
-		os_mutex_lock(&vk->queue_mutex);
-		vk->vkDeviceWaitIdle(vk->device);
-		os_mutex_unlock(&vk->queue_mutex);
+	/*
+	 * Make sure that any of the command buffers from the command pool are
+	 * not in use (pending in Vulkan terms), to please the validation layer.
+	 */
+	os_mutex_lock(&vk->queue_mutex);
+	vk->vkQueueWaitIdle(vk->queue);
+	os_mutex_unlock(&vk->queue_mutex);
 
-		vk->vkDestroyCommandPool(vk->device, vk->cmd_pool, NULL);
-		vk->cmd_pool = VK_NULL_HANDLE;
-	}
+	// Now safe to free the pool.
+	vk_cmd_pool_destroy(vk, &c->pool);
+
 	vk_deinit_mutex(vk);
 
 	free(c);
 }
 
 static xrt_result_t
-client_vk_compositor_begin_session(struct xrt_compositor *xc, enum xrt_view_type type)
+client_vk_compositor_begin_session(struct xrt_compositor *xc, const struct xrt_begin_session_info *info)
 {
 	COMP_TRACE_MARKER();
 
-	struct client_vk_compositor *c = client_vk_compositor(xc);
-
 	// Pipe down call into native compositor.
-	return xrt_comp_begin_session(&c->xcn->base, type);
+	return xrt_comp_begin_session(to_native_compositor(xc), info);
 }
 
 static xrt_result_t
@@ -392,10 +431,8 @@ client_vk_compositor_end_session(struct xrt_compositor *xc)
 {
 	COMP_TRACE_MARKER();
 
-	struct client_vk_compositor *c = client_vk_compositor(xc);
-
 	// Pipe down call into native compositor.
-	return xrt_comp_end_session(&c->xcn->base);
+	return xrt_comp_end_session(to_native_compositor(xc));
 }
 
 static xrt_result_t
@@ -406,86 +443,77 @@ client_vk_compositor_wait_frame(struct xrt_compositor *xc,
 {
 	COMP_TRACE_MARKER();
 
-	struct client_vk_compositor *c = client_vk_compositor(xc);
-
 	// Pipe down call into native compositor.
-	return xrt_comp_wait_frame(&c->xcn->base, out_frame_id, predicted_display_time, predicted_display_period);
+	return xrt_comp_wait_frame(    //
+	    to_native_compositor(xc),  //
+	    out_frame_id,              //
+	    predicted_display_time,    //
+	    predicted_display_period); //
 }
 
 static xrt_result_t
 client_vk_compositor_begin_frame(struct xrt_compositor *xc, int64_t frame_id)
 {
-	struct client_vk_compositor *c = client_vk_compositor(xc);
-
 	// Pipe down call into native compositor.
-	return xrt_comp_begin_frame(&c->xcn->base, frame_id);
+	return xrt_comp_begin_frame(to_native_compositor(xc), frame_id);
 }
 
 static xrt_result_t
 client_vk_compositor_discard_frame(struct xrt_compositor *xc, int64_t frame_id)
 {
-	struct client_vk_compositor *c = client_vk_compositor(xc);
-
 	// Pipe down call into native compositor.
-	return xrt_comp_discard_frame(&c->xcn->base, frame_id);
+	return xrt_comp_discard_frame(to_native_compositor(xc), frame_id);
 }
 
 static xrt_result_t
-client_vk_compositor_layer_begin(struct xrt_compositor *xc,
-                                 int64_t frame_id,
-                                 uint64_t display_time_ns,
-                                 enum xrt_blend_mode env_blend_mode)
+client_vk_compositor_layer_begin(struct xrt_compositor *xc, const struct xrt_layer_frame_data *data)
 {
 	COMP_TRACE_MARKER();
 
-	struct client_vk_compositor *c = client_vk_compositor(xc);
-
-	return xrt_comp_layer_begin(&c->xcn->base, frame_id, display_time_ns, env_blend_mode);
+	return xrt_comp_layer_begin(to_native_compositor(xc), data);
 }
 
 static xrt_result_t
-client_vk_compositor_layer_stereo_projection(struct xrt_compositor *xc,
-                                             struct xrt_device *xdev,
-                                             struct xrt_swapchain *l_xsc,
-                                             struct xrt_swapchain *r_xsc,
-                                             const struct xrt_layer_data *data)
+client_vk_compositor_layer_projection(struct xrt_compositor *xc,
+                                      struct xrt_device *xdev,
+                                      struct xrt_swapchain *xsc[XRT_MAX_VIEWS],
+                                      const struct xrt_layer_data *data)
 {
-	struct client_vk_compositor *c = client_vk_compositor(xc);
-	struct xrt_swapchain *l_xscn;
-	struct xrt_swapchain *r_xscn;
+	struct xrt_compositor *xcn;
+	struct xrt_swapchain *xscn[XRT_MAX_VIEWS];
 
-	assert(data->type == XRT_LAYER_STEREO_PROJECTION);
+	assert(data->type == XRT_LAYER_PROJECTION);
+	for (uint32_t i = 0; i < data->view_count; ++i) {
+		xscn[i] = &client_vk_swapchain(xsc[i])->xscn->base;
+	}
 
-	l_xscn = &client_vk_swapchain(l_xsc)->xscn->base;
-	r_xscn = &client_vk_swapchain(r_xsc)->xscn->base;
+	xcn = to_native_compositor(xc);
 
-	return xrt_comp_layer_stereo_projection(&c->xcn->base, xdev, l_xscn, r_xscn, data);
+	return xrt_comp_layer_projection(xcn, xdev, xscn, data);
 }
 
 
 static xrt_result_t
 client_vk_compositor_layer_stereo_projection_depth(struct xrt_compositor *xc,
                                                    struct xrt_device *xdev,
-                                                   struct xrt_swapchain *l_xsc,
-                                                   struct xrt_swapchain *r_xsc,
-                                                   struct xrt_swapchain *l_d_xsc,
-                                                   struct xrt_swapchain *r_d_xsc,
+                                                   struct xrt_swapchain *xsc[XRT_MAX_VIEWS],
+                                                   struct xrt_swapchain *d_xsc[XRT_MAX_VIEWS],
                                                    const struct xrt_layer_data *data)
 {
-	struct client_vk_compositor *c = client_vk_compositor(xc);
-	struct xrt_swapchain *l_xscn;
-	struct xrt_swapchain *r_xscn;
-	struct xrt_swapchain *l_d_xscn;
-	struct xrt_swapchain *r_d_xscn;
+	struct xrt_compositor *xcn;
 
-	assert(data->type == XRT_LAYER_STEREO_PROJECTION_DEPTH);
+	struct xrt_swapchain *xscn[XRT_MAX_VIEWS];
+	struct xrt_swapchain *d_xscn[XRT_MAX_VIEWS];
 
-	l_xscn = &client_vk_swapchain(l_xsc)->xscn->base;
-	r_xscn = &client_vk_swapchain(r_xsc)->xscn->base;
-	l_d_xscn = &client_vk_swapchain(l_d_xsc)->xscn->base;
-	r_d_xscn = &client_vk_swapchain(r_d_xsc)->xscn->base;
+	assert(data->type == XRT_LAYER_PROJECTION_DEPTH);
 
-	return xrt_comp_layer_stereo_projection_depth(&c->xcn->base, xdev, l_xscn, r_xscn, l_d_xscn, r_d_xscn, data);
+	xcn = to_native_compositor(xc);
+	for (uint32_t i = 0; i < data->view_count; ++i) {
+		xscn[i] = to_native_swapchain(xsc[i]);
+		d_xscn[i] = to_native_swapchain(d_xsc[i]);
+	}
+
+	return xrt_comp_layer_projection_depth(xcn, xdev, xscn, d_xscn, data);
 }
 
 static xrt_result_t
@@ -494,14 +522,15 @@ client_vk_compositor_layer_quad(struct xrt_compositor *xc,
                                 struct xrt_swapchain *xsc,
                                 const struct xrt_layer_data *data)
 {
-	struct client_vk_compositor *c = client_vk_compositor(xc);
+	struct xrt_compositor *xcn;
 	struct xrt_swapchain *xscfb;
 
 	assert(data->type == XRT_LAYER_QUAD);
 
-	xscfb = &client_vk_swapchain(xsc)->xscn->base;
+	xcn = to_native_compositor(xc);
+	xscfb = to_native_swapchain(xsc);
 
-	return xrt_comp_layer_quad(&c->xcn->base, xdev, xscfb, data);
+	return xrt_comp_layer_quad(xcn, xdev, xscfb, data);
 }
 
 static xrt_result_t
@@ -510,14 +539,15 @@ client_vk_compositor_layer_cube(struct xrt_compositor *xc,
                                 struct xrt_swapchain *xsc,
                                 const struct xrt_layer_data *data)
 {
-	struct client_vk_compositor *c = client_vk_compositor(xc);
+	struct xrt_compositor *xcn;
 	struct xrt_swapchain *xscfb;
 
 	assert(data->type == XRT_LAYER_CUBE);
 
-	xscfb = &client_vk_swapchain(xsc)->xscn->base;
+	xcn = to_native_compositor(xc);
+	xscfb = to_native_swapchain(xsc);
 
-	return xrt_comp_layer_cube(&c->xcn->base, xdev, xscfb, data);
+	return xrt_comp_layer_cube(xcn, xdev, xscfb, data);
 }
 
 static xrt_result_t
@@ -526,14 +556,15 @@ client_vk_compositor_layer_cylinder(struct xrt_compositor *xc,
                                     struct xrt_swapchain *xsc,
                                     const struct xrt_layer_data *data)
 {
-	struct client_vk_compositor *c = client_vk_compositor(xc);
+	struct xrt_compositor *xcn;
 	struct xrt_swapchain *xscfb;
 
 	assert(data->type == XRT_LAYER_CYLINDER);
 
-	xscfb = &client_vk_swapchain(xsc)->xscn->base;
+	xcn = to_native_compositor(xc);
+	xscfb = to_native_swapchain(xsc);
 
-	return xrt_comp_layer_cylinder(&c->xcn->base, xdev, xscfb, data);
+	return xrt_comp_layer_cylinder(xcn, xdev, xscfb, data);
 }
 
 static xrt_result_t
@@ -542,14 +573,15 @@ client_vk_compositor_layer_equirect1(struct xrt_compositor *xc,
                                      struct xrt_swapchain *xsc,
                                      const struct xrt_layer_data *data)
 {
-	struct client_vk_compositor *c = client_vk_compositor(xc);
+	struct xrt_compositor *xcn;
 	struct xrt_swapchain *xscfb;
 
 	assert(data->type == XRT_LAYER_EQUIRECT1);
 
-	xscfb = &client_vk_swapchain(xsc)->xscn->base;
+	xcn = to_native_compositor(xc);
+	xscfb = to_native_swapchain(xsc);
 
-	return xrt_comp_layer_equirect1(&c->xcn->base, xdev, xscfb, data);
+	return xrt_comp_layer_equirect1(xcn, xdev, xscfb, data);
 }
 
 static xrt_result_t
@@ -558,31 +590,53 @@ client_vk_compositor_layer_equirect2(struct xrt_compositor *xc,
                                      struct xrt_swapchain *xsc,
                                      const struct xrt_layer_data *data)
 {
-	struct client_vk_compositor *c = client_vk_compositor(xc);
+	struct xrt_compositor *xcn;
 	struct xrt_swapchain *xscfb;
 
 	assert(data->type == XRT_LAYER_EQUIRECT2);
 
-	xscfb = &client_vk_swapchain(xsc)->xscn->base;
+	xcn = to_native_compositor(xc);
+	xscfb = to_native_swapchain(xsc);
 
-	return xrt_comp_layer_equirect2(&c->xcn->base, xdev, xscfb, data);
+	return xrt_comp_layer_equirect2(xcn, xdev, xscfb, data);
 }
 
 static xrt_result_t
-client_vk_compositor_layer_commit(struct xrt_compositor *xc, int64_t frame_id, xrt_graphics_sync_handle_t sync_handle)
+client_vk_compositor_layer_passthrough(struct xrt_compositor *xc,
+                                       struct xrt_device *xdev,
+                                       const struct xrt_layer_data *data)
+{
+	struct client_vk_compositor *c = client_vk_compositor(xc);
+
+	assert(data->type == XRT_LAYER_PASSTHROUGH);
+
+	return xrt_comp_layer_passthrough(&c->xcn->base, xdev, data);
+}
+
+static xrt_result_t
+client_vk_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sync_handle)
 {
 	COMP_TRACE_MARKER();
 
 	struct client_vk_compositor *c = client_vk_compositor(xc);
 
+	if (c->renderdoc_enabled) {
+		struct vk_bundle *vk = &c->vk;
+		VkResult ret = vk_cmd_pool_submit_cmd_buffer(vk, &c->pool, c->dcb);
+		if (ret != VK_SUCCESS) {
+			VK_ERROR(vk, "vk_cmd_pool_submit_cmd_buffer: %s %u", vk_result_string(ret), ret);
+			return XRT_ERROR_FAILED_TO_SUBMIT_VULKAN_COMMANDS;
+		}
+	}
+
 	xrt_result_t xret = XRT_SUCCESS;
-	if (submit_handle(c, frame_id, sync_handle, &xret)) {
+	if (submit_handle(c, sync_handle, &xret)) {
 		return xret;
-	} else if (submit_semaphore(c, frame_id, &xret)) {
+	} else if (submit_semaphore(c, &xret)) {
 		return xret;
-	} else if (submit_fence(c, frame_id, &xret)) {
+	} else if (submit_fence(c, &xret)) {
 		return xret;
-	} else if (submit_fallback(c, frame_id, &xret)) {
+	} else if (submit_fallback(c, &xret)) {
 		return xret;
 	} else {
 		// Really bad state.
@@ -595,9 +649,7 @@ client_vk_compositor_get_swapchain_create_properties(struct xrt_compositor *xc,
                                                      const struct xrt_swapchain_create_info *info,
                                                      struct xrt_swapchain_create_properties *xsccp)
 {
-	struct client_vk_compositor *c = client_vk_compositor(xc);
-
-	return xrt_comp_get_swapchain_create_properties(&c->xcn->base, info, xsccp);
+	return xrt_comp_get_swapchain_create_properties(to_native_compositor(xc), info, xsccp);
 }
 
 static xrt_result_t
@@ -612,8 +664,19 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 	VkResult ret;
 	xrt_result_t xret;
 
+	struct xrt_swapchain_create_properties xsccp = XRT_STRUCT_INIT;
+	xret = xrt_comp_get_swapchain_create_properties(&c->xcn->base, info, &xsccp);
+	if (xret != XRT_SUCCESS) {
+		VK_ERROR(vk, "Failed to get create properties: %u", xret);
+		return xret;
+	}
+
+	// Update the create info.
+	struct xrt_swapchain_create_info xinfo = *info;
+	xinfo.bits |= xsccp.extra_bits;
+
 	struct xrt_swapchain_native *xscn = NULL; // Has to be NULL.
-	xret = xrt_comp_native_create_swapchain(c->xcn, info, &xscn);
+	xret = xrt_comp_native_create_swapchain(c->xcn, &xinfo, &xscn);
 
 	if (xret != XRT_SUCCESS) {
 		return xret;
@@ -622,14 +685,15 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 
 	struct xrt_swapchain *xsc = &xscn->base;
 
-	VkAccessFlags barrier_access_mask = vk_csci_get_barrier_access_mask(info->bits);
-	VkImageLayout barrier_optimal_layout = vk_csci_get_barrier_optimal_layout(info->format);
-	VkImageAspectFlags barrier_aspect_mask = vk_csci_get_barrier_aspect_mask(info->format);
+	VkAccessFlags barrier_access_mask = vk_csci_get_barrier_access_mask(xinfo.bits);
+	VkImageLayout barrier_optimal_layout = vk_csci_get_barrier_optimal_layout(xinfo.format);
+	VkImageAspectFlags barrier_aspect_mask = vk_csci_get_barrier_aspect_mask(xinfo.format);
 
 	struct client_vk_swapchain *sc = U_TYPED_CALLOC(struct client_vk_swapchain);
 	sc->base.base.destroy = client_vk_swapchain_destroy;
 	sc->base.base.acquire_image = client_vk_swapchain_acquire_image;
 	sc->base.base.wait_image = client_vk_swapchain_wait_image;
+	sc->base.base.barrier_image = client_vk_swapchain_barrier_image;
 	sc->base.base.release_image = client_vk_swapchain_release_image;
 	sc->base.base.reference.count = 1;
 	sc->base.base.image_count = xsc->image_count; // Fetch the number of images from the native swapchain.
@@ -637,23 +701,33 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 	sc->xscn = xscn;
 
 	for (uint32_t i = 0; i < xsc->image_count; i++) {
-		ret = vk_create_image_from_native(vk, info, &xscn->images[i], &sc->base.images[i], &sc->mems[i]);
+		ret = vk_create_image_from_native(vk, &xinfo, &xscn->images[i], &sc->base.images[i], &sc->mems[i]);
 
 		if (ret != VK_SUCCESS) {
 			return XRT_ERROR_VULKAN;
 		}
+
+		VK_NAME_IMAGE(vk, sc->base.images[i], "vk_image_collection image");
+		VK_NAME_DEVICE_MEMORY(vk, sc->mems[i], "vk_image_collection device_memory");
 	}
+
+	vk_cmd_pool_lock(&c->pool);
+	const VkCommandBufferUsageFlags flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
 
 	// Prerecord command buffers for swapchain image ownership/layout transitions
 	for (uint32_t i = 0; i < xsc->image_count; i++) {
-		ret = vk_init_cmd_buffer(vk, &sc->acquire[i]);
+		ret = vk_cmd_pool_create_and_begin_cmd_buffer_locked(vk, &c->pool, flags, &sc->acquire[i]);
 		if (ret != VK_SUCCESS) {
+			vk_cmd_pool_unlock(&c->pool);
 			return XRT_ERROR_VULKAN;
 		}
-		ret = vk_init_cmd_buffer(vk, &sc->release[i]);
+		VK_NAME_COMMAND_BUFFER(vk, sc->acquire[i], "client_vk_swapchain acquire command buffer");
+		ret = vk_cmd_pool_create_and_begin_cmd_buffer_locked(vk, &c->pool, flags, &sc->release[i]);
 		if (ret != VK_SUCCESS) {
+			vk_cmd_pool_unlock(&c->pool);
 			return XRT_ERROR_VULKAN;
 		}
+		VK_NAME_COMMAND_BUFFER(vk, sc->release[i], "client_vk_swapchain release command buffer");
 
 		VkImageSubresourceRange subresource_range = {
 		    .aspectMask = barrier_aspect_mask,
@@ -715,14 +789,18 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 		ret = vk->vkEndCommandBuffer(sc->acquire[i]);
 		if (ret != VK_SUCCESS) {
 			VK_ERROR(vk, "vkEndCommandBuffer: %s", vk_result_string(ret));
+			vk_cmd_pool_unlock(&c->pool);
 			return XRT_ERROR_VULKAN;
 		}
 		ret = vk->vkEndCommandBuffer(sc->release[i]);
 		if (ret != VK_SUCCESS) {
 			VK_ERROR(vk, "vkEndCommandBuffer: %s", vk_result_string(ret));
+			vk_cmd_pool_unlock(&c->pool);
 			return XRT_ERROR_VULKAN;
 		}
 	}
+	vk_cmd_pool_unlock(&c->pool);
+
 
 	*out_xsc = &sc->base.base;
 
@@ -738,6 +816,8 @@ client_vk_compositor_create(struct xrt_compositor_native *xcn,
                             bool external_fence_fd_enabled,
                             bool external_semaphore_fd_enabled,
                             bool timeline_semaphore_enabled,
+                            bool debug_utils_enabled,
+                            bool renderdoc_enabled,
                             uint32_t queueFamilyIndex,
                             uint32_t queueIndex)
 {
@@ -749,22 +829,25 @@ client_vk_compositor_create(struct xrt_compositor_native *xcn,
 
 	c->base.base.get_swapchain_create_properties = client_vk_compositor_get_swapchain_create_properties;
 	c->base.base.create_swapchain = client_vk_swapchain_create;
+	c->base.base.create_passthrough = client_vk_compositor_passthrough_create;
+	c->base.base.create_passthrough_layer = client_vk_compositor_passthrough_layer_create;
+	c->base.base.destroy_passthrough = client_vk_compositor_passthrough_destroy;
 	c->base.base.begin_session = client_vk_compositor_begin_session;
 	c->base.base.end_session = client_vk_compositor_end_session;
 	c->base.base.wait_frame = client_vk_compositor_wait_frame;
 	c->base.base.begin_frame = client_vk_compositor_begin_frame;
 	c->base.base.discard_frame = client_vk_compositor_discard_frame;
 	c->base.base.layer_begin = client_vk_compositor_layer_begin;
-	c->base.base.layer_stereo_projection = client_vk_compositor_layer_stereo_projection;
-	c->base.base.layer_stereo_projection_depth = client_vk_compositor_layer_stereo_projection_depth;
+	c->base.base.layer_projection = client_vk_compositor_layer_projection;
+	c->base.base.layer_projection_depth = client_vk_compositor_layer_stereo_projection_depth;
 	c->base.base.layer_quad = client_vk_compositor_layer_quad;
 	c->base.base.layer_cube = client_vk_compositor_layer_cube;
 	c->base.base.layer_cylinder = client_vk_compositor_layer_cylinder;
 	c->base.base.layer_equirect1 = client_vk_compositor_layer_equirect1;
 	c->base.base.layer_equirect2 = client_vk_compositor_layer_equirect2;
+	c->base.base.layer_passthrough = client_vk_compositor_layer_passthrough;
 	c->base.base.layer_commit = client_vk_compositor_layer_commit;
 	c->base.base.destroy = client_vk_compositor_destroy;
-	c->base.base.poll_events = client_vk_compositor_poll_events;
 
 	c->xcn = xcn;
 	// passthrough our formats from the native compositor to the client
@@ -773,9 +856,10 @@ client_vk_compositor_create(struct xrt_compositor_native *xcn,
 	}
 
 	c->base.base.info.format_count = xcn->base.info.format_count;
+	c->renderdoc_enabled = renderdoc_enabled;
 
 	// Default to info.
-	enum u_logging_level log_level = U_LOGGING_INFO;
+	enum u_logging_level log_level = debug_get_log_option_vulkan_log();
 
 	ret = vk_init_from_given(          //
 	    &c->vk,                        // vk_bundle
@@ -788,6 +872,7 @@ client_vk_compositor_create(struct xrt_compositor_native *xcn,
 	    external_fence_fd_enabled,     // external_fence_fd_enabled
 	    external_semaphore_fd_enabled, // external_semaphore_fd_enabled
 	    timeline_semaphore_enabled,    // timeline_semaphore_enabled
+	    debug_utils_enabled,           // debug_utils_enabled
 	    log_level);                    // log_level
 	if (ret != VK_SUCCESS) {
 		goto err_free;
@@ -798,18 +883,53 @@ client_vk_compositor_create(struct xrt_compositor_native *xcn,
 		goto err_free;
 	}
 
+	ret = vk_cmd_pool_init(&c->vk, &c->pool, 0);
+	if (ret != VK_SUCCESS) {
+		goto err_mutex;
+	}
+
+	VK_NAME_COMMAND_POOL(&c->vk, c->pool.pool, "client_vk_compositor command pool");
+
 #ifdef VK_KHR_timeline_semaphore
 	if (vk_can_import_and_export_timeline_semaphore(&c->vk)) {
 		xret = setup_semaphore(c);
 		if (xret != XRT_SUCCESS) {
-			goto err_mutex;
+			goto err_pool;
 		}
 	}
 #endif
 
+	// Get max texture size.
+	{
+		struct vk_bundle *vk = &c->vk;
+		VkPhysicalDeviceProperties pdp;
+		vk->vkGetPhysicalDeviceProperties(vk->physical_device, &pdp);
+		c->base.base.info.max_texture_size = pdp.limits.maxImageDimension2D;
+	}
+
+	if (!c->renderdoc_enabled) {
+		return c;
+	}
+
+	struct vk_bundle *vk = &c->vk;
+	if (!vk->has_EXT_debug_utils) {
+		c->renderdoc_enabled = false;
+		return c;
+	}
+
+	// Create a dummy VkCommandBuffer and submit it to the VkQueue, just for inserting a debug label into
+	// RenderDoc for triggering the capture.
+	ret = vk_cmd_pool_create_begin_insert_label_and_end_cmd_buffer_locked(
+	    vk, &c->pool, "vr-marker,frame_end,type,application", &c->dcb);
+	if (ret != VK_SUCCESS) {
+		VK_ERROR(vk, "vk_cmd_pool_create_insert_debug_label_and_end_cmd_buffer: %s", vk_result_string(ret));
+		goto err_pool;
+	}
+
 	return c;
 
-
+err_pool:
+	vk_cmd_pool_destroy(&c->vk, &c->pool);
 err_mutex:
 	vk_deinit_mutex(&c->vk);
 err_free:

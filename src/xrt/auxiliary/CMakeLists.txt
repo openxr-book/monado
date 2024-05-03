@@ -1,7 +1,6 @@
 # Copyright 2019-2022, Collabora, Ltd.
 # SPDX-License-Identifier: BSL-1.0
 
-
 # Common includes
 add_library(aux-includes INTERFACE)
 target_include_directories(
@@ -18,7 +17,7 @@ if(XRT_HAVE_OPENGL OR XRT_HAVE_OPENGLES)
 endif()
 
 # Direct3D library
-if(XRT_HAVE_D3D11 AND XRT_HAVE_VULKAN)
+if(XRT_HAVE_D3D11 OR XRT_HAVE_D3D12)
 	add_subdirectory(d3d)
 endif()
 
@@ -40,7 +39,7 @@ add_subdirectory(tracking)
 add_subdirectory(util)
 
 # Vive helper library.
-if(XRT_BUILD_DRIVER_VIVE OR XRT_BUILD_DRIVER_SURVIVE OR XRT_BUILD_DRIVER_REMOTE)
+if(XRT_MODULE_AUX_VIVE)
 	add_subdirectory(vive)
 endif()
 

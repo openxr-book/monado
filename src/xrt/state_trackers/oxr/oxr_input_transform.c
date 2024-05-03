@@ -3,7 +3,7 @@
 /*!
  * @file
  * @brief  Handles transformation/filtering of input data.
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @ingroup oxr_input_transform
  */
@@ -13,6 +13,7 @@
 #include "oxr_input_transform.h"
 #include "oxr_logger.h"
 #include "oxr_objects.h"
+#include "oxr_conversions.h"
 
 #include "util/u_misc.h"
 
@@ -32,22 +33,6 @@ xr_action_type_to_str(XrActionType type)
 	XR_LIST_ENUM_XrActionType(PRINT)
 #undef PRINT
 	default: return "XR_ACTION_TYPE_UNKNOWN";
-	}
-	// clang-format on
-}
-
-static const char *
-xrt_input_type_to_str(enum xrt_input_type type)
-{
-	// clang-format off
-	switch (type) {
-	case XRT_INPUT_TYPE_VEC1_ZERO_TO_ONE: return "XRT_INPUT_TYPE_VEC1_ZERO_TO_ONE";
-	case XRT_INPUT_TYPE_VEC1_MINUS_ONE_TO_ONE: return "XRT_INPUT_TYPE_VEC1_MINUS_ONE_TO_ONE";
-	case XRT_INPUT_TYPE_VEC2_MINUS_ONE_TO_ONE: return "XRT_INPUT_TYPE_VEC2_MINUS_ONE_TO_ONE";
-	case XRT_INPUT_TYPE_VEC3_MINUS_ONE_TO_ONE: return "XRT_INPUT_TYPE_VEC3_MINUS_ONE_TO_ONE";
-	case XRT_INPUT_TYPE_BOOLEAN: return "XRT_INPUT_TYPE_BOOLEAN";
-	case XRT_INPUT_TYPE_POSE: return "XRT_INPUT_TYPE_POSE";
-	default: return "XRT_INPUT_UNKNOWN";
 	}
 	// clang-format on
 }
@@ -236,8 +221,8 @@ oxr_input_transform_process(struct oxr_input_transform *transform,
 			enum oxr_dpad_region bound_region = dpad_state->bound_region;
 			enum oxr_dpad_region active_regions = OXR_DPAD_REGION_CENTER;
 
-			for (int i = 0; i < 4; i++) {
-				enum oxr_dpad_region query_region = 1 << i;
+			for (unsigned int i = 0; i < 4; i++) {
+				enum oxr_dpad_region query_region = 1u << i;
 
 				bool rot90 =
 				    (query_region == OXR_DPAD_REGION_LEFT) || (query_region == OXR_DPAD_REGION_RIGHT);

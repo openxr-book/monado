@@ -3,7 +3,7 @@
 /*!
  * @file
  * @brief  Holds OpenGLES-specific session functions.
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @author Drew DeVault <sir@cmpwn.com>
  * @author Simon Ser <contact@emersion.fr>
  * @ingroup oxr_main
@@ -76,6 +76,13 @@ oxr_session_populate_gles_android(struct oxr_logger *log,
 		return oxr_error(log, XR_ERROR_INITIALIZATION_FAILED, "Unsupported EGL client type");
 	}
 
+	bool renderdoc_enabled = false;
+
+#if defined(XRT_FEATURE_RENDERDOC)
+	if (sess->sys->inst->rdoc_api) {
+		renderdoc_enabled = true;
+	}
+#endif
 
 	struct xrt_compositor_native *xcn = sess->xcn;
 	struct xrt_compositor_gl *xcgl = NULL;
@@ -85,11 +92,12 @@ oxr_session_populate_gles_android(struct oxr_logger *log,
 	    next->config,                                   //
 	    next->context,                                  //
 	    get_proc_addr,                                  //
+	    renderdoc_enabled,                              //
 	    &xcgl);                                         //
 
 	if (xret == XRT_ERROR_EGL_CONFIG_MISSING) {
 		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,
-		                 "XrGraphicsBindingEGLMNDX::config can not be null when EGL_KHR_no_config_context is "
+		                 "XrGraphicsBindingEGLMNDX::config cannot be null when EGL_KHR_no_config_context is "
 		                 "not supported by the display.");
 	}
 	if (xret != XR_SUCCESS || xcgl == NULL) {

@@ -44,7 +44,7 @@ static void
 u_config_json_open_or_create_file(struct u_config_json *json, const char *filename)
 {
 	json->file_loaded = false;
-#if defined(XRT_OS_LINUX) && !defined(XRT_OS_ANDROID)
+#if (defined(XRT_OS_LINUX) || defined(XRT_OS_WINDOWS)) && !defined(XRT_OS_ANDROID)
 	char tmp[1024];
 	ssize_t ret = u_file_get_path_in_config_dir(filename, tmp, sizeof(tmp));
 	if (ret <= 0) {
@@ -54,7 +54,7 @@ u_config_json_open_or_create_file(struct u_config_json *json, const char *filena
 		return;
 	}
 
-	FILE *file = u_file_open_file_in_config_dir(filename, "r");
+	FILE *file = u_file_open_file_in_config_dir(filename, "rb");
 	if (file == NULL) {
 		return;
 	}
@@ -238,7 +238,7 @@ u_config_json_get_active(struct u_config_json *json, enum u_config_json_active_c
 }
 
 bool
-u_config_json_get_remote_port(struct u_config_json *json, int *out_port)
+u_config_json_get_remote_settings(struct u_config_json *json, int *out_port, uint32_t *out_view_count)
 {
 	cJSON *t = cJSON_GetObjectItemCaseSensitive(json->root, "remote");
 	if (t == NULL) {
@@ -260,8 +260,13 @@ u_config_json_get_remote_port(struct u_config_json *json, int *out_port)
 	if (!get_obj_int(t, "port", &port)) {
 		return false;
 	}
+	int view_count = 0;
+	if (!get_obj_int(t, "view_count", &view_count)) {
+		return false;
+	}
 
 	*out_port = port;
+	*out_view_count = view_count;
 
 	return true;
 }
@@ -533,7 +538,7 @@ u_gui_state_get_scene(struct u_config_json *json, enum u_gui_state_scene scene)
 
 	struct cJSON *c =
 	    cJSON_DetachItemFromObjectCaseSensitive(cJSON_GetObjectItemCaseSensitive(json->root, "scenes"), scene_name);
-	cJSON_free(json->root);
+	cJSON_Delete(json->root);
 	return c;
 }
 

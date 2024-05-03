@@ -5,7 +5,8 @@
  * @brief Small utility for keeping track of the history of an xrt_space_relation, ie. for knowing where a HMD or
  * controller was in the past.
  * @author Moses Turner <moses@collabora.com>
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
+ * @author Korcan Hussein <korcan.hussein@collabora.com>
  * @ingroup aux_math
  */
 
@@ -44,7 +45,7 @@ static constexpr size_t BufLen = 4096;
 struct m_relation_history
 {
 	HistoryBuffer<struct relation_history_entry, BufLen> impl;
-	os::Mutex mutex;
+	mutable os::Mutex mutex;
 };
 
 
@@ -80,7 +81,9 @@ m_relation_history_push(struct m_relation_history *rh, struct xrt_space_relation
 }
 
 enum m_relation_history_result
-m_relation_history_get(struct m_relation_history *rh, uint64_t at_timestamp_ns, struct xrt_space_relation *out_relation)
+m_relation_history_get(const struct m_relation_history *rh,
+                       uint64_t at_timestamp_ns,
+                       struct xrt_space_relation *out_relation)
 {
 	XRT_TRACE_MARKER();
 	std::unique_lock<os::Mutex> lock(rh->mutex);
@@ -93,7 +96,7 @@ m_relation_history_get(struct m_relation_history *rh, uint64_t at_timestamp_ns, 
 		const auto b = rh->impl.begin();
 		const auto e = rh->impl.end();
 
-		// find the first element *not less than* our value. the lambda we pass is the comparison
+		// Find the first element *not less than* our value. the lambda we pass is the comparison
 		// function, to compare against timestamps.
 		const auto it =
 		    std::lower_bound(b, e, at_timestamp_ns, [](const relation_history_entry &rhe, uint64_t timestamp) {
@@ -104,6 +107,7 @@ m_relation_history_get(struct m_relation_history *rh, uint64_t at_timestamp_ns, 
 			// lower bound is at the end:
 			// The desired timestamp is after what our buffer contains.
 			// (pose-prediction)
+			// Output flags match the most recent buffer entry.
 			int64_t diff_prediction_ns = static_cast<int64_t>(at_timestamp_ns) - rh->impl.back().timestamp;
 			double delta_s = time_ns_to_s(diff_prediction_ns);
 
@@ -113,7 +117,8 @@ m_relation_history_get(struct m_relation_history *rh, uint64_t at_timestamp_ns, 
 			return M_RELATION_HISTORY_RESULT_PREDICTED;
 		}
 		if (at_timestamp_ns == it->timestamp) {
-			// exact match
+			// exact match:
+			// Flags copied directly along with everything else.
 			U_LOG_T("Exact match in the buffer!");
 			*out_relation = it->relation;
 			return M_RELATION_HISTORY_RESULT_EXACT;
@@ -122,6 +127,7 @@ m_relation_history_get(struct m_relation_history *rh, uint64_t at_timestamp_ns, 
 			// lower bound is at the beginning (and it's not an exact match):
 			// The desired timestamp is before what our buffer contains.
 			// (an edge case where somebody asks for a really old pose and we do our best)
+			// Output flags are the same as the input flags for the history entry we use
 			int64_t diff_prediction_ns = static_cast<int64_t>(at_timestamp_ns) - rh->impl.front().timestamp;
 			double delta_s = time_ns_to_s(diff_prediction_ns);
 			U_LOG_T("Extrapolating %f s before the front of the buffer!", delta_s);
@@ -141,7 +147,7 @@ m_relation_history_get(struct m_relation_history *rh, uint64_t at_timestamp_ns, 
 
 		float amount_to_lerp = (float)diff_before / (float)(diff_before + diff_after);
 
-		// Copy relation flags
+		// Copy intersection of relation flags
 		xrt_space_relation result{};
 		result.relation_flags = (enum xrt_space_relation_flags)(predecessor.relation.relation_flags &
 		                                                        successor.relation.relation_flags);
@@ -222,7 +228,7 @@ m_relation_history_estimate_motion(struct m_relation_history *rh,
 }
 
 bool
-m_relation_history_get_latest(struct m_relation_history *rh,
+m_relation_history_get_latest(const struct m_relation_history *rh,
                               uint64_t *out_time_ns,
                               struct xrt_space_relation *out_relation)
 {
@@ -238,6 +244,7 @@ m_relation_history_get_latest(struct m_relation_history *rh,
 uint32_t
 m_relation_history_get_size(const struct m_relation_history *rh)
 {
+	std::unique_lock<os::Mutex> lock(rh->mutex);
 	return (uint32_t)rh->impl.size();
 }
 

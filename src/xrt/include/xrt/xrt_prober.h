@@ -1,4 +1,4 @@
-// Copyright 2019-2022, Collabora, Ltd.
+// Copyright 2019-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -35,6 +35,8 @@ struct xrt_auto_prober;
 struct xrt_tracking_factory;
 struct xrt_builder;
 struct xrt_system_devices;
+struct xrt_space_overseer;
+struct xrt_session_event_sink;
 struct os_hid_device;
 
 /*!
@@ -90,7 +92,6 @@ struct xrt_prober_device
 	 * USB/Bluetooth product ID (PID)
 	 */
 	uint16_t product_id;
-	char product_name[XRT_DEVICE_PRODUCT_NAME_LEN];
 
 	/*!
 	 * Device bus type
@@ -134,7 +135,7 @@ struct xrt_prober
 
 	/*!
 	 * Enumerate all connected devices, whether or not we have an associated
-	 * driver. Can not be called with the device list is locked
+	 * driver. Cannot be called with the device list is locked
 	 * @ref xrt_prober::lock_list and @ref xrt_prober::unlock_list.
 	 *
 	 * This function along with lock/unlock allows a @ref xrt_builder to
@@ -170,22 +171,30 @@ struct xrt_prober
 	xrt_result_t (*unlock_list)(struct xrt_prober *xp, struct xrt_prober_device ***devices);
 
 	/*!
-	 * Dump a listing of all devices found on the system to platform
-	 * dependent output (stdout).
+	 * Dump a listing of all devices found on the system to logging system
+	 * or platform dependent output (stdout).
+	 *
+	 * @param[in]  xp         Prober self parameter.
+	 * @param[in]  use_stdout If true uses stdout instead of logging code.
 	 *
 	 * @note Code consuming this interface should use xrt_prober_dump()
 	 */
-	int (*dump)(struct xrt_prober *xp);
+	int (*dump)(struct xrt_prober *xp, bool use_stdout);
 
 	/*!
 	 * Create system devices.
 	 *
 	 * @param[in]  xp        Prober self parameter.
+	 * @param[in]  broadcast Event sink that broadcasts events to all sessions.
 	 * @param[out] out_xsysd Return of system devices, the pointed pointer must be NULL.
+	 * @param[out] out_xso   Return of the @ref xrt_space_overseer, the pointed pointer must be NULL.
 	 *
 	 * @note Code consuming this interface should use xrt_prober_create_system()
 	 */
-	xrt_result_t (*create_system)(struct xrt_prober *xp, struct xrt_system_devices **out_xsysd);
+	xrt_result_t (*create_system)(struct xrt_prober *xp,
+	                              struct xrt_session_event_sink *broadcast,
+	                              struct xrt_system_devices **out_xsysd,
+	                              struct xrt_space_overseer **out_xso);
 
 	/*!
 	 * Iterate through drivers (by ID and auto-probers) checking to see if
@@ -252,19 +261,23 @@ struct xrt_prober
 	int (*list_video_devices)(struct xrt_prober *xp, xrt_prober_list_video_func_t cb, void *ptr);
 
 	/*!
-	 * Retrieve the raw @ref xrt_prober_entry and @ref xrt_auto_prober arrays.
+	 * Retrieve the raw @ref xrt_builder, @ref xrt_prober_entry and @ref xrt_auto_prober arrays.
 	 *
 	 * @param xp Pointer to self
+	 * @param[out] out_builder_count The size of @p out_builders
+	 * @param[out] out_builders An array of builders.
 	 * @param[out] out_entry_count The size of @p out_entries
 	 * @param[out] out_entries An array of prober entries
 	 * @param[out] out_auto_probers An array of up to @ref XRT_MAX_AUTO_PROBERS auto-probers
 	 *
 	 * @return 0 on success, <0 on error.
 	 */
-	int (*get_entries)(struct xrt_prober *xp,
-	                   size_t *out_entry_count,
-	                   struct xrt_prober_entry ***out_entries,
-	                   struct xrt_auto_prober ***out_auto_probers);
+	int (*get_builders)(struct xrt_prober *xp,
+	                    size_t *out_builder_count,
+	                    struct xrt_builder ***out_builders,
+	                    size_t *out_entry_count,
+	                    struct xrt_prober_entry ***out_entries,
+	                    struct xrt_auto_prober ***out_auto_probers);
 
 	/*!
 	 * Returns a string property on the device of the given type
@@ -352,9 +365,9 @@ xrt_prober_unlock_list(struct xrt_prober *xp, struct xrt_prober_device ***device
  * @public @memberof xrt_prober
  */
 static inline int
-xrt_prober_dump(struct xrt_prober *xp)
+xrt_prober_dump(struct xrt_prober *xp, bool use_stdout)
 {
-	return xp->dump(xp);
+	return xp->dump(xp, use_stdout);
 }
 
 /*!
@@ -365,9 +378,12 @@ xrt_prober_dump(struct xrt_prober *xp)
  * @public @memberof xrt_prober
  */
 static inline xrt_result_t
-xrt_prober_create_system(struct xrt_prober *xp, struct xrt_system_devices **out_xsysd)
+xrt_prober_create_system(struct xrt_prober *xp,
+                         struct xrt_session_event_sink *broadcast,
+                         struct xrt_system_devices **out_xsysd,
+                         struct xrt_space_overseer **out_xso)
 {
-	return xp->create_system(xp, out_xsysd);
+	return xp->create_system(xp, broadcast, out_xsysd, out_xso);
 }
 
 /*!
@@ -460,19 +476,21 @@ xrt_prober_list_video_devices(struct xrt_prober *xp, xrt_prober_list_video_func_
 }
 
 /*!
- * @copydoc xrt_prober::get_entries
+ * @copydoc xrt_prober::get_builders
  *
- * Helper function for @ref xrt_prober::get_entries.
+ * Helper function for @ref xrt_prober::get_builders.
  *
  * @public @memberof xrt_prober
  */
 static inline int
-xrt_prober_get_entries(struct xrt_prober *xp,
-                       size_t *out_entry_count,
-                       struct xrt_prober_entry ***out_entries,
-                       struct xrt_auto_prober ***out_auto_probers)
+xrt_prober_get_builders(struct xrt_prober *xp,
+                        size_t *out_builder_count,
+                        struct xrt_builder ***out_builders,
+                        size_t *out_entry_count,
+                        struct xrt_prober_entry ***out_entries,
+                        struct xrt_auto_prober ***out_auto_probers)
 {
-	return xp->get_entries(xp, out_entry_count, out_entries, out_auto_probers);
+	return xp->get_builders(xp, out_builder_count, out_builders, out_entry_count, out_entries, out_auto_probers);
 }
 
 /*!
@@ -577,14 +595,18 @@ struct xrt_builder
 	 * @param[in]  xb        Builder self parameter.
 	 * @param[in]  xp        Prober
 	 * @param[in]  config    JSON config object if found for this setter upper.
+	 * @param[in]  broadcast Event sink that broadcasts events to all sessions.
 	 * @param[out] out_xsysd Return of system devices, the pointed pointer must be NULL.
+	 * @param[out] out_xso   Return of the @ref xrt_space_overseer, the pointed pointer must be NULL.
 	 *
 	 * @note Code consuming this interface should use xrt_builder_open_system()
 	 */
 	xrt_result_t (*open_system)(struct xrt_builder *xb,
 	                            cJSON *config,
 	                            struct xrt_prober *xp,
-	                            struct xrt_system_devices **out_xsysd);
+	                            struct xrt_session_event_sink *broadcast,
+	                            struct xrt_system_devices **out_xsysd,
+	                            struct xrt_space_overseer **out_xso);
 
 	/*!
 	 * Destroy this setter upper.
@@ -621,9 +643,11 @@ static inline xrt_result_t
 xrt_builder_open_system(struct xrt_builder *xb,
                         cJSON *config,
                         struct xrt_prober *xp,
-                        struct xrt_system_devices **out_xsysd)
+                        struct xrt_session_event_sink *broadcast,
+                        struct xrt_system_devices **out_xsysd,
+                        struct xrt_space_overseer **out_xso)
 {
-	return xb->open_system(xb, config, xp, out_xsysd);
+	return xb->open_system(xb, config, xp, broadcast, out_xsysd, out_xso);
 }
 
 /*!
@@ -722,7 +746,7 @@ struct xrt_prober_entry
  *
  * @ingroup xrt_iface
  */
-typedef struct xrt_auto_prober *(*xrt_auto_prober_create_func_t)();
+typedef struct xrt_auto_prober *(*xrt_auto_prober_create_func_t)(void);
 
 /*!
  * @interface xrt_auto_prober

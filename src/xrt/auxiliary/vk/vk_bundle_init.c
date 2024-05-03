@@ -1,4 +1,4 @@
-// Copyright 2019-2022, Collabora, Ltd.
+// Copyright 2019-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -17,6 +17,7 @@
  * @ingroup aux_vk
  */
 
+#include "util/u_pretty_print.h"
 #include "vk/vk_helpers.h"
 
 #include <stdio.h>
@@ -76,23 +77,83 @@ is_instance_ext_supported(VkExtensionProperties *props, uint32_t prop_count, con
  *
  */
 
+VkResult
+vk_check_required_instance_extensions(struct vk_bundle *vk, struct u_string_list *required_instance_ext_list)
+{
+	struct u_pp_sink_stack_only sink;
+	VkExtensionProperties *props = NULL;
+	uint32_t prop_count = 0;
+	VkResult ret;
+
+	// Two call.
+	ret = vk_enumerate_instance_extensions_properties( //
+	    vk,                                            // vk_bundle
+	    NULL,                                          // layer_name
+	    &prop_count,                                   // out_prop_count
+	    &props);                                       // out_props
+	if (ret != VK_SUCCESS) {
+		return ret; // Already logged.
+	}
+
+	// We want to print all missing extensions.
+	bool have_missing = false;
+
+	// Used to build a nice pretty list of missing extensions.
+	u_pp_delegate_t dg = u_pp_sink_stack_only_init(&sink);
+
+	// Check if required extensions are supported.
+	uint32_t required_instance_ext_count = u_string_list_get_size(required_instance_ext_list);
+	const char *const *required_instance_exts = u_string_list_get_data(required_instance_ext_list);
+	for (uint32_t i = 0; i < required_instance_ext_count; i++) {
+		const char *required_ext = required_instance_exts[i];
+
+		if (is_instance_ext_supported(props, prop_count, required_ext)) {
+			continue;
+		}
+
+		u_pp(dg, "\n\t%s", required_ext);
+		have_missing = true;
+	}
+
+	// Clean up after us.
+	if (props != NULL) {
+		free(props);
+		props = NULL;
+		prop_count = 0;
+	}
+
+	if (!have_missing) {
+		return VK_SUCCESS;
+	}
+
+	VK_ERROR(vk, "Missing required instance extensions:%s", sink.buffer);
+
+	return VK_ERROR_EXTENSION_NOT_PRESENT;
+}
+
 struct u_string_list *
 vk_build_instance_extensions(struct vk_bundle *vk,
                              struct u_string_list *required_instance_ext_list,
                              struct u_string_list *optional_instance_ext_list)
 {
-	VkResult res;
-
+	VkExtensionProperties *props = NULL;
 	uint32_t prop_count = 0;
-	res = vk->vkEnumerateInstanceExtensionProperties(NULL, &prop_count, NULL);
-	vk_check_error("vkEnumerateInstanceExtensionProperties", res, NULL);
+	VkResult ret;
 
-	VkExtensionProperties *props = U_TYPED_ARRAY_CALLOC(VkExtensionProperties, prop_count);
-	res = vk->vkEnumerateInstanceExtensionProperties(NULL, &prop_count, props);
-	vk_check_error_with_free("vkEnumerateInstanceExtensionProperties", res, NULL, props);
+	// Two call.
+	ret = vk_enumerate_instance_extensions_properties( //
+	    vk,                                            // vk_bundle
+	    NULL,                                          // layer_name
+	    &prop_count,                                   // out_prop_count
+	    &props);                                       // out_props
+	if (ret != VK_SUCCESS) {
+		return NULL; // Already logged.
+	}
 
-	struct u_string_list *ret = u_string_list_create_from_list(required_instance_ext_list);
+	// Assumed to be supported.
+	struct u_string_list *list = u_string_list_create_from_list(required_instance_ext_list);
 
+	// Check any supported extensions.
 	uint32_t optional_instance_ext_count = u_string_list_get_size(optional_instance_ext_list);
 	const char *const *optional_instance_exts = u_string_list_get_data(optional_instance_ext_list);
 	for (uint32_t i = 0; i < optional_instance_ext_count; i++) {
@@ -108,17 +169,17 @@ vk_build_instance_extensions(struct vk_bundle *vk,
 			continue;
 		}
 
-		int added = u_string_list_append_unique(ret, optional_ext);
+		int added = u_string_list_append_unique(list, optional_ext);
 		if (added == 1) {
 			VK_DEBUG(vk, "Using optional instance ext %s", optional_ext);
 		} else {
 			VK_WARN(vk, "Duplicate instance extension %s not added twice", optional_ext);
 		}
-		break;
 	}
 
 	free(props);
-	return ret;
+
+	return list;
 }
 
 void
@@ -127,6 +188,8 @@ vk_fill_in_has_instance_extensions(struct vk_bundle *vk, struct u_string_list *e
 	// beginning of GENERATED instance extension code - do not modify - used by scripts
 	// Reset before filling out.
 	vk->has_EXT_display_surface_counter = false;
+	vk->has_EXT_swapchain_colorspace = false;
+	vk->has_EXT_debug_utils = false;
 
 	const char *const *exts = u_string_list_get_data(ext_list);
 	uint32_t ext_count = u_string_list_get_size(ext_list);
@@ -140,6 +203,20 @@ vk_fill_in_has_instance_extensions(struct vk_bundle *vk, struct u_string_list *e
 			continue;
 		}
 #endif // defined(VK_EXT_display_surface_counter)
+
+#if defined(VK_EXT_swapchain_colorspace)
+		if (strcmp(ext, VK_EXT_SWAPCHAIN_COLORSPACE_EXTENSION_NAME) == 0) {
+			vk->has_EXT_swapchain_colorspace = true;
+			continue;
+		}
+#endif // defined(VK_EXT_swapchain_colorspace)
+
+#if defined(VK_EXT_debug_utils)
+		if (strcmp(ext, VK_EXT_DEBUG_UTILS_EXTENSION_NAME) == 0) {
+			vk->has_EXT_debug_utils = true;
+			continue;
+		}
+#endif // defined(VK_EXT_debug_utils)
 	}
 	// end of GENERATED instance extension code - do not modify - used by scripts
 }
@@ -163,6 +240,8 @@ fill_in_device_features(struct vk_bundle *vk)
 
 	vk->features.timestamp_compute_and_graphics = pdp.limits.timestampComputeAndGraphics;
 	vk->features.timestamp_period = pdp.limits.timestampPeriod;
+	vk->features.max_per_stage_descriptor_sampled_images = pdp.limits.maxPerStageDescriptorSampledImages;
+	vk->features.max_per_stage_descriptor_storage_images = pdp.limits.maxPerStageDescriptorStorageImages;
 
 
 	/*
@@ -179,6 +258,24 @@ fill_in_device_features(struct vk_bundle *vk)
 
 	vk->features.timestamp_valid_bits = props[vk->queue_family_index].timestampValidBits;
 	free(props);
+}
+
+static void
+get_external_image_support(struct vk_bundle *vk,
+                           bool depth,
+                           VkExternalMemoryHandleTypeFlagBits handle_type,
+                           bool *out_importable,
+                           bool *out_exportable)
+{
+	// Note that this is a heuristic: just picked two somewhat-random formats to test with here.
+	// Before creating an actual swapchain we check the desired format for real.
+	// Not using R16G16B16A16_UNORM because 8bpx linear is discouraged, and not using
+	// the SRGB version because Android's AHardwareBuffer is weird with SRGB (no internal support)
+	VkFormat image_format = depth ? VK_FORMAT_D16_UNORM : VK_FORMAT_R16G16B16A16_UNORM;
+	enum xrt_swapchain_usage_bits bits =
+	    depth ? (enum xrt_swapchain_usage_bits)(XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL | XRT_SWAPCHAIN_USAGE_SAMPLED)
+	          : (enum xrt_swapchain_usage_bits)(XRT_SWAPCHAIN_USAGE_COLOR | XRT_SWAPCHAIN_USAGE_SAMPLED);
+	vk_csci_get_image_external_support(vk, image_format, bits, handle_type, out_importable, out_exportable);
 }
 
 static bool
@@ -289,7 +386,7 @@ get_timeline_semaphore_bit_support(struct vk_bundle *vk,
 #endif
 }
 
-bool
+static bool
 is_timeline_semaphore_bit_supported(struct vk_bundle *vk, VkExternalSemaphoreHandleTypeFlagBits handle_type)
 {
 	bool importable = false, exportable = false;
@@ -313,7 +410,49 @@ fill_in_external_object_properties(struct vk_bundle *vk)
 		VK_WARN(vk, "vkGetPhysicalDeviceExternalSemaphorePropertiesKHR not supported, should always be.");
 		return;
 	}
+	if (vk->vkGetPhysicalDeviceImageFormatProperties2 == NULL) {
+		VK_WARN(vk, "vkGetPhysicalDeviceImageFormatProperties2 not supported, should always be.");
+		return;
+	}
 
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_WIN32_HANDLE)
+	get_external_image_support(vk, false, VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT,
+	                           &vk->external.color_image_import_opaque_win32,
+	                           &vk->external.color_image_export_opaque_win32);
+	get_external_image_support(vk, true, VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT,
+	                           &vk->external.depth_image_import_opaque_win32,
+	                           &vk->external.depth_image_export_opaque_win32);
+
+
+	get_external_image_support(vk, false, VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE_BIT,
+	                           &vk->external.color_image_import_d3d11, &vk->external.color_image_export_d3d11);
+	get_external_image_support(vk, true, VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE_BIT,
+	                           &vk->external.depth_image_import_d3d11, &vk->external.depth_image_export_d3d11);
+
+#elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
+	get_external_image_support(vk, false, VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT,
+	                           &vk->external.color_image_import_opaque_fd,
+	                           &vk->external.color_image_export_opaque_fd);
+	get_external_image_support(vk, true, VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT,
+	                           &vk->external.depth_image_import_opaque_fd,
+	                           &vk->external.depth_image_export_opaque_fd);
+
+#elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER)
+	get_external_image_support(vk, false, VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT,
+	                           &vk->external.color_image_import_opaque_fd,
+	                           &vk->external.color_image_export_opaque_fd);
+	get_external_image_support(vk, true, VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT,
+	                           &vk->external.depth_image_import_opaque_fd,
+	                           &vk->external.depth_image_export_opaque_fd);
+
+
+	get_external_image_support(vk, false, VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID,
+	                           &vk->external.color_image_import_ahardwarebuffer,
+	                           &vk->external.color_image_export_ahardwarebuffer);
+	get_external_image_support(vk, true, VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID,
+	                           &vk->external.depth_image_import_ahardwarebuffer,
+	                           &vk->external.depth_image_export_ahardwarebuffer);
+#endif
 #if defined(XRT_GRAPHICS_SYNC_HANDLE_IS_FD)
 
 	vk->external.fence_sync_fd = is_fence_bit_supported( //
@@ -360,64 +499,123 @@ fill_in_external_object_properties(struct vk_bundle *vk)
  *
  */
 
+static int
+device_type_priority(VkPhysicalDeviceType device_type)
+{
+	switch (device_type) {
+	case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU: return 4;
+	case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: return 3;
+	case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU: return 2;
+	case VK_PHYSICAL_DEVICE_TYPE_CPU: return 1;
+	default: return 0;
+	}
+}
+
+static bool
+device_is_preferred(VkPhysicalDeviceProperties *l_device, VkPhysicalDeviceProperties *r_device)
+{
+	int l_priority = device_type_priority(l_device->deviceType);
+	int r_priority = device_type_priority(r_device->deviceType);
+
+	if (l_priority > r_priority)
+		return true;
+
+	return false;
+}
+
+static void
+device_debug_print(struct vk_bundle *vk, const VkPhysicalDeviceProperties *pdp, uint32_t index)
+{
+	char title[32];
+	(void)snprintf(title, sizeof(title), "GPU index %u\n", index);
+	vk_print_device_info(vk, U_LOGGING_DEBUG, pdp, index, title);
+}
+
+static uint32_t
+select_preferred_device(struct vk_bundle *vk, VkPhysicalDevice *devices, uint32_t device_count)
+{
+	assert(device_count > 0);
+
+	// Default to first if there is only one.
+	uint32_t gpu_index = 0;
+	VkPhysicalDeviceProperties gpu_properties;
+	vk->vkGetPhysicalDeviceProperties(devices[0], &gpu_properties);
+
+	// Loop starts at index 1, so print the first GPU here.
+	device_debug_print(vk, &gpu_properties, 0);
+
+	for (uint32_t i = 1; i < device_count; i++) {
+		VkPhysicalDeviceProperties pdp;
+		vk->vkGetPhysicalDeviceProperties(devices[i], &pdp);
+
+		// Print GPU 1 to device_count here.
+		device_debug_print(vk, &pdp, i);
+
+		// Prefer devices based on device type priority, with preference to equal devices with smaller index
+		if (device_is_preferred(&pdp, &gpu_properties)) {
+			gpu_index = i;
+			gpu_properties = pdp;
+		}
+	}
+
+	return gpu_index;
+}
+
 static VkResult
 select_physical_device(struct vk_bundle *vk, int forced_index)
 {
-	VkPhysicalDevice physical_devices[16];
-	uint32_t gpu_count = ARRAY_SIZE(physical_devices);
+	VkPhysicalDevice *physical_devices = NULL;
+	uint32_t gpu_count = 0;
 	VkResult ret;
 
-	ret = vk->vkEnumeratePhysicalDevices(vk->instance, &gpu_count, physical_devices);
+	ret = vk_enumerate_physical_devices( //
+	    vk,                              // vk_bundle
+	    &gpu_count,                      // out_physical_device_count
+	    &physical_devices);              // out_physical_devices
 	if (ret != VK_SUCCESS) {
-		VK_DEBUG(vk, "vkEnumeratePhysicalDevices: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vk_enumerate_physical_devices: %s", vk_result_string(ret));
 		return ret;
 	}
-
-	if (gpu_count < 1) {
-		VK_DEBUG(vk, "No physical device found!");
-		return VK_ERROR_DEVICE_LOST;
-	}
-
-	if (gpu_count > 1) {
-		VK_DEBUG(vk, "Can not deal well with multiple devices.");
+	if (gpu_count == 0) {
+		VK_ERROR(vk, "No physical device found!");
+		return VK_ERROR_DEVICE_LOST; // No need to free if zero devices.
 	}
 
 	VK_DEBUG(vk, "Choosing Vulkan device index");
 	uint32_t gpu_index = 0;
-	if (forced_index > -1) {
-		if ((uint32_t)forced_index + 1 > gpu_count) {
-			VK_ERROR(vk, "Attempted to force GPU index %d, but only %d GPUs are available", forced_index,
+	if (forced_index >= 0) {
+		uint32_t uint_index = (uint32_t)forced_index;
+		if (uint_index + 1 > gpu_count) {
+			VK_ERROR(vk, "Attempted to force GPU index %u, but only %u GPUs are available", uint_index,
 			         gpu_count);
+			free(physical_devices);
 			return VK_ERROR_DEVICE_LOST;
 		}
-		gpu_index = forced_index;
-		VK_DEBUG(vk, "Forced use of Vulkan device index %d.", gpu_index);
+		gpu_index = uint_index;
+		VK_DEBUG(vk, "Forced use of Vulkan device index %u.", gpu_index);
 	} else {
 		VK_DEBUG(vk, "Available GPUs");
-		// as a first-step to 'intelligent' selection, prefer a
-		// 'discrete' gpu if it is present
-		for (uint32_t i = 0; i < gpu_count; i++) {
-			VkPhysicalDeviceProperties pdp;
-			vk->vkGetPhysicalDeviceProperties(physical_devices[i], &pdp);
-
-			char title[20];
-			snprintf(title, 20, "GPU index %d\n", i);
-			vk_print_device_info(vk, U_LOGGING_DEBUG, &pdp, i, title);
-
-			if (pdp.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
-				gpu_index = i;
-			}
-		}
+		gpu_index = select_preferred_device(vk, physical_devices, gpu_count);
 	}
 
+	// Setup the physical device on the bundle.
 	vk->physical_device = physical_devices[gpu_index];
 	vk->physical_device_index = gpu_index;
 
+	// Free the array.
+	free(physical_devices);
+	physical_devices = NULL;
+
+
+	/*
+	 * Have now selected device, get properties of it.
+	 */
+
 	VkPhysicalDeviceProperties pdp;
-	vk->vkGetPhysicalDeviceProperties(physical_devices[gpu_index], &pdp);
+	vk->vkGetPhysicalDeviceProperties(vk->physical_device, &pdp);
 
 	char title[20];
-	snprintf(title, 20, "Selected GPU: %d\n", gpu_index);
+	(void)snprintf(title, sizeof(title), "Selected GPU: %u\n", gpu_index);
 	vk_print_device_info(vk, U_LOGGING_DEBUG, &pdp, gpu_index, title);
 
 	char *tegra_substr = strstr(pdp.deviceName, "Tegra");
@@ -472,9 +670,9 @@ err_free:
 }
 
 static VkResult
-find_compute_queue_family(struct vk_bundle *vk, uint32_t *out_compute_queue_family)
+find_queue_family(struct vk_bundle *vk, VkQueueFlags required_flags, uint32_t *out_queue_family)
 {
-	/* Find the "best" compute queue (prefer compute-only queues) */
+	/* Find the "best" queue with the requested flags (prefer queues without graphics) */
 	uint32_t queue_family_count = 0;
 	uint32_t i = 0;
 	vk->vkGetPhysicalDeviceQueueFamilyProperties(vk->physical_device, &queue_family_count, NULL);
@@ -489,7 +687,7 @@ find_compute_queue_family(struct vk_bundle *vk, uint32_t *out_compute_queue_fami
 	}
 
 	for (i = 0; i < queue_family_count; i++) {
-		if (~queue_family_props[i].queueFlags & VK_QUEUE_COMPUTE_BIT) {
+		if ((queue_family_props[i].queueFlags & required_flags) != required_flags) {
 			continue;
 		}
 
@@ -499,20 +697,20 @@ find_compute_queue_family(struct vk_bundle *vk, uint32_t *out_compute_queue_fami
 	}
 
 	if (i >= queue_family_count) {
-		/* If there's no compute-only queue, just find any queue that supports compute */
+		/* If there's no suitable queue without graphics, just find any suitabable one*/
 		for (i = 0; i < queue_family_count; i++) {
-			if (queue_family_props[i].queueFlags & VK_QUEUE_COMPUTE_BIT) {
+			if ((queue_family_props[i].queueFlags & required_flags) == required_flags) {
 				break;
 			}
 		}
 
 		if (i >= queue_family_count) {
-			VK_DEBUG(vk, "No compatible compute queue family found");
+			VK_DEBUG(vk, "No compatible queue family found (flags: 0x%xd)", required_flags);
 			goto err_free;
 		}
 	}
 
-	*out_compute_queue_family = i;
+	*out_queue_family = i;
 
 	free(queue_family_props);
 
@@ -543,11 +741,20 @@ fill_in_has_device_extensions(struct vk_bundle *vk, struct u_string_list *ext_li
 	// Reset before filling out.
 	vk->has_KHR_external_fence_fd = false;
 	vk->has_KHR_external_semaphore_fd = false;
+	vk->has_KHR_format_feature_flags2 = false;
+	vk->has_KHR_global_priority = false;
 	vk->has_KHR_image_format_list = false;
+	vk->has_KHR_maintenance1 = false;
+	vk->has_KHR_maintenance2 = false;
+	vk->has_KHR_maintenance3 = false;
+	vk->has_KHR_maintenance4 = false;
+	vk->has_KHR_synchronization2 = false;
 	vk->has_KHR_timeline_semaphore = false;
 	vk->has_EXT_calibrated_timestamps = false;
 	vk->has_EXT_display_control = false;
+	vk->has_EXT_external_memory_dma_buf = false;
 	vk->has_EXT_global_priority = false;
+	vk->has_EXT_image_drm_format_modifier = false;
 	vk->has_EXT_robustness2 = false;
 	vk->has_GOOGLE_display_timing = false;
 
@@ -571,12 +778,61 @@ fill_in_has_device_extensions(struct vk_bundle *vk, struct u_string_list *ext_li
 		}
 #endif // defined(VK_KHR_external_semaphore_fd)
 
+#if defined(VK_KHR_format_feature_flags2)
+		if (strcmp(ext, VK_KHR_FORMAT_FEATURE_FLAGS_2_EXTENSION_NAME) == 0) {
+			vk->has_KHR_format_feature_flags2 = true;
+			continue;
+		}
+#endif // defined(VK_KHR_format_feature_flags2)
+
+#if defined(VK_KHR_global_priority)
+		if (strcmp(ext, VK_KHR_GLOBAL_PRIORITY_EXTENSION_NAME) == 0) {
+			vk->has_KHR_global_priority = true;
+			continue;
+		}
+#endif // defined(VK_KHR_global_priority)
+
 #if defined(VK_KHR_image_format_list)
 		if (strcmp(ext, VK_KHR_IMAGE_FORMAT_LIST_EXTENSION_NAME) == 0) {
 			vk->has_KHR_image_format_list = true;
 			continue;
 		}
 #endif // defined(VK_KHR_image_format_list)
+
+#if defined(VK_KHR_maintenance1)
+		if (strcmp(ext, VK_KHR_MAINTENANCE_1_EXTENSION_NAME) == 0) {
+			vk->has_KHR_maintenance1 = true;
+			continue;
+		}
+#endif // defined(VK_KHR_maintenance1)
+
+#if defined(VK_KHR_maintenance2)
+		if (strcmp(ext, VK_KHR_MAINTENANCE_2_EXTENSION_NAME) == 0) {
+			vk->has_KHR_maintenance2 = true;
+			continue;
+		}
+#endif // defined(VK_KHR_maintenance2)
+
+#if defined(VK_KHR_maintenance3)
+		if (strcmp(ext, VK_KHR_MAINTENANCE_3_EXTENSION_NAME) == 0) {
+			vk->has_KHR_maintenance3 = true;
+			continue;
+		}
+#endif // defined(VK_KHR_maintenance3)
+
+#if defined(VK_KHR_maintenance4)
+		if (strcmp(ext, VK_KHR_MAINTENANCE_4_EXTENSION_NAME) == 0) {
+			vk->has_KHR_maintenance4 = true;
+			continue;
+		}
+#endif // defined(VK_KHR_maintenance4)
+
+#if defined(VK_KHR_synchronization2)
+		if (strcmp(ext, VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME) == 0) {
+			vk->has_KHR_synchronization2 = true;
+			continue;
+		}
+#endif // defined(VK_KHR_synchronization2)
 
 #if defined(VK_KHR_timeline_semaphore)
 		if (strcmp(ext, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME) == 0) {
@@ -599,12 +855,26 @@ fill_in_has_device_extensions(struct vk_bundle *vk, struct u_string_list *ext_li
 		}
 #endif // defined(VK_EXT_display_control)
 
+#if defined(VK_EXT_external_memory_dma_buf)
+		if (strcmp(ext, VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME) == 0) {
+			vk->has_EXT_external_memory_dma_buf = true;
+			continue;
+		}
+#endif // defined(VK_EXT_external_memory_dma_buf)
+
 #if defined(VK_EXT_global_priority)
 		if (strcmp(ext, VK_EXT_GLOBAL_PRIORITY_EXTENSION_NAME) == 0) {
 			vk->has_EXT_global_priority = true;
 			continue;
 		}
 #endif // defined(VK_EXT_global_priority)
+
+#if defined(VK_EXT_image_drm_format_modifier)
+		if (strcmp(ext, VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME) == 0) {
+			vk->has_EXT_image_drm_format_modifier = true;
+			continue;
+		}
+#endif // defined(VK_EXT_image_drm_format_modifier)
 
 #if defined(VK_EXT_robustness2)
 		if (strcmp(ext, VK_EXT_ROBUSTNESS_2_EXTENSION_NAME) == 0) {
@@ -621,28 +891,6 @@ fill_in_has_device_extensions(struct vk_bundle *vk, struct u_string_list *ext_li
 #endif // defined(VK_GOOGLE_display_timing)
 	}
 	// end of GENERATED device extension code - do not modify - used by scripts
-}
-
-static VkResult
-get_device_ext_props(struct vk_bundle *vk,
-                     VkPhysicalDevice physical_device,
-                     VkExtensionProperties **out_props,
-                     uint32_t *out_prop_count)
-{
-	uint32_t prop_count = 0;
-	VkResult res = vk->vkEnumerateDeviceExtensionProperties(physical_device, NULL, &prop_count, NULL);
-	vk_check_error("vkEnumerateDeviceExtensionProperties", res, false);
-
-	VkExtensionProperties *props = U_TYPED_ARRAY_CALLOC(VkExtensionProperties, prop_count);
-
-	res = vk->vkEnumerateDeviceExtensionProperties(physical_device, NULL, &prop_count, props);
-	vk_check_error_with_free("vkEnumerateDeviceExtensionProperties", res, false, props);
-
-	// The preceding check returns on failure.
-	*out_props = props;
-	*out_prop_count = prop_count;
-
-	return VK_SUCCESS;
 }
 
 static bool
@@ -675,7 +923,16 @@ build_device_extensions(struct vk_bundle *vk,
 {
 	VkExtensionProperties *props = NULL;
 	uint32_t prop_count = 0;
-	if (get_device_ext_props(vk, physical_device, &props, &prop_count) != VK_SUCCESS) {
+	VkResult ret;
+
+	ret = vk_enumerate_physical_device_extension_properties( //
+	    vk,                                                  // vk_bundle
+	    physical_device,                                     // physical_device
+	    NULL,                                                // layer_name
+	    &prop_count,                                         // out_prop_count
+	    &props);                                             // out_props
+	if (ret != VK_SUCCESS) {
+		VK_ERROR(vk, "vk_enumerate_physical_device_extension_properties: %s", vk_result_string(ret));
 		return false;
 	}
 
@@ -728,7 +985,7 @@ build_device_extensions(struct vk_bundle *vk,
 	return true;
 }
 
-/**
+/*!
  * @brief Sets fields in @p device_features to true if and only if they are available and they are true in @p
  * optional_device_features (indicating a desire for that feature)
  *
@@ -766,6 +1023,13 @@ filter_device_features(struct vk_bundle *vk,
 	};
 #endif
 
+#ifdef VK_KHR_synchronization2
+	VkPhysicalDeviceSynchronization2FeaturesKHR synchronization_2_info = {
+	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR,
+	    .pNext = NULL,
+	};
+#endif
+
 	VkPhysicalDeviceFeatures2 physical_device_features = {
 	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
 	    .pNext = NULL,
@@ -782,6 +1046,13 @@ filter_device_features(struct vk_bundle *vk,
 	if (vk->has_KHR_timeline_semaphore) {
 		append_to_pnext_chain((VkBaseInStructure *)&physical_device_features,
 		                      (VkBaseInStructure *)&timeline_semaphore_info);
+	}
+#endif
+
+#ifdef VK_KHR_synchronization2
+	if (vk->has_KHR_synchronization2) {
+		append_to_pnext_chain((VkBaseInStructure *)&physical_device_features,
+		                      (VkBaseInStructure *)&synchronization_2_info);
 	}
 #endif
 
@@ -803,6 +1074,13 @@ filter_device_features(struct vk_bundle *vk,
 #ifdef VK_KHR_timeline_semaphore
 	CHECK(timeline_semaphore, timeline_semaphore_info.timelineSemaphore);
 #endif
+
+#ifdef VK_KHR_synchronization2
+	CHECK(synchronization_2, synchronization_2_info.synchronization2);
+#endif
+
+	CHECK(shader_image_gather_extended, physical_device_features.features.shaderImageGatherExtended);
+
 	CHECK(shader_storage_image_write_without_format,
 	      physical_device_features.features.shaderStorageImageWriteWithoutFormat);
 
@@ -812,11 +1090,15 @@ filter_device_features(struct vk_bundle *vk,
 	VK_DEBUG(vk,
 	         "Features:"
 	         "\n\tnull_descriptor: %i"
+	         "\n\tshader_image_gather_extended: %i"
 	         "\n\tshader_storage_image_write_without_format: %i"
-	         "\n\ttimeline_semaphore: %i",                               //
+	         "\n\ttimeline_semaphore: %i"
+	         "\n\tsynchronization_2: %i",                                //
 	         device_features->null_descriptor,                           //
+	         device_features->shader_image_gather_extended,              //
 	         device_features->shader_storage_image_write_without_format, //
-	         device_features->timeline_semaphore);
+	         device_features->timeline_semaphore,                        //
+	         device_features->synchronization_2);
 }
 
 
@@ -825,6 +1107,12 @@ filter_device_features(struct vk_bundle *vk,
  * 'Exported' device functions.
  *
  */
+
+VkResult
+vk_select_physical_device(struct vk_bundle *vk, int forced_index)
+{
+	return select_physical_device(vk, forced_index);
+}
 
 XRT_CHECK_RESULT VkResult
 vk_create_device(struct vk_bundle *vk,
@@ -856,13 +1144,22 @@ vk_create_device(struct vk_bundle *vk,
 	struct vk_device_features device_features = {0};
 	filter_device_features(vk, vk->physical_device, optional_device_features, &device_features);
 	vk->features.timeline_semaphore = device_features.timeline_semaphore;
+	vk->features.synchronization_2 = device_features.synchronization_2;
+
 
 	/*
 	 * Queue
 	 */
 
+	// If we don't have global priority, only allow medium priority queues.
+	if (!vk->has_EXT_global_priority && //
+	    !vk->has_KHR_global_priority && //
+	    global_priority != VK_QUEUE_GLOBAL_PRIORITY_MEDIUM_EXT) {
+		return VK_ERROR_NOT_PERMITTED_EXT;
+	}
+
 	if (only_compute) {
-		ret = find_compute_queue_family(vk, &vk->queue_family_index);
+		ret = find_queue_family(vk, VK_QUEUE_COMPUTE_BIT, &vk->queue_family_index);
 	} else {
 		ret = find_graphics_queue_family(vk, &vk->queue_family_index);
 	}
@@ -878,17 +1175,43 @@ vk_create_device(struct vk_bundle *vk,
 	};
 
 	float queue_priority = 0.0f;
-	VkDeviceQueueCreateInfo queue_create_info = {
-	    .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-	    .pNext = NULL,
-	    .queueCount = 1,
-	    .queueFamilyIndex = vk->queue_family_index,
-	    .pQueuePriorities = &queue_priority,
-	};
+	VkDeviceQueueCreateInfo queue_create_info[2] = {0};
+	uint32_t queue_create_info_count = 1;
 
-	if (vk->has_EXT_global_priority) {
-		priority_info.pNext = queue_create_info.pNext;
-		queue_create_info.pNext = (void *)&priority_info;
+	// Compute or Graphics queue
+	queue_create_info[0].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+	queue_create_info[0].pNext = NULL;
+	queue_create_info[0].queueCount = 1;
+	queue_create_info[0].queueFamilyIndex = vk->queue_family_index;
+	queue_create_info[0].pQueuePriorities = &queue_priority;
+
+#ifdef VK_KHR_video_encode_queue
+	// Video encode queue
+	vk->encode_queue_family_index = VK_QUEUE_FAMILY_IGNORED;
+	if (u_string_list_contains(device_ext_list, VK_KHR_VIDEO_ENCODE_QUEUE_EXTENSION_NAME)) {
+		ret = find_queue_family(vk, VK_QUEUE_VIDEO_ENCODE_BIT_KHR, &vk->encode_queue_family_index);
+		if (ret == VK_SUCCESS) {
+			queue_create_info[queue_create_info_count].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+			queue_create_info[queue_create_info_count].pNext = NULL;
+			queue_create_info[queue_create_info_count].queueCount = 1;
+			queue_create_info[queue_create_info_count].queueFamilyIndex = vk->encode_queue_family_index;
+			queue_create_info[queue_create_info_count].pQueuePriorities = &queue_priority;
+			queue_create_info_count++;
+			VK_DEBUG(vk, "Creating video encode queue, family index %d", vk->encode_queue_family_index);
+		}
+	}
+#endif
+
+#ifdef VK_KHR_global_priority
+	static_assert(VK_STRUCTURE_TYPE_DEVICE_QUEUE_GLOBAL_PRIORITY_CREATE_INFO_EXT ==
+	                  VK_STRUCTURE_TYPE_DEVICE_QUEUE_GLOBAL_PRIORITY_CREATE_INFO_KHR,
+	              "Vulkan structs doesn't have the same structure ID!");
+#endif
+
+	if (vk->has_EXT_global_priority || vk->has_KHR_global_priority) {
+		// This is okay, see static_assert above.
+		priority_info.pNext = queue_create_info[0].pNext;
+		queue_create_info[0].pNext = (void *)&priority_info;
 	}
 
 
@@ -912,14 +1235,23 @@ vk_create_device(struct vk_bundle *vk,
 	};
 #endif
 
+#ifdef VK_KHR_synchronization2
+	VkPhysicalDeviceSynchronization2FeaturesKHR synchronization_2_info = {
+	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR,
+	    .pNext = NULL,
+	    .synchronization2 = device_features.synchronization_2,
+	};
+#endif
+
 	VkPhysicalDeviceFeatures enabled_features = {
+	    .shaderImageGatherExtended = device_features.shader_image_gather_extended,
 	    .shaderStorageImageWriteWithoutFormat = device_features.shader_storage_image_write_without_format,
 	};
 
 	VkDeviceCreateInfo device_create_info = {
 	    .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-	    .queueCreateInfoCount = 1,
-	    .pQueueCreateInfos = &queue_create_info,
+	    .queueCreateInfoCount = queue_create_info_count,
+	    .pQueueCreateInfos = queue_create_info,
 	    .enabledExtensionCount = u_string_list_get_size(device_ext_list),
 	    .ppEnabledExtensionNames = u_string_list_get_data(device_ext_list),
 	    .pEnabledFeatures = &enabled_features,
@@ -935,6 +1267,13 @@ vk_create_device(struct vk_bundle *vk,
 	if (vk->has_KHR_timeline_semaphore) {
 		append_to_pnext_chain((VkBaseInStructure *)&device_create_info,
 		                      (VkBaseInStructure *)&timeline_semaphore_info);
+	}
+#endif
+
+#ifdef VK_KHR_synchronization2
+	if (vk->has_KHR_synchronization2) {
+		append_to_pnext_chain((VkBaseInStructure *)&device_create_info,
+		                      (VkBaseInStructure *)&synchronization_2_info);
 	}
 #endif
 
@@ -962,6 +1301,15 @@ vk_create_device(struct vk_bundle *vk,
 		goto err_destroy;
 	}
 	vk->vkGetDeviceQueue(vk->device, vk->queue_family_index, 0, &vk->queue);
+#if defined(VK_KHR_video_encode_queue)
+	if (vk->encode_queue_family_index != VK_QUEUE_FAMILY_IGNORED) {
+		vk->vkGetDeviceQueue(vk->device, vk->encode_queue_family_index, 0, &vk->encode_queue);
+	}
+#endif
+
+	// Need to do this after functions have been gotten.
+	VK_NAME_INSTANCE(vk, vk->instance, "vk_bundle instance");
+	VK_NAME_DEVICE(vk, vk->device, "vk_bundle device");
 
 	return ret;
 
@@ -975,9 +1323,6 @@ err_destroy:
 VkResult
 vk_init_mutex(struct vk_bundle *vk)
 {
-	if (os_mutex_init(&vk->cmd_pool_mutex) < 0) {
-		return VK_ERROR_INITIALIZATION_FAILED;
-	}
 	if (os_mutex_init(&vk->queue_mutex) < 0) {
 		return VK_ERROR_INITIALIZATION_FAILED;
 	}
@@ -987,27 +1332,8 @@ vk_init_mutex(struct vk_bundle *vk)
 VkResult
 vk_deinit_mutex(struct vk_bundle *vk)
 {
-	os_mutex_destroy(&vk->cmd_pool_mutex);
 	os_mutex_destroy(&vk->queue_mutex);
 	return VK_SUCCESS;
-}
-
-XRT_CHECK_RESULT VkResult
-vk_init_cmd_pool(struct vk_bundle *vk)
-{
-	VkCommandPoolCreateInfo cmd_pool_info = {
-	    .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-	    .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-	    .queueFamilyIndex = vk->queue_family_index,
-	};
-
-	VkResult ret;
-	ret = vk->vkCreateCommandPool(vk->device, &cmd_pool_info, NULL, &vk->cmd_pool);
-	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vkCreateCommandPool: %s", vk_result_string(ret));
-	}
-
-	return ret;
 }
 
 
@@ -1028,6 +1354,7 @@ vk_init_from_given(struct vk_bundle *vk,
                    bool external_fence_fd_enabled,
                    bool external_semaphore_fd_enabled,
                    bool timeline_semaphore_enabled,
+                   bool debug_utils_enabled,
                    enum u_logging_level log_level)
 {
 	VkResult ret;
@@ -1078,6 +1405,12 @@ vk_init_from_given(struct vk_bundle *vk,
 	}
 #endif
 
+#ifdef VK_EXT_debug_utils
+	if (debug_utils_enabled) {
+		vk->has_EXT_debug_utils = true;
+	}
+#endif
+
 	// Fill in the device features we are interested in.
 	fill_in_device_features(vk);
 
@@ -1091,12 +1424,6 @@ vk_init_from_given(struct vk_bundle *vk,
 	}
 
 	vk->vkGetDeviceQueue(vk->device, vk->queue_family_index, vk->queue_index, &vk->queue);
-
-	// Create the pool.
-	ret = vk_init_cmd_pool(vk);
-	if (ret != VK_SUCCESS) {
-		goto err_memset;
-	}
 
 
 	return VK_SUCCESS;

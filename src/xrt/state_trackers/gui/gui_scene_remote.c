@@ -13,6 +13,7 @@
 #include "util/u_logging.h"
 
 #include "math/m_api.h"
+#include "math/m_vec2.h"
 
 #include "gui_common.h"
 #include "gui_imgui.h"
@@ -38,6 +39,12 @@ struct gui_remote
 
 	struct r_remote_data reset;
 	struct r_remote_data data;
+
+	// Was the left trigger pushed last frame?
+	bool left_trigger_was_pressed_last_frame;
+
+	// Was the right trigger pushed last frame?
+	bool right_trigger_was_pressed_last_frame;
 
 	bool cheat_menu;
 
@@ -106,7 +113,7 @@ handle_downable_button(const char *name)
 }
 
 static void
-handle_input(struct r_remote_controller_data *d)
+handle_input(struct r_remote_controller_data *d, bool *trigger_was_pressed_last_frame)
 {
 	igText("Hover buttons and sliders to touch component.");
 	bool touched = false;
@@ -131,6 +138,13 @@ handle_input(struct r_remote_controller_data *d)
 
 	// Trigger
 	igText("Value > 0.0 causes touch, 0.7 > causes click");
+	if (handle_downable_button("Press for 1.0")) {
+		d->trigger_value.x = 1.0f;
+		*trigger_was_pressed_last_frame = true;
+	} else if (*trigger_was_pressed_last_frame) {
+		d->trigger_value.x = 0.0f;
+		*trigger_was_pressed_last_frame = false;
+	}
 	igSliderFloat("Trigger", &d->trigger_value.x, 0, 1, "%.2f", 0);
 	touched |= igIsItemHovered(ImGuiHoveredFlags_RectOnly);
 	d->trigger_click = d->trigger_value.x > 0.7;
@@ -141,13 +155,13 @@ handle_input(struct r_remote_controller_data *d)
 	touched = false;
 	d->thumbstick_click = handle_downable_button("Thumbstick Click");
 	touched |= igIsItemHovered(ImGuiHoveredFlags_RectOnly);
-	igSliderFloat2("Thumbstick", &d->thumbstick.x, -1, 1, "%.2f", 0);
+	igSliderFloat2("Thumbstick", *m_vec2_ptr_to_float_arr_ptr(&d->thumbstick), -1, 1, "%.2f", 0);
 	touched |= igIsItemHovered(ImGuiHoveredFlags_RectOnly);
 	d->thumbstick_touch = touched;
 
 	// Trackpad
 	touched = false;
-	igSliderFloat2("Trackpad", &d->trackpad.x, -1, 1, "%.2f", 0);
+	igSliderFloat2("Trackpad", *m_vec2_ptr_to_float_arr_ptr(&d->trackpad), -1, 1, "%.2f", 0);
 	touched |= igIsItemHovered(ImGuiHoveredFlags_RectOnly);
 	igSliderFloat("Trackpad Force", &d->trackpad_force.x, 0, 1, "%.2f", 0);
 	touched |= igIsItemHovered(ImGuiHoveredFlags_RectOnly);
@@ -298,10 +312,8 @@ render_cheat_menu(struct gui_remote *gr, struct gui_program *p)
 
 #define POSE(prefix)                                                                                                   \
 	do {                                                                                                           \
-		handle_draggable_vec3_f32(#prefix ".pose.position", &d->prefix.pose.position,                          \
-		                          &r->prefix.pose.position);                                                   \
-		handle_draggable_quat(#prefix ".pose.orientation", &d->prefix.pose.orientation,                        \
-		                      &r->prefix.pose.orientation);                                                    \
+		handle_draggable_vec3_f32(#prefix ".pose.position", &d->prefix.position, &r->prefix.position);         \
+		handle_draggable_quat(#prefix ".pose.orientation", &d->prefix.orientation, &r->prefix.orientation);    \
 	} while (false)
 
 #define LIN_ANG(prefix)                                                                                                \
@@ -314,7 +326,7 @@ render_cheat_menu(struct gui_remote *gr, struct gui_program *p)
 
 #define BUTTONS(prefix)                                                                                                \
 	do {                                                                                                           \
-		handle_input(&d->prefix);                                                                              \
+		handle_input(&d->prefix, &gr->prefix##_trigger_was_pressed_last_frame);                                \
 	} while (false)
 
 #define CURL(prefix, name, index) igDragFloat(#prefix "." #name, &d->prefix.hand_curl[index], 0.01, 0.0, 1.0, "%f", 0);
@@ -334,19 +346,19 @@ on_connected(struct gui_remote *gr, struct gui_program *p)
 	const struct r_remote_data *r = &gr->reset;
 	struct r_remote_data *d = &gr->data;
 
-	igPushIDPtr(&d->hmd); // Make all IDs unique.
-	POSE(hmd);
+	igPushIDPtr(&d->head); // Make all IDs unique.
+	POSE(head.center);
 	igPopID(); // Pop unique IDs
 
 	igPushIDPtr(&d->left); // Make all IDs unique.
-	POSE(left);
+	POSE(left.pose);
 	LIN_ANG(left);
 	BUTTONS(left);
 	HAND(left);
 	igPopID(); // Pop unique IDs
 
 	igPushIDPtr(&d->right); // Make all IDs unique.
-	POSE(right);
+	POSE(right.pose);
 	LIN_ANG(right);
 	BUTTONS(right);
 	HAND(right);

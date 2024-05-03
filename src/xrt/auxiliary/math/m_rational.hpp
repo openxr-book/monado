@@ -3,7 +3,7 @@
 /*!
  * @file
  * @brief  A very simple rational number type.
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup aux_math
  */
 
@@ -118,6 +118,24 @@ template <typename Scalar> struct Rational
 	complement() const noexcept
 	{
 		return Rational{denominator - numerator, denominator}.withNonNegativeDenominator();
+	}
+
+	/*!
+	 * Get an approximation of this value as a float.
+	 */
+	constexpr float
+	as_float() const noexcept
+	{
+		return static_cast<float>(numerator) / static_cast<float>(denominator);
+	}
+
+	/*!
+	 * Get an approximation of this value as a double.
+	 */
+	constexpr double
+	as_double() const noexcept
+	{
+		return static_cast<double>(numerator) / static_cast<double>(denominator);
 	}
 };
 

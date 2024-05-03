@@ -1,6 +1,6 @@
 // Copyright 2020-2021, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
-// Author: Ryan Pavlik <ryan.pavlik@collabora.com>
+// Author: Rylie Pavlik <rylie.pavlik@collabora.com>
 // Inline implementations: do not include on its own!
 
 #pragma once
@@ -17,6 +17,12 @@ DexClassLoader::construct(std::string const &searchPath,
     return DexClassLoader{
         Meta::data().clazz().newInstance(Meta::data().init, searchPath, "",
                                          nativeSearchPath, parentClassLoader)};
+}
+
+inline java::lang::Class
+DexClassLoader::loadClass(const std::string &name) {
+    assert(!isNull());
+    return java::lang::Class{object().call<jni::Object>(Meta::data().loadClass, name)};
 }
 
 } // namespace dalvik::system

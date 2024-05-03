@@ -17,7 +17,7 @@
 
 #include "os/os_time.h"
 
-#if defined(XRT_OS_LINUX)
+#if defined(XRT_OS_LINUX) || defined(XRT_ENV_MINGW)
 #include <pthread.h>
 #include <semaphore.h>
 #include <assert.h>
@@ -54,8 +54,10 @@ extern "C" {
 struct os_mutex
 {
 	pthread_mutex_t mutex;
+
 #ifndef NDEBUG
 	bool initialized;
+	bool recursive;
 #endif
 };
 
@@ -70,6 +72,7 @@ os_mutex_init(struct os_mutex *om)
 	assert(!om->initialized);
 #ifndef NDEBUG
 	om->initialized = true;
+	om->recursive = false;
 #endif
 	return pthread_mutex_init(&om->mutex, NULL);
 }
@@ -119,9 +122,56 @@ static inline void
 os_mutex_destroy(struct os_mutex *om)
 {
 	assert(om->initialized);
+	assert(!om->recursive);
+
 	pthread_mutex_destroy(&om->mutex);
+
 #ifndef NDEBUG
 	om->initialized = false;
+	om->recursive = false;
+#endif
+}
+
+/*!
+ * Init.
+ *
+ * @public @memberof os_mutex
+ */
+static inline int
+os_mutex_recursive_init(struct os_mutex *om)
+{
+	assert(!om->initialized);
+
+#ifndef NDEBUG
+	om->initialized = true;
+	om->recursive = true;
+#endif
+
+	pthread_mutexattr_t attr;
+	pthread_mutexattr_init(&attr);
+	pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+	int ret = pthread_mutex_init(&om->mutex, &attr);
+	pthread_mutexattr_destroy(&attr);
+
+	return ret;
+}
+
+/*!
+ * Clean up.
+ *
+ * @public @memberof os_mutex
+ */
+static inline void
+os_mutex_recursive_destroy(struct os_mutex *om)
+{
+	assert(om->initialized);
+	assert(om->recursive);
+
+	pthread_mutex_destroy(&om->mutex);
+
+#ifndef NDEBUG
+	om->initialized = false;
+	om->recursive = false;
 #endif
 }
 
@@ -130,6 +180,10 @@ os_mutex_destroy(struct os_mutex *om)
  *
  * Conditional variable.
  *
+ */
+
+/*!
+ * A wrapper around a native conditional variable.
  */
 struct os_cond
 {
@@ -333,7 +387,7 @@ os_semaphore_release(struct os_semaphore *os)
 static inline int
 os_semaphore_get_realtime_clock(struct timespec *ts, uint64_t timeout_ns)
 {
-#if defined(XRT_OS_WINDOWS)
+#if defined(XRT_OS_WINDOWS) && !defined(XRT_ENV_MINGW)
 	struct timespec relative;
 	os_ns_to_timespec(timeout_ns, &relative);
 	pthread_win32_getabstime_np(ts, &relative);

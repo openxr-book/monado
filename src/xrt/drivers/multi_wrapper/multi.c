@@ -7,12 +7,15 @@
  * @ingroup drv_multi
  */
 
-#include "multi.h"
-#include "util/u_device.h"
-#include "util/u_debug.h"
-
 #include "math/m_api.h"
 #include "math/m_space.h"
+
+#include "util/u_misc.h"
+#include "util/u_debug.h"
+#include "util/u_device.h"
+
+#include "multi.h"
+
 
 DEBUG_GET_ONCE_LOG_OPTION(multi_log, "MULTI_LOG", U_LOGGING_WARN)
 
@@ -66,13 +69,12 @@ attached_override(struct multi_device *d,
 
 	// XXX TODO tracking origin offsets
 	// m_relation_chain_push_inverted_pose_if_not_identity(&xrc, tracker_offset);
-	// m_relation_chain_push_inverted_relation(&xrc, tracker_relation);
+	// m_relation_chain_push_pose_if_not_identity(&xrc, target_offset);
 
 	struct xrt_relation_chain xrc = {0};
 	m_relation_chain_push_relation(&xrc, target_relation);
 	m_relation_chain_push_pose_if_not_identity(&xrc, &d->tracking_override.offset_inv);
 	m_relation_chain_push_relation(&xrc, tracker_relation);
-	m_relation_chain_push_pose_if_not_identity(&xrc, tracker_offset);
 	m_relation_chain_push_relation(&xrc, in_target_space);
 	m_relation_chain_resolve(&xrc, out_relation);
 }
@@ -149,11 +151,7 @@ get_hand_tracking(struct xrt_device *xdev,
 
 
 	switch (d->override_type) {
-	case XRT_TRACKING_OVERRIDE_DIRECT: {
-		// XXX: Codepath not tested. Probably doesn't do what you want.
-		direct_override(d, &out_value->hand_pose, &out_value->hand_pose);
-
-	} break;
+	case XRT_TRACKING_OVERRIDE_DIRECT: direct_override(d, &tracker_relation, &out_value->hand_pose); break;
 	case XRT_TRACKING_OVERRIDE_ATTACHED: {
 
 		// struct xrt_space_relation target_relation;
@@ -204,7 +202,7 @@ get_view_poses(struct xrt_device *xdev,
 }
 
 static bool
-compute_distortion(struct xrt_device *xdev, int view, float u, float v, struct xrt_uv_triplet *result)
+compute_distortion(struct xrt_device *xdev, uint32_t view, float u, float v, struct xrt_uv_triplet *result)
 {
 	struct multi_device *d = (struct multi_device *)xdev;
 	struct xrt_device *target = d->tracking_override.target;
@@ -249,7 +247,7 @@ multi_create_tracking_override(enum xrt_tracking_override_type override_type,
 	// The offset describes the physical pose of the tracker in the space of the thing we want to track.
 	// For a tracker that is physically attached at y=.1m to the tracked thing, when querying the pose for the
 	// tracked thing, we want to transform its pose by y-=.1m relative to the tracker. Multiple target devices may
-	// share a single tracker, therefore we can not simply adjust the tracker's tracking origin.
+	// share a single tracker, therefore we cannot simply adjust the tracker's tracking origin.
 	math_pose_invert(offset, &d->tracking_override.offset_inv);
 
 	d->tracking_override.target = tracking_override_target;

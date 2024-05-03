@@ -1,4 +1,4 @@
-// Copyright 2019-2021, Collabora, Ltd.
+// Copyright 2019-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -49,6 +49,18 @@ client_gl_swapchain(struct xrt_swapchain *xsc)
 	return (struct client_gl_swapchain *)xsc;
 }
 
+static inline struct xrt_swapchain *
+to_native_swapchain(struct xrt_swapchain *xsc)
+{
+	return &client_gl_swapchain(xsc)->xscn->base;
+}
+
+static inline struct xrt_compositor *
+to_native_compositor(struct xrt_compositor *xc)
+{
+	return &client_gl_compositor(xc)->xcn->base;
+}
+
 static int64_t
 gl_format_to_vk(int64_t format)
 {
@@ -87,6 +99,7 @@ vk_format_to_gl(int64_t format)
 	case 90 /*  VK_FORMAT_R16G16B16_SFLOAT         */: return GL_RGB16F;
 	case 91 /*  VK_FORMAT_R16G16B16A16_UNORM       */: return GL_RGBA16;
 	case 97 /*  VK_FORMAT_R16G16B16A16_SFLOAT      */: return GL_RGBA16F;
+	case 100 /* VK_FORMAT_R32_SFLOAT               */: return 0;
 	case 124 /* VK_FORMAT_D16_UNORM                */: return GL_DEPTH_COMPONENT16;
 	case 125 /* VK_FORMAT_X8_D24_UNORM_PACK32      */: return 0; // GL_DEPTH_COMPONENT24?
 	case 126 /* VK_FORMAT_D32_SFLOAT               */: return GL_DEPTH_COMPONENT32F;
@@ -135,28 +148,28 @@ handle_fencing_or_finish(struct client_gl_compositor *c)
 static xrt_result_t
 client_gl_swapchain_acquire_image(struct xrt_swapchain *xsc, uint32_t *out_index)
 {
-	struct client_gl_swapchain *sc = client_gl_swapchain(xsc);
-
 	// Pipe down call into native swapchain.
-	return xrt_swapchain_acquire_image(&sc->xscn->base, out_index);
+	return xrt_swapchain_acquire_image(to_native_swapchain(xsc), out_index);
 }
 
 static xrt_result_t
 client_gl_swapchain_wait_image(struct xrt_swapchain *xsc, uint64_t timeout_ns, uint32_t index)
 {
-	struct client_gl_swapchain *sc = client_gl_swapchain(xsc);
-
 	// Pipe down call into native swapchain.
-	return xrt_swapchain_wait_image(&sc->xscn->base, timeout_ns, index);
+	return xrt_swapchain_wait_image(to_native_swapchain(xsc), timeout_ns, index);
+}
+
+static xrt_result_t
+client_gl_swapchain_barrier_image(struct xrt_swapchain *xsc, enum xrt_barrier_direction direction, uint32_t index)
+{
+	return XRT_SUCCESS;
 }
 
 static xrt_result_t
 client_gl_swapchain_release_image(struct xrt_swapchain *xsc, uint32_t index)
 {
-	struct client_gl_swapchain *sc = client_gl_swapchain(xsc);
-
 	// Pipe down call into native swapchain.
-	return xrt_swapchain_release_image(&sc->xscn->base, index);
+	return xrt_swapchain_release_image(to_native_swapchain(xsc), index);
 }
 
 
@@ -167,21 +180,17 @@ client_gl_swapchain_release_image(struct xrt_swapchain *xsc, uint32_t index)
  */
 
 static xrt_result_t
-client_gl_compositor_begin_session(struct xrt_compositor *xc, enum xrt_view_type type)
+client_gl_compositor_begin_session(struct xrt_compositor *xc, const struct xrt_begin_session_info *info)
 {
-	struct client_gl_compositor *c = client_gl_compositor(xc);
-
 	// Pipe down call into native compositor.
-	return xrt_comp_begin_session(&c->xcn->base, type);
+	return xrt_comp_begin_session(to_native_compositor(xc), info);
 }
 
 static xrt_result_t
 client_gl_compositor_end_session(struct xrt_compositor *xc)
 {
-	struct client_gl_compositor *c = client_gl_compositor(xc);
-
 	// Pipe down call into native compositor.
-	return xrt_comp_end_session(&c->xcn->base);
+	return xrt_comp_end_session(to_native_compositor(xc));
 }
 
 static xrt_result_t
@@ -190,89 +199,78 @@ client_gl_compositor_wait_frame(struct xrt_compositor *xc,
                                 uint64_t *predicted_display_time,
                                 uint64_t *predicted_display_period)
 {
-	struct client_gl_compositor *c = client_gl_compositor(xc);
-
 	// Pipe down call into native compositor.
-	return xrt_comp_wait_frame(&c->xcn->base, out_frame_id, predicted_display_time, predicted_display_period);
+	return xrt_comp_wait_frame(    //
+	    to_native_compositor(xc),  //
+	    out_frame_id,              //
+	    predicted_display_time,    //
+	    predicted_display_period); //
 }
 
 static xrt_result_t
 client_gl_compositor_begin_frame(struct xrt_compositor *xc, int64_t frame_id)
 {
-	struct client_gl_compositor *c = client_gl_compositor(xc);
-
 	// Pipe down call into native compositor.
-	return xrt_comp_begin_frame(&c->xcn->base, frame_id);
+	return xrt_comp_begin_frame(to_native_compositor(xc), frame_id);
 }
 
 static xrt_result_t
 client_gl_compositor_discard_frame(struct xrt_compositor *xc, int64_t frame_id)
 {
-	struct client_gl_compositor *c = client_gl_compositor(xc);
-
 	// Pipe down call into native compositor.
-	return xrt_comp_discard_frame(&c->xcn->base, frame_id);
+	return xrt_comp_discard_frame(to_native_compositor(xc), frame_id);
 }
 
 static xrt_result_t
-client_gl_compositor_layer_begin(struct xrt_compositor *xc,
-                                 int64_t frame_id,
-                                 uint64_t display_time_ns,
-                                 enum xrt_blend_mode env_blend_mode)
+client_gl_compositor_layer_begin(struct xrt_compositor *xc, const struct xrt_layer_frame_data *data)
 {
-	struct client_gl_compositor *c = client_gl_compositor(xc);
-
-	return xrt_comp_layer_begin(&c->xcn->base, frame_id, display_time_ns, env_blend_mode);
+	// Pipe down call into native compositor.
+	return xrt_comp_layer_begin(to_native_compositor(xc), data);
 }
 
 static xrt_result_t
-client_gl_compositor_layer_stereo_projection(struct xrt_compositor *xc,
-                                             struct xrt_device *xdev,
-                                             struct xrt_swapchain *l_xsc,
-                                             struct xrt_swapchain *r_xsc,
-                                             const struct xrt_layer_data *data)
+client_gl_compositor_layer_projection(struct xrt_compositor *xc,
+                                      struct xrt_device *xdev,
+                                      struct xrt_swapchain *xsc[XRT_MAX_VIEWS],
+                                      const struct xrt_layer_data *data)
 {
-	struct client_gl_compositor *c = client_gl_compositor(xc);
-	struct xrt_swapchain *l_xscn;
-	struct xrt_swapchain *r_xscn;
+	struct xrt_compositor *xcn;
+	struct xrt_swapchain *xscn[XRT_MAX_VIEWS];
 
-	assert(data->type == XRT_LAYER_STEREO_PROJECTION);
+	xcn = to_native_compositor(xc);
+	assert(data->type == XRT_LAYER_PROJECTION);
+	for (uint32_t i = 0; i < data->view_count; ++i) {
+		xscn[i] = &client_gl_swapchain(xsc[i])->xscn->base;
+	}
+	struct xrt_layer_data d = *data;
+	d.flip_y = !d.flip_y;
 
-	l_xscn = &client_gl_swapchain(l_xsc)->xscn->base;
-	r_xscn = &client_gl_swapchain(r_xsc)->xscn->base;
+	return xrt_comp_layer_projection(xcn, xdev, xscn, &d);
+}
+
+static xrt_result_t
+client_gl_compositor_layer_projection_depth(struct xrt_compositor *xc,
+                                            struct xrt_device *xdev,
+                                            struct xrt_swapchain *xsc[XRT_MAX_VIEWS],
+                                            struct xrt_swapchain *d_xsc[XRT_MAX_VIEWS],
+                                            const struct xrt_layer_data *data)
+{
+	struct xrt_compositor *xcn;
+	struct xrt_swapchain *xscn[XRT_MAX_VIEWS];
+	struct xrt_swapchain *d_xscn[XRT_MAX_VIEWS];
+
+	assert(data->type == XRT_LAYER_PROJECTION_DEPTH);
+
+	xcn = to_native_compositor(xc);
+	for (uint32_t i = 0; i < data->view_count; ++i) {
+		xscn[i] = to_native_swapchain(xsc[i]);
+		d_xscn[i] = to_native_swapchain(d_xsc[i]);
+	}
 
 	struct xrt_layer_data d = *data;
 	d.flip_y = !d.flip_y;
 
-	return xrt_comp_layer_stereo_projection(&c->xcn->base, xdev, l_xscn, r_xscn, &d);
-}
-
-static xrt_result_t
-client_gl_compositor_layer_stereo_projection_depth(struct xrt_compositor *xc,
-                                                   struct xrt_device *xdev,
-                                                   struct xrt_swapchain *l_xsc,
-                                                   struct xrt_swapchain *r_xsc,
-                                                   struct xrt_swapchain *l_d_xsc,
-                                                   struct xrt_swapchain *r_d_xsc,
-                                                   const struct xrt_layer_data *data)
-{
-	struct client_gl_compositor *c = client_gl_compositor(xc);
-	struct xrt_swapchain *l_xscn;
-	struct xrt_swapchain *r_xscn;
-	struct xrt_swapchain *l_d_xscn;
-	struct xrt_swapchain *r_d_xscn;
-
-	assert(data->type == XRT_LAYER_STEREO_PROJECTION_DEPTH);
-
-	l_xscn = &client_gl_swapchain(l_xsc)->xscn->base;
-	r_xscn = &client_gl_swapchain(r_xsc)->xscn->base;
-	l_d_xscn = &client_gl_swapchain(l_d_xsc)->xscn->base;
-	r_d_xscn = &client_gl_swapchain(r_d_xsc)->xscn->base;
-
-	struct xrt_layer_data d = *data;
-	d.flip_y = !d.flip_y;
-
-	return xrt_comp_layer_stereo_projection_depth(&c->xcn->base, xdev, l_xscn, r_xscn, l_d_xscn, r_d_xscn, &d);
+	return xrt_comp_layer_projection_depth(xcn, xdev, xscn, d_xscn, &d);
 }
 
 static xrt_result_t
@@ -281,17 +279,18 @@ client_gl_compositor_layer_quad(struct xrt_compositor *xc,
                                 struct xrt_swapchain *xsc,
                                 const struct xrt_layer_data *data)
 {
-	struct client_gl_compositor *c = client_gl_compositor(xc);
+	struct xrt_compositor *xcn;
 	struct xrt_swapchain *xscfb;
 
 	assert(data->type == XRT_LAYER_QUAD);
 
-	xscfb = &client_gl_swapchain(xsc)->xscn->base;
+	xcn = to_native_compositor(xc);
+	xscfb = to_native_swapchain(xsc);
 
 	struct xrt_layer_data d = *data;
 	d.flip_y = !d.flip_y;
 
-	return xrt_comp_layer_quad(&c->xcn->base, xdev, xscfb, &d);
+	return xrt_comp_layer_quad(xcn, xdev, xscfb, &d);
 }
 
 static xrt_result_t
@@ -300,17 +299,18 @@ client_gl_compositor_layer_cube(struct xrt_compositor *xc,
                                 struct xrt_swapchain *xsc,
                                 const struct xrt_layer_data *data)
 {
-	struct client_gl_compositor *c = client_gl_compositor(xc);
+	struct xrt_compositor *xcn;
 	struct xrt_swapchain *xscfb;
 
 	assert(data->type == XRT_LAYER_CUBE);
 
-	xscfb = &client_gl_swapchain(xsc)->xscn->base;
+	xcn = to_native_compositor(xc);
+	xscfb = to_native_swapchain(xsc);
 
 	struct xrt_layer_data d = *data;
 	d.flip_y = !d.flip_y;
 
-	return xrt_comp_layer_cube(&c->xcn->base, xdev, xscfb, &d);
+	return xrt_comp_layer_cube(xcn, xdev, xscfb, &d);
 }
 
 static xrt_result_t
@@ -319,17 +319,18 @@ client_gl_compositor_layer_cylinder(struct xrt_compositor *xc,
                                     struct xrt_swapchain *xsc,
                                     const struct xrt_layer_data *data)
 {
-	struct client_gl_compositor *c = client_gl_compositor(xc);
+	struct xrt_compositor *xcn;
 	struct xrt_swapchain *xscfb;
 
 	assert(data->type == XRT_LAYER_CYLINDER);
 
-	xscfb = &client_gl_swapchain(xsc)->xscn->base;
+	xcn = to_native_compositor(xc);
+	xscfb = to_native_swapchain(xsc);
 
 	struct xrt_layer_data d = *data;
 	d.flip_y = !d.flip_y;
 
-	return xrt_comp_layer_cylinder(&c->xcn->base, xdev, xscfb, &d);
+	return xrt_comp_layer_cylinder(xcn, xdev, xscfb, &d);
 }
 
 static xrt_result_t
@@ -338,17 +339,18 @@ client_gl_compositor_layer_equirect1(struct xrt_compositor *xc,
                                      struct xrt_swapchain *xsc,
                                      const struct xrt_layer_data *data)
 {
-	struct client_gl_compositor *c = client_gl_compositor(xc);
+	struct xrt_compositor *xcn;
 	struct xrt_swapchain *xscfb;
 
 	assert(data->type == XRT_LAYER_EQUIRECT1);
 
-	xscfb = &client_gl_swapchain(xsc)->xscn->base;
+	xcn = to_native_compositor(xc);
+	xscfb = to_native_swapchain(xsc);
 
 	struct xrt_layer_data d = *data;
 	d.flip_y = !d.flip_y;
 
-	return xrt_comp_layer_equirect1(&c->xcn->base, xdev, xscfb, &d);
+	return xrt_comp_layer_equirect1(xcn, xdev, xscfb, &d);
 }
 
 static xrt_result_t
@@ -357,40 +359,61 @@ client_gl_compositor_layer_equirect2(struct xrt_compositor *xc,
                                      struct xrt_swapchain *xsc,
                                      const struct xrt_layer_data *data)
 {
-	struct client_gl_compositor *c = client_gl_compositor(xc);
+	struct xrt_compositor *xcn;
 	struct xrt_swapchain *xscfb;
 
 	assert(data->type == XRT_LAYER_EQUIRECT2);
 
-	xscfb = &client_gl_swapchain(xsc)->xscn->base;
+	xcn = to_native_compositor(xc);
+	xscfb = to_native_swapchain(xsc);
 
 	struct xrt_layer_data d = *data;
 	d.flip_y = !d.flip_y;
 
-	return xrt_comp_layer_equirect2(&c->xcn->base, xdev, xscfb, &d);
+	return xrt_comp_layer_equirect2(xcn, xdev, xscfb, &d);
 }
 
 static xrt_result_t
-client_gl_compositor_layer_commit(struct xrt_compositor *xc, int64_t frame_id, xrt_graphics_sync_handle_t sync_handle)
+client_gl_compositor_layer_passthrough(struct xrt_compositor *xc,
+                                       struct xrt_device *xdev,
+                                       const struct xrt_layer_data *data)
+{
+	struct client_gl_compositor *c = client_gl_compositor(xc);
+
+	assert(data->type == XRT_LAYER_PASSTHROUGH);
+
+	struct xrt_layer_data d = *data;
+	d.flip_y = !d.flip_y;
+
+	return xrt_comp_layer_passthrough(&c->xcn->base, xdev, &d);
+}
+
+static xrt_result_t
+client_gl_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sync_handle)
 {
 	COMP_TRACE_MARKER();
 
 	struct client_gl_compositor *c = client_gl_compositor(xc);
+
+	if (c->renderdoc_enabled) {
+		glDebugMessageInsert(GL_DEBUG_SOURCE_THIRD_PARTY, GL_DEBUG_TYPE_MARKER, 1,
+		                     GL_DEBUG_SEVERITY_NOTIFICATION, -1, "vr-marker,frame_end,type,application");
+	}
 
 	// We make the sync object, not st/oxr which is our user.
 	assert(!xrt_graphics_sync_handle_is_valid(sync_handle));
 
 	sync_handle = XRT_GRAPHICS_SYNC_HANDLE_INVALID;
 
-	xrt_result_t xret = c->context_begin(xc);
+	xrt_result_t xret = client_gl_compositor_context_begin(xc, CLIENT_GL_CONTEXT_REASON_SYNCHRONIZE);
 	if (xret == XRT_SUCCESS) {
 		sync_handle = handle_fencing_or_finish(c);
-		c->context_end(xc);
+		client_gl_compositor_context_end(xc, CLIENT_GL_CONTEXT_REASON_SYNCHRONIZE);
 	}
 
 	COMP_TRACE_IDENT(layer_commit);
 
-	return xrt_comp_layer_commit(&c->xcn->base, frame_id, sync_handle);
+	return xrt_comp_layer_commit(&c->xcn->base, sync_handle);
 }
 
 static xrt_result_t
@@ -400,7 +423,16 @@ client_gl_compositor_get_swapchain_create_properties(struct xrt_compositor *xc,
 {
 	struct client_gl_compositor *c = client_gl_compositor(xc);
 
-	return xrt_comp_get_swapchain_create_properties(&c->xcn->base, info, xsccp);
+	int64_t vk_format = gl_format_to_vk(info->format);
+	if (vk_format == 0) {
+		U_LOG_E("Invalid format!");
+		return XRT_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED;
+	}
+
+	struct xrt_swapchain_create_info vkinfo = *info;
+	vkinfo.format = vk_format;
+
+	return xrt_comp_get_swapchain_create_properties(&c->xcn->base, &vkinfo, xsccp);
 }
 
 static xrt_result_t
@@ -409,9 +441,24 @@ client_gl_swapchain_create(struct xrt_compositor *xc,
                            struct xrt_swapchain **out_xsc)
 {
 	struct client_gl_compositor *c = client_gl_compositor(xc);
+	struct xrt_swapchain_create_properties xsccp = {0};
 	xrt_result_t xret = XRT_SUCCESS;
 
-	xret = c->context_begin(xc);
+	// Do before getting the context, not using ourselves.
+	xret = xrt_comp_get_swapchain_create_properties(xc, info, &xsccp);
+	if (xret != XRT_SUCCESS) {
+		U_LOG_E("Failed to get create properties: %u", xret);
+		return xret;
+	}
+
+	// Check before setting the context.
+	int64_t vk_format = gl_format_to_vk(info->format);
+	if (vk_format == 0) {
+		U_LOG_E("Invalid format!");
+		return XRT_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED;
+	}
+
+	xret = client_gl_compositor_context_begin(xc, CLIENT_GL_CONTEXT_REASON_OTHER);
 	if (xret != XRT_SUCCESS) {
 		return xret;
 	}
@@ -420,26 +467,24 @@ client_gl_swapchain_create(struct xrt_compositor *xc,
 		const char *version_str = (const char *)glGetString(GL_VERSION);
 		if (strstr(version_str, "OpenGL ES 2.") == version_str) {
 			U_LOG_E("Only one array layer is supported with OpenGL ES 2");
-			c->context_end(xc);
+			client_gl_compositor_context_end(xc, CLIENT_GL_CONTEXT_REASON_OTHER);
 			return XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED;
 		}
 	}
 
-	int64_t vk_format = gl_format_to_vk(info->format);
-	if (vk_format == 0) {
-		U_LOG_E("Invalid format!");
-		c->context_end(xc);
-		return XRT_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED;
-	}
-
 	struct xrt_swapchain_create_info xinfo = *info;
-	xinfo.format = vk_format;
-	struct xrt_swapchain_native *xscn = NULL; // Has to be NULL.
-	xret = xrt_comp_native_create_swapchain(c->xcn, &xinfo, &xscn);
+	struct xrt_swapchain_create_info vkinfo = *info;
 
+	// Update the create info.
+	xinfo.bits |= xsccp.extra_bits;
+	vkinfo.format = vk_format;
+	vkinfo.bits |= xsccp.extra_bits;
+
+	struct xrt_swapchain_native *xscn = NULL; // Has to be NULL.
+	xret = xrt_comp_native_create_swapchain(c->xcn, &vkinfo, &xscn);
 
 	if (xret != XRT_SUCCESS) {
-		c->context_end(xc);
+		client_gl_compositor_context_end(xc, CLIENT_GL_CONTEXT_REASON_OTHER);
 		return xret;
 	}
 	assert(xscn != NULL);
@@ -455,16 +500,16 @@ client_gl_swapchain_create(struct xrt_compositor *xc,
 	struct xrt_swapchain *xsc = &xscn->base;
 
 	struct client_gl_swapchain *sc = NULL;
-	if (NULL == c->create_swapchain(xc, info, xscn, &sc)) {
+	if (NULL == c->create_swapchain(xc, &xinfo, xscn, &sc)) {
 		// Drop our reference, does NULL checking.
 		xrt_swapchain_reference(&xsc, NULL);
-		c->context_end(xc);
+		client_gl_compositor_context_end(xc, CLIENT_GL_CONTEXT_REASON_OTHER);
 		return XRT_ERROR_OPENGL;
 	}
 
 	if (sc == NULL) {
 		U_LOG_E("Could not create OpenGL swapchain.");
-		c->context_end(xc);
+		client_gl_compositor_context_end(xc, CLIENT_GL_CONTEXT_REASON_OTHER);
 		return XRT_ERROR_OPENGL;
 	}
 
@@ -473,6 +518,9 @@ client_gl_swapchain_create(struct xrt_compositor *xc,
 	}
 	if (NULL == sc->base.base.wait_image) {
 		sc->base.base.wait_image = client_gl_swapchain_wait_image;
+	}
+	if (NULL == sc->base.base.barrier_image) {
+		sc->base.base.barrier_image = client_gl_swapchain_barrier_image;
 	}
 	if (NULL == sc->base.base.release_image) {
 		sc->base.base.release_image = client_gl_swapchain_release_image;
@@ -483,19 +531,38 @@ client_gl_swapchain_create(struct xrt_compositor *xc,
 
 	glBindTexture(tex_target, prev_texture);
 
-	c->context_end(xc);
+	client_gl_compositor_context_end(xc, CLIENT_GL_CONTEXT_REASON_OTHER);
 
 	*out_xsc = &sc->base.base;
 	return XRT_SUCCESS;
 }
 
 static xrt_result_t
-client_gl_compositor_poll_events(struct xrt_compositor *xc, union xrt_compositor_event *out_xce)
+client_gl_compositor_passthrough_create(struct xrt_compositor *xc, const struct xrt_passthrough_create_info *info)
 {
 	struct client_gl_compositor *c = client_gl_compositor(xc);
 
 	// Pipe down call into native compositor.
-	return xrt_comp_poll_events(&c->xcn->base, out_xce);
+	return xrt_comp_create_passthrough(&c->xcn->base, info);
+}
+
+static xrt_result_t
+client_gl_compositor_passthrough_layer_create(struct xrt_compositor *xc,
+                                              const struct xrt_passthrough_layer_create_info *info)
+{
+	struct client_gl_compositor *c = client_gl_compositor(xc);
+
+	// Pipe down call into native compositor.
+	return xrt_comp_create_passthrough_layer(&c->xcn->base, info);
+}
+
+static xrt_result_t
+client_gl_compositor_passthrough_destroy(struct xrt_compositor *xc)
+{
+	struct client_gl_compositor *c = client_gl_compositor(xc);
+
+	// Pipe down call into native compositor.
+	return xrt_comp_destroy_passthrough(&c->xcn->base);
 }
 
 static void
@@ -520,34 +587,37 @@ client_gl_compositor_close(struct client_gl_compositor *c)
 bool
 client_gl_compositor_init(struct client_gl_compositor *c,
                           struct xrt_compositor_native *xcn,
-                          client_gl_context_begin_func_t context_begin,
-                          client_gl_context_end_func_t context_end,
+                          client_gl_context_begin_locked_func_t context_begin_locked,
+                          client_gl_context_end_locked_func_t context_end_locked,
                           client_gl_swapchain_create_func_t create_swapchain,
                           client_gl_insert_fence_func_t insert_fence)
 {
-	assert(context_begin != NULL);
-	assert(context_end != NULL);
+	assert(context_begin_locked != NULL);
+	assert(context_end_locked != NULL);
 
 	c->base.base.get_swapchain_create_properties = client_gl_compositor_get_swapchain_create_properties;
 	c->base.base.create_swapchain = client_gl_swapchain_create;
+	c->base.base.create_passthrough = client_gl_compositor_passthrough_create;
+	c->base.base.create_passthrough_layer = client_gl_compositor_passthrough_layer_create;
+	c->base.base.destroy_passthrough = client_gl_compositor_passthrough_destroy;
 	c->base.base.begin_session = client_gl_compositor_begin_session;
 	c->base.base.end_session = client_gl_compositor_end_session;
 	c->base.base.wait_frame = client_gl_compositor_wait_frame;
 	c->base.base.begin_frame = client_gl_compositor_begin_frame;
 	c->base.base.discard_frame = client_gl_compositor_discard_frame;
 	c->base.base.layer_begin = client_gl_compositor_layer_begin;
-	c->base.base.layer_stereo_projection = client_gl_compositor_layer_stereo_projection;
-	c->base.base.layer_stereo_projection_depth = client_gl_compositor_layer_stereo_projection_depth;
+	c->base.base.layer_projection = client_gl_compositor_layer_projection;
+	c->base.base.layer_projection_depth = client_gl_compositor_layer_projection_depth;
 	c->base.base.layer_quad = client_gl_compositor_layer_quad;
 	c->base.base.layer_cube = client_gl_compositor_layer_cube;
 	c->base.base.layer_cylinder = client_gl_compositor_layer_cylinder;
 	c->base.base.layer_equirect1 = client_gl_compositor_layer_equirect1;
 	c->base.base.layer_equirect2 = client_gl_compositor_layer_equirect2;
+	c->base.base.layer_passthrough = client_gl_compositor_layer_passthrough;
 	c->base.base.layer_commit = client_gl_compositor_layer_commit;
 	c->base.base.destroy = client_gl_compositor_destroy;
-	c->base.base.poll_events = client_gl_compositor_poll_events;
-	c->context_begin = context_begin;
-	c->context_end = context_end;
+	c->context_begin_locked = context_begin_locked;
+	c->context_end_locked = context_end_locked;
 	c->create_swapchain = create_swapchain;
 	c->insert_fence = insert_fence;
 	c->xcn = xcn;
@@ -567,6 +637,13 @@ client_gl_compositor_init(struct client_gl_compositor *c,
 		c->base.base.info.formats[count++] = f;
 	}
 	c->base.base.info.format_count = count;
+
+	// Get max texture size.
+	GLint max_texture_size = 0;
+	glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_texture_size);
+	if (max_texture_size > 0) {
+		c->base.base.info.max_texture_size = (uint32_t)max_texture_size;
+	}
 
 	os_mutex_init(&c->context_mutex);
 

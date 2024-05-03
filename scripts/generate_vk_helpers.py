@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2019-2021, Collabora, Ltd.
+# Copyright 2019-2023, Collabora, Ltd.
 # SPDX-License-Identifier: BSL-1.0
 """Simple script to update vk_helpers.{c,h}."""
 
@@ -75,6 +75,7 @@ def get_device_cmds():
         Cmd("vkCmdCopyImage"),
         Cmd("vkCmdCopyImageToBuffer"),
         Cmd("vkCmdBlitImage"),
+        Cmd("vkCmdPushConstants"),
         Cmd("vkEndCommandBuffer"),
         Cmd("vkFreeCommandBuffers"),
         None,
@@ -167,6 +168,17 @@ def get_device_cmds():
         Cmd("vkGetSwapchainCounterEXT", requires=("VK_EXT_display_control",)),
         Cmd("vkRegisterDeviceEventEXT", requires=("VK_EXT_display_control",)),
         Cmd("vkRegisterDisplayEventEXT", requires=("VK_EXT_display_control",)),
+        None,
+        Cmd("vkGetImageDrmFormatModifierPropertiesEXT", requires=("VK_EXT_image_drm_format_modifier",)),
+        None,
+        Cmd("vkCmdBeginDebugUtilsLabelEXT", requires=("VK_EXT_debug_utils",)),
+        Cmd("vkCmdEndDebugUtilsLabelEXT", requires=("VK_EXT_debug_utils",)),
+        Cmd("vkCmdInsertDebugUtilsLabelEXT", requires=("VK_EXT_debug_utils",)),
+        Cmd("vkQueueBeginDebugUtilsLabelEXT", requires=("VK_EXT_debug_utils",)),
+        Cmd("vkQueueEndDebugUtilsLabelEXT", requires=("VK_EXT_debug_utils",)),
+        Cmd("vkQueueInsertDebugUtilsLabelEXT", requires=("VK_EXT_debug_utils",)),
+        Cmd("vkSetDebugUtilsObjectNameEXT", requires=("VK_EXT_debug_utils",)),
+        Cmd("vkSetDebugUtilsObjectTagEXT", requires=("VK_EXT_debug_utils",)),
     ]
 
 
@@ -191,6 +203,7 @@ def get_instance_cmds():
         Cmd("vkGetPhysicalDeviceSurfacePresentModesKHR"),
         Cmd("vkGetPhysicalDeviceSurfaceSupportKHR"),
         Cmd("vkGetPhysicalDeviceFormatProperties"),
+        Cmd("vkGetPhysicalDeviceFormatProperties2KHR", member_name="vkGetPhysicalDeviceFormatProperties2"),
         Cmd("vkGetPhysicalDeviceImageFormatProperties2"),
         Cmd("vkGetPhysicalDeviceExternalBufferPropertiesKHR"),
         Cmd("vkGetPhysicalDeviceExternalFencePropertiesKHR"),
@@ -243,23 +256,38 @@ def get_instance_cmds():
         None,
         Cmd("vkCreateWin32SurfaceKHR", requires=("VK_USE_PLATFORM_WIN32_KHR",)),
         None,
-        Cmd("vkGetPhysicalDeviceSurfaceCapabilities2EXT", requires=("VK_EXT_display_surface_counter",))
+        Cmd("vkGetPhysicalDeviceSurfaceCapabilities2EXT", requires=("VK_EXT_display_surface_counter",)),
+        None,
+        Cmd("vkCreateDebugUtilsMessengerEXT", requires=("VK_EXT_debug_utils",)),
+        Cmd("vkSubmitDebugUtilsMessageEXT", requires=("VK_EXT_debug_utils",)),
+        Cmd("vkDestroyDebugUtilsMessengerEXT", requires=("VK_EXT_debug_utils",)),
     ]
 
 
 # Sorted KHR, EXT, Vendor, interally alphabetically
 INSTANCE_EXTENSIONS_TO_CHECK = [
     "VK_EXT_display_surface_counter",
+    "VK_EXT_swapchain_colorspace",
+    "VK_EXT_debug_utils",
 ]
 # Sorted KHR, EXT, Vendor, interally alphabetically
 DEVICE_EXTENSIONS_TO_CHECK = [
     "VK_KHR_external_fence_fd",
     "VK_KHR_external_semaphore_fd",
+    "VK_KHR_format_feature_flags2",
+    "VK_KHR_global_priority",
     "VK_KHR_image_format_list",
+    "VK_KHR_maintenance1",
+    "VK_KHR_maintenance2",
+    "VK_KHR_maintenance3",
+    "VK_KHR_maintenance4",
+    "VK_KHR_synchronization2",
     "VK_KHR_timeline_semaphore",
     "VK_EXT_calibrated_timestamps",
     "VK_EXT_display_control",
+    "VK_EXT_external_memory_dma_buf",
     "VK_EXT_global_priority",
+    "VK_EXT_image_drm_format_modifier",
     "VK_EXT_robustness2",
     "VK_GOOGLE_display_timing",
 ]
@@ -389,7 +417,13 @@ def make_ext_member_name(ext: str):
 
 
 def make_ext_name_define(ext: str):
-    return "{}_EXTENSION_NAME".format(ext.upper()).replace("2", "_2")
+    str = ext.upper()
+    str = str.replace("1", "_1")
+    str = str.replace("2", "_2")
+    str = str.replace("3", "_3")
+    str = str.replace("4", "_4")
+
+    return "{}_EXTENSION_NAME".format(str)
 
 
 def generate_ext_members(exts):

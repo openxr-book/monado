@@ -1,9 +1,10 @@
-// Copyright 2018-2022, Collabora, Ltd.
+// Copyright 2018-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Holds instance related functions.
  * @author Jakob Bornecrantz <jakob@collabora.com>
+ * @author Korcan Hussein <korcan.hussein@collabora.com>
  * @ingroup oxr_main
  */
 
@@ -17,6 +18,11 @@
 #include "util/u_misc.h"
 #include "util/u_debug.h"
 #include "util/u_git_tag.h"
+#include "util/u_builders.h"
+
+#ifdef XRT_FEATURE_CLIENT_DEBUG_GUI
+#include "util/u_debug_gui.h"
+#endif
 
 #ifdef XRT_OS_ANDROID
 #include "android/android_globals.h"
@@ -44,22 +50,6 @@ DEBUG_GET_ONCE_BOOL_OPTION(debug_spaces, "OXR_DEBUG_SPACES", false)
 DEBUG_GET_ONCE_BOOL_OPTION(debug_bindings, "OXR_DEBUG_BINDINGS", false)
 DEBUG_GET_ONCE_BOOL_OPTION(lifecycle_verbose, "OXR_LIFECYCLE_VERBOSE", false)
 
-DEBUG_GET_ONCE_FLOAT_OPTION(tracking_origin_offset_x, "OXR_TRACKING_ORIGIN_OFFSET_X", 0.0f)
-DEBUG_GET_ONCE_FLOAT_OPTION(tracking_origin_offset_y, "OXR_TRACKING_ORIGIN_OFFSET_Y", 0.0f)
-DEBUG_GET_ONCE_FLOAT_OPTION(tracking_origin_offset_z, "OXR_TRACKING_ORIGIN_OFFSET_Z", 0.0f)
-
-#ifdef XRT_FEATURE_CLIENT_DEBUG_GUI
-/* ---- HACK ---- */
-extern int
-oxr_sdl2_hack_create(void **out_hack);
-
-extern void
-oxr_sdl2_hack_start(void *hack, struct xrt_instance *xinst, struct xrt_system_devices *xsysd);
-
-extern void
-oxr_sdl2_hack_stop(void **hack_ptr);
-/* ---- HACK ---- */
-#endif
 
 static XrResult
 oxr_instance_destroy(struct oxr_logger *log, struct oxr_handle_base *hb)
@@ -78,12 +68,18 @@ oxr_instance_destroy(struct oxr_logger *log, struct oxr_handle_base *hb)
 	u_hashset_destroy(&inst->action_sets.name_store);
 	u_hashset_destroy(&inst->action_sets.loc_store);
 
+	// Free the mask here, no system destroy yet.
+	for (uint32_t i = 0; i < ARRAY_SIZE(inst->system.visibility_mask); i++) {
+		free(inst->system.visibility_mask[i]);
+		inst->system.visibility_mask[i] = NULL;
+	}
+
+	xrt_space_overseer_destroy(&inst->system.xso);
+	os_mutex_destroy(&inst->system.sync_actions_mutex);
 	xrt_system_devices_destroy(&inst->system.xsysd);
 
 #ifdef XRT_FEATURE_CLIENT_DEBUG_GUI
-	/* ---- HACK ---- */
-	oxr_sdl2_hack_stop(&inst->hack);
-	/* ---- HACK ---- */
+	u_debug_gui_stop(&inst->debug_ui);
 #endif
 
 	xrt_instance_destroy(&inst->xinst);
@@ -126,14 +122,36 @@ starts_with(const char *with, const char *string)
 static void
 debug_print_devices(struct oxr_logger *log, struct oxr_system *sys)
 {
-	struct xrt_device *h = GET_XDEV_BY_ROLE(sys, head);
-	struct xrt_device *l = GET_XDEV_BY_ROLE(sys, left);
-	struct xrt_device *r = GET_XDEV_BY_ROLE(sys, right);
+#define D(INDEX) (roles.INDEX < 0 ? NULL : sys->xsysd->xdevs[roles.INDEX])
+#define P(XDEV) (XDEV != NULL ? XDEV->str : "<none>")
 
-	oxr_log(log, "Selected devices\n\tHead: '%s' (%i)\n\tLeft: '%s' (%i)\n\tRight: '%s' (%i)", //
-	        h ? h->str : "<none>", sys->role.head,                                             //
-	        l ? l->str : "<none>", sys->role.left,                                             //
-	        r ? r->str : "<none>", sys->role.right);                                           //
+	// Static roles.
+	struct xrt_device *h = GET_XDEV_BY_ROLE(sys, head);
+	struct xrt_device *e = GET_XDEV_BY_ROLE(sys, eyes);
+	struct xrt_device *hl = GET_XDEV_BY_ROLE(sys, hand_tracking_left);
+	struct xrt_device *hr = GET_XDEV_BY_ROLE(sys, hand_tracking_right);
+
+	// Dynamic roles, the system cache might not have been updated yet.
+	struct xrt_system_roles roles = XRT_SYSTEM_ROLES_INIT;
+	xrt_system_devices_get_roles(sys->xsysd, &roles);
+
+	struct xrt_device *l = D(left);
+	struct xrt_device *r = D(right);
+	struct xrt_device *gp = D(gamepad);
+
+	oxr_log(log,
+	        "Selected devices"
+	        "\n\tHead: '%s'"
+	        "\n\tEyes: '%s'"
+	        "\n\tLeft: '%s'"
+	        "\n\tRight: '%s'"
+	        "\n\tGamepad: '%s'"
+	        "\n\tHand-Tracking Left: '%s'"
+	        "\n\tHand-Tracking Right: '%s'",
+	        P(h), P(e), P(l), P(r), P(gp), P(hl), P(hr));
+
+#undef P
+#undef D
 }
 
 static void
@@ -157,15 +175,19 @@ detect_engine(struct oxr_logger *log, struct oxr_instance *inst, const XrInstanc
 static void
 apply_quirks(struct oxr_logger *log, struct oxr_instance *inst)
 {
-#if 0
-	// This is no longer needed.
+	// Reset.
+	inst->quirks.skip_end_session = false;
+	inst->quirks.disable_vulkan_format_depth_stencil = false;
+	inst->quirks.no_validation_error_in_create_ref_space = false;
+
 	if (starts_with("UnrealEngine", inst->appinfo.detected.engine.name) && //
 	    inst->appinfo.detected.engine.major == 4 &&                        //
-	    inst->appinfo.detected.engine.minor <= 27 &&                       //
-	    inst->appinfo.detected.engine.patch <= 0) {
-		inst->quirks.disable_vulkan_format_depth_stencil = true;
+	    inst->appinfo.detected.engine.minor <= 27) {
+		inst->quirks.skip_end_session = true;
 	}
-#endif
+
+	// Currently always true.
+	inst->quirks.no_validation_error_in_create_ref_space = true;
 }
 
 XrResult
@@ -182,6 +204,7 @@ oxr_instance_create(struct oxr_logger *log,
 
 	OXR_ALLOCATE_HANDLE_OR_RETURN(log, inst, OXR_XR_DEBUG_INSTANCE, oxr_instance_destroy, NULL);
 
+	inst->extensions = *extensions; // Sets the enabled extensions.
 	inst->lifecycle_verbose = debug_get_bool_option_lifecycle_verbose();
 	inst->debug_spaces = debug_get_bool_option_debug_spaces();
 	inst->debug_views = debug_get_bool_option_debug_views();
@@ -193,10 +216,14 @@ oxr_instance_create(struct oxr_logger *log,
 		return ret;
 	}
 
+	m_ret = os_mutex_init(&inst->system.sync_actions_mutex);
+	if (m_ret < 0) {
+		ret = oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Failed to init sync action mutex");
+		return ret;
+	}
+
 #ifdef XRT_FEATURE_CLIENT_DEBUG_GUI
-	/* ---- HACK ---- */
-	oxr_sdl2_hack_create(&inst->hack);
-	/* ---- HACK ---- */
+	u_debug_gui_create(&inst->debug_ui);
 #endif
 
 	ret = oxr_path_init(log, inst);
@@ -235,15 +262,32 @@ oxr_instance_create(struct oxr_logger *log,
 	cache_path(log, inst, "/interaction_profiles/oculus/go_controller", &inst->path_cache.oculus_go_controller);
 	cache_path(log, inst, "/interaction_profiles/oculus/touch_controller", &inst->path_cache.oculus_touch_controller);
 	cache_path(log, inst, "/interaction_profiles/valve/index_controller", &inst->path_cache.valve_index_controller);
+	cache_path(log, inst, "/interaction_profiles/hp/mixed_reality_controller", &inst->path_cache.hp_mixed_reality_controller);
+	cache_path(log, inst, "/interaction_profiles/samsung/odyssey_controller", &inst->path_cache.samsung_odyssey_controller);
+	cache_path(log, inst, "/interaction_profiles/ml/ml2_controller", &inst->path_cache.ml_ml2_controller);
 	cache_path(log, inst, "/interaction_profiles/mndx/ball_on_a_stick_controller", &inst->path_cache.mndx_ball_on_a_stick_controller);
 	cache_path(log, inst, "/interaction_profiles/microsoft/hand_interaction", &inst->path_cache.msft_hand_interaction);
+	cache_path(log, inst, "/interaction_profiles/ext/eye_gaze_interaction", &inst->path_cache.ext_eye_gaze_interaction);
+	cache_path(log, inst, "/interaction_profiles/ext/hand_interaction_ext", &inst->path_cache.ext_hand_interaction);
+	cache_path(log, inst, "/interaction_profiles/oppo/mr_controller_oppo", &inst->path_cache.oppo_mr_controller);
 
 	// clang-format on
 
 	// fill in our application info - @todo - replicate all createInfo
 	// fields?
 
-	struct xrt_instance_info i_info = {0};
+	struct xrt_instance_info i_info = {
+	    .ext_hand_tracking_enabled = extensions->EXT_hand_tracking,
+#ifdef OXR_HAVE_EXT_eye_gaze_interaction
+	    .ext_eye_gaze_interaction_enabled = extensions->EXT_eye_gaze_interaction,
+#endif
+#ifdef OXR_HAVE_EXT_hand_interaction
+	    .ext_hand_interaction_enabled = extensions->EXT_hand_interaction,
+#endif
+#ifdef OXR_HAVE_HTC_facial_tracking
+	    .htc_facial_tracking_enabled = extensions->HTC_facial_tracking,
+#endif
+	};
 	snprintf(i_info.application_name, sizeof(inst->xinst->instance_info.application_name), "%s",
 	         createInfo->applicationInfo.applicationName);
 
@@ -256,20 +300,28 @@ oxr_instance_create(struct oxr_logger *log,
 	android_looper_poll_until_activity_resumed();
 #endif
 
+
+	/*
+	 * Monado initialisation.
+	 */
+
 	xret = xrt_instance_create(&i_info, &inst->xinst);
 	if (xret != XRT_SUCCESS) {
-		ret = oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Failed to create prober");
+		ret = oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Failed to create instance '%i'", xret);
 		oxr_instance_destroy(log, &inst->handle);
 		return ret;
 	}
 
 	struct oxr_system *sys = &inst->system;
 
-	// Create the compositor if we are not headless.
-	if (!inst->extensions.MND_headless) {
-		xret = xrt_instance_create_system(inst->xinst, &sys->xsysd, &sys->xsysc);
+	// Create the compositor if we are not headless, currently always create it.
+	bool should_create_compositor = true /* !inst->extensions.MND_headless */;
+
+	// Create the system.
+	if (should_create_compositor) {
+		xret = xrt_instance_create_system(inst->xinst, &sys->xsys, &sys->xsysd, &sys->xso, &sys->xsysc);
 	} else {
-		xret = xrt_instance_create_system(inst->xinst, &sys->xsysd, NULL);
+		xret = xrt_instance_create_system(inst->xinst, &sys->xsys, &sys->xsysd, &sys->xso, NULL);
 	}
 
 	if (xret != XRT_SUCCESS) {
@@ -281,9 +333,9 @@ oxr_instance_create(struct oxr_logger *log,
 	ret = XR_SUCCESS;
 	if (sys->xsysd == NULL) {
 		ret = oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Huh?! Field sys->xsysd was NULL?");
-	} else if (!inst->extensions.MND_headless && sys->xsysc == NULL) {
+	} else if (should_create_compositor && sys->xsysc == NULL) {
 		ret = oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Huh?! Field sys->xsysc was NULL?");
-	} else if (inst->extensions.MND_headless && sys->xsysc != NULL) {
+	} else if (!should_create_compositor && sys->xsysc != NULL) {
 		ret = oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Huh?! Field sys->xsysc was not NULL?");
 	}
 
@@ -300,24 +352,14 @@ oxr_instance_create(struct oxr_logger *log,
 		oxr_instance_destroy(log, &inst->handle);
 		return ret;
 	}
-
-	struct xrt_vec3 global_tracking_origin_offset = {debug_get_float_option_tracking_origin_offset_x(),
-	                                                 debug_get_float_option_tracking_origin_offset_y(),
-	                                                 debug_get_float_option_tracking_origin_offset_z()};
-
-	u_device_setup_tracking_origins(dev, GET_XDEV_BY_ROLE(sys, left), GET_XDEV_BY_ROLE(sys, right),
-	                                &global_tracking_origin_offset);
-
-	// Sets the enabled extensions, this is where we should do any extra validation.
-	inst->extensions = *extensions;
-
-	ret = oxr_system_fill_in(log, inst, 1, &inst->system);
+	uint32_t view_count = dev->hmd->view_count;
+	ret = oxr_system_fill_in(log, inst, XRT_SYSTEM_ID, view_count, &inst->system);
 	if (ret != XR_SUCCESS) {
 		oxr_instance_destroy(log, &inst->handle);
 		return ret;
 	}
 
-	inst->timekeeping = time_state_create();
+	inst->timekeeping = time_state_create(inst->xinst->startup_timestamp);
 
 	//! @todo check if this (and other creates) failed?
 
@@ -330,9 +372,7 @@ oxr_instance_create(struct oxr_logger *log,
 	u_var_add_root((void *)inst, "XrInstance", true);
 
 #ifdef XRT_FEATURE_CLIENT_DEBUG_GUI
-	/* ---- HACK ---- */
-	oxr_sdl2_hack_start(inst->hack, inst->xinst, sys->xsysd);
-	/* ---- HACK ---- */
+	u_debug_gui_start(inst->debug_ui, inst->xinst, sys->xsysd);
 #endif
 
 	oxr_log(log,
@@ -343,23 +383,31 @@ oxr_instance_create(struct oxr_logger *log,
 	        "\tcreateInfo->applicationInfo.engineVersion: %i\n"
 	        "\tappinfo.detected.engine.name: %s\n"
 	        "\tappinfo.detected.engine.version: %i.%i.%i\n"
-	        "\tquirks.disable_vulkan_format_depth_stencil: %s",
-	        createInfo->applicationInfo.applicationName,                          //
-	        createInfo->applicationInfo.applicationVersion,                       //
-	        createInfo->applicationInfo.engineName,                               //
-	        createInfo->applicationInfo.engineVersion,                            //
-	        inst->appinfo.detected.engine.name,                                   //
-	        inst->appinfo.detected.engine.major,                                  //
-	        inst->appinfo.detected.engine.minor,                                  //
-	        inst->appinfo.detected.engine.patch,                                  //
-	        inst->quirks.disable_vulkan_format_depth_stencil ? "true" : "false"); //
+	        "\tquirks.disable_vulkan_format_depth_stencil: %s\n"
+	        "\tquirks.no_validation_error_in_create_ref_space: %s",
+	        createInfo->applicationInfo.applicationName,                              //
+	        createInfo->applicationInfo.applicationVersion,                           //
+	        createInfo->applicationInfo.engineName,                                   //
+	        createInfo->applicationInfo.engineVersion,                                //
+	        inst->appinfo.detected.engine.name,                                       //
+	        inst->appinfo.detected.engine.major,                                      //
+	        inst->appinfo.detected.engine.minor,                                      //
+	        inst->appinfo.detected.engine.patch,                                      //
+	        inst->quirks.disable_vulkan_format_depth_stencil ? "true" : "false",      //
+	        inst->quirks.no_validation_error_in_create_ref_space ? "true" : "false"); //
 
 	debug_print_devices(log, sys);
 
 
 #ifdef XRT_FEATURE_RENDERDOC
 
-#ifdef XRT_OS_LINUX
+#ifdef __GNUC__
+// Keep the warnings about normal usage of dlsym away.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#endif // __GNUC_
+
+#if defined(XRT_OS_LINUX) && !defined(XRT_OS_ANDROID)
 	void *mod = dlopen("librenderdoc.so", RTLD_NOW | RTLD_NOLOAD);
 	if (mod) {
 		pRENDERDOC_GetAPI RENDERDOC_GetAPI = (pRENDERDOC_GetAPI)dlsym(mod, "RENDERDOC_GetAPI");
@@ -384,6 +432,10 @@ oxr_instance_create(struct oxr_logger *log,
 	}
 #endif
 
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif // __GNUC_
+
 #endif
 
 	*out_instance = inst;
@@ -395,8 +447,8 @@ oxr_instance_create(struct oxr_logger *log,
 XrResult
 oxr_instance_get_properties(struct oxr_logger *log, struct oxr_instance *inst, XrInstanceProperties *instanceProperties)
 {
-	instanceProperties->runtimeVersion = XR_MAKE_VERSION(21, 0, 0);
-	snprintf(instanceProperties->runtimeName, XR_MAX_RUNTIME_NAME_SIZE - 1, "Monado(XRT) by Collabora et al '%s'",
+	instanceProperties->runtimeVersion = XR_MAKE_VERSION(u_version_major, u_version_minor, u_version_patch);
+	snprintf(instanceProperties->runtimeName, XR_MAX_RUNTIME_NAME_SIZE - 1, "%s '%s'", u_runtime_description,
 	         u_git_tag);
 
 	return XR_SUCCESS;

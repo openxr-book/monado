@@ -1,4 +1,4 @@
-// Copyright 2022, Collabora, Ltd.
+// Copyright 2022-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -7,16 +7,17 @@
  * @ingroup xrt_iface
  */
 
-#include "xrt/xrt_config_have.h"
+#include "xrt/xrt_compiler.h"
+#include "xrt/xrt_config_have.h" // IWYU pragma: keep
 #include "xrt/xrt_config_drivers.h"
 
 #include "xrt/xrt_prober.h"
 #include "xrt/xrt_settings.h"
 #include "xrt/xrt_frameserver.h"
 
-#include "util/u_sink.h"
+#include "util/u_sink.h" // IWYU pragma: keep
 #include "util/u_misc.h"
-#include "util/u_device.h"
+#include "util/u_device.h" // IWYU pragma: keep
 #include "util/u_logging.h"
 #include "util/u_builders.h"
 #include "util/u_config_json.h"
@@ -130,11 +131,16 @@ setup_pipeline(struct xrt_prober *xp, struct build_state *build)
 	struct xrt_colour_rgb_f32 rgb[2] = {{1.f, 0.f, 0.f}, {1.f, 0.f, 1.f}};
 
 	// We create the two psmv trackers up front, but don't start them.
-	// clang-format off
+#if defined(XRT_HAVE_OPENCV) && defined(XRT_BUILD_DRIVER_PSMV)
 	t_psmv_create(build->xfctx, &rgb[0], data, &build->psmv_red, &xsinks[0]);
 	t_psmv_create(build->xfctx, &rgb[1], data, &build->psmv_purple, &xsinks[1]);
+#endif
+#if defined(XRT_HAVE_OPENCV) && defined(XRT_BUILD_DRIVER_PSVR)
 	t_psvr_create(build->xfctx, data, &build->psvr, &xsinks[2]);
-	// clang-format on
+#endif
+
+	// No longer needed.
+	t_stereo_camera_calibration_reference(&data, NULL);
 
 	// Setup origin to the common one.
 	build->psvr->origin = build->origin;
@@ -271,17 +277,18 @@ rgb_estimate_system(struct xrt_builder *xb, cJSON *config, struct xrt_prober *xp
 }
 
 static xrt_result_t
-rgb_open_system(struct xrt_builder *xb, cJSON *config, struct xrt_prober *xp, struct xrt_system_devices **out_xsysd)
+rgb_open_system_impl(struct xrt_builder *xb,
+                     cJSON *config,
+                     struct xrt_prober *xp,
+                     struct xrt_tracking_origin *origin,
+                     struct xrt_system_devices *xsysd,
+                     struct xrt_frame_context *xfctx,
+                     struct u_builder_roles_helper *ubrh)
 {
 	struct u_builder_search_results results = {0};
 	struct xrt_prober_device **xpdevs = NULL;
 	size_t xpdev_count = 0;
 	xrt_result_t xret = XRT_SUCCESS;
-
-	assert(out_xsysd != NULL);
-	assert(*out_xsysd == NULL);
-
-	struct u_system_devices *usysd = u_system_devices_allocate();
 
 
 	/*
@@ -291,8 +298,8 @@ rgb_open_system(struct xrt_builder *xb, cJSON *config, struct xrt_prober *xp, st
 	struct build_state build = {0};
 	if (get_settings(config, &build.settings)) {
 #ifdef XRT_HAVE_OPENCV
-		build.xfctx = &usysd->xfctx;
-		build.origin = &usysd->origin;
+		build.xfctx = xfctx;
+		build.origin = origin;
 		build.origin->type = XRT_TRACKING_TYPE_RGB;
 		build.origin->offset.orientation.y = 1.0f;
 		build.origin->offset.position.z = -2.0f;
@@ -314,7 +321,6 @@ rgb_open_system(struct xrt_builder *xb, cJSON *config, struct xrt_prober *xp, st
 	// Lock the device list
 	xret = xrt_prober_lock_list(xp, &xpdevs, &xpdev_count);
 	if (xret != XRT_SUCCESS) {
-		u_system_devices_destroy(&usysd);
 		return xret;
 	}
 
@@ -331,13 +337,14 @@ rgb_open_system(struct xrt_builder *xb, cJSON *config, struct xrt_prober *xp, st
 #endif
 
 	if (head != NULL) {
-#ifdef XRT_HAVE_OPENCV
+#if defined(XRT_HAVE_OPENCV) && defined(XRT_BUILD_DRIVER_PSVR)
 		if (build.psvr != NULL) {
 			t_psvr_start(build.psvr);
 		}
 #endif
 	} else {
-		head = simulated_hmd_create();
+		const struct xrt_pose center = XRT_POSE_IDENTITY;
+		head = simulated_hmd_create(SIMULATED_MOVEMENT_WOBBLE, &center);
 	}
 
 
@@ -373,30 +380,27 @@ rgb_open_system(struct xrt_builder *xb, cJSON *config, struct xrt_prober *xp, st
 	// Unlock the device list
 	xret = xrt_prober_unlock_list(xp, &xpdevs);
 	if (xret != XRT_SUCCESS) {
-		u_system_devices_destroy(&usysd);
 		return xret;
 	}
 
+	// Add to devices.
+	xsysd->xdevs[xsysd->xdev_count++] = head;
 
-	usysd->base.xdevs[usysd->base.xdev_count++] = head;
-	usysd->base.roles.head = head;
-
+	struct xrt_device *left = NULL, *right = NULL;
 	if (psmv_red != NULL) {
-		usysd->base.xdevs[usysd->base.xdev_count++] = psmv_red;
-		usysd->base.roles.right = psmv_red;
+		xsysd->xdevs[xsysd->xdev_count++] = psmv_red;
+		right = psmv_red; // Notice right.
 	}
 
 	if (psmv_purple != NULL) {
-		usysd->base.xdevs[usysd->base.xdev_count++] = psmv_purple;
-		usysd->base.roles.left = psmv_purple;
+		xsysd->xdevs[xsysd->xdev_count++] = psmv_purple;
+		left = psmv_purple; // Notice left.
 	}
 
-
-	/*
-	 * Done.
-	 */
-
-	*out_xsysd = &usysd->base;
+	// Assign to role(s).
+	ubrh->head = head;
+	ubrh->left = left;
+	ubrh->right = right;
 
 	return XRT_SUCCESS;
 }
@@ -417,14 +421,19 @@ rgb_destroy(struct xrt_builder *xb)
 struct xrt_builder *
 t_builder_rgb_tracking_create(void)
 {
-	struct xrt_builder *xb = U_TYPED_CALLOC(struct xrt_builder);
-	xb->estimate_system = rgb_estimate_system;
-	xb->open_system = rgb_open_system;
-	xb->destroy = rgb_destroy;
-	xb->identifier = "rgb_tracking";
-	xb->name = "RGB tracking based devices (PSVR, PSMV, ...)";
-	xb->driver_identifiers = driver_list;
-	xb->driver_identifier_count = ARRAY_SIZE(driver_list);
+	struct u_builder *ub = U_TYPED_CALLOC(struct u_builder);
 
-	return xb;
+	// xrt_builder fields.
+	ub->base.estimate_system = rgb_estimate_system;
+	ub->base.open_system = u_builder_open_system_static_roles;
+	ub->base.destroy = rgb_destroy;
+	ub->base.identifier = "rgb_tracking";
+	ub->base.name = "RGB tracking based devices (PSVR, PSMV, ...)";
+	ub->base.driver_identifiers = driver_list;
+	ub->base.driver_identifier_count = ARRAY_SIZE(driver_list);
+
+	// u_builder fields.
+	ub->open_system_static_roles = rgb_open_system_impl;
+
+	return &ub->base;
 }

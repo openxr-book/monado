@@ -25,6 +25,7 @@ src/xrt/compositor/shaders/*.vert.h
 src/xrt/compositor/shaders/*.frag.h
 src/xrt/compositor/shaders/*.comp.h
 src/xrt/include/xrt/xrt_config_*.h
+!src/xrt/include/xrt/xrt_config_*os.h
 src/xrt/ipc/*_generated.*
 src/xrt/targets/cli/monado-cli
 src/xrt/targets/ctl/monado-ctl
@@ -44,6 +45,7 @@ __pycache__/
 # Ignore build trees
 build/
 build*/
+cmake-build-*/
 
 # Ignore local settings
 .vscode
@@ -88,6 +90,7 @@ src/xrt/drivers/arduino/device/*.bin
 .settings
 .project
 .classpath
+*.hprof
 
 # Ignore Sourcetrail things
 *.srctrlbm
@@ -102,3 +105,6 @@ container-build-report.xml
 
 # Ignore Vulkan validation layer settings
 vk_layer_settings.txt
+
+# Ignore local pyenv version file
+.python-version

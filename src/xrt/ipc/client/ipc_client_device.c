@@ -1,18 +1,12 @@
-// Copyright 2020, Collabora, Ltd.
+// Copyright 2020-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  IPC Client device.
  * @author Jakob Bornecrantz <jakob@collabora.com>
+ * @author Korcan Hussein <korcan.hussein@collabora.com>
  * @ingroup ipc_client
  */
-
-#include <math.h>
-#include <stdio.h>
-#include <unistd.h>
-#include <stdlib.h>
-#include <string.h>
-#include <assert.h>
 
 #include "xrt/xrt_device.h"
 
@@ -28,6 +22,12 @@
 #include "client/ipc_client.h"
 #include "ipc_client_generated.h"
 
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <assert.h>
+
 
 /*
  *
@@ -36,17 +36,13 @@
  */
 
 /*!
- * An IPC client proxy for an @ref xrt_device.
- * @implements xrt_device
+ * An IPC client proxy for an controller or other non-MHD @ref xrt_device and
+ * @ref ipc_client_xdev. Using a typedef reduce impact of refactor change.
+ *
+ * @implements ipc_client_xdev
+ * @ingroup ipc_client
  */
-struct ipc_client_device
-{
-	struct xrt_device base;
-
-	struct ipc_connection *ipc_c;
-
-	uint32_t device_id;
-};
+typedef struct ipc_client_xdev ipc_client_device_t;
 
 
 /*
@@ -55,16 +51,16 @@ struct ipc_client_device
  *
  */
 
-static inline struct ipc_client_device *
+static inline ipc_client_device_t *
 ipc_client_device(struct xrt_device *xdev)
 {
-	return (struct ipc_client_device *)xdev;
+	return (ipc_client_device_t *)xdev;
 }
 
 static void
 ipc_client_device_destroy(struct xrt_device *xdev)
 {
-	struct ipc_client_device *icd = ipc_client_device(xdev);
+	ipc_client_device_t *icd = ipc_client_device(xdev);
 
 	// Remove the variable tracking.
 	u_var_remove_root(icd);
@@ -80,12 +76,10 @@ ipc_client_device_destroy(struct xrt_device *xdev)
 static void
 ipc_client_device_update_inputs(struct xrt_device *xdev)
 {
-	struct ipc_client_device *icd = ipc_client_device(xdev);
+	ipc_client_device_t *icd = ipc_client_device(xdev);
 
-	xrt_result_t r = ipc_call_device_update_input(icd->ipc_c, icd->device_id);
-	if (r != XRT_SUCCESS) {
-		IPC_ERROR(icd->ipc_c, "Error sending input update!");
-	}
+	xrt_result_t xret = ipc_call_device_update_input(icd->ipc_c, icd->device_id);
+	IPC_CHK_ONLY_PRINT(icd->ipc_c, xret, "ipc_call_device_update_input");
 }
 
 static void
@@ -94,29 +88,49 @@ ipc_client_device_get_tracked_pose(struct xrt_device *xdev,
                                    uint64_t at_timestamp_ns,
                                    struct xrt_space_relation *out_relation)
 {
-	struct ipc_client_device *icd = ipc_client_device(xdev);
+	ipc_client_device_t *icd = ipc_client_device(xdev);
 
-	xrt_result_t r =
-	    ipc_call_device_get_tracked_pose(icd->ipc_c, icd->device_id, name, at_timestamp_ns, out_relation);
-	if (r != XRT_SUCCESS) {
-		IPC_ERROR(icd->ipc_c, "Error sending input update!");
-	}
+	xrt_result_t xret = ipc_call_device_get_tracked_pose( //
+	    icd->ipc_c,                                       //
+	    icd->device_id,                                   //
+	    name,                                             //
+	    at_timestamp_ns,                                  //
+	    out_relation);                                    //
+	IPC_CHK_ONLY_PRINT(icd->ipc_c, xret, "ipc_call_device_get_tracked_pose");
 }
 
-void
+static void
 ipc_client_device_get_hand_tracking(struct xrt_device *xdev,
                                     enum xrt_input_name name,
                                     uint64_t at_timestamp_ns,
                                     struct xrt_hand_joint_set *out_value,
                                     uint64_t *out_timestamp_ns)
 {
-	struct ipc_client_device *icd = ipc_client_device(xdev);
+	ipc_client_device_t *icd = ipc_client_device(xdev);
 
-	xrt_result_t r = ipc_call_device_get_hand_tracking(icd->ipc_c, icd->device_id, name, at_timestamp_ns, out_value,
-	                                                   out_timestamp_ns);
-	if (r != XRT_SUCCESS) {
-		IPC_ERROR(icd->ipc_c, "Error sending input update!");
-	}
+	xrt_result_t xret = ipc_call_device_get_hand_tracking( //
+	    icd->ipc_c,                                        //
+	    icd->device_id,                                    //
+	    name,                                              //
+	    at_timestamp_ns,                                   //
+	    out_value,                                         //
+	    out_timestamp_ns);                                 //
+	IPC_CHK_ONLY_PRINT(icd->ipc_c, xret, "ipc_call_device_get_hand_tracking");
+}
+
+static xrt_result_t
+ipc_client_device_get_face_tracking(struct xrt_device *xdev,
+                                    enum xrt_input_name facial_expression_type,
+                                    struct xrt_facial_expression_set *out_value)
+{
+	ipc_client_device_t *icd = ipc_client_device(xdev);
+
+	xrt_result_t xret = ipc_call_device_get_face_tracking( //
+	    icd->ipc_c,                                        //
+	    icd->device_id,                                    //
+	    facial_expression_type,                            //
+	    out_value);                                        //
+	IPC_CHK_ALWAYS_RET(icd->ipc_c, xret, "ipc_call_device_get_face_tracking");
 }
 
 static void
@@ -135,12 +149,20 @@ ipc_client_device_get_view_poses(struct xrt_device *xdev,
 static void
 ipc_client_device_set_output(struct xrt_device *xdev, enum xrt_output_name name, const union xrt_output_value *value)
 {
-	struct ipc_client_device *icd = ipc_client_device(xdev);
+	ipc_client_device_t *icd = ipc_client_device(xdev);
 
-	xrt_result_t r = ipc_call_device_set_output(icd->ipc_c, icd->device_id, name, value);
-	if (r != XRT_SUCCESS) {
-		IPC_ERROR(icd->ipc_c, "Error sending set output!");
-	}
+	xrt_result_t xret = ipc_call_device_set_output(icd->ipc_c, icd->device_id, name, value);
+	IPC_CHK_ONLY_PRINT(icd->ipc_c, xret, "ipc_call_device_set_output");
+}
+
+static xrt_result_t
+ipc_client_device_get_visibility_mask(struct xrt_device *xdev,
+                                      enum xrt_visibility_mask_type type,
+                                      uint32_t view_index,
+                                      struct xrt_visibility_mask **out_mask)
+{
+	assert(false);
+	return XRT_ERROR_IPC_FAILURE;
 }
 
 /*!
@@ -155,13 +177,15 @@ ipc_client_device_create(struct ipc_connection *ipc_c, struct xrt_tracking_origi
 
 	// Allocate and setup the basics.
 	enum u_device_alloc_flags flags = (enum u_device_alloc_flags)(U_DEVICE_ALLOC_HMD);
-	struct ipc_client_device *icd = U_DEVICE_ALLOCATE(struct ipc_client_device, flags, 0, 0);
+	ipc_client_device_t *icd = U_DEVICE_ALLOCATE(ipc_client_device_t, flags, 0, 0);
 	icd->ipc_c = ipc_c;
 	icd->base.update_inputs = ipc_client_device_update_inputs;
 	icd->base.get_tracked_pose = ipc_client_device_get_tracked_pose;
 	icd->base.get_hand_tracking = ipc_client_device_get_hand_tracking;
+	icd->base.get_face_tracking = ipc_client_device_get_face_tracking;
 	icd->base.get_view_poses = ipc_client_device_get_view_poses;
 	icd->base.set_output = ipc_client_device_set_output;
+	icd->base.get_visibility_mask = ipc_client_device_get_visibility_mask;
 	icd->base.destroy = ipc_client_device_destroy;
 
 	// Start copying the information from the isdev.
@@ -171,6 +195,7 @@ ipc_client_device_create(struct ipc_connection *ipc_c, struct xrt_tracking_origi
 
 	// Print name.
 	snprintf(icd->base.str, XRT_DEVICE_NAME_LEN, "%s", isdev->str);
+	snprintf(icd->base.serial, XRT_DEVICE_NAME_LEN, "%s", isdev->serial);
 
 	// Setup inputs, by pointing directly to the shared memory.
 	assert(isdev->input_count > 0);
@@ -214,6 +239,10 @@ ipc_client_device_create(struct ipc_connection *ipc_c, struct xrt_tracking_origi
 	icd->base.orientation_tracking_supported = isdev->orientation_tracking_supported;
 	icd->base.position_tracking_supported = isdev->position_tracking_supported;
 	icd->base.hand_tracking_supported = isdev->hand_tracking_supported;
+	icd->base.eye_gaze_supported = isdev->eye_gaze_supported;
+	icd->base.face_tracking_supported = isdev->face_tracking_supported;
+	icd->base.force_feedback_supported = isdev->force_feedback_supported;
+	icd->base.stage_supported = isdev->stage_supported;
 
 	icd->base.device_type = isdev->device_type;
 	return &icd->base;

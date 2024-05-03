@@ -1,4 +1,4 @@
-// Copyright 2022, Collabora, Ltd.
+// Copyright 2022-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -12,6 +12,7 @@
 
 #include "util/u_misc.h"
 #include "util/u_device.h"
+#include "util/u_builders.h"
 #include "util/u_system_helpers.h"
 
 #include "target_builder_interface.h"
@@ -82,6 +83,7 @@ static const char *driver_list[] = {
 #if defined(XRT_BUILD_DRIVER_SIMULATED)
     "simulated",
 #endif
+    NULL,
 };
 
 
@@ -97,23 +99,28 @@ legacy_estimate_system(struct xrt_builder *xb,
                        struct xrt_prober *xp,
                        struct xrt_builder_estimate *estimate)
 {
-	estimate->maybe.head = true;
-	estimate->maybe.left = true;
-	estimate->maybe.right = true;
+	// If no driver is enabled, there is no way to create a HMD
+	bool may_create_hmd = xb->driver_identifier_count > 0;
+
+	estimate->maybe.head = may_create_hmd;
+	estimate->maybe.left = may_create_hmd;
+	estimate->maybe.right = may_create_hmd;
 	estimate->priority = -20;
 
 	return XRT_SUCCESS;
 }
 
 static xrt_result_t
-legacy_open_system(struct xrt_builder *xb, cJSON *config, struct xrt_prober *xp, struct xrt_system_devices **out_xsysd)
+legacy_open_system_impl(struct xrt_builder *xb,
+                        cJSON *config,
+                        struct xrt_prober *xp,
+                        struct xrt_tracking_origin *origin,
+                        struct xrt_system_devices *xsysd,
+                        struct xrt_frame_context *xfctx,
+                        struct u_builder_roles_helper *ubrh)
 {
-	struct u_system_devices *usysd = u_system_devices_allocate();
 	xrt_result_t xret;
 	int ret;
-
-	assert(out_xsysd != NULL);
-	assert(*out_xsysd == NULL);
 
 
 	/*
@@ -125,18 +132,18 @@ legacy_open_system(struct xrt_builder *xb, cJSON *config, struct xrt_prober *xp,
 		return xret;
 	}
 
-	ret = xrt_prober_select(xp, usysd->base.xdevs, ARRAY_SIZE(usysd->base.xdevs));
+	ret = xrt_prober_select(xp, xsysd->xdevs, ARRAY_SIZE(xsysd->xdevs));
 	if (ret < 0) {
-		u_system_devices_destroy(&usysd);
+		return XRT_ERROR_DEVICE_CREATION_FAILED;
 	}
 
 	// Count the xdevs.
-	for (uint32_t i = 0; i < ARRAY_SIZE(usysd->base.xdevs); i++) {
-		if (usysd->base.xdevs[i] == NULL) {
+	for (uint32_t i = 0; i < ARRAY_SIZE(xsysd->xdevs); i++) {
+		if (xsysd->xdevs[i] == NULL) {
 			break;
 		}
 
-		usysd->base.xdev_count++;
+		xsysd->xdev_count++;
 	}
 
 
@@ -144,31 +151,33 @@ legacy_open_system(struct xrt_builder *xb, cJSON *config, struct xrt_prober *xp,
 	 * Setup the roles.
 	 */
 
-	int head, left, right;
-	u_device_assign_xdev_roles(usysd->base.xdevs, usysd->base.xdev_count, &head, &left, &right);
+	int head_idx, left_idx, right_idx;
+	u_device_assign_xdev_roles(xsysd->xdevs, xsysd->xdev_count, &head_idx, &left_idx, &right_idx);
 
-	if (head >= 0) {
-		usysd->base.roles.head = usysd->base.xdevs[head];
+	struct xrt_device *head = NULL;
+	struct xrt_device *left = NULL, *right = NULL;
+	struct xrt_device *left_ht = NULL, *right_ht = NULL;
+
+	if (head_idx >= 0) {
+		head = xsysd->xdevs[head_idx];
 	}
-	if (left >= 0) {
-		usysd->base.roles.left = usysd->base.xdevs[left];
+	if (left_idx >= 0) {
+		left = xsysd->xdevs[left_idx];
 	}
-	if (right >= 0) {
-		usysd->base.roles.right = usysd->base.xdevs[right];
+	if (right_idx >= 0) {
+		right = xsysd->xdevs[right_idx];
 	}
 
 	// Find hand tracking devices.
-	usysd->base.roles.hand_tracking.left =
-	    u_system_devices_get_ht_device(usysd, XRT_INPUT_GENERIC_HAND_TRACKING_LEFT);
-	usysd->base.roles.hand_tracking.right =
-	    u_system_devices_get_ht_device(usysd, XRT_INPUT_GENERIC_HAND_TRACKING_RIGHT);
+	left_ht = u_system_devices_get_ht_device_left(xsysd);
+	right_ht = u_system_devices_get_ht_device_right(xsysd);
 
-
-	/*
-	 * Done.
-	 */
-
-	*out_xsysd = &usysd->base;
+	// Assign to role(s).
+	ubrh->head = head;
+	ubrh->left = left;
+	ubrh->right = right;
+	ubrh->hand_tracking.left = left_ht;
+	ubrh->hand_tracking.right = right_ht;
 
 	return XRT_SUCCESS;
 }
@@ -189,14 +198,19 @@ legacy_destroy(struct xrt_builder *xb)
 struct xrt_builder *
 t_builder_legacy_create(void)
 {
-	struct xrt_builder *xb = U_TYPED_CALLOC(struct xrt_builder);
-	xb->estimate_system = legacy_estimate_system;
-	xb->open_system = legacy_open_system;
-	xb->destroy = legacy_destroy;
-	xb->identifier = "legacy";
-	xb->name = "Legacy probing system";
-	xb->driver_identifiers = driver_list;
-	xb->driver_identifier_count = ARRAY_SIZE(driver_list);
+	struct u_builder *ub = U_TYPED_CALLOC(struct u_builder);
 
-	return xb;
+	// xrt_builder fields.
+	ub->base.estimate_system = legacy_estimate_system;
+	ub->base.open_system = u_builder_open_system_static_roles;
+	ub->base.destroy = legacy_destroy;
+	ub->base.identifier = "legacy";
+	ub->base.name = "Legacy probing system";
+	ub->base.driver_identifiers = driver_list;
+	ub->base.driver_identifier_count = ARRAY_SIZE(driver_list) - 1;
+
+	// u_builder fields.
+	ub->open_system_static_roles = legacy_open_system_impl;
+
+	return &ub->base;
 }

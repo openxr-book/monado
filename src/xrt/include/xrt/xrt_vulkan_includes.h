@@ -4,7 +4,7 @@
  * @file
  * @brief  Include all of the Vulkan headers in one place, and cope with any "messy" includes implied by it.
  * @author Jakob Bornecrantz <jakob@collabora.com>
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup xrt_iface
  */
 
@@ -18,7 +18,21 @@
 #include "xrt/xrt_windows.h"
 
 #define VK_NO_PROTOTYPES
-#include <vulkan/vulkan.h>
+#include <vulkan/vulkan.h> // IWYU pragma: export
+
+// Dealing with underscore compat.
+#ifndef VK_KHR_MAINTENANCE_1_EXTENSION_NAME
+#define VK_KHR_MAINTENANCE_1_EXTENSION_NAME VK_KHR_MAINTENANCE1_EXTENSION_NAME
+#endif
+#ifndef VK_KHR_MAINTENANCE_2_EXTENSION_NAME
+#define VK_KHR_MAINTENANCE_2_EXTENSION_NAME VK_KHR_MAINTENANCE2_EXTENSION_NAME
+#endif
+#ifndef VK_KHR_MAINTENANCE_3_EXTENSION_NAME
+#define VK_KHR_MAINTENANCE_3_EXTENSION_NAME VK_KHR_MAINTENANCE3_EXTENSION_NAME
+#endif
+#ifndef VK_EXT_SWAPCHAIN_COLORSPACE_EXTENSION_NAME
+#define VK_EXT_SWAPCHAIN_COLORSPACE_EXTENSION_NAME VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME
+#endif
 
 #if defined(VK_USE_PLATFORM_XLIB_XRANDR_EXT) || defined(VK_USE_PLATFORM_XLIB_KHR)
 // the xlib header is notoriously polluting.

@@ -106,8 +106,9 @@ DEBUG_GET_ONCE_LOG_OPTION(psvr_log, "PSVR_TRACKING_LOG", U_LOGGING_WARN)
 // uncomment this to dump comprehensive optical and imu data to
 // /tmp/psvr_dump.txt
 
-//#define PSVR_DUMP_FOR_OFFLINE_ANALYSIS
-//#define PSVR_DUMP_IMU_FOR_OFFLINE_ANALYSIS
+// Debug define(s), always off.
+#undef PSVR_DUMP_FOR_OFFLINE_ANALYSIS
+#undef PSVR_DUMP_IMU_FOR_OFFLINE_ANALYSIS
 
 using namespace xrt::auxiliary::tracking;
 
@@ -137,8 +138,7 @@ struct View
 
 	cv::Matx33d intrinsics;
 	cv::Mat distortion; // size may vary
-	cv::Vec4d distortion_fisheye;
-	bool use_fisheye;
+	enum t_camera_distortion_model distortion_model;
 
 	std::vector<cv::KeyPoint> keypoints;
 
@@ -150,8 +150,7 @@ struct View
 		CameraCalibrationWrapper wrap(calib);
 		intrinsics = wrap.intrinsics_mat;
 		distortion = wrap.distortion_mat.clone();
-		distortion_fisheye = wrap.distortion_fisheye_mat;
-		use_fisheye = wrap.use_fisheye;
+		distortion_model = wrap.distortion_model;
 
 		undistort_rectify_map_x = rectification.remap_x;
 		undistort_rectify_map_y = rectification.remap_y;
@@ -195,11 +194,11 @@ typedef struct model_vertex
 
 typedef struct match_data
 {
-	float angle = {};              // angle from reference vector
-	float distance = {};           // distance from base of reference vector
-	int32_t vertex_index = {};     // index also known as tag
-	Eigen::Vector4f position = {}; // 3d position of vertex
-	blob_point_t src_blob = {};    // blob this vertex was derived from
+	float angle = {};                                   // angle from reference vector
+	float distance = {};                                // distance from base of reference vector
+	int32_t vertex_index = {};                          // index also known as tag
+	Eigen::Vector4f position = Eigen::Vector4f::Zero(); // 3d position of vertex
+	blob_point_t src_blob = {};                         // blob this vertex was derived from
 } match_data_t;
 
 typedef struct match_model
@@ -1825,7 +1824,7 @@ run(TrackerPSVR &t)
 	while (os_thread_helper_is_running_locked(&t.oth)) {
 
 		// No data
-		if (!t.has_imu || t.frame == NULL) {
+		if (!t.has_imu && t.frame == NULL) {
 			os_thread_helper_wait_locked(&t.oth);
 
 			/*
@@ -2081,7 +2080,7 @@ t_psvr_create(struct xrt_frame_context *xfctx,
 	blob_params.filterByInertia = false;
 	blob_params.filterByColor = true;
 	blob_params.blobColor = 255; // 0 or 255 - color comes from binarized image?
-	blob_params.minArea = 0;
+	blob_params.minArea = 1;
 	blob_params.maxArea = 1000;
 	blob_params.maxThreshold = 51; // using a wide threshold span slows things down bigtime
 	blob_params.minThreshold = 50;

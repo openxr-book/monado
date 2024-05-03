@@ -34,6 +34,8 @@ Let us know and we'll figure out a way to help you get involved successfully.
   or by "re-writing history" (with your permission and leaving your commit authorship intact),
   revising each commit to apply formatting.
 
+  - Android Java and Kotlin code can be formatted using "Spotless" by running `./gradlew spotlessApply`.
+
 - Avoid including whitespace or other formatting changes to unrelated code when committing.
   The `git add -p` command or the "stage selected lines/hunks" feature of various Git GUIs are
   great ways of making sure you only stage and commit the changes that you mean to.
@@ -53,6 +55,11 @@ Let us know and we'll figure out a way to help you get involved successfully.
   When on compilers that take warning flags like gcc and clang do,
   the build system automatically turns on quite a few of them.
   If you can't figure out a warning, mention it in the request so we can figure it out together.
+
+- We use [Proclamation](https://gitlab.com/proclamation/proclamation) to generate release notes.
+  After creating a merge request for a substantial change, please create one or more changelog
+  fragments on the branch describing the changes.  See
+  [doc/changes/README.md](doc/changes/README.md) for more info.
 
 ### Issues
 
@@ -76,4 +83,3 @@ bug reports should include:
     otherwise a description of expected and actual behavior
   - if you cannot disclose your code, or even if you can,
     an "artificial", minimally-sized example can be very valuable.
-

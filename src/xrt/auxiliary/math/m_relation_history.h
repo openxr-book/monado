@@ -5,6 +5,8 @@
  * @brief Small utility for keeping track of the history of an xrt_space_relation, ie. for knowing where a HMD or
  * controller was in the past
  * @author Moses Turner <moses@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
+ * @author Korcan Hussein <korcan.hussein@collabora.com>
  * @ingroup aux_util
  */
 #pragma once
@@ -17,6 +19,10 @@ extern "C" {
 
 /**
  * @brief Opaque type for storing the history of a space relation in a ring buffer
+ *
+ * @note Unlike the bare C++ data structure @ref HistoryBuffer this wraps, **this is a thread safe interface**,
+ * and is safe for concurrent access from multiple threads.
+ * (It is using a simple mutex, not a reader/writer lock, but that is fine until proven to be a bottleneck.)
  *
  * @ingroup aux_util
  */
@@ -67,7 +73,7 @@ m_relation_history_push(struct m_relation_history *rh,
  * @public @memberof m_relation_history
  */
 enum m_relation_history_result
-m_relation_history_get(struct m_relation_history *rh,
+m_relation_history_get(const struct m_relation_history *rh,
                        uint64_t at_timestamp_ns,
                        struct xrt_space_relation *out_relation);
 
@@ -99,7 +105,7 @@ m_relation_history_estimate_motion(struct m_relation_history *rh,
  * @public @memberof m_relation_history
  */
 bool
-m_relation_history_get_latest(struct m_relation_history *rh,
+m_relation_history_get_latest(const struct m_relation_history *rh,
                               uint64_t *out_time_ns,
                               struct xrt_space_relation *out_relation);
 
@@ -181,7 +187,7 @@ public:
 	 * @copydoc m_relation_history_get
 	 */
 	Result
-	get(uint64_t at_time_ns, xrt_space_relation *out_relation) noexcept
+	get(uint64_t at_time_ns, xrt_space_relation *out_relation) const noexcept
 	{
 		return m_relation_history_get(mPtr, at_time_ns, out_relation);
 	}
@@ -190,7 +196,7 @@ public:
 	 * @copydoc m_relation_history_get_latest
 	 */
 	bool
-	get_latest(uint64_t *out_time_ns, xrt_space_relation *out_relation) noexcept
+	get_latest(uint64_t *out_time_ns, xrt_space_relation *out_relation) const noexcept
 	{
 		return m_relation_history_get_latest(mPtr, out_time_ns, out_relation);
 	}

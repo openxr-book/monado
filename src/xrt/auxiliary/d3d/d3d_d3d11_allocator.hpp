@@ -3,7 +3,7 @@
 /*!
  * @file
  * @brief Higher-level D3D11-backed image buffer allocation routine.
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup aux_d3d
  */
 
@@ -46,6 +46,6 @@ allocateSharedImages(ID3D11Device5 &device,
                      size_t image_count,
                      bool keyed_mutex,
                      std::vector<wil::com_ptr<ID3D11Texture2D1>> &out_images,
-                     std::vector<wil::unique_handle> &out_handles);
+                     std::vector<HANDLE> &out_handles);
 
 }; // namespace xrt::auxiliary::d3d::d3d11

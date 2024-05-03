@@ -1,4 +1,4 @@
-// Copyright 2019, Collabora, Ltd.
+// Copyright 2019-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -11,6 +11,7 @@
 #pragma once
 
 #include "vk/vk_helpers.h"
+#include "vk/vk_cmd_pool.h"
 #include "xrt/xrt_gfx_vk.h"
 
 #ifdef __cplusplus
@@ -75,6 +76,11 @@ struct client_vk_compositor
 	} sync;
 
 	struct vk_bundle vk;
+
+	struct vk_cmd_pool pool;
+
+	bool renderdoc_enabled;
+	VkCommandBuffer dcb;
 };
 
 
@@ -102,6 +108,8 @@ client_vk_compositor_create(struct xrt_compositor_native *xcn,
                             bool external_fence_fd_enabled,
                             bool external_semaphore_fd_enabled,
                             bool timeline_semaphore_enabled,
+                            bool debug_utils_enabled,
+                            bool renderdoc_enabled,
                             uint32_t queueFamilyIndex,
                             uint32_t queueIndex);
 

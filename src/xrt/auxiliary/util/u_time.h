@@ -9,7 +9,7 @@
  * simpler (like @ref aux_os_time) for most purposes that aren't in OpenXR
  * interface code.
  *
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup aux_util
  *
  * @see time_state
@@ -20,8 +20,16 @@
 #include "xrt/xrt_compiler.h"
 
 #include <stdint.h>
-#include <time.h>
+#include <time.h> // IWYU pragma: keep
 
+#if defined(XRT_ENV_MINGW)
+// That define is needed before to include windows.h, to avoid a collision
+// between the 'byte' type defined by windows and std::byte defined in cstddef
+// since C++17
+#define byte win_byte_override
+#include <windows.h>
+#undef byte
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -106,6 +114,19 @@ static inline double
 time_ns_to_ms_f(time_duration_ns ns)
 {
 	return (double)(ns) / (double)(U_TIME_1MS_IN_NS);
+}
+
+/*!
+ * Convert double float milliseconds to nanoseconds, human comprehensible config
+ * inputs. Recommended to keep the absolute value of the input relitively small.
+ *
+ * @see timepoint_ns
+ * @ingroup aux_util
+ */
+static inline timepoint_ns
+time_ms_f_to_ns(double ms_f)
+{
+	return (timepoint_ns)(ms_f * (double)(U_TIME_1MS_IN_NS));
 }
 
 /*!
@@ -199,7 +220,7 @@ struct time_state;
  * @ingroup aux_util
  */
 struct time_state *
-time_state_create();
+time_state_create(uint64_t offset);
 
 
 /*!

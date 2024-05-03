@@ -1,4 +1,4 @@
-// Copyright 2019, Collabora, Ltd.
+// Copyright 2019-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -17,10 +17,8 @@
 U_TRACE_TARGET_SETUP(U_TRACE_WHICH_OPENXR)
 
 #include "xrt/xrt_instance.h"
+#include "client/ipc_client_interface.h"
 
-// Forward declaration
-xrt_result_t
-ipc_instance_create(struct xrt_instance_info *i_info, struct xrt_instance **out_xinst);
 
 xrt_result_t
 xrt_instance_create(struct xrt_instance_info *ii, struct xrt_instance **out_xinst)
@@ -38,7 +36,7 @@ xrt_instance_create(struct xrt_instance_info *ii, struct xrt_instance **out_xins
 U_TRACE_TARGET_SETUP(U_TRACE_WHICH_SERVICE)
 
 /*
- * For non-service runtime, xrt_instance_create defined in target_instance
+ * For a non-service runtime, xrt_instance_create is defined in target_instance
  * helper lib, so we just have a placeholder symbol below to silence warnings about
  * empty translation units.
  */

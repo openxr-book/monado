@@ -58,7 +58,8 @@ struct gui_record_window
 	{
 		struct xrt_frame_context xfctx;
 
-		int scale;
+		float scale;
+		bool rotate_180;
 
 		struct xrt_frame_sink *sink;
 		struct gui_ogl_texture *ogl;
@@ -104,7 +105,15 @@ void
 gui_window_record_render(struct gui_record_window *rw, struct gui_program *p);
 
 /*!
- * Frees all resources assocciated with a record window. Make sure to only call
+ * Draw the sink image as the background to the background of the render view.
+ * Basically the main window in which all ImGui windows lives in, not to a
+ * ImGui window.
+ */
+void
+gui_window_record_to_background(struct gui_record_window *rw, struct gui_program *p);
+
+/*!
+ * Frees all resources associated with a record window. Make sure to only call
  * this function on the main gui thread, and that nothing is pushing into the
  * record windows sink.
  */

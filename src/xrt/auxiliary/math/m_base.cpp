@@ -4,13 +4,16 @@
  * @file
  * @brief  Base implementations for math library.
  * @author Jakob Bornecrantz <jakob@collabora.com>
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @author Moses Turner <mosesturner@protonmail.com>
  * @author Nis Madsen <nima_zero_one@protonmail.com>
  * @ingroup aux_math
  */
+// IWYU pragma: no_include "src/Core/DenseBase.h"
+// IWYU pragma: no_include "src/Core/MatrixBase.h"
 
-#include "math/m_api.h"
+#include "math/m_api.h" // IWYU pragma: associated
+
 #include "math/m_eigen_interop.hpp"
 #include "math/m_vec3.h"
 
@@ -173,10 +176,31 @@ math_vec3_normalize(struct xrt_vec3 *in)
 }
 
 extern "C" void
+math_vec3_translation_from_isometry(const struct xrt_matrix_4x4 *transform, struct xrt_vec3 *result)
+{
+	Eigen::Isometry3f isometry{map_matrix_4x4(*transform)};
+	map_vec3(*result) = isometry.translation();
+}
+
+
+/*
+ *
+ * Exported 64 bit vector functions.
+ *
+ */
+
+extern "C" void
+math_vec3_f64_cross(const struct xrt_vec3_f64 *l, const struct xrt_vec3_f64 *r, struct xrt_vec3_f64 *result)
+{
+	map_vec3_f64(*result) = map_vec3_f64(*l).cross(map_vec3_f64(*r));
+}
+
+extern "C" void
 math_vec3_f64_normalize(struct xrt_vec3_f64 *in)
 {
 	map_vec3_f64(*in) = map_vec3_f64(*in).normalized();
 }
+
 
 /*
  *
@@ -188,6 +212,14 @@ extern "C" void
 math_quat_from_angle_vector(float angle_rads, const struct xrt_vec3 *vector, struct xrt_quat *result)
 {
 	map_quat(*result) = Eigen::AngleAxisf(angle_rads, copy(vector));
+}
+
+extern "C" void
+math_quat_from_euler_angles(const struct xrt_vec3 *angles, struct xrt_quat *result)
+{
+	map_quat(*result) = Eigen::AngleAxisf(angles->z, Eigen::Vector3f::UnitZ()) *
+	                    Eigen::AngleAxisf(angles->y, Eigen::Vector3f::UnitY()) *
+	                    Eigen::AngleAxisf(angles->x, Eigen::Vector3f::UnitX());
 }
 
 extern "C" void
@@ -382,35 +414,168 @@ math_quat_slerp(const struct xrt_quat *left, const struct xrt_quat *right, float
 	map_quat(*result) = l.slerp(t, r);
 }
 
+extern "C" void
+math_quat_from_swing(const struct xrt_vec2 *swing, struct xrt_quat *result)
+{
+	assert(swing != NULL);
+	assert(result != NULL);
+	const float *a0 = &swing->x;
+	const float *a1 = &swing->y;
+	const float theta_squared = *a0 * *a0 + *a1 * *a1;
+
+	if (theta_squared > 0.f) {
+		const float theta = sqrt(theta_squared);
+		const float half_theta = theta * 0.5f;
+		const float k = sin(half_theta) / theta;
+		result->w = cos(half_theta);
+		result->x = *a0 * k;
+		result->y = *a1 * k;
+		result->z = 0.f;
+	} else {
+		// lim(x->0) (sin(x/2)/x) = 0.5, but sin(0)/0 is undefined, so we need to catch this with a conditional.
+		const float k = 0.5f;
+		result->w = 1.0f;
+		result->x = *a0 * k;
+		result->y = *a1 * k;
+		result->z = 0.f;
+	}
+}
+
+// See https://gitlab.freedesktop.org/slitcch/rotation_visualizer/-/blob/main/lm_rotations_story.inl for the derivation
+extern "C" void
+math_quat_from_swing_twist(const struct xrt_vec2 *swing, const float twist, struct xrt_quat *result)
+{
+	assert(swing != NULL);
+	assert(result != NULL);
+
+	float swing_x = swing->x;
+	float swing_y = swing->y;
+
+	float theta_squared_swing = swing_x * swing_x + swing_y * swing_y;
+
+	if (theta_squared_swing > float(0.0)) {
+		// theta_squared_swing is nonzero, so we the regular derived conversion.
+
+		float theta = sqrt(theta_squared_swing);
+
+		float half_theta = theta * float(0.5);
+
+		// the "other" theta
+		float half_twist = twist * float(0.5);
+
+		float cos_half_theta = cos(half_theta);
+		float cos_half_twist = cos(half_twist);
+
+		float sin_half_theta = sin(half_theta);
+		float sin_half_twist = sin(half_twist);
+
+		float sin_half_theta_over_theta = sin_half_theta / theta;
+
+		result->w = cos_half_theta * cos_half_twist;
+
+		float x_part_1 = (swing_x * cos_half_twist * sin_half_theta_over_theta);
+		float x_part_2 = (swing_y * sin_half_twist * sin_half_theta_over_theta);
+
+		result->x = x_part_1 + x_part_2;
+
+		float y_part_1 = (swing_y * cos_half_twist * sin_half_theta_over_theta);
+		float y_part_2 = (swing_x * sin_half_twist * sin_half_theta_over_theta);
+
+		result->y = y_part_1 - y_part_2;
+
+		result->z = cos_half_theta * sin_half_twist;
+
+	} else {
+		// sin_half_theta/theta would be undefined, but
+		// the limit approaches 0.5, so we do this.
+		// Note the differences w/ lm_rotations.inl - we can skip some things as we're not using this to compute
+		// a jacobian.
+
+		float half_twist = twist * float(0.5);
+
+		float cos_half_twist = cos(half_twist);
+
+		float sin_half_twist = sin(half_twist);
+
+		float sin_half_theta_over_theta = float(0.5);
+
+		// cos(0) is 1 so no cos_half_theta necessary
+		result->w = cos_half_twist;
+
+		float x_part_1 = (swing_x * cos_half_twist * sin_half_theta_over_theta);
+		float x_part_2 = (swing_y * sin_half_twist * sin_half_theta_over_theta);
+
+		result->x = x_part_1 + x_part_2;
+
+		float y_part_1 = (swing_y * cos_half_twist * sin_half_theta_over_theta);
+		float y_part_2 = (swing_x * sin_half_twist * sin_half_theta_over_theta);
+
+		result->y = y_part_1 - y_part_2;
+
+		result->z = sin_half_twist;
+	}
+}
+
+/*!
+ * Converts a quaternion to XY-swing and Z-twist
+ *
+ * @relates xrt_quat
+ * @ingroup aux_math
+ */
+extern "C" void
+math_quat_to_swing_twist(const struct xrt_quat *in, struct xrt_vec2 *out_swing, float *out_twist)
+{
+	Eigen::Quaternionf rot = map_quat(*in);
+
+	Eigen::Vector3f our_z = rot * (Eigen::Vector3f::UnitZ());
+
+	Eigen::Quaternionf swing = Eigen::Quaternionf().setFromTwoVectors(Eigen::Vector3f::UnitZ(), our_z);
+
+	Eigen::Quaternionf twist = swing.inverse() * rot;
+
+	Eigen::AngleAxisf twist_aax = Eigen::AngleAxisf(twist);
+
+	Eigen::AngleAxisf swing_aax = Eigen::AngleAxisf(swing);
+
+	out_swing->x = swing_aax.axis().x() * swing_aax.angle();
+	out_swing->y = swing_aax.axis().y() * swing_aax.angle();
+	assert(swing_aax.axis().z() < 0.001);
+
+	*out_twist = twist_aax.axis().z() * twist_aax.angle();
+}
+
 /*
  *
  * Exported matrix functions.
  *
  */
 
-extern "C" void
-math_matrix_2x2_multiply(const struct xrt_matrix_2x2 *left,
-                         const struct xrt_matrix_2x2 *right,
-                         struct xrt_matrix_2x2 *result_out)
-{
-	const struct xrt_matrix_2x2 l = *left;
-	const struct xrt_matrix_2x2 r = *right;
 
-	// Initialisers: struct, union, v[4]
-	struct xrt_matrix_2x2 result = {{{
-	    l.v[0] * r.v[0] + l.v[1] * r.v[2],
-	    l.v[0] * r.v[1] + l.v[1] * r.v[3],
-	    l.v[2] * r.v[0] + l.v[3] * r.v[2],
-	    l.v[2] * r.v[1] + l.v[3] * r.v[3],
-	}}};
-
-	*result_out = result;
-}
 
 extern "C" void
 math_matrix_3x3_identity(struct xrt_matrix_3x3 *mat)
 {
 	map_matrix_3x3(*mat) = Eigen::Matrix3f::Identity();
+}
+
+extern "C" void
+math_matrix_3x3_from_quat(const struct xrt_quat *q, struct xrt_matrix_3x3 *result_out)
+{
+	struct xrt_matrix_3x3 result = {{
+	    1 - 2 * q->y * q->y - 2 * q->z * q->z,
+	    2 * q->x * q->y - 2 * q->w * q->z,
+	    2 * q->x * q->z + 2 * q->w * q->y,
+
+	    2 * q->x * q->y + 2 * q->w * q->z,
+	    1 - 2 * q->x * q->x - 2 * q->z * q->z,
+	    2 * q->y * q->z - 2 * q->w * q->x,
+
+	    2 * q->x * q->z - 2 * q->w * q->y,
+	    2 * q->y * q->z + 2 * q->w * q->x,
+	    1 - 2 * q->x * q->x - 2 * q->y * q->y,
+	}};
+
+	*result_out = result;
 }
 
 extern "C" void
@@ -469,6 +634,24 @@ math_matrix_3x3_transform_vec3(const struct xrt_matrix_3x3 *left,
 	    left->v[6], left->v[7], left->v[8];  // 3
 
 	map_vec3(*result_out) = m * copy(right);
+}
+
+extern "C" void
+math_matrix_4x4_transform_vec3(const struct xrt_matrix_4x4 *left,
+                               const struct xrt_vec3 *right,
+                               struct xrt_vec3 *result_out)
+{
+	Eigen::Matrix4f m = copy(left);
+
+	Eigen::Vector4f v;
+	v << right->x, right->y, right->z, 1.0;
+
+	Eigen::Vector4f res;
+	res = m * v;
+
+	result_out->x = res.x();
+	result_out->y = res.y();
+	result_out->z = res.z();
 }
 
 extern "C" void
@@ -628,19 +811,6 @@ m_mat4_f64_multiply(const struct xrt_matrix_4x4_f64 *left,
 	Eigen::Matrix4d r = map_matrix_4x4_f64(*right);
 
 	map_matrix_4x4_f64(*result) = l * r;
-}
-
-extern "C" void
-math_vec3_f64_cross(const struct xrt_vec3_f64 *l, const struct xrt_vec3_f64 *r, struct xrt_vec3_f64 *result)
-{
-	map_vec3_f64(*result) = map_vec3_f64(*l).cross(map_vec3_f64(*r));
-}
-
-extern "C" void
-math_vec3_translation_from_isometry(const struct xrt_matrix_4x4 *transform, struct xrt_vec3 *result)
-{
-	Eigen::Isometry3f isometry{map_matrix_4x4(*transform)};
-	map_vec3(*result) = isometry.translation();
 }
 
 extern "C" void

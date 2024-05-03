@@ -1,6 +1,6 @@
 // Copyright 2020-2021, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
-// Author: Ryan Pavlik <ryan.pavlik@collabora.com>
+// Author: Rylie Pavlik <rylie.pavlik@collabora.com>
 // Inline implementations: do not include on its own!
 
 #pragma once
@@ -14,11 +14,6 @@ namespace android::app {
 inline jni::Object Activity::getWindow() {
     assert(!isNull());
     return object().call<jni::Object>(Meta::data().getWindow);
-}
-
-inline jni::Object Activity::getSystemService(std::string const &name) {
-    assert(!isNull());
-    return object().call<jni::Object>(Meta::data().getSystemService, name);
 }
 
 inline void

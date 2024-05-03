@@ -1,11 +1,13 @@
-# Copyright 2019-2020, Collabora, Ltd.
+# Copyright 2019-2022, Collabora, Ltd.
+#
 # SPDX-License-Identifier: BSL-1.0
+#
 # Distributed under the Boost Software License, Version 1.0.
 # (See accompanying file LICENSE_1_0.txt or copy at
 # http://www.boost.org/LICENSE_1_0.txt)
 #
 # Original Author:
-# 2019-2020 Ryan Pavlik <ryan.pavlik@collabora.com>
+# 2019-2022 Rylie Pavlik <rylie.pavlik@collabora.com> <rylie@ryliepavlik.com>
 
 #.rst:
 # FindcJSON
@@ -37,6 +39,7 @@ include(FindPackageHandleStandardArgs)
 # Check for CMake config first.
 find_package(cJSON QUIET CONFIG)
 if(cJSON_FOUND AND TARGET cjson)
+    set_target_properties(cjson PROPERTIES IMPORTED_GLOBAL TRUE)
     # Found config, let's prefer it.
     find_package_handle_standard_args(cJSON CONFIG_MODE)
     set(CJSON_LIBRARY cjson)

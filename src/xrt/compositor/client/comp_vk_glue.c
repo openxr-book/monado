@@ -72,6 +72,8 @@ xrt_gfx_vk_provider_create(struct xrt_compositor_native *xcn,
                            bool external_fence_fd_enabled,
                            bool external_semaphore_fd_enabled,
                            bool timeline_semaphore_enabled,
+                           bool debug_utils_enabled,
+                           bool renderdoc_enabled,
                            uint32_t queue_family_index,
                            uint32_t queue_index)
 {
@@ -84,6 +86,8 @@ xrt_gfx_vk_provider_create(struct xrt_compositor_native *xcn,
 	    external_fence_fd_enabled,                                  //
 	    external_semaphore_fd_enabled,                              //
 	    timeline_semaphore_enabled,                                 //
+	    debug_utils_enabled,                                        //
+	    renderdoc_enabled,                                          //
 	    queue_family_index,                                         //
 	    queue_index);                                               //
 

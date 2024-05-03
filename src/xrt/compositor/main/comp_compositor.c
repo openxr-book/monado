@@ -1,11 +1,11 @@
-// Copyright 2019-2021, Collabora, Ltd.
+// Copyright 2019-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Main compositor written using Vulkan implementation.
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @author Lubosz Sarnecki <lubosz.sarnecki@collabora.com>
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @author Moses Turner <moses@collabora.com>
  * @ingroup comp_main
  *
@@ -42,8 +42,11 @@
  * behavior.
  */
 
-#include "xrt/xrt_gfx_native.h"
+#include "xrt/xrt_compiler.h"
 #include "xrt/xrt_config_have.h"
+#include "xrt/xrt_results.h"
+
+#include "math/m_api.h"
 
 #include "os/os_time.h"
 
@@ -54,11 +57,17 @@
 #include "util/u_pacing.h"
 #include "util/u_handles.h"
 #include "util/u_trace_marker.h"
+#include "util/u_pretty_print.h"
 #include "util/u_distortion_mesh.h"
 #include "util/u_verify.h"
 
 #include "util/comp_vulkan.h"
 #include "main/comp_compositor.h"
+#include "main/comp_frame.h"
+
+#ifdef XRT_FEATURE_WINDOW_PEEK
+#include "main/comp_window_peek.h"
+#endif
 
 #include "multi/comp_multi_interface.h"
 
@@ -76,14 +85,14 @@
 
 #define WINDOW_TITLE "Monado"
 
+DEBUG_GET_ONCE_BOOL_OPTION(disable_deferred, "XRT_COMPOSITOR_DISABLE_DEFERRED", false)
+
 
 /*
  *
  * Helper functions.
  *
  */
-
-#define CVK_ERROR(C, FUNC, MSG, RET) COMP_ERROR(C, FUNC ": %s\n\t" MSG, vk_result_string(RET));
 
 static double
 ns_to_ms(int64_t ns)
@@ -93,7 +102,7 @@ ns_to_ms(int64_t ns)
 }
 
 static double
-ts_ms()
+ts_ms(void)
 {
 	int64_t monotonic = os_monotonic_get_ns();
 	return ns_to_ms(monotonic);
@@ -112,11 +121,34 @@ get_vk(struct comp_compositor *c)
  *
  */
 
+static bool
+compositor_init_window_post_vulkan(struct comp_compositor *c);
+static bool
+compositor_init_swapchain(struct comp_compositor *c);
+static bool
+compositor_init_renderer(struct comp_compositor *c);
+
 static xrt_result_t
-compositor_begin_session(struct xrt_compositor *xc, enum xrt_view_type type)
+compositor_begin_session(struct xrt_compositor *xc, const struct xrt_begin_session_info *info)
 {
 	struct comp_compositor *c = comp_compositor(xc);
 	COMP_DEBUG(c, "BEGIN_SESSION");
+
+	// clang-format off
+	if (c->deferred_surface) {
+		if (!compositor_init_window_post_vulkan(c) ||
+		    !compositor_init_swapchain(c) ||
+		    !compositor_init_renderer(c)) {
+			COMP_ERROR(c, "Failed to init compositor %p", (void *)c);
+			c->base.base.base.destroy(&c->base.base.base);
+
+			return XRT_ERROR_VULKAN;
+		}
+		comp_target_set_title(c->target, WINDOW_TITLE);
+		comp_renderer_add_debug_vars(c->r);
+	}
+	// clang-format on
+
 	return XRT_SUCCESS;
 }
 
@@ -125,6 +157,17 @@ compositor_end_session(struct xrt_compositor *xc)
 {
 	struct comp_compositor *c = comp_compositor(xc);
 	COMP_DEBUG(c, "END_SESSION");
+
+	if (c->deferred_surface) {
+		// Make sure we don't have anything to destroy.
+		comp_swapchain_shared_garbage_collect(&c->base.cscs);
+		comp_renderer_destroy(&c->r);
+#ifdef XRT_FEATURE_WINDOW_PEEK
+		comp_window_peek_destroy(&c->peek);
+#endif
+		comp_target_destroy(&c->target);
+	}
+
 	return XRT_SUCCESS;
 }
 
@@ -147,7 +190,7 @@ compositor_predict_frame(struct xrt_compositor *xc,
 
 	comp_target_update_timings(c->target);
 
-	assert(c->frame.waited.id == -1);
+	assert(comp_frame_is_invalid_locked(&c->frame.waited));
 
 	int64_t frame_id = -1;
 	uint64_t wake_up_time_ns = 0;
@@ -214,88 +257,6 @@ compositor_discard_frame(struct xrt_compositor *xc, int64_t frame_id)
 	return XRT_SUCCESS;
 }
 
-static void
-do_graphics_layers(struct comp_compositor *c)
-{
-	// Always zero for now.
-	uint32_t layer_count = c->base.slot.layer_count;
-
-	comp_renderer_destroy_layers(c->r);
-
-	if (c->base.slot.one_projection_layer_fast_path) {
-		return;
-	}
-
-	comp_renderer_allocate_layers(c->r, layer_count);
-
-	for (uint32_t i = 0; i < layer_count; i++) {
-		struct comp_layer *layer = &c->base.slot.layers[i];
-		struct xrt_layer_data *data = &layer->data;
-
-		COMP_SPEW(c, "LAYER_COMMIT (%d) predicted display time: %8.3fms", i, ns_to_ms(data->timestamp));
-
-		switch (data->type) {
-		case XRT_LAYER_QUAD: {
-			struct xrt_layer_quad_data *quad = &layer->data.quad;
-			struct comp_swapchain_image *image;
-			image = &layer->sc_array[0]->images[quad->sub.image_index];
-			comp_renderer_set_quad_layer(c->r, i, image, data);
-		} break;
-		case XRT_LAYER_STEREO_PROJECTION: {
-			struct xrt_layer_stereo_projection_data *stereo = &data->stereo;
-			struct comp_swapchain_image *right;
-			struct comp_swapchain_image *left;
-			left = &layer->sc_array[0]->images[stereo->l.sub.image_index];
-			right = &layer->sc_array[1]->images[stereo->r.sub.image_index];
-
-			comp_renderer_set_projection_layer(c->r, i, left, right, data);
-		} break;
-		case XRT_LAYER_STEREO_PROJECTION_DEPTH: {
-			struct xrt_layer_stereo_projection_depth_data *stereo = &data->stereo_depth;
-			struct comp_swapchain_image *right;
-			struct comp_swapchain_image *left;
-			left = &layer->sc_array[0]->images[stereo->l.sub.image_index];
-			right = &layer->sc_array[1]->images[stereo->r.sub.image_index];
-
-			//! @todo: Make use of stereo->l_d and stereo->r_d
-
-			comp_renderer_set_projection_layer(c->r, i, left, right, data);
-		} break;
-		case XRT_LAYER_CYLINDER: {
-			struct xrt_layer_cylinder_data *cyl = &layer->data.cylinder;
-			struct comp_swapchain_image *image;
-			image = &layer->sc_array[0]->images[cyl->sub.image_index];
-			comp_renderer_set_cylinder_layer(c->r, i, image, data);
-		} break;
-#ifdef XRT_FEATURE_OPENXR_LAYER_EQUIRECT1
-		case XRT_LAYER_EQUIRECT1: {
-			struct xrt_layer_equirect1_data *eq = &layer->data.equirect1;
-			struct comp_swapchain_image *image;
-			image = &layer->sc_array[0]->images[eq->sub.image_index];
-			comp_renderer_set_equirect1_layer(c->r, i, image, data);
-		} break;
-#endif
-#ifdef XRT_FEATURE_OPENXR_LAYER_EQUIRECT2
-		case XRT_LAYER_EQUIRECT2: {
-			struct xrt_layer_equirect2_data *eq = &layer->data.equirect2;
-			struct comp_swapchain_image *image;
-			image = &layer->sc_array[0]->images[eq->sub.image_index];
-			comp_renderer_set_equirect2_layer(c->r, i, image, data);
-		} break;
-#endif
-#ifndef XRT_FEATURE_OPENXR_LAYER_EQUIRECT1
-		case XRT_LAYER_EQUIRECT1:
-#endif
-#ifndef XRT_FEATURE_OPENXR_LAYER_EQUIRECT2
-		case XRT_LAYER_EQUIRECT2:
-#endif
-		case XRT_LAYER_CUBE:
-			// Should never end up here.
-			assert(false);
-		}
-	}
-}
-
 /*!
  * We have a fast path for single projection layer that goes directly
  * to the distortion shader, so no need to use the layer renderer.
@@ -311,16 +272,16 @@ can_do_one_projection_layer_fast_path(struct comp_compositor *c)
 	enum xrt_layer_type type = layer->data.type;
 
 	// Handled by the distortion shader.
-	if (type != XRT_LAYER_STEREO_PROJECTION && //
-	    type != XRT_LAYER_STEREO_PROJECTION_DEPTH) {
+	if (type != XRT_LAYER_PROJECTION && //
+	    type != XRT_LAYER_PROJECTION_DEPTH) {
 		return false;
 	}
 
 	return true;
 }
 
-static xrt_result_t
-compositor_layer_commit(struct xrt_compositor *xc, int64_t frame_id, xrt_graphics_sync_handle_t sync_handle)
+static XRT_CHECK_RESULT xrt_result_t
+compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sync_handle)
 {
 	COMP_TRACE_MARKER();
 
@@ -332,17 +293,21 @@ compositor_layer_commit(struct xrt_compositor *xc, int64_t frame_id, xrt_graphic
 	 * We have a fast path for single projection layer that goes directly
 	 * to the distortion shader, so no need to use the layer renderer.
 	 */
-	bool fast_path = can_do_one_projection_layer_fast_path(c) && !c->mirroring_to_debug_gui;
+	bool fast_path =                              //
+	    !c->peek &&                               //
+	    !c->mirroring_to_debug_gui &&             //
+	    !c->debug.disable_fast_path &&            //
+	    can_do_one_projection_layer_fast_path(c); //
 	c->base.slot.one_projection_layer_fast_path = fast_path;
 
 
 	u_graphics_sync_unref(&sync_handle);
 
-	if (!c->settings.use_compute) {
-		do_graphics_layers(c);
+	// Do the drawing
+	xrt_result_t xret = comp_renderer_draw(c->r);
+	if (xret != XRT_SUCCESS) {
+		return xret;
 	}
-
-	comp_renderer_draw(c->r);
 
 	u_frame_times_widget_push_sample(&c->compositor_frame_times, os_monotonic_get_ns());
 
@@ -354,44 +319,26 @@ compositor_layer_commit(struct xrt_compositor *xc, int64_t frame_id, xrt_graphic
 	COMP_SPEW(c, "LAYER_COMMIT finished drawing at %8.3fms", ns_to_ms(c->last_frame_time_ns));
 
 	// Now is a good point to garbage collect.
-	comp_swapchain_garbage_collect(&c->base.cscgc);
+	comp_swapchain_shared_garbage_collect(&c->base.cscs);
 
 	return XRT_SUCCESS;
 }
 
 static xrt_result_t
-compositor_poll_events(struct xrt_compositor *xc, union xrt_compositor_event *out_xce)
+compositor_get_display_refresh_rate(struct xrt_compositor *xc, float *out_display_refresh_rate_hz)
 {
 	struct comp_compositor *c = comp_compositor(xc);
-	COMP_SPEW(c, "POLL_EVENTS");
 
-	U_ZERO(out_xce);
+	//! @todo: Implement the method to change display refresh rate.
+	*out_display_refresh_rate_hz = (float)(1. / time_ns_to_s(c->settings.nominal_frame_interval_ns));
 
-	switch (c->state) {
-	case COMP_STATE_UNINITIALIZED:
-		COMP_ERROR(c, "Polled uninitialized compositor");
-		out_xce->state.type = XRT_COMPOSITOR_EVENT_NONE;
-		break;
-	case COMP_STATE_READY: out_xce->state.type = XRT_COMPOSITOR_EVENT_NONE; break;
-	case COMP_STATE_PREPARED:
-		COMP_DEBUG(c, "PREPARED -> VISIBLE");
-		out_xce->state.type = XRT_COMPOSITOR_EVENT_STATE_CHANGE;
-		out_xce->state.visible = true;
-		c->state = COMP_STATE_VISIBLE;
-		break;
-	case COMP_STATE_VISIBLE:
-		COMP_DEBUG(c, "VISIBLE -> FOCUSED");
-		out_xce->state.type = XRT_COMPOSITOR_EVENT_STATE_CHANGE;
-		out_xce->state.visible = true;
-		out_xce->state.focused = true;
-		c->state = COMP_STATE_FOCUSED;
-		break;
-	case COMP_STATE_FOCUSED:
-		// No more transitions.
-		out_xce->state.type = XRT_COMPOSITOR_EVENT_NONE;
-		break;
-	}
+	return XRT_SUCCESS;
+}
 
+static xrt_result_t
+compositor_request_display_refresh_rate(struct xrt_compositor *xc, float display_refresh_rate_hz)
+{
+	//! @todo: Implement the method to change display refresh rate.
 	return XRT_SUCCESS;
 }
 
@@ -403,23 +350,42 @@ compositor_destroy(struct xrt_compositor *xc)
 
 	COMP_DEBUG(c, "COMP_DESTROY");
 
+	// Need to do this as early as possible.
+	u_var_remove_root(c);
+
+	// Destroy any Vulkan resources, even if not used.
+	for (uint32_t i = 0; i < ARRAY_SIZE(c->scratch.views); i++) {
+		comp_scratch_single_images_free(&c->scratch.views[i], &c->base.vk);
+	}
+
+	// Destroy the scratch images fully, we initialized all of them.
+	for (uint32_t i = 0; i < ARRAY_SIZE(c->scratch.views); i++) {
+		comp_scratch_single_images_destroy(&c->scratch.views[i]);
+	}
+
+	// Make sure we are not holding onto any swapchains.
+	u_swapchain_debug_destroy(&c->debug.sc);
+
 	// Make sure we don't have anything to destroy.
-	comp_swapchain_garbage_collect(&c->base.cscgc);
+	comp_swapchain_shared_garbage_collect(&c->base.cscs);
+
+	// Must be destroyed before Vulkan.
+	comp_swapchain_shared_destroy(&c->base.cscs, vk);
 
 	comp_renderer_destroy(&c->r);
 
-	render_resources_close(&c->nr);
-
-	// As long as vk_bundle is valid it's safe to call this function.
-	render_shaders_close(&c->shaders, vk);
+#ifdef XRT_FEATURE_WINDOW_PEEK
+	comp_window_peek_destroy(&c->peek);
+#endif
 
 	// Does NULL checking.
 	comp_target_destroy(&c->target);
 
-	if (vk->cmd_pool != VK_NULL_HANDLE) {
-		vk->vkDestroyCommandPool(vk->device, vk->cmd_pool, NULL);
-		vk->cmd_pool = VK_NULL_HANDLE;
-	}
+	// Only depends on vk_bundle and shaders.
+	render_resources_close(&c->nr);
+
+	// As long as vk_bundle is valid it's safe to call this function.
+	render_shaders_close(&c->shaders, vk);
 
 	if (vk->device != VK_NULL_HANDLE) {
 		vk->vkDestroyDevice(vk->device, NULL);
@@ -433,8 +399,7 @@ compositor_destroy(struct xrt_compositor *xc)
 		vk->instance = VK_NULL_HANDLE;
 	}
 
-	u_var_remove_root(c);
-
+	// Can do this now.
 	u_frame_times_widget_teardown(&c->compositor_frame_times);
 
 	comp_base_fini(&c->base);
@@ -452,6 +417,8 @@ compositor_destroy(struct xrt_compositor *xc)
 static bool
 compositor_check_and_prepare_xdev(struct comp_compositor *c, struct xrt_device *xdev)
 {
+	COMP_TRACE_MARKER();
+
 	// clang-format off
 	bool has_none = (xdev->hmd->distortion.models & XRT_DISTORTION_MODEL_NONE) != 0;
 	bool has_meshuv = (xdev->hmd->distortion.models & XRT_DISTORTION_MODEL_MESHUV) != 0;
@@ -498,67 +465,21 @@ compositor_check_and_prepare_xdev(struct comp_compositor *c, struct xrt_device *
 // If any of these lists are updated, please also update the appropriate column
 // in `vulkan-extensions.md`
 
-// clang-format off
-#define COMP_INSTANCE_EXTENSIONS_COMMON                         \
-	VK_EXT_DEBUG_REPORT_EXTENSION_NAME,                     \
-	VK_KHR_EXTERNAL_FENCE_CAPABILITIES_EXTENSION_NAME,      \
-	VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME,     \
-	VK_KHR_EXTERNAL_SEMAPHORE_CAPABILITIES_EXTENSION_NAME,  \
-	VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME, \
-	VK_KHR_SURFACE_EXTENSION_NAME
-// clang-format on
-
 static const char *instance_extensions_common[] = {
     COMP_INSTANCE_EXTENSIONS_COMMON,
 };
 
-#ifdef VK_USE_PLATFORM_XCB_KHR
-static const char *instance_extensions_xcb[] = {
-    VK_KHR_XCB_SURFACE_EXTENSION_NAME,
-};
+static const char *optional_instance_extensions[] = {
+#ifdef VK_EXT_swapchain_colorspace
+    VK_EXT_SWAPCHAIN_COLORSPACE_EXTENSION_NAME,
 #endif
-
-#ifdef VK_USE_PLATFORM_WAYLAND_KHR
-static const char *instance_extensions_wayland[] = {
-    VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME,
-};
-
-static const char *instance_extensions_direct_wayland[] = {
-    VK_KHR_DISPLAY_EXTENSION_NAME,             //
-    VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME,     //
-    VK_EXT_DIRECT_MODE_DISPLAY_EXTENSION_NAME, //
-
-#ifdef VK_EXT_acquire_drm_display
-    VK_EXT_ACQUIRE_DRM_DISPLAY_EXTENSION_NAME,
+#ifdef VK_EXT_display_surface_counter
+    VK_EXT_DISPLAY_SURFACE_COUNTER_EXTENSION_NAME,
+#endif
+#if defined VK_EXT_debug_utils && !defined NDEBUG
+    VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
 #endif
 };
-#endif
-
-#ifdef VK_USE_PLATFORM_XLIB_XRANDR_EXT
-static const char *instance_extensions_direct_mode[] = {
-    VK_KHR_DISPLAY_EXTENSION_NAME,
-    VK_EXT_DIRECT_MODE_DISPLAY_EXTENSION_NAME,
-    VK_EXT_ACQUIRE_XLIB_DISPLAY_EXTENSION_NAME,
-};
-#endif
-
-#ifdef VK_USE_PLATFORM_DISPLAY_KHR
-static const char *instance_extensions_vk_display[] = {
-    VK_KHR_DISPLAY_EXTENSION_NAME,
-};
-#endif
-
-#ifdef VK_USE_PLATFORM_ANDROID_KHR
-static const char *instance_extensions_android[] = {
-    VK_KHR_ANDROID_SURFACE_EXTENSION_NAME,
-};
-#endif
-
-#ifdef VK_USE_PLATFORM_WIN32_KHR
-static const char *instance_extensions_windows[] = {
-    VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
-};
-#endif
 
 // Note: Keep synchronized with comp_vk_glue - we should have everything they
 // do, plus VK_KHR_SWAPCHAIN_EXTENSION_NAME
@@ -611,8 +532,20 @@ static const char *optional_device_extensions[] = {
 #error "Need port!"
 #endif
 
+#ifdef VK_KHR_format_feature_flags2
+    VK_KHR_FORMAT_FEATURE_FLAGS_2_EXTENSION_NAME,
+#endif
+#ifdef VK_KHR_global_priority
+    VK_KHR_GLOBAL_PRIORITY_EXTENSION_NAME,
+#endif
 #ifdef VK_KHR_image_format_list
     VK_KHR_IMAGE_FORMAT_LIST_EXTENSION_NAME,
+#endif
+#ifdef VK_KHR_maintenance1
+    VK_KHR_MAINTENANCE_1_EXTENSION_NAME,
+#endif
+#ifdef VK_KHR_maintenance2
+    VK_KHR_MAINTENANCE_2_EXTENSION_NAME,
 #endif
 #ifdef VK_KHR_timeline_semaphore
     VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME,
@@ -626,93 +559,82 @@ static const char *optional_device_extensions[] = {
 #ifdef VK_EXT_display_control
     VK_EXT_DISPLAY_CONTROL_EXTENSION_NAME,
 #endif
+#ifdef VK_KHR_synchronization2
+    VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
+#endif
 };
-
-static VkResult
-select_instances_extensions(struct comp_compositor *c, struct u_string_list *required, struct u_string_list *optional)
-{
-	switch (c->settings.window_type) {
-	case WINDOW_NONE: break;
-#ifdef VK_USE_PLATFORM_WAYLAND_KHR
-	case WINDOW_DIRECT_WAYLAND:
-		u_string_list_append_array(required, instance_extensions_direct_wayland,
-		                           ARRAY_SIZE(instance_extensions_direct_wayland));
-		break;
-
-	case WINDOW_WAYLAND:
-		u_string_list_append_array(required, instance_extensions_wayland,
-		                           ARRAY_SIZE(instance_extensions_wayland));
-		break;
-#endif
-#ifdef VK_USE_PLATFORM_XCB_KHR
-	case WINDOW_XCB:
-		u_string_list_append_array(required, instance_extensions_xcb, ARRAY_SIZE(instance_extensions_xcb));
-		break;
-#endif
-#ifdef VK_USE_PLATFORM_XLIB_XRANDR_EXT
-	case WINDOW_DIRECT_RANDR:
-	case WINDOW_DIRECT_NVIDIA:
-		u_string_list_append_array(required, instance_extensions_direct_mode,
-		                           ARRAY_SIZE(instance_extensions_direct_mode));
-		break;
-#endif
-#ifdef VK_USE_PLATFORM_ANDROID_KHR
-	case WINDOW_ANDROID:
-		u_string_list_append_array(required, instance_extensions_android,
-		                           ARRAY_SIZE(instance_extensions_android));
-		break;
-#endif
-#ifdef VK_USE_PLATFORM_WIN32_KHR
-	case WINDOW_MSWIN:
-		u_string_list_append_array(required, instance_extensions_windows,
-		                           ARRAY_SIZE(instance_extensions_windows));
-		break;
-#endif
-#ifdef VK_USE_PLATFORM_DISPLAY_KHR
-	case WINDOW_VK_DISPLAY:
-		u_string_list_append_array(required, instance_extensions_vk_display,
-		                           ARRAY_SIZE(instance_extensions_vk_display));
-		break;
-#endif
-	default: return VK_ERROR_INITIALIZATION_FAILED;
-	}
-
-#ifdef VK_EXT_display_surface_counter
-	u_string_list_append(optional, VK_EXT_DISPLAY_SURFACE_COUNTER_EXTENSION_NAME);
-#endif
-
-	return VK_SUCCESS;
-}
 
 static bool
 compositor_init_vulkan(struct comp_compositor *c)
 {
+	COMP_TRACE_MARKER();
+
+	assert(c->target_factory != NULL);
+
 	struct vk_bundle *vk = get_vk(c);
-	VkResult ret;
 
-	// every backend needs at least the common extensions
-	struct u_string_list *required_instance_ext_list =
-	    u_string_list_create_from_array(instance_extensions_common, ARRAY_SIZE(instance_extensions_common));
 
+	/*
+	 * Instance extensions.
+	 */
+
+	struct u_string_list *required_instance_ext_list = u_string_list_create();
 	struct u_string_list *optional_instance_ext_list = u_string_list_create();
 
-	ret = select_instances_extensions(c, required_instance_ext_list, optional_instance_ext_list);
-	if (ret != VK_SUCCESS) {
-		CVK_ERROR(c, "select_instances_extensions", "Failed to select instance extensions.", ret);
-		u_string_list_destroy(&required_instance_ext_list);
-		u_string_list_destroy(&optional_instance_ext_list);
-		return ret;
-	}
+	// Every backend needs at least the common extensions.
+	u_string_list_append_array(                  //
+	    required_instance_ext_list,              //
+	    instance_extensions_common,              //
+	    ARRAY_SIZE(instance_extensions_common)); //
 
-	struct u_string_list *required_device_extension_list =
-	    u_string_list_create_from_array(required_device_extensions, ARRAY_SIZE(required_device_extensions));
+	// Add per target required extensions.
+	u_string_list_append_array(                                //
+	    required_instance_ext_list,                            //
+	    c->target_factory->required_instance_extensions,       //
+	    c->target_factory->required_instance_extension_count); //
 
-	struct u_string_list *optional_device_extension_list =
-	    u_string_list_create_from_array(optional_device_extensions, ARRAY_SIZE(optional_device_extensions));
+	// Optional instance extensions.
+	u_string_list_append_array(                    //
+	    optional_instance_ext_list,                //
+	    optional_instance_extensions,              //
+	    ARRAY_SIZE(optional_instance_extensions)); //
+
+
+	/*
+	 * Device extensions.
+	 */
+
+	struct u_string_list *required_device_extension_list = u_string_list_create();
+	struct u_string_list *optional_device_extension_list = u_string_list_create();
+
+	// Required device extensions.
+	u_string_list_append_array(                  //
+	    required_device_extension_list,          //
+	    required_device_extensions,              //
+	    ARRAY_SIZE(required_device_extensions)); //
+
+	// Optional device extensions.
+	u_string_list_append_array(                  //
+	    optional_device_extension_list,          //
+	    optional_device_extensions,              //
+	    ARRAY_SIZE(optional_device_extensions)); //
+
+	// Add per target optional device extensions.
+	u_string_list_append_array(                              //
+	    optional_device_extension_list,                      //
+	    c->target_factory->optional_device_extensions,       //
+	    c->target_factory->optional_device_extension_count); //
+
+	// Select required Vulkan version, suitable for both compositor and target
+	uint32_t required_instance_version = MAX(c->target_factory->required_instance_version, VK_API_VERSION_1_0);
+
+	/*
+	 * Create the device.
+	 */
 
 	struct comp_vulkan_arguments vk_args = {
 	    .get_instance_proc_address = vkGetInstanceProcAddr,
-	    .required_instance_version = VK_MAKE_VERSION(1, 0, 0),
+	    .required_instance_version = required_instance_version,
 	    .required_instance_extensions = required_instance_ext_list,
 	    .optional_instance_extensions = optional_instance_ext_list,
 	    .required_device_extensions = required_device_extension_list,
@@ -752,6 +674,12 @@ compositor_init_vulkan(struct comp_compositor *c)
 	c->settings.client_gpu_deviceLUID = vk_res.client_gpu_deviceLUID;
 	c->settings.client_gpu_deviceLUID_valid = vk_res.client_gpu_deviceLUID_valid;
 
+	// Tie the lifetimes of swapchains to Vulkan.
+	xrt_result_t xret = comp_swapchain_shared_init(&c->base.cscs, vk);
+	if (xret != XRT_SUCCESS) {
+		return false;
+	}
+
 	return true;
 }
 
@@ -762,183 +690,74 @@ compositor_init_vulkan(struct comp_compositor *c)
  *
  */
 
+const struct comp_target_factory *ctfs[] = {
+#if defined VK_USE_PLATFORM_WAYLAND_KHR && defined XRT_HAVE_WAYLAND_DIRECT
+    &comp_target_factory_direct_wayland,
+#endif
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+    &comp_target_factory_wayland,
+#endif
 #ifdef VK_USE_PLATFORM_XLIB_XRANDR_EXT
-static bool
-_match_allowlist_entry(const char *al_entry, VkDisplayPropertiesKHR *disp)
+    &comp_target_factory_direct_randr,
+#endif
+#ifdef VK_USE_PLATFORM_XCB_KHR
+    &comp_target_factory_xcb,
+#endif
+#ifdef XRT_OS_ANDROID
+    &comp_target_factory_android,
+#endif
+#ifdef XRT_OS_WINDOWS
+    &comp_target_factory_mswin,
+#endif
+#ifdef VK_USE_PLATFORM_XLIB_XRANDR_EXT
+    &comp_target_factory_direct_nvidia,
+#endif
+#ifdef VK_USE_PLATFORM_DISPLAY_KHR
+    &comp_target_factory_vk_display,
+#endif
+};
+
+static void
+error_msg_with_list(struct comp_compositor *c, const char *msg)
 {
-	unsigned long al_entry_length = strlen(al_entry);
-	unsigned long disp_entry_length = strlen(disp->displayName);
-	if (disp_entry_length < al_entry_length)
-		return false;
+	struct u_pp_sink_stack_only sink;
+	u_pp_delegate_t dg = u_pp_sink_stack_only_init(&sink);
+	u_pp(dg, "%s, available targets:", msg);
+	for (size_t i = 0; i < ARRAY_SIZE(ctfs); i++) {
+		u_pp(dg, "\n\t%s: %s", ctfs[i]->identifier, ctfs[i]->name);
+	}
 
-	// we have a match with this allowlist entry.
-	if (strncmp(al_entry, disp->displayName, al_entry_length) == 0)
-		return true;
-
-	return false;
+	COMP_ERROR(c, "%s", sink.buffer);
 }
 
-/*
- * our physical device is an nvidia card, we can potentially select
- * nvidia-specific direct mode.
- *
- * we need to also check if we are confident that we can create a direct mode
- * display, if not we need to abandon the attempt here, and allow desktop-window
- * fallback to occur.
- */
-
 static bool
-_test_for_nvidia(struct comp_compositor *c, struct vk_bundle *vk)
+compositor_check_deferred(struct comp_compositor *c, const struct comp_target_factory *ctf)
 {
-	VkResult ret;
-
-	VkPhysicalDeviceProperties physical_device_properties;
-	vk->vkGetPhysicalDeviceProperties(vk->physical_device, &physical_device_properties);
-
-	if (physical_device_properties.vendorID != 0x10DE)
-		return false;
-
-	// get a list of attached displays
-	uint32_t display_count;
-
-	ret = vk->vkGetPhysicalDeviceDisplayPropertiesKHR(vk->physical_device, &display_count, NULL);
-	if (ret != VK_SUCCESS) {
-		CVK_ERROR(c, "vkGetPhysicalDeviceDisplayPropertiesKHR", "Failed to get vulkan display count", ret);
+	if (debug_get_bool_option_disable_deferred()) {
+		COMP_DEBUG(c, "Deferred window initialization globally disabled!");
 		return false;
 	}
 
-	VkDisplayPropertiesKHR *display_props = U_TYPED_ARRAY_CALLOC(VkDisplayPropertiesKHR, display_count);
-
-	if (display_props && vk->vkGetPhysicalDeviceDisplayPropertiesKHR(vk->physical_device, &display_count,
-	                                                                 display_props) != VK_SUCCESS) {
-		CVK_ERROR(c, "vkGetPhysicalDeviceDisplayPropertiesKHR", "Failed to get display properties", ret);
-		free(display_props);
-		return false;
+	if (!ctf->is_deferred) {
+		return false; // It is not deferred but that's okay.
 	}
 
-	for (uint32_t i = 0; i < display_count; i++) {
-		VkDisplayPropertiesKHR *disp = display_props + i;
-		// check this display against our allowlist
-		for (uint32_t j = 0; j < ARRAY_SIZE(NV_DIRECT_ALLOWLIST); j++) {
-			if (_match_allowlist_entry(NV_DIRECT_ALLOWLIST[j], disp)) {
-				free(display_props);
-				return true;
-			}
-		}
+	COMP_DEBUG(c, "Deferred target backend %s selected!", ctf->name);
 
-		if (c->settings.nvidia_display && _match_allowlist_entry(c->settings.nvidia_display, disp)) {
-			free(display_props);
-			return true;
-		}
-	}
+	c->target_factory = ctf;
+	c->deferred_surface = true;
 
-	COMP_ERROR(c, "NVIDIA: No allowlisted displays found!");
-
-	COMP_ERROR(c, "== Current Allowlist ==");
-	for (uint32_t i = 0; i < ARRAY_SIZE(NV_DIRECT_ALLOWLIST); i++)
-		COMP_ERROR(c, "%s", NV_DIRECT_ALLOWLIST[i]);
-
-	COMP_ERROR(c, "== Found Displays ==");
-	for (uint32_t i = 0; i < display_count; i++)
-		COMP_ERROR(c, "%s", display_props[i].displayName);
-
-
-	free(display_props);
-
-	return false;
-}
-#endif // VK_USE_PLATFORM_XLIB_XRANDR_EXT
-
-static bool
-compositor_check_vulkan_caps(struct comp_compositor *c)
-{
-#ifdef VK_USE_PLATFORM_XLIB_XRANDR_EXT
-	VkResult ret;
-
-	// this is duplicative, but seems to be the easiest way to
-	// 'pre-check' capabilities when window creation precedes vulkan
-	// instance creation. we also need to load the VK_KHR_DISPLAY
-	// extension.
-
-	if (c->settings.window_type != WINDOW_AUTO) {
-		COMP_DEBUG(c, "Skipping NVIDIA detection, window type forced.");
-		return true;
-	}
-	COMP_DEBUG(c, "Checking for NVIDIA vulkan driver.");
-
-	struct vk_bundle temp_vk_storage = {0};
-	struct vk_bundle *temp_vk = &temp_vk_storage;
-	temp_vk->log_level = U_LOGGING_WARN;
-
-	ret = vk_get_loader_functions(temp_vk, vkGetInstanceProcAddr);
-	if (ret != VK_SUCCESS) {
-		CVK_ERROR(c, "vk_get_loader_functions", "Failed to get loader functions.", ret);
-		return false;
-	}
-
-	const char *extension_names[] = {COMP_INSTANCE_EXTENSIONS_COMMON, VK_KHR_DISPLAY_EXTENSION_NAME};
-
-
-	VkInstanceCreateInfo instance_create_info = {
-	    .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-	    .enabledExtensionCount = ARRAY_SIZE(extension_names),
-	    .ppEnabledExtensionNames = extension_names,
-	};
-
-	ret = temp_vk->vkCreateInstance(&instance_create_info, NULL, &(temp_vk->instance));
-	if (ret != VK_SUCCESS) {
-		CVK_ERROR(c, "vkCreateInstance", "Failed to create VkInstance.", ret);
-		return false;
-	}
-
-	ret = vk_get_instance_functions(temp_vk);
-	if (ret != VK_SUCCESS) {
-		CVK_ERROR(c, "vk_get_instance_functions", "Failed to get Vulkan instance functions.", ret);
-		return false;
-	}
-
-	bool use_compute = c->settings.use_compute;
-
-	struct u_string_list *required_device_ext_list =
-	    u_string_list_create_from_array(required_device_extensions, ARRAY_SIZE(required_device_extensions));
-
-	struct u_string_list *optional_device_ext_list =
-	    u_string_list_create_from_array(optional_device_extensions, ARRAY_SIZE(optional_device_extensions));
-
-	// follow same device selection logic as subsequent calls
-	ret = vk_create_device(                  //
-	    temp_vk,                             //
-	    c->settings.selected_gpu_index,      //
-	    use_compute,                         // compute_only
-	    VK_QUEUE_GLOBAL_PRIORITY_MEDIUM_EXT, // global_priority
-	    required_device_ext_list,            //
-	    optional_device_ext_list,            //
-	    NULL);                               // optional_device_features
-
-	u_string_list_destroy(&required_device_ext_list);
-	u_string_list_destroy(&optional_device_ext_list);
-
-	if (ret != VK_SUCCESS) {
-		CVK_ERROR(c, "vk_create_device", "Failed to create VkDevice.", ret);
-		return false;
-	}
-
-	if (_test_for_nvidia(c, temp_vk)) {
-		c->settings.window_type = WINDOW_DIRECT_NVIDIA;
-		COMP_DEBUG(c, "Selecting direct NVIDIA window type!");
-	}
-
-	temp_vk->vkDestroyDevice(temp_vk->device, NULL);
-	temp_vk->vkDestroyInstance(temp_vk->instance, NULL);
-
-#endif // VK_USE_PLATFORM_XLIB_XRANDR_EXT
 	return true;
 }
 
 static bool
-compositor_try_window(struct comp_compositor *c, struct comp_target *ct)
+compositor_try_window(struct comp_compositor *c, const struct comp_target_factory *ctf)
 {
-	if (ct == NULL) {
+	COMP_TRACE_MARKER();
+
+	struct comp_target *ct = NULL;
+
+	if (!ctf->create_target(ctf, c, &ct)) {
 		return false;
 	}
 
@@ -947,142 +766,132 @@ compositor_try_window(struct comp_compositor *c, struct comp_target *ct)
 		return false;
 	}
 
-	COMP_DEBUG(c, "Window backend %s initialized!", ct->name);
+	COMP_DEBUG(c, "Target backend %s initialized!", ct->name);
 
+	c->target_factory = ctf;
 	c->target = ct;
 
 	return true;
 }
 
 static bool
-compositor_init_window_pre_vulkan(struct comp_compositor *c)
+select_target_factory_from_settings(struct comp_compositor *c, const struct comp_target_factory **out_ctf)
 {
-	// Nothing to do for nvidia and vk_display.
-	if (c->settings.window_type == WINDOW_DIRECT_NVIDIA || c->settings.window_type == WINDOW_VK_DISPLAY) {
+	const char *identifier = c->settings.target_identifier;
+
+	if (identifier == NULL) {
+		return true; // Didn't ask for a target, all ok.
+	}
+
+	for (size_t i = 0; i < ARRAY_SIZE(ctfs); i++) {
+		const struct comp_target_factory *ctf = ctfs[i];
+
+		if (strcmp(ctf->identifier, identifier) == 0) {
+			*out_ctf = ctf;
+			return true;
+		}
+	}
+
+	char buffer[256];
+	snprintf(buffer, ARRAY_SIZE(buffer), "Could not find target factory with identifier '%s'", identifier);
+	error_msg_with_list(c, buffer);
+
+	return false; // User asked for a target that we couldn't find, error.
+}
+
+static bool
+select_target_factory_by_detecting(struct comp_compositor *c, const struct comp_target_factory **out_ctf)
+{
+	for (size_t i = 0; i < ARRAY_SIZE(ctfs); i++) {
+		const struct comp_target_factory *ctf = ctfs[i];
+
+		if (comp_target_factory_detect(ctf, c)) {
+			*out_ctf = ctf;
+			return true;
+		}
+	}
+
+	return true; // Didn't detect a target, but that's ok.
+}
+
+static bool
+compositor_init_window_pre_vulkan(struct comp_compositor *c, const struct comp_target_factory *selected_ctf)
+{
+	COMP_TRACE_MARKER();
+
+	if (selected_ctf == NULL && !select_target_factory_from_settings(c, &selected_ctf)) {
+		return false; // Error!
+	}
+
+	if (selected_ctf == NULL && !select_target_factory_by_detecting(c, &selected_ctf)) {
+		return false; // Error!
+	}
+
+	if (selected_ctf != NULL) {
+		// We have selected a target factory, but it needs Vulkan.
+		if (selected_ctf->requires_vulkan_for_create) {
+			COMP_INFO(c, "Selected %s backend!", selected_ctf->name);
+			c->target_factory = selected_ctf;
+			return true;
+		}
+
+		if (compositor_check_deferred(c, selected_ctf)) {
+			return true;
+		}
+
+		if (!compositor_try_window(c, selected_ctf)) {
+			COMP_ERROR(c, "Failed to init %s backend!", selected_ctf->name);
+			return false;
+		}
+
 		return true;
 	}
 
-	switch (c->settings.window_type) {
-	case WINDOW_AUTO:
-#if defined VK_USE_PLATFORM_WAYLAND_KHR && defined XRT_HAVE_WAYLAND_DIRECT
-		if (compositor_try_window(c, comp_window_direct_wayland_create(c))) {
-			c->settings.window_type = WINDOW_DIRECT_WAYLAND;
-			return true;
-		}
-#endif
-#ifdef VK_USE_PLATFORM_WAYLAND_KHR
-		if (compositor_try_window(c, comp_window_wayland_create(c))) {
-			c->settings.window_type = WINDOW_WAYLAND;
-			return true;
-		}
-#endif
-#ifdef VK_USE_PLATFORM_XLIB_XRANDR_EXT
-		if (compositor_try_window(c, comp_window_direct_randr_create(c))) {
-			c->settings.window_type = WINDOW_DIRECT_RANDR;
-			return true;
-		}
-#endif
-#ifdef VK_USE_PLATFORM_XCB_KHR
-		if (compositor_try_window(c, comp_window_xcb_create(c))) {
-			c->settings.window_type = WINDOW_XCB;
-			COMP_DEBUG(c, "Using VK_PRESENT_MODE_IMMEDIATE_KHR for xcb window")
-			c->settings.present_mode = VK_PRESENT_MODE_IMMEDIATE_KHR;
-			return true;
-		}
-#endif
-#ifdef XRT_OS_ANDROID
-		if (compositor_try_window(c, comp_window_android_create(c))) {
-			c->settings.window_type = WINDOW_ANDROID;
-			return true;
-		}
-#endif
-#ifdef XRT_OS_WINDOWS
-		if (compositor_try_window(c, comp_window_mswin_create(c))) {
-			c->settings.window_type = WINDOW_MSWIN;
-			return true;
-		}
-#endif
-		COMP_ERROR(c, "Failed to auto detect window support!");
-		break;
-	case WINDOW_XCB:
-#ifdef VK_USE_PLATFORM_XCB_KHR
-		compositor_try_window(c, comp_window_xcb_create(c));
-		COMP_DEBUG(c, "Using VK_PRESENT_MODE_IMMEDIATE_KHR for xcb window")
-		c->settings.present_mode = VK_PRESENT_MODE_IMMEDIATE_KHR;
-#else
-		COMP_ERROR(c, "XCB support not compiled in!");
-#endif
-		break;
-	case WINDOW_WAYLAND:
-#ifdef VK_USE_PLATFORM_WAYLAND_KHR
-		compositor_try_window(c, comp_window_wayland_create(c));
-#else
-		COMP_ERROR(c, "Wayland support not compiled in!");
-#endif
-		break;
-	case WINDOW_DIRECT_WAYLAND:
-#if defined VK_USE_PLATFORM_WAYLAND_KHR && defined XRT_HAVE_WAYLAND_DIRECT
-		compositor_try_window(c, comp_window_direct_wayland_create(c));
-#else
-		COMP_ERROR(c, "Wayland direct support not compiled in!");
-#endif
-		break;
-	case WINDOW_DIRECT_RANDR:
-#ifdef VK_USE_PLATFORM_XLIB_XRANDR_EXT
-		compositor_try_window(c, comp_window_direct_randr_create(c));
-#else
-		COMP_ERROR(c, "Direct mode support not compiled in!");
-#endif
-		break;
-	case WINDOW_ANDROID:
-#ifdef XRT_OS_ANDROID
-		compositor_try_window(c, comp_window_android_create(c));
-#else
-		COMP_ERROR(c, "Android support not compiled in!");
-#endif
-		break;
+	for (size_t i = 0; i < ARRAY_SIZE(ctfs); i++) {
+		const struct comp_target_factory *ctf = ctfs[i];
 
-	case WINDOW_MSWIN:
-#ifdef XRT_OS_WINDOWS
-		compositor_try_window(c, comp_window_mswin_create(c));
-#else
-		COMP_ERROR(c, "Windows support not compiled in!");
-#endif
-		break;
-	default: COMP_ERROR(c, "Unknown window type!"); break;
+		// Skip targets that requires Vulkan.
+		if (ctf->requires_vulkan_for_create) {
+			continue;
+		}
+
+		if (compositor_check_deferred(c, ctf)) {
+			return true;
+		}
+
+		if (compositor_try_window(c, ctf)) {
+			return true;
+		}
 	}
 
-	// Failed to create?
-	return c->target != NULL;
+	// Nothing worked, giving up.
+	error_msg_with_list(c, "Failed to create any target");
+
+	return false;
 }
 
 static bool
 compositor_init_window_post_vulkan(struct comp_compositor *c)
 {
-	if (c->settings.window_type == WINDOW_DIRECT_NVIDIA) {
-#ifdef VK_USE_PLATFORM_XLIB_XRANDR_EXT
-		return compositor_try_window(c, comp_window_direct_nvidia_create(c));
-#else
-		assert(false && "NVIDIA direct mode depends on the xlib/xrandr direct mode.");
-		return false;
-#endif
+	COMP_TRACE_MARKER();
+
+	assert(c->target_factory != NULL);
+
+	if (c->target != NULL) {
+		return true;
 	}
 
-	if (c->settings.window_type == WINDOW_VK_DISPLAY) {
-#ifdef VK_USE_PLATFORM_DISPLAY_KHR
-		return compositor_try_window(c, comp_window_vk_display_create(c));
-#else
-		assert(false && "VkDisplayKHR direct mode depends on VK_USE_PLATFORM_DISPLAY_KHR.");
-		return false;
-#endif
-	}
-
-	return true;
+	return compositor_try_window(c, c->target_factory);
 }
 
 static bool
 compositor_init_swapchain(struct comp_compositor *c)
 {
+	COMP_TRACE_MARKER();
+
+	assert(c->target != NULL);
+	assert(c->target_factory != NULL);
+
 	if (comp_target_init_post_vulkan(c->target,                   //
 	                                 c->settings.preferred.width, //
 	                                 c->settings.preferred.height)) {
@@ -1097,29 +906,46 @@ compositor_init_swapchain(struct comp_compositor *c)
 }
 
 static bool
-compositor_init_shaders(struct comp_compositor *c)
+compositor_init_render_resources(struct comp_compositor *c)
 {
+	COMP_TRACE_MARKER();
+
 	struct vk_bundle *vk = get_vk(c);
 
-	return render_shaders_load(&c->shaders, vk);
+	if (!render_shaders_load(&c->shaders, vk)) {
+		return false;
+	}
+
+	if (!render_resources_init(&c->nr, &c->shaders, get_vk(c), c->xdev)) {
+		return false;
+	}
+
+	return true;
 }
 
 static bool
 compositor_init_renderer(struct comp_compositor *c)
 {
-	if (!render_resources_init(&c->nr, &c->shaders, get_vk(c), c->xdev)) {
-		return false;
-	}
+	COMP_TRACE_MARKER();
 
-	c->r = comp_renderer_create(c);
+	c->r = comp_renderer_create(c, c->view_extents);
+
+#ifdef XRT_FEATURE_WINDOW_PEEK
+	c->peek = comp_window_peek_create(c);
+#else
+	c->peek = NULL;
+#endif
+
 	return c->r != NULL;
 }
 
-
-
 xrt_result_t
-xrt_gfx_provider_create_system(struct xrt_device *xdev, struct xrt_system_compositor **out_xsysc)
+comp_main_create_system_compositor(struct xrt_device *xdev,
+                                   const struct comp_target_factory *ctf,
+                                   struct xrt_system_compositor **out_xsysc)
 {
+	COMP_TRACE_MARKER();
+
 	struct comp_compositor *c = U_TYPED_CALLOC(struct comp_compositor);
 
 	c->base.base.base.begin_session = compositor_begin_session;
@@ -1129,7 +955,8 @@ xrt_gfx_provider_create_system(struct xrt_device *xdev, struct xrt_system_compos
 	c->base.base.base.begin_frame = compositor_begin_frame;
 	c->base.base.base.discard_frame = compositor_discard_frame;
 	c->base.base.base.layer_commit = compositor_layer_commit;
-	c->base.base.base.poll_events = compositor_poll_events;
+	c->base.base.base.get_display_refresh_rate = compositor_get_display_refresh_rate;
+	c->base.base.base.request_display_refresh_rate = compositor_request_display_refresh_rate;
 	c->base.base.base.destroy = compositor_destroy;
 	c->frame.waited.id = -1;
 	c->frame.rendering.id = -1;
@@ -1137,11 +964,24 @@ xrt_gfx_provider_create_system(struct xrt_device *xdev, struct xrt_system_compos
 
 	COMP_DEBUG(c, "Doing init %p", (void *)c);
 
+	if (xdev->hmd->view_count == 0) {
+		U_LOG_E("Bug detected: HMD \"%s\" does not set xdev->hmd.view_count. Value must be > 0!", xdev->str);
+		assert(xdev->hmd->view_count > 0);
+	}
+
 	// Do this as early as possible.
 	comp_base_init(&c->base);
 
 	// Init the settings to default.
 	comp_settings_init(&c->settings, xdev);
+
+	// Init this before the renderer.
+	u_swapchain_debug_init(&c->debug.sc);
+
+	// Init these before the renderer, not all might be used.
+	for (uint32_t i = 0; i < ARRAY_SIZE(c->scratch.views); i++) {
+		comp_scratch_single_images_init(&c->scratch.views[i]);
+	}
 
 	c->last_frame_time_ns = os_monotonic_get_ns();
 
@@ -1154,13 +994,6 @@ xrt_gfx_provider_create_system(struct xrt_device *xdev, struct xrt_system_compos
 
 	uint32_t w0 = (uint32_t)(xdev->hmd->views[0].display.w_pixels * scale);
 	uint32_t h0 = (uint32_t)(xdev->hmd->views[0].display.h_pixels * scale);
-	uint32_t w1 = (uint32_t)(xdev->hmd->views[1].display.w_pixels * scale);
-	uint32_t h1 = (uint32_t)(xdev->hmd->views[1].display.h_pixels * scale);
-
-	uint32_t w0_2 = xdev->hmd->views[0].display.w_pixels * 2;
-	uint32_t h0_2 = xdev->hmd->views[0].display.h_pixels * 2;
-	uint32_t w1_2 = xdev->hmd->views[1].display.w_pixels * 2;
-	uint32_t h1_2 = xdev->hmd->views[1].display.h_pixels * 2;
 
 	c->view_extents.width = w0;
 	c->view_extents.height = h0;
@@ -1172,21 +1005,27 @@ xrt_gfx_provider_create_system(struct xrt_device *xdev, struct xrt_system_compos
 
 	// clang-format off
 	if (!compositor_check_and_prepare_xdev(c, xdev) ||
-	    !compositor_check_vulkan_caps(c) ||
-	    !compositor_init_window_pre_vulkan(c) ||
+	    !compositor_init_window_pre_vulkan(c, ctf) ||
 	    !compositor_init_vulkan(c) ||
-	    !compositor_init_window_post_vulkan(c) ||
-	    !compositor_init_shaders(c) ||
-	    !compositor_init_swapchain(c) ||
-	    !compositor_init_renderer(c)) {
+	    !compositor_init_render_resources(c)) {
 		COMP_ERROR(c, "Failed to init compositor %p", (void *)c);
 		c->base.base.base.destroy(&c->base.base.base);
 
 		return XRT_ERROR_VULKAN;
 	}
-	// clang-format on
 
-	comp_target_set_title(c->target, WINDOW_TITLE);
+	if (!c->deferred_surface) {
+		if (!compositor_init_window_post_vulkan(c) ||
+		    !compositor_init_swapchain(c) ||
+		    !compositor_init_renderer(c)) {
+			COMP_ERROR(c, "Failed to init compositor %p", (void*)c);
+			c->base.base.base.destroy(&c->base.base.base);
+
+			return XRT_ERROR_VULKAN;
+		}
+		comp_target_set_title(c->target, WINDOW_TITLE);
+	}
+	// clang-format on
 
 	COMP_DEBUG(c, "Done %p", (void *)c);
 
@@ -1223,19 +1062,20 @@ xrt_gfx_provider_create_system(struct xrt_device *xdev, struct xrt_system_compos
 	sys_info->client_d3d_deviceLUID_valid = c->settings.client_gpu_deviceLUID_valid;
 
 	// clang-format off
-	sys_info->views[0].recommended.width_pixels  = w0;
-	sys_info->views[0].recommended.height_pixels = h0;
-	sys_info->views[0].recommended.sample_count  = 1;
-	sys_info->views[0].max.width_pixels          = w0_2;
-	sys_info->views[0].max.height_pixels         = h0_2;
-	sys_info->views[0].max.sample_count          = 1;
+	uint32_t view_count = xdev->hmd->view_count;
+	for (uint32_t i = 0; i < view_count; ++i) {
+		uint32_t w = (uint32_t)(xdev->hmd->views[i].display.w_pixels * scale);
+		uint32_t h = (uint32_t)(xdev->hmd->views[i].display.h_pixels * scale);
+		uint32_t w_2 = xdev->hmd->views[i].display.w_pixels * 2;
+		uint32_t h_2 = xdev->hmd->views[i].display.h_pixels * 2;
 
-	sys_info->views[1].recommended.width_pixels  = w1;
-	sys_info->views[1].recommended.height_pixels = h1;
-	sys_info->views[1].recommended.sample_count  = 1;
-	sys_info->views[1].max.width_pixels          = w1_2;
-	sys_info->views[1].max.height_pixels         = h1_2;
-	sys_info->views[1].max.sample_count          = 1;
+		sys_info->views[i].recommended.width_pixels  = w;
+		sys_info->views[i].recommended.height_pixels = h;
+		sys_info->views[i].recommended.sample_count  = 1;
+		sys_info->views[i].max.width_pixels          = w_2;
+		sys_info->views[i].max.height_pixels         = h_2;
+		sys_info->views[i].max.sample_count          = 1;
+	}
 	// clang-format on
 
 	// If we can add e.g. video pass-through capabilities, we may need to change (augment) this list.
@@ -1256,23 +1096,30 @@ xrt_gfx_provider_create_system(struct xrt_device *xdev, struct xrt_system_compos
 
 	u_var_add_ro_f32(c, &c->compositor_frame_times.fps, "FPS (Compositor)");
 	u_var_add_bool(c, &c->debug.atw_off, "Debug: ATW OFF");
+	u_var_add_bool(c, &c->debug.disable_fast_path, "Debug: Disable fast path");
 	u_var_add_f32_timing(c, c->compositor_frame_times.debug_var, "Frame Times (Compositor)");
 
+	// Only add active views.
+	for (uint32_t i = 0; i < view_count; i++) {
+		char tmp[] = "View[X_XXX_XXX]";
+		snprintf(tmp, sizeof(tmp), "View[%u]", i);
+		u_var_add_native_images_debug(c, &c->scratch.views[i].unid, tmp);
+	}
 
 	//! @todo: Query all supported refresh rates of the current mode
-	sys_info->num_refresh_rates = 1;
-	sys_info->refresh_rates[0] = (float)(1. / time_ns_to_s(c->settings.nominal_frame_interval_ns));
+	sys_info->refresh_rate_count = 1;
+	sys_info->refresh_rates_hz[0] = (float)(1. / time_ns_to_s(c->settings.nominal_frame_interval_ns));
 
-
-
-	comp_renderer_add_debug_vars(c->r);
-
-	c->state = COMP_STATE_READY;
+	// Needs to be delayed until after compositor's u_var has been setup.
+	if (!c->deferred_surface) {
+		comp_renderer_add_debug_vars(c->r);
+	}
 
 	// Standard app pacer.
 	struct u_pacing_app_factory *upaf = NULL;
 	xrt_result_t xret = u_pa_factory_create(&upaf);
 	assert(xret == XRT_SUCCESS && upaf != NULL);
+	(void)xret;
 
-	return comp_multi_create_system_compositor(&c->base.base, upaf, sys_info, out_xsysc);
+	return comp_multi_create_system_compositor(&c->base.base, upaf, sys_info, !c->deferred_surface, out_xsysc);
 }

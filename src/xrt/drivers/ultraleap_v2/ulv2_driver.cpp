@@ -1,4 +1,4 @@
-// Copyright 2020-2021, Collabora, Ltd.
+// Copyright 2020-2023, Collabora, Ltd.
 // Copyright 2020-2021, Moses Turner
 // SPDX-License-Identifier: BSL-1.0
 /*!
@@ -323,13 +323,6 @@ cleanup_leap_loop:
 }
 
 static void
-ulv2_device_update_inputs(struct xrt_device *xdev)
-{
-	// Empty
-}
-
-
-static void
 ulv2_device_get_hand_tracking(struct xrt_device *xdev,
                               enum xrt_input_name name,
                               uint64_t at_timestamp_ns,
@@ -379,13 +372,8 @@ ulv2_device_destroy(struct xrt_device *xdev)
 	u_device_free(&ulv2d->base);
 }
 
-int
-ulv2_found(struct xrt_prober *xp,
-           struct xrt_prober_device **devices,
-           size_t device_count,
-           size_t index,
-           cJSON *attached_data,
-           struct xrt_device **out_xdev)
+xrt_result_t
+ulv2_create_device(struct xrt_device **out_xdev)
 {
 	enum u_device_alloc_flags flags = U_DEVICE_ALLOC_NO_FLAGS;
 
@@ -403,7 +391,7 @@ ulv2_found(struct xrt_prober *xp,
 
 	ulv2d->log_level = debug_get_log_option_ulv2_log();
 
-	ulv2d->base.update_inputs = ulv2_device_update_inputs;
+	ulv2d->base.update_inputs = u_device_noop_update_inputs;
 	ulv2d->base.get_hand_tracking = ulv2_device_get_hand_tracking;
 	ulv2d->base.destroy = ulv2_device_destroy;
 
@@ -444,11 +432,11 @@ ulv2_found(struct xrt_prober *xp,
 
 	out_xdev[0] = &ulv2d->base;
 
-	return 1;
+	return XRT_SUCCESS;
 
 cleanup:
 	ulv2_device_destroy(&ulv2d->base);
-	return 0;
+	return XRT_ERROR_DEVICE_CREATION_FAILED;
 }
 
 } // extern "C"

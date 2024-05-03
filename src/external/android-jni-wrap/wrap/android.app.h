@@ -1,6 +1,6 @@
 // Copyright 2020-2021, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
-// Author: Ryan Pavlik <ryan.pavlik@collabora.com>
+// Author: Rylie Pavlik <rylie.pavlik@collabora.com>
 
 #pragma once
 
@@ -65,17 +65,6 @@ class Activity : public content::Context {
     jni::Object getWindow();
 
     /*!
-     * Wrapper for the getSystemService method
-     *
-     * Java prototype:
-     * `public java.lang.Object getSystemService(java.lang.String);`
-     *
-     * JNI signature: (Ljava/lang/String;)Ljava/lang/Object;
-     *
-     */
-    jni::Object getSystemService(std::string const &name);
-
-    /*!
      * Wrapper for the setVrModeEnabled method
      *
      * Java prototype:
@@ -93,7 +82,6 @@ class Activity : public content::Context {
      */
     struct Meta : public MetaBaseDroppable {
         jni::method_t getWindow;
-        jni::method_t getSystemService;
         jni::method_t setVrModeEnabled;
 
         /*!

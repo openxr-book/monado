@@ -1,4 +1,4 @@
-// Copyright 2019-2022, Collabora, Ltd.
+// Copyright 2019-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -21,12 +21,26 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "util/u_misc.h"
 #include "util/u_debug.h"
+#include "util/u_handles.h"
+#include "util/u_misc.h"
 
 #include "vk/vk_helpers.h"
 
 #include <xrt/xrt_handles.h>
+
+
+/*
+ *
+ * Small internal helpers.
+ *
+ */
+
+#define CHAIN(STRUCT, NEXT)                                                                                            \
+	do {                                                                                                           \
+		(STRUCT).pNext = NEXT;                                                                                 \
+		NEXT = (VkBaseInStructure *)&(STRUCT);                                                                 \
+	} while (false)
 
 
 /*
@@ -59,16 +73,210 @@ vk_result_string(VkResult code)
 		ENUM_TO_STR(VK_ERROR_INCOMPATIBLE_DRIVER);
 		ENUM_TO_STR(VK_ERROR_TOO_MANY_OBJECTS);
 		ENUM_TO_STR(VK_ERROR_FORMAT_NOT_SUPPORTED);
+		ENUM_TO_STR(VK_ERROR_FRAGMENTED_POOL);
+#ifdef VK_VERSION_1_1
+		ENUM_TO_STR(VK_ERROR_OUT_OF_POOL_MEMORY);
+		ENUM_TO_STR(VK_ERROR_INVALID_EXTERNAL_HANDLE);
+#endif
+#ifdef VK_VERSION_1_2
+		ENUM_TO_STR(VK_ERROR_UNKNOWN); // Only defined in 1.2 and above headers.
+		ENUM_TO_STR(VK_ERROR_FRAGMENTATION);
+		ENUM_TO_STR(VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS);
+#else
+	case -13 /* VK_ERROR_UNKNOWN */: return "VK_ERROR_UNKNOWN"; // Has no guard.
+#endif
+#ifdef VK_VERSION_1_3
+		ENUM_TO_STR(VK_PIPELINE_COMPILE_REQUIRED);
+#endif
+#ifdef VK_KHR_surface
 		ENUM_TO_STR(VK_ERROR_SURFACE_LOST_KHR);
 		ENUM_TO_STR(VK_ERROR_NATIVE_WINDOW_IN_USE_KHR);
+#endif
+#ifdef VK_KHR_swapchain
 		ENUM_TO_STR(VK_SUBOPTIMAL_KHR);
 		ENUM_TO_STR(VK_ERROR_OUT_OF_DATE_KHR);
+#endif
+#ifdef VK_KHR_display_swapchain
 		ENUM_TO_STR(VK_ERROR_INCOMPATIBLE_DISPLAY_KHR);
+#endif
+#ifdef VK_EXT_debug_report
 		ENUM_TO_STR(VK_ERROR_VALIDATION_FAILED_EXT);
+#endif
+#ifdef VK_NV_glsl_shader
 		ENUM_TO_STR(VK_ERROR_INVALID_SHADER_NV);
-		ENUM_TO_STR(VK_ERROR_INVALID_EXTERNAL_HANDLE);
+#endif
+#if defined(VK_ENABLE_BETA_EXTENSIONS) && defined(VK_KHR_video_queue)
+		ENUM_TO_STR(VK_ERROR_IMAGE_USAGE_NOT_SUPPORTED_KHR);
+		ENUM_TO_STR(VK_ERROR_VIDEO_PICTURE_LAYOUT_NOT_SUPPORTED_KHR);
+		ENUM_TO_STR(VK_ERROR_VIDEO_PROFILE_OPERATION_NOT_SUPPORTED_KHR);
+		ENUM_TO_STR(VK_ERROR_VIDEO_PROFILE_FORMAT_NOT_SUPPORTED_KHR);
+		ENUM_TO_STR(VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR);
+		ENUM_TO_STR(VK_ERROR_VIDEO_STD_VERSION_NOT_SUPPORTED_KHR);
+#endif
+#ifdef VK_EXT_image_drm_format_modifier
+		ENUM_TO_STR(VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT);
+#endif
+#ifdef VK_KHR_global_priority
+		ENUM_TO_STR(VK_ERROR_NOT_PERMITTED_KHR);
+#endif
+#ifdef VK_EXT_full_screen_exclusive
+		ENUM_TO_STR(VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT);
+#endif
+#ifdef VK_KHR_deferred_host_operations
+		ENUM_TO_STR(VK_THREAD_IDLE_KHR);
+#endif
+#ifdef VK_KHR_deferred_host_operations
+		ENUM_TO_STR(VK_THREAD_DONE_KHR);
+#endif
+#ifdef VK_KHR_deferred_host_operations
+		ENUM_TO_STR(VK_OPERATION_DEFERRED_KHR);
+#endif
+#ifdef VK_KHR_deferred_host_operations
+		ENUM_TO_STR(VK_OPERATION_NOT_DEFERRED_KHR);
+#endif
+#ifdef VK_EXT_image_compression_control
+		ENUM_TO_STR(VK_ERROR_COMPRESSION_EXHAUSTED_EXT);
+#endif
+#if defined(VK_KHR_maintenance1) && !defined(VK_VERSION_1_1)
+		ENUM_TO_STR(VK_ERROR_OUT_OF_POOL_MEMORY_KHR);
+#endif
+#if defined(VK_KHR_external_memory) && !defined(VK_VERSION_1_1)
+		ENUM_TO_STR(VK_ERROR_INVALID_EXTERNAL_HANDLE_KHR);
+#endif
+#if defined(VK_EXT_descriptor_indexing) && !defined(VK_VERSION_1_2)
+		ENUM_TO_STR(VK_ERROR_FRAGMENTATION_EXT);
+#endif
+#if defined(VK_EXT_global_priority) && !defined(VK_KHR_global_priority)
 		ENUM_TO_STR(VK_ERROR_NOT_PERMITTED_EXT);
+#endif
+#if defined(VK_EXT_buffer_device_address) && !defined(VK_VERSION_1_2)
+		ENUM_TO_STR(VK_ERROR_INVALID_DEVICE_ADDRESS_EXT);
+		// VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS_KHR = VK_ERROR_INVALID_DEVICE_ADDRESS_EXT
+#endif
+#if defined(VK_EXT_pipeline_creation_cache_control) && !defined(VK_VERSION_1_3)
+		ENUM_TO_STR(VK_PIPELINE_COMPILE_REQUIRED_EXT);
+		// VK_ERROR_PIPELINE_COMPILE_REQUIRED_EXT = VK_ERROR_PIPELINE_COMPILE_REQUIRED_EXT
+#endif
 	default: return "UNKNOWN RESULT";
+	}
+}
+
+XRT_CHECK_RESULT const char *
+vk_object_type_string(VkObjectType type)
+{
+	switch (type) {
+		ENUM_TO_STR(VK_OBJECT_TYPE_UNKNOWN);
+		ENUM_TO_STR(VK_OBJECT_TYPE_INSTANCE);
+		ENUM_TO_STR(VK_OBJECT_TYPE_PHYSICAL_DEVICE);
+		ENUM_TO_STR(VK_OBJECT_TYPE_DEVICE);
+		ENUM_TO_STR(VK_OBJECT_TYPE_QUEUE);
+		ENUM_TO_STR(VK_OBJECT_TYPE_SEMAPHORE);
+		ENUM_TO_STR(VK_OBJECT_TYPE_COMMAND_BUFFER);
+		ENUM_TO_STR(VK_OBJECT_TYPE_FENCE);
+		ENUM_TO_STR(VK_OBJECT_TYPE_DEVICE_MEMORY);
+		ENUM_TO_STR(VK_OBJECT_TYPE_BUFFER);
+		ENUM_TO_STR(VK_OBJECT_TYPE_IMAGE);
+		ENUM_TO_STR(VK_OBJECT_TYPE_EVENT);
+		ENUM_TO_STR(VK_OBJECT_TYPE_QUERY_POOL);
+		ENUM_TO_STR(VK_OBJECT_TYPE_BUFFER_VIEW);
+		ENUM_TO_STR(VK_OBJECT_TYPE_IMAGE_VIEW);
+		ENUM_TO_STR(VK_OBJECT_TYPE_SHADER_MODULE);
+		ENUM_TO_STR(VK_OBJECT_TYPE_PIPELINE_CACHE);
+		ENUM_TO_STR(VK_OBJECT_TYPE_PIPELINE_LAYOUT);
+		ENUM_TO_STR(VK_OBJECT_TYPE_RENDER_PASS);
+		ENUM_TO_STR(VK_OBJECT_TYPE_PIPELINE);
+		ENUM_TO_STR(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT);
+		ENUM_TO_STR(VK_OBJECT_TYPE_SAMPLER);
+		ENUM_TO_STR(VK_OBJECT_TYPE_DESCRIPTOR_POOL);
+		ENUM_TO_STR(VK_OBJECT_TYPE_DESCRIPTOR_SET);
+		ENUM_TO_STR(VK_OBJECT_TYPE_FRAMEBUFFER);
+		ENUM_TO_STR(VK_OBJECT_TYPE_COMMAND_POOL);
+#ifdef VK_VERSION_1_1
+		ENUM_TO_STR(VK_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE);
+#elif defined(VK_KHR_descriptor_update_template)
+		ENUM_TO_STR(VK_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE_KHR);
+#endif
+#ifdef VK_VERSION_1_1
+		ENUM_TO_STR(VK_OBJECT_TYPE_SAMPLER_YCBCR_CONVERSION);
+#elif defined(VK_KHR_sampler_ycbcr_conversion)
+		ENUM_TO_STR(VK_OBJECT_TYPE_SAMPLER_YCBCR_CONVERSION_KHR);
+#endif
+#ifdef VK_VERSION_1_3
+		ENUM_TO_STR(VK_OBJECT_TYPE_PRIVATE_DATA_SLOT);
+#elif defined(VK_EXT_private_data)
+		ENUM_TO_STR(VK_OBJECT_TYPE_PRIVATE_DATA_SLOT_EXT);
+#endif
+#ifdef VK_KHR_surface
+		ENUM_TO_STR(VK_OBJECT_TYPE_SURFACE_KHR);
+#endif
+#ifdef VK_KHR_swapchain
+		ENUM_TO_STR(VK_OBJECT_TYPE_SWAPCHAIN_KHR);
+#endif
+#ifdef VK_KHR_display
+		ENUM_TO_STR(VK_OBJECT_TYPE_DISPLAY_KHR);
+		ENUM_TO_STR(VK_OBJECT_TYPE_DISPLAY_MODE_KHR);
+#endif
+#ifdef VK_EXT_debug_report
+		ENUM_TO_STR(VK_OBJECT_TYPE_DEBUG_REPORT_CALLBACK_EXT);
+#endif
+#ifdef VK_KHR_video_queue
+		ENUM_TO_STR(VK_OBJECT_TYPE_VIDEO_SESSION_KHR);
+		ENUM_TO_STR(VK_OBJECT_TYPE_VIDEO_SESSION_PARAMETERS_KHR);
+#endif
+#ifdef VK_NVX_binary_import
+		ENUM_TO_STR(VK_OBJECT_TYPE_CU_MODULE_NVX);
+		ENUM_TO_STR(VK_OBJECT_TYPE_CU_FUNCTION_NVX);
+#endif
+#ifdef VK_EXT_debug_utils
+		ENUM_TO_STR(VK_OBJECT_TYPE_DEBUG_UTILS_MESSENGER_EXT);
+#endif
+#ifdef VK_KHR_acceleration_structure
+		ENUM_TO_STR(VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR);
+#endif
+#ifdef VK_EXT_validation_cache
+		ENUM_TO_STR(VK_OBJECT_TYPE_VALIDATION_CACHE_EXT);
+#endif
+#ifdef VK_NV_ray_tracing
+		ENUM_TO_STR(VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_NV);
+#endif
+#ifdef VK_INTEL_performance_query
+		ENUM_TO_STR(VK_OBJECT_TYPE_PERFORMANCE_CONFIGURATION_INTEL);
+#endif
+#ifdef VK_KHR_deferred_host_operations
+		ENUM_TO_STR(VK_OBJECT_TYPE_DEFERRED_OPERATION_KHR);
+#endif
+#ifdef VK_NV_device_generated_commands
+		ENUM_TO_STR(VK_OBJECT_TYPE_INDIRECT_COMMANDS_LAYOUT_NV);
+#endif
+#ifdef VK_NV_cuda_kernel_launch
+		ENUM_TO_STR(VK_OBJECT_TYPE_CUDA_MODULE_NV);
+		ENUM_TO_STR(VK_OBJECT_TYPE_CUDA_FUNCTION_NV);
+#endif
+#ifdef VK_FUCHSIA_buffer_collection
+		ENUM_TO_STR(VK_OBJECT_TYPE_BUFFER_COLLECTION_FUCHSIA);
+#endif
+#ifdef VK_EXT_opacity_micromap
+		ENUM_TO_STR(VK_OBJECT_TYPE_MICROMAP_EXT);
+#endif
+#ifdef VK_NV_optical_flow
+		ENUM_TO_STR(VK_OBJECT_TYPE_OPTICAL_FLOW_SESSION_NV);
+#endif
+#ifdef VK_EXT_shader_object
+		ENUM_TO_STR(VK_OBJECT_TYPE_SHADER_EXT);
+#endif
+	default: return "UNKNOWN OBJECT TYPE";
+	}
+}
+
+XRT_CHECK_RESULT const char *
+vk_physical_device_type_string(VkPhysicalDeviceType device_type)
+{
+	switch (device_type) {
+		ENUM_TO_STR(VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU);
+		ENUM_TO_STR(VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU);
+		ENUM_TO_STR(VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU);
+		ENUM_TO_STR(VK_PHYSICAL_DEVICE_TYPE_CPU);
+	default: return "UNKNOWN PHYSICAL DEVICE TYPE";
 	}
 }
 
@@ -332,32 +540,12 @@ vk_format_string(VkFormat code)
 }
 
 XRT_CHECK_RESULT const char *
-vk_format_feature_string(VkFormatFeatureFlagBits code)
+vk_sharing_mode_string(VkSharingMode code)
 {
 	switch (code) {
-		ENUM_TO_STR(VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT);
-		ENUM_TO_STR(VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT);
-		ENUM_TO_STR(VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
-		ENUM_TO_STR(VK_FORMAT_FEATURE_TRANSFER_SRC_BIT);
-		ENUM_TO_STR(VK_FORMAT_FEATURE_TRANSFER_DST_BIT);
-		ENUM_TO_STR(VK_FORMAT_R5G6B5_UNORM_PACK16);
-	default: return "UNKNOWN FORMAT FEATURE";
-	}
-}
-
-XRT_CHECK_RESULT const char *
-xrt_swapchain_usage_string(enum xrt_swapchain_usage_bits code)
-{
-	switch (code) {
-		ENUM_TO_STR(XRT_SWAPCHAIN_USAGE_COLOR);
-		ENUM_TO_STR(XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL);
-		ENUM_TO_STR(XRT_SWAPCHAIN_USAGE_UNORDERED_ACCESS);
-		ENUM_TO_STR(XRT_SWAPCHAIN_USAGE_TRANSFER_SRC);
-		ENUM_TO_STR(XRT_SWAPCHAIN_USAGE_TRANSFER_DST);
-		ENUM_TO_STR(XRT_SWAPCHAIN_USAGE_SAMPLED);
-		ENUM_TO_STR(XRT_SWAPCHAIN_USAGE_MUTABLE_FORMAT);
-		ENUM_TO_STR(XRT_SWAPCHAIN_USAGE_INPUT_ATTACHMENT);
-	default: return "UNKNOWN SWAPCHAIN USAGE";
+		ENUM_TO_STR(VK_SHARING_MODE_EXCLUSIVE);
+		ENUM_TO_STR(VK_SHARING_MODE_CONCURRENT);
+	default: return "UNKNOWN SHARING MODE";
 	}
 }
 
@@ -376,6 +564,34 @@ vk_present_mode_string(VkPresentModeKHR code)
 }
 
 XRT_CHECK_RESULT const char *
+vk_color_space_string(VkColorSpaceKHR code)
+{
+	switch (code) {
+		ENUM_TO_STR(VK_COLOR_SPACE_SRGB_NONLINEAR_KHR);
+#ifdef VK_EXT_swapchain_colorspace
+		ENUM_TO_STR(VK_COLOR_SPACE_DISPLAY_P3_NONLINEAR_EXT);
+		ENUM_TO_STR(VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT);
+		ENUM_TO_STR(VK_COLOR_SPACE_DISPLAY_P3_LINEAR_EXT);
+		ENUM_TO_STR(VK_COLOR_SPACE_DCI_P3_NONLINEAR_EXT);
+		ENUM_TO_STR(VK_COLOR_SPACE_BT709_LINEAR_EXT);
+		ENUM_TO_STR(VK_COLOR_SPACE_BT709_NONLINEAR_EXT);
+		ENUM_TO_STR(VK_COLOR_SPACE_BT2020_LINEAR_EXT);
+		ENUM_TO_STR(VK_COLOR_SPACE_HDR10_ST2084_EXT);
+		ENUM_TO_STR(VK_COLOR_SPACE_DOLBYVISION_EXT);
+		ENUM_TO_STR(VK_COLOR_SPACE_HDR10_HLG_EXT);
+		ENUM_TO_STR(VK_COLOR_SPACE_ADOBERGB_LINEAR_EXT);
+		ENUM_TO_STR(VK_COLOR_SPACE_ADOBERGB_NONLINEAR_EXT);
+		ENUM_TO_STR(VK_COLOR_SPACE_PASS_THROUGH_EXT);
+		ENUM_TO_STR(VK_COLOR_SPACE_EXTENDED_SRGB_NONLINEAR_EXT);
+#endif
+#ifdef VK_AMD_display_native_hdr
+		ENUM_TO_STR(VK_COLOR_SPACE_DISPLAY_NATIVE_AMD);
+#endif
+	default: return "UNKNOWN COLOR SPACE";
+	}
+}
+
+XRT_CHECK_RESULT const char *
 vk_power_state_string(VkDisplayPowerStateEXT code)
 {
 	switch (code) {
@@ -387,22 +603,163 @@ vk_power_state_string(VkDisplayPowerStateEXT code)
 }
 
 XRT_CHECK_RESULT const char *
-vk_color_space_string(VkColorSpaceKHR code)
+vk_format_feature_flag_string(VkFormatFeatureFlagBits bits, bool null_on_unknown)
 {
-	switch (code) {
-		ENUM_TO_STR(VK_COLORSPACE_SRGB_NONLINEAR_KHR);
-	default: return "UNKNOWN COLOR SPACE";
+	switch (bits) {
+		ENUM_TO_STR(VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT);
+		ENUM_TO_STR(VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT);
+		ENUM_TO_STR(VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
+		ENUM_TO_STR(VK_FORMAT_FEATURE_TRANSFER_SRC_BIT);
+		ENUM_TO_STR(VK_FORMAT_FEATURE_TRANSFER_DST_BIT);
+		ENUM_TO_STR(VK_FORMAT_R5G6B5_UNORM_PACK16);
+	default:
+		if (bits == 0) {
+			return "FORMAT FEATURE: NO BITS SET";
+		} else if (bits & (bits - 1)) {
+			return "FORMAT FEATURE: MULTIPLE BITS SET";
+		} else {
+			return null_on_unknown ? NULL : "FORMAT FEATURE: UNKNOWN BIT";
+		}
 	}
 }
 
-XRT_CHECK_RESULT bool
-vk_has_error(VkResult res, const char *fun, const char *file, int line)
+XRT_CHECK_RESULT const char *
+vk_image_usage_flag_string(VkImageUsageFlagBits bits, bool null_on_unknown)
 {
-	if (res != VK_SUCCESS) {
-		U_LOG_E("%s failed with %s in %s:%d", fun, vk_result_string(res), file, line);
-		return true;
+	switch (bits) {
+		ENUM_TO_STR(VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
+		ENUM_TO_STR(VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+		ENUM_TO_STR(VK_IMAGE_USAGE_SAMPLED_BIT);
+		ENUM_TO_STR(VK_IMAGE_USAGE_STORAGE_BIT);
+		ENUM_TO_STR(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
+		ENUM_TO_STR(VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
+		ENUM_TO_STR(VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT);
+		ENUM_TO_STR(VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT);
+#ifdef VK_KHR_video_decode_queue
+		ENUM_TO_STR(VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR);
+		ENUM_TO_STR(VK_IMAGE_USAGE_VIDEO_DECODE_SRC_BIT_KHR);
+		ENUM_TO_STR(VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR);
+#endif
+#ifdef VK_EXT_fragment_density_map
+		ENUM_TO_STR(VK_IMAGE_USAGE_FRAGMENT_DENSITY_MAP_BIT_EXT);
+#endif
+#ifdef VK_KHR_fragment_shading_rate
+		ENUM_TO_STR(VK_IMAGE_USAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR);
+#endif
+#ifdef VK_EXT_host_image_copy
+		ENUM_TO_STR(VK_IMAGE_USAGE_HOST_TRANSFER_BIT_EXT);
+#endif
+#ifdef VK_EXT_attachment_feedback_loop_layout
+		ENUM_TO_STR(VK_IMAGE_USAGE_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT);
+#endif
+#ifdef VK_HUAWEI_invocation_mask
+		ENUM_TO_STR(VK_IMAGE_USAGE_INVOCATION_MASK_BIT_HUAWEI);
+#endif
+#ifdef VK_QCOM_image_processing
+		ENUM_TO_STR(VK_IMAGE_USAGE_SAMPLE_WEIGHT_BIT_QCOM);
+#endif
+#ifdef VK_QCOM_image_processing
+		ENUM_TO_STR(VK_IMAGE_USAGE_SAMPLE_BLOCK_MATCH_BIT_QCOM);
+#endif
+#if defined(VK_NV_shading_rate_image) && !defined(VK_KHR_fragment_shading_rate)
+		ENUM_TO_STR(VK_IMAGE_USAGE_SHADING_RATE_IMAGE_BIT_NV);
+#endif
+	default:
+		if (bits == 0) {
+			return "IMAGE USAGE: NO BITS SET";
+		} else if (bits & (bits - 1)) {
+			return "IMAGE USAGE: MULTIPLE BITS SET";
+		} else {
+			return null_on_unknown ? NULL : "IMAGE USAGE: UNKNOWN BIT";
+		}
 	}
-	return false;
+}
+
+XRT_CHECK_RESULT const char *
+vk_composite_alpha_flag_string(VkCompositeAlphaFlagBitsKHR bits, bool null_on_unknown)
+{
+	switch (bits) {
+		ENUM_TO_STR(VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR);
+		ENUM_TO_STR(VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR);
+		ENUM_TO_STR(VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR);
+		ENUM_TO_STR(VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR);
+	default:
+		if (bits == 0) {
+			return "COMPOSITE ALPHA: NO BITS SET";
+		} else if (bits & (bits - 1)) {
+			return "COMPOSITE ALPHA: MULTIPLE BITS SET";
+		} else {
+			return null_on_unknown ? NULL : "COMPOSITE ALPHA: UNKNOWN BIT";
+		}
+	}
+}
+
+XRT_CHECK_RESULT const char *
+vk_surface_transform_flag_string(VkSurfaceTransformFlagBitsKHR bits, bool null_on_unknown)
+{
+	switch (bits) {
+		ENUM_TO_STR(VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR);
+		ENUM_TO_STR(VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR);
+		ENUM_TO_STR(VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR);
+		ENUM_TO_STR(VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR);
+		ENUM_TO_STR(VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_BIT_KHR);
+		ENUM_TO_STR(VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_ROTATE_90_BIT_KHR);
+		ENUM_TO_STR(VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_ROTATE_180_BIT_KHR);
+		ENUM_TO_STR(VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_ROTATE_270_BIT_KHR);
+		ENUM_TO_STR(VK_SURFACE_TRANSFORM_INHERIT_BIT_KHR);
+	default:
+		if (bits == 0) {
+			return "SURFACE TRANSFORM: NO BITS SET";
+		} else if (bits & (bits - 1)) {
+			return "SURFACE TRANSFORM: MULTIPLE BITS SET";
+		} else {
+			return null_on_unknown ? NULL : "SURFACE TRANSFORM: UNKNOWN BIT";
+		}
+	}
+}
+
+#ifdef VK_KHR_display
+XRT_CHECK_RESULT const char *
+vk_display_plane_alpha_flag_string(VkDisplayPlaneAlphaFlagBitsKHR bits, bool null_on_unknown)
+{
+	switch (bits) {
+		ENUM_TO_STR(VK_DISPLAY_PLANE_ALPHA_OPAQUE_BIT_KHR);
+		ENUM_TO_STR(VK_DISPLAY_PLANE_ALPHA_GLOBAL_BIT_KHR);
+		ENUM_TO_STR(VK_DISPLAY_PLANE_ALPHA_PER_PIXEL_BIT_KHR);
+		ENUM_TO_STR(VK_DISPLAY_PLANE_ALPHA_PER_PIXEL_PREMULTIPLIED_BIT_KHR);
+	default:
+		if (bits == 0) {
+			return "DISPLAY PLANE ALPHA: NO BITS SET";
+		} else if (bits & (bits - 1)) {
+			return "DISPLAY PLANE ALPHA: MULTIPLE BITS SET";
+		} else {
+			return null_on_unknown ? NULL : "DISPLAY PLANE ALPHA: UNKNOWN BIT";
+		}
+	}
+}
+#endif
+
+XRT_CHECK_RESULT const char *
+xrt_swapchain_usage_flag_string(enum xrt_swapchain_usage_bits bits, bool null_on_unknown)
+{
+	switch (bits) {
+		ENUM_TO_STR(XRT_SWAPCHAIN_USAGE_COLOR);
+		ENUM_TO_STR(XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL);
+		ENUM_TO_STR(XRT_SWAPCHAIN_USAGE_UNORDERED_ACCESS);
+		ENUM_TO_STR(XRT_SWAPCHAIN_USAGE_TRANSFER_SRC);
+		ENUM_TO_STR(XRT_SWAPCHAIN_USAGE_TRANSFER_DST);
+		ENUM_TO_STR(XRT_SWAPCHAIN_USAGE_SAMPLED);
+		ENUM_TO_STR(XRT_SWAPCHAIN_USAGE_MUTABLE_FORMAT);
+		ENUM_TO_STR(XRT_SWAPCHAIN_USAGE_INPUT_ATTACHMENT);
+	default:
+		if (bits == 0) {
+			return "XRT SWAPCHAIN USAGE: NO BITS SET";
+		} else if (bits & (bits - 1)) {
+			return "XRT SWAPCHAIN USAGE: MULTIPLE BITS SET";
+		} else {
+			return null_on_unknown ? NULL : "XRT SWAPCHAIN USAGE: UNKNOWN BIT";
+		}
+	}
 }
 
 
@@ -505,18 +862,22 @@ vk_alloc_and_bind_image_memory(struct vk_bundle *vk,
 	return ret;
 }
 
-VkResult
-vk_create_image_simple(struct vk_bundle *vk,
-                       VkExtent2D extent,
-                       VkFormat format,
-                       VkImageUsageFlags usage,
-                       VkDeviceMemory *out_mem,
-                       VkImage *out_image)
+static VkResult
+create_image_simple(struct vk_bundle *vk,
+                    VkExtent2D extent,
+                    VkFormat format,
+                    VkImageCreateFlags create,
+                    VkImageUsageFlags usage,
+                    VkBaseInStructure *next_chain,
+                    VkDeviceMemory *out_mem,
+                    VkImage *out_image)
 {
 	VkImageCreateInfo image_info = {
 	    .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+	    .pNext = next_chain,
 	    .imageType = VK_IMAGE_TYPE_2D,
 	    .format = format,
+	    .flags = create,
 	    .extent =
 	        {
 	            .width = extent.width,
@@ -559,6 +920,64 @@ vk_create_image_simple(struct vk_bundle *vk,
 	*out_image = image;
 
 	return ret;
+}
+
+VkResult
+vk_create_image_simple(struct vk_bundle *vk,
+                       VkExtent2D extent,
+                       VkFormat format,
+                       VkImageUsageFlags usage,
+                       VkDeviceMemory *out_mem,
+                       VkImage *out_image)
+{
+	VkImageCreateFlags create = 0;
+
+	return create_image_simple( //
+	    vk,                     //
+	    extent,                 // extent
+	    format,                 // format
+	    create,                 // create
+	    usage,                  // usage
+	    NULL,                   // next_chain
+	    out_mem,                // out_mem
+	    out_image);             // out_image
+}
+
+VkResult
+vk_create_image_mutable_rgba(
+    struct vk_bundle *vk, VkExtent2D extent, VkImageUsageFlags usage, VkDeviceMemory *out_mem, VkImage *out_image)
+{
+	VkFormat format = VK_FORMAT_R8G8B8A8_UNORM;
+	VkImageCreateFlags create = VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;
+	VkBaseInStructure *next_chain = NULL;
+
+#ifdef VK_KHR_image_format_list
+	VkFormat formats[2] = {
+	    VK_FORMAT_R8G8B8A8_UNORM,
+	    VK_FORMAT_R8G8B8A8_SRGB,
+	};
+
+	VkImageFormatListCreateInfoKHR image_format_list_create_info = {
+	    .sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_LIST_CREATE_INFO_KHR,
+	    .pNext = next_chain,
+	    .viewFormatCount = ARRAY_SIZE(formats),
+	    .pViewFormats = formats,
+	};
+
+	if (vk->has_KHR_image_format_list) {
+		CHAIN(image_format_list_create_info, next_chain);
+	}
+#endif
+
+	return create_image_simple( //
+	    vk,                     //
+	    extent,                 // extent
+	    format,                 // format
+	    create,                 // create
+	    usage,                  // usage
+	    next_chain,             // next_chain
+	    out_mem,                // out_mem
+	    out_image);             // out_image
 }
 
 VkResult
@@ -694,47 +1113,13 @@ vk_create_image_from_native(struct vk_bundle *vk,
 		return VK_ERROR_FEATURE_NOT_PRESENT;
 	}
 
-	VkExternalMemoryHandleTypeFlags handle_type = vk_csci_get_image_external_handle_type(vk);
+	VkExternalMemoryHandleTypeFlags handle_type = vk_csci_get_image_external_handle_type(vk, image_native);
 
-	// In->pNext
-	VkPhysicalDeviceExternalImageFormatInfo external_image_format_info = {
-	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO,
-	    .handleType = handle_type,
-	};
+	bool importable = false;
+	vk_csci_get_image_external_support(vk, image_format, info->bits, handle_type, &importable, NULL);
 
-	// In
-	VkPhysicalDeviceImageFormatInfo2 format_info = {
-	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2,
-	    .pNext = &external_image_format_info,
-	    .format = image_format,
-	    .type = VK_IMAGE_TYPE_2D,
-	    .tiling = VK_IMAGE_TILING_OPTIMAL,
-	    .usage = image_usage,
-	};
-
-	// Out->pNext
-	VkExternalImageFormatProperties external_format_properties = {
-	    .sType = VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES,
-	};
-
-	// Out
-	VkImageFormatProperties2 format_properties = {
-	    .sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2,
-	    .pNext = &external_format_properties,
-	};
-
-	ret = vk->vkGetPhysicalDeviceImageFormatProperties2(vk->physical_device, &format_info, &format_properties);
-	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vkGetPhysicalDeviceImageFormatProperties2: %s", vk_result_string(ret));
-		// Nothing to cleanup
-		return ret;
-	}
-
-	VkExternalMemoryFeatureFlags features =
-	    external_format_properties.externalMemoryProperties.externalMemoryFeatures;
-
-	if ((features & VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT) == 0) {
-		VK_ERROR(vk, "External memory handle is not importable (has features: %d)", features);
+	if (!importable) {
+		VK_ERROR(vk, "External memory handle is not importable");
 		return VK_ERROR_INITIALIZATION_FAILED;
 	}
 
@@ -787,7 +1172,7 @@ vk_create_image_from_native(struct vk_bundle *vk,
 	VkImportMemoryWin32HandleInfoKHR import_memory_info = {
 	    .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_WIN32_HANDLE_INFO_KHR,
 	    .pNext = NULL,
-	    .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT,
+	    .handleType = handle_type,
 	    .handle = image_native->handle,
 	};
 #else
@@ -809,8 +1194,15 @@ vk_create_image_from_native(struct vk_bundle *vk,
 	    out_mem,                          // out_mem
 	    NULL);                            // out_size
 
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_CONSUMED_BY_VULKAN_IMPORT)
 	// We have consumed this fd now, make sure it's not freed again.
 	image_native->handle = XRT_GRAPHICS_BUFFER_HANDLE_INVALID;
+#elif defined(XRT_GRAPHICS_BUFFER_HANDLE_REFERENCE_ADDED_BY_VULKAN_IMPORT)
+	// Some platforms need an explicit unref (Android)
+	u_graphics_buffer_unref(&image_native->handle);
+#else
+#error "Need port!"
+#endif
 
 	if (ret != VK_SUCCESS) {
 		vk->vkDestroyImage(vk->device, image, NULL);
@@ -933,38 +1325,29 @@ vk_create_sampler(struct vk_bundle *vk, VkSamplerAddressMode clamp_mode, VkSampl
 	return VK_SUCCESS;
 }
 
-VkResult
-vk_create_view(struct vk_bundle *vk,
-               VkImage image,
-               VkImageViewType type,
-               VkFormat format,
-               VkImageSubresourceRange subresource_range,
-               VkImageView *out_view)
-{
-	VkComponentMapping components = {
-	    .r = VK_COMPONENT_SWIZZLE_R,
-	    .g = VK_COMPONENT_SWIZZLE_G,
-	    .b = VK_COMPONENT_SWIZZLE_B,
-	    .a = VK_COMPONENT_SWIZZLE_A,
-	};
 
-	return vk_create_view_swizzle(vk, image, type, format, subresource_range, components, out_view);
-}
+/*
+ *
+ * Image view code.
+ *
+ */
 
-VkResult
-vk_create_view_swizzle(struct vk_bundle *vk,
-                       VkImage image,
-                       VkImageViewType type,
-                       VkFormat format,
-                       VkImageSubresourceRange subresource_range,
-                       VkComponentMapping components,
-                       VkImageView *out_view)
+static VkResult
+create_view(struct vk_bundle *vk,
+            VkImage image,
+            VkImageViewType type,
+            VkFormat format,
+            VkImageSubresourceRange subresource_range,
+            VkComponentMapping components,
+            VkBaseInStructure *next_chain,
+            VkImageView *out_view)
 {
 	VkImageView view;
 	VkResult ret;
 
 	VkImageViewCreateInfo imageView = {
 	    .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+	    .pNext = next_chain,
 	    .image = image,
 	    .viewType = type,
 	    .format = format,
@@ -983,22 +1366,117 @@ vk_create_view_swizzle(struct vk_bundle *vk,
 	return VK_SUCCESS;
 }
 
-VkAccessFlags
-vk_get_access_flags(VkImageLayout layout)
+static VkResult
+create_view_default_swizzle(struct vk_bundle *vk,
+                            VkImage image,
+                            VkImageViewType type,
+                            VkFormat format,
+                            VkImageSubresourceRange subresource_range,
+                            VkBaseInStructure *next_chain,
+                            VkImageView *out_view)
 {
-	switch (layout) {
-	case VK_IMAGE_LAYOUT_UNDEFINED: return 0;
-	case VK_IMAGE_LAYOUT_GENERAL: return VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT;
-	case VK_IMAGE_LAYOUT_PREINITIALIZED: return VK_ACCESS_HOST_WRITE_BIT;
-	case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL: return VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-	case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL: return VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-	case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL: return VK_ACCESS_TRANSFER_READ_BIT;
-	case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL: return VK_ACCESS_TRANSFER_WRITE_BIT;
-	case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL: return VK_ACCESS_SHADER_READ_BIT;
-	default: U_LOG_E("Unhandled access mask case for layout %d.", layout);
-	}
-	return 0;
+	VkComponentMapping components = {
+	    .r = VK_COMPONENT_SWIZZLE_R,
+	    .g = VK_COMPONENT_SWIZZLE_G,
+	    .b = VK_COMPONENT_SWIZZLE_B,
+	    .a = VK_COMPONENT_SWIZZLE_A,
+	};
+
+	return create_view(    //
+	    vk,                // vk_bundle
+	    image,             // image
+	    type,              // type
+	    format,            // format
+	    subresource_range, // subresource_range
+	    components,        // components
+	    next_chain,        // next_chain
+	    out_view);         // out_view
 }
+
+VkResult
+vk_create_view(struct vk_bundle *vk,
+               VkImage image,
+               VkImageViewType type,
+               VkFormat format,
+               VkImageSubresourceRange subresource_range,
+               VkImageView *out_view)
+{
+	return create_view_default_swizzle( //
+	    vk,                             // vk_bundle
+	    image,                          // image
+	    type,                           // type
+	    format,                         // format
+	    subresource_range,              // subresource_range
+	    NULL,                           // next_chain
+	    out_view);                      // out_view
+}
+
+VkResult
+vk_create_view_swizzle(struct vk_bundle *vk,
+                       VkImage image,
+                       VkImageViewType type,
+                       VkFormat format,
+                       VkImageSubresourceRange subresource_range,
+                       VkComponentMapping components,
+                       VkImageView *out_view)
+{
+	return create_view(    //
+	    vk,                // vk_bundle
+	    image,             // image
+	    type,              // type
+	    format,            // format
+	    subresource_range, // subresource_range
+	    components,        // components
+	    NULL,              // next_chain
+	    out_view);         // out_view
+}
+
+VkResult
+vk_create_view_usage(struct vk_bundle *vk,
+                     VkImage image,
+                     VkImageViewType type,
+                     VkFormat format,
+                     VkImageUsageFlags image_usage,
+                     VkImageSubresourceRange subresource_range,
+                     VkImageView *out_view)
+{
+	VkBaseInStructure *next_chain = NULL;
+
+	/*
+	 * @todo Handle Vulkan 1.0 instance without VK_KHR_maintenance2 on GPUs that don't support srgb with storage
+	 * usage.
+	 */
+#ifdef VK_KHR_maintenance2
+	VkImageViewUsageCreateInfo image_view_usage_create_info = {
+	    .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_USAGE_CREATE_INFO,
+	    .pNext = next_chain,
+	    .usage = image_usage,
+	};
+
+	if (vk->has_KHR_maintenance2 || vk->version >= VK_VERSION_1_1) {
+		CHAIN(image_view_usage_create_info, next_chain);
+	} else {
+		VK_WARN(vk,
+		        "Using Vulkan 1.0 instance without VK_KHR_maintenance2 support, can't use usage image view.");
+	}
+#endif
+
+	return create_view_default_swizzle( //
+	    vk,                             // vk_bundle
+	    image,                          // image
+	    type,                           // type
+	    format,                         // format
+	    subresource_range,              // subresource_range
+	    next_chain,                     // next_chain
+	    out_view);                      // out_view
+}
+
+
+/*
+ *
+ * Descriptor pool code.
+ *
+ */
 
 bool
 vk_init_descriptor_pool(struct vk_bundle *vk,
@@ -1015,7 +1493,7 @@ vk_init_descriptor_pool(struct vk_bundle *vk,
 	};
 
 	VkResult res = vk->vkCreateDescriptorPool(vk->device, &info, NULL, out_descriptor_pool);
-	vk_check_error("vkCreateDescriptorPool", res, false);
+	VK_CHK_WITH_RET(res, "vkCreateDescriptorPool", false);
 
 	return true;
 }
@@ -1035,10 +1513,17 @@ vk_allocate_descriptor_sets(struct vk_bundle *vk,
 	};
 
 	VkResult res = vk->vkAllocateDescriptorSets(vk->device, &alloc_info, sets);
-	vk_check_error("vkAllocateDescriptorSets", res, false);
+	VK_CHK_WITH_RET(res, "vkAllocateDescriptorSets", false);
 
 	return true;
 }
+
+
+/*
+ *
+ * Buffer code.
+ *
+ */
 
 bool
 vk_buffer_init(struct vk_bundle *vk,
@@ -1055,7 +1540,7 @@ vk_buffer_init(struct vk_bundle *vk,
 	};
 
 	VkResult res = vk->vkCreateBuffer(vk->device, &buffer_info, NULL, out_buffer);
-	vk_check_error("vkCreateBuffer", res, false);
+	VK_CHK_WITH_RET(res, "vkCreateBuffer", false);
 
 	VkMemoryRequirements requirements;
 	vk->vkGetBufferMemoryRequirements(vk->device, *out_buffer, &requirements);
@@ -1079,10 +1564,10 @@ vk_buffer_init(struct vk_bundle *vk,
 	};
 
 	res = vk->vkAllocateMemory(vk->device, &alloc_info, NULL, out_mem);
-	vk_check_error("vkAllocateMemory", res, false);
+	VK_CHK_WITH_RET(res, "vkAllocateMemory", false);
 
 	res = vk->vkBindBufferMemory(vk->device, *out_buffer, *out_mem, 0);
-	vk_check_error("vkBindBufferMemory", res, false);
+	VK_CHK_WITH_RET(res, "vkBindBufferMemory", false);
 
 	return true;
 }
@@ -1099,7 +1584,7 @@ vk_update_buffer(struct vk_bundle *vk, float *buffer, size_t buffer_size, VkDevi
 {
 	void *tmp;
 	VkResult res = vk->vkMapMemory(vk->device, memory, 0, VK_WHOLE_SIZE, 0, &tmp);
-	vk_check_error("vkMapMemory", res, false);
+	VK_CHK_WITH_RET(res, "vkMapMemory", false);
 
 	memcpy(tmp, buffer, buffer_size);
 
@@ -1110,7 +1595,7 @@ vk_update_buffer(struct vk_bundle *vk, float *buffer, size_t buffer_size, VkDevi
 	};
 
 	res = vk->vkFlushMappedMemoryRanges(vk->device, 1, &memory_range);
-	vk_check_error("vkFlushMappedMemoryRanges", res, false);
+	VK_CHK_WITH_RET(res, "vkFlushMappedMemoryRanges", false);
 
 	vk->vkUnmapMemory(vk->device, memory);
 
@@ -1123,148 +1608,6 @@ vk_update_buffer(struct vk_bundle *vk, float *buffer, size_t buffer_size, VkDevi
  * Command buffer code.
  *
  */
-
-VkResult
-vk_init_cmd_buffer(struct vk_bundle *vk, VkCommandBuffer *out_cmd_buffer)
-{
-	VkCommandBuffer cmd_buffer;
-	VkResult ret;
-
-	// Allocate the command buffer.
-	VkCommandBufferAllocateInfo cmd_buffer_info = {
-	    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-	    .commandPool = vk->cmd_pool,
-	    .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-	    .commandBufferCount = 1,
-	};
-
-	os_mutex_lock(&vk->cmd_pool_mutex);
-
-	ret = vk->vkAllocateCommandBuffers(vk->device, &cmd_buffer_info, &cmd_buffer);
-
-	os_mutex_unlock(&vk->cmd_pool_mutex);
-
-	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vkAllocateCommandBuffers: %s", vk_result_string(ret));
-		// Nothing to cleanup
-		return ret;
-	}
-
-	// Start the command buffer as well.
-	VkCommandBufferBeginInfo begin_info = {
-	    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-	};
-
-	os_mutex_lock(&vk->cmd_pool_mutex);
-	ret = vk->vkBeginCommandBuffer(cmd_buffer, &begin_info);
-	os_mutex_unlock(&vk->cmd_pool_mutex);
-
-	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vkBeginCommandBuffer: %s", vk_result_string(ret));
-		goto err_buffer;
-	}
-
-	*out_cmd_buffer = cmd_buffer;
-
-	return VK_SUCCESS;
-
-
-err_buffer:
-	vk->vkFreeCommandBuffers(vk->device, vk->cmd_pool, 1, &cmd_buffer);
-
-	return ret;
-}
-
-XRT_CHECK_RESULT VkResult
-vk_submit_cmd_buffer(struct vk_bundle *vk, VkCommandBuffer cmd_buffer)
-{
-	VkResult ret = VK_SUCCESS;
-	VkFence fence;
-	VkFenceCreateInfo fence_info = {
-	    .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-	};
-	VkSubmitInfo submitInfo = {
-	    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-	    .commandBufferCount = 1,
-	    .pCommandBuffers = &cmd_buffer,
-	};
-
-	// Finish the command buffer first.
-	os_mutex_lock(&vk->cmd_pool_mutex);
-	ret = vk->vkEndCommandBuffer(cmd_buffer);
-	os_mutex_unlock(&vk->cmd_pool_mutex);
-	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vkEndCommandBuffer: %s", vk_result_string(ret));
-		goto out;
-	}
-
-	// Create the fence.
-	ret = vk->vkCreateFence(vk->device, &fence_info, NULL, &fence);
-	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vkCreateFence: %s", vk_result_string(ret));
-		goto out;
-	}
-
-	// Do the actual submitting.
-	ret = vk_locked_submit(vk, vk->queue, 1, &submitInfo, fence);
-	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "Error: Could not submit to queue.\n");
-		goto out_fence;
-	}
-
-	// Then wait for the fence.
-	ret = vk->vkWaitForFences(vk->device, 1, &fence, VK_TRUE, 1000000000);
-	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vkWaitForFences: %s", vk_result_string(ret));
-		goto out_fence;
-	}
-
-	// Yes fall through.
-
-out_fence:
-	vk->vkDestroyFence(vk->device, fence, NULL);
-out:
-	os_mutex_lock(&vk->cmd_pool_mutex);
-	vk->vkFreeCommandBuffers(vk->device, vk->cmd_pool, 1, &cmd_buffer);
-	os_mutex_unlock(&vk->cmd_pool_mutex);
-
-	return ret;
-}
-
-XRT_CHECK_RESULT VkResult
-vk_locked_submit(struct vk_bundle *vk, VkQueue queue, uint32_t count, const VkSubmitInfo *infos, VkFence fence)
-{
-	VkResult ret;
-	os_mutex_lock(&vk->queue_mutex);
-	os_mutex_lock(&vk->cmd_pool_mutex);
-	ret = vk->vkQueueSubmit(queue, count, infos, fence);
-	os_mutex_unlock(&vk->cmd_pool_mutex);
-	os_mutex_unlock(&vk->queue_mutex);
-	return ret;
-}
-
-void
-vk_cmd_image_barrier_gpu(struct vk_bundle *vk,
-                         VkCommandBuffer cmd_buffer,
-                         VkImage image,
-                         VkAccessFlags src_access_mask,
-                         VkAccessFlags dst_access_mask,
-                         VkImageLayout old_layout,
-                         VkImageLayout new_layout,
-                         VkImageSubresourceRange subresource_range)
-{
-	os_mutex_lock(&vk->cmd_pool_mutex);
-	vk_cmd_image_barrier_gpu_locked( //
-	    vk,                          // vk_bundle
-	    cmd_buffer,                  // cmd_buffer
-	    image,                       // image
-	    src_access_mask,             // src_access_mask
-	    dst_access_mask,             // dst_access_mask
-	    old_layout,                  // old_image_layout
-	    new_layout,                  // new_image_layout
-	    subresource_range);          // subresource_range
-	os_mutex_unlock(&vk->cmd_pool_mutex);
-}
 
 void
 vk_cmd_image_barrier_locked(struct vk_bundle *vk,

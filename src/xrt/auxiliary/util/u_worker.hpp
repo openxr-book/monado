@@ -51,9 +51,9 @@ public:
 	/*!
 	 * @copydoc u_worker_thread_pool_create
 	 */
-	SharedThreadPool(uint32_t starting_worker_count, uint32_t thread_count)
+	SharedThreadPool(uint32_t starting_worker_count, uint32_t thread_count, const char *prefix)
 	{
-		mPool = u_worker_thread_pool_create(starting_worker_count, thread_count);
+		mPool = u_worker_thread_pool_create(starting_worker_count, thread_count, prefix);
 	}
 
 	~SharedThreadPool()
@@ -74,7 +74,7 @@ public:
 
 	friend SharedThreadGroup;
 
-	// No default contstructor.
+	// No default constructor.
 	SharedThreadPool() = delete;
 	// No move.
 	SharedThreadPool(SharedThreadPool &&) = delete;

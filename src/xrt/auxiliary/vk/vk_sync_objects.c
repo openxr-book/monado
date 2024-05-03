@@ -5,7 +5,7 @@
  * @brief  Vulkan sync primitives code.
  *
  * @author Jakob Bornecrantz <jakob@collabora.com>
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup aux_vk
  */
 
@@ -134,6 +134,9 @@ vk_create_and_submit_fence_native(struct vk_bundle *vk, xrt_graphics_sync_handle
 		return ret;
 	}
 
+	// Won't be returned, but name for debbuging.
+	VK_NAME_FENCE(vk, fence, "VK Create Submit Sync");
+
 
 	/*
 	 * Submit fence.
@@ -237,7 +240,6 @@ create_semaphore_and_native(struct vk_bundle *vk,
 		VK_ERROR(vk, "vkCreateSemaphore: %s", vk_result_string(ret));
 		return ret;
 	}
-
 
 #if defined(XRT_GRAPHICS_SYNC_HANDLE_IS_FD)
 	VkSemaphoreGetFdInfoKHR get_fd_info = {
@@ -349,6 +351,10 @@ vk_create_fence_sync_from_native(struct vk_bundle *vk, xrt_graphics_sync_handle_
 		return ret;
 	}
 
+	// Should be overwritten by caller, but name here for debugging.
+	VK_NAME_FENCE(vk, fence, "VK Import");
+
+
 #ifdef XRT_GRAPHICS_SYNC_HANDLE_IS_FD
 	// This is what is used on Linux Mesa when importing fences from OpenGL.
 	VkExternalFenceHandleTypeFlagBits handleType = VK_EXTERNAL_FENCE_HANDLE_TYPE_SYNC_FD_BIT;
@@ -357,6 +363,7 @@ vk_create_fence_sync_from_native(struct vk_bundle *vk, xrt_graphics_sync_handle_
 	    .sType = VK_STRUCTURE_TYPE_IMPORT_FENCE_FD_INFO_KHR,
 	    .fence = fence,
 	    .handleType = handleType,
+	    .flags = VK_FENCE_IMPORT_TEMPORARY_BIT,
 	    .fd = native,
 	};
 

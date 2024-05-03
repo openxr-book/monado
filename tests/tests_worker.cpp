@@ -3,7 +3,7 @@
 /*!
  * @file
  * @brief Thread pool tests.
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  */
 
 #include <util/u_worker.hpp>
@@ -20,7 +20,7 @@ using namespace xrt::auxiliary::util;
 
 TEST_CASE("TaskCollection")
 {
-	SharedThreadPool pool{2, 3};
+	SharedThreadPool pool{2, 3, "Test"};
 	bool calledA[] = {
 	    false,
 	    false,

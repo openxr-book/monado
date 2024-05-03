@@ -1,0 +1,29 @@
+{#
+# SPDX-License-Identifier: CC0-1.0
+# SPDX-FileCopyrightText: 2018-2023 Collabora, Ltd. and the Monado contributors
+#
+# This file is not used directly to generate its own output: it is included by .gitlab-ci.yml.jinja
+#}
+
+{# Macro to compute job name to extend to use image given a package we want#}
+{% macro base_job_to_use_image_containing(package) %}
+{% for distro in distributions -%} {%- for image in distro.images if package in image.packages %}
+{{ base_job_to_use_image(distro, image) if loop.first }}
+{% endfor -%} {%- endfor %}
+{% endmacro -%}
+
+{# Macro to compute a part of a job name, etc. for a distro and image #}
+{% macro image_name(distro, image) -%}
+{{ distro.name }}
+{%- if "codename" in image %}:{{ image.codename }}{%- endif -%}
+{%- endmacro -%}
+
+{# Macro to compute job name to extend to use image given distro and image objects#}
+{% macro base_job_to_use_image(distro, image) %}.monado.image.{{ image_name(distro, image) }}{% endmacro -%}
+
+
+{# Macro to compute a part of a comment describing a distro and image #}
+{% macro image_name_for_comment(distro, image) %}
+{{ distro.name | capitalize }}
+{%- if "codename" in image %} {{ image.codename }}{%- endif -%}
+{%- endmacro -%}

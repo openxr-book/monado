@@ -1,4 +1,4 @@
-// Copyright 2020, Collabora, Ltd.
+// Copyright 2020-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -22,13 +22,35 @@
 #ifdef XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER
 #include "android/android_ahardwarebuffer_allocator.h"
 #endif
+
+
+/*
+ *
+ * Struct.
+ *
+ */
+
+/*
+ * Small helper to merge the format list the app can provide with any needed
+ * workaround format list, like the one needed on Android for SRGB swapchains.
+ */
+struct format_list_helper
+{
+	// Make it slightly larger so extra formats can always fit.
+	VkFormat formats[XRT_MAX_SWAPCHAIN_CREATE_INFO_FORMAT_LIST_COUNT + 2];
+
+	// Counts the total amount of formats.
+	uint32_t format_count;
+};
+
+
 /*
  *
  * Helper functions.
  *
  */
 
-VkExternalMemoryHandleTypeFlags
+static VkExternalMemoryHandleTypeFlags
 get_image_memory_handle_type(void)
 {
 #if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER)
@@ -40,6 +62,23 @@ get_image_memory_handle_type(void)
 #else
 #error "need port"
 #endif
+}
+
+static void
+add_format_non_dup(struct format_list_helper *flh, VkFormat format)
+{
+	for (uint32_t i = 0; i < flh->format_count; i++) {
+		if (flh->formats[i] == format) {
+			return;
+		}
+	}
+
+	if (flh->format_count >= ARRAY_SIZE(flh->formats)) {
+		U_LOG_E("Too many formats!");
+		return;
+	}
+
+	flh->formats[flh->format_count++] = format;
 }
 
 static VkResult
@@ -58,6 +97,13 @@ create_image(struct vk_bundle *vk, const struct xrt_swapchain_create_info *info,
 		return VK_ERROR_FEATURE_NOT_PRESENT;
 	}
 
+	// Set the image create mutable flag if usage mutable is given.
+	bool has_mutable_usage = (info->bits & XRT_SWAPCHAIN_USAGE_MUTABLE_FORMAT) != 0;
+	if (has_mutable_usage) {
+		image_create_flags |= VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;
+	}
+
+	// Results of operations.
 	VkDeviceMemory device_memory = VK_NULL_HANDLE;
 	VkImage image = VK_NULL_HANDLE;
 	VkResult ret = VK_SUCCESS;
@@ -124,6 +170,15 @@ create_image(struct vk_bundle *vk, const struct xrt_swapchain_create_info *info,
 	};
 	CHAIN(external_memory_image_create_info);
 
+	// Format list helper needed for the below.
+	struct format_list_helper flh = XRT_STRUCT_INIT;
+
+	// If the format list is used add them here.
+	for (uint32_t i = 0; i < info->format_count; i++) {
+		add_format_non_dup(&flh, info->formats[i]);
+	}
+
+
 #if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER)
 	VkExternalFormatANDROID format_android = {
 	    .sType = VK_STRUCTURE_TYPE_EXTERNAL_FORMAT_ANDROID,
@@ -131,18 +186,6 @@ create_image(struct vk_bundle *vk, const struct xrt_swapchain_create_info *info,
 	};
 	CHAIN(format_android);
 
-#ifdef VK_KHR_image_format_list
-	VkImageFormatListCreateInfoKHR image_format_list_create_info = {
-	    .sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_LIST_CREATE_INFO_KHR,
-	    .pNext = NULL,
-	    .viewFormatCount = 2,
-	    .pViewFormats =
-	        (VkFormat[2]){
-	            VK_FORMAT_R8G8B8A8_UNORM,
-	            VK_FORMAT_R8G8B8A8_SRGB,
-	        },
-	};
-#endif
 	// Android can't allocate native sRGB.
 	// Use UNORM and correct gamma later.
 	if (image_format == VK_FORMAT_R8G8B8A8_SRGB) {
@@ -156,11 +199,24 @@ create_image(struct vk_bundle *vk, const struct xrt_swapchain_create_info *info,
 		assert(a_buffer_format_props.format != VK_FORMAT_UNDEFINED); // Make sure there is a Vulkan format.
 		assert(format_android.externalFormat == 0);
 
-#ifdef VK_KHR_image_format_list
-		if (vk->has_KHR_image_format_list) {
-			CHAIN(image_format_list_create_info);
-		}
+		add_format_non_dup(&flh, VK_FORMAT_R8G8B8A8_UNORM);
+		add_format_non_dup(&flh, VK_FORMAT_R8G8B8A8_SRGB);
+	}
 #endif
+
+#ifdef VK_KHR_image_format_list
+	VkImageFormatListCreateInfoKHR image_format_list_create_info = {
+	    .sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_LIST_CREATE_INFO_KHR,
+	    .viewFormatCount = flh.format_count,
+	    .pViewFormats = flh.formats,
+	};
+
+	if (vk->has_KHR_image_format_list && flh.format_count != 0) {
+		CHAIN(image_format_list_create_info);
+	}
+#else
+	if (flh.format_count != 0) {
+		VK_WARN(vk, "VK_KHR_image_format_list not supported");
 	}
 #endif
 
@@ -296,6 +352,7 @@ vk_ic_allocate(struct vk_bundle *vk,
 	VkResult ret = VK_SUCCESS;
 
 	if (image_count > ARRAY_SIZE(out_vkic->images)) {
+		U_LOG_E("To many images for vk_image_collection");
 		return VK_ERROR_OUT_OF_HOST_MEMORY;
 	}
 
@@ -306,6 +363,9 @@ vk_ic_allocate(struct vk_bundle *vk,
 		if (ret != VK_SUCCESS) {
 			break;
 		}
+
+		VK_NAME_IMAGE(vk, out_vkic->images[i].handle, "vk_image_collection image");
+		VK_NAME_DEVICE_MEMORY(vk, out_vkic->images[i].memory, "vk_image_collection device_memory");
 	}
 
 	// Set the fields.
@@ -348,7 +408,9 @@ vk_ic_from_natives(struct vk_bundle *vk,
 	size_t i = 0;
 	for (; i < image_count; i++) {
 		// Ensure that all handles are consumed or none are.
-		xrt_graphics_buffer_handle_t buf = u_graphics_buffer_ref(native_images[i].handle);
+		xrt_graphics_buffer_handle_t buf = native_images[i].is_dxgi_handle
+		                                       ? native_images[i].handle
+		                                       : u_graphics_buffer_ref(native_images[i].handle);
 
 		if (!xrt_graphics_buffer_is_valid(buf)) {
 			U_LOG_E("Could not ref/duplicate graphics buffer handle");
@@ -363,9 +425,15 @@ vk_ic_from_natives(struct vk_bundle *vk,
 		    &out_vkic->images[i].handle,   // out_image
 		    &out_vkic->images[i].memory);  // out_mem
 		if (ret != VK_SUCCESS) {
-			u_graphics_buffer_unref(&buf);
+			if (!native_images[i].is_dxgi_handle) {
+				u_graphics_buffer_unref(&buf);
+			}
 			break;
 		}
+
+		VK_NAME_IMAGE(vk, out_vkic->images[i].handle, "vk_image_collection image");
+		VK_NAME_DEVICE_MEMORY(vk, out_vkic->images[i].memory, "vk_image_collection device_memory");
+
 		native_images[i].handle = buf;
 	}
 	// Set the fields.
@@ -376,7 +444,9 @@ vk_ic_from_natives(struct vk_bundle *vk,
 		// We have consumed all handles now, close all of the copies we
 		// made, all this to make sure we do all or nothing.
 		for (size_t k = 0; k < image_count; k++) {
-			u_graphics_buffer_unref(&native_images[k].handle);
+			if (!native_images[k].is_dxgi_handle) {
+				u_graphics_buffer_unref(&native_images[k].handle);
+			}
 			native_images[k].size = 0;
 		}
 		return ret;

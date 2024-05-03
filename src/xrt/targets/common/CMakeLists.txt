@@ -1,26 +1,21 @@
-# Copyright 2019-2021, Collabora, Ltd.
+# Copyright 2019-2023, Collabora, Ltd.
 # SPDX-License-Identifier: BSL-1.0
 
 ####
 # Lists
 #
 
-add_library(target_lists STATIC
-	target_builder_interface.h
-	target_builder_legacy.c
-	target_lists.c
-	target_lists.h
+add_library(
+	target_lists STATIC target_builder_interface.h target_builder_legacy.c target_lists.c
+			    target_lists.h
 	)
-target_link_libraries(
-	target_lists
-	PRIVATE
-		xrt-interfaces
-		aux_util # TODO Remove this after removing #include "util/u_time.h" from xrt_defines.h
-		drv_includes
-	)
+target_link_libraries(target_lists PRIVATE xrt-interfaces aux_util aux_util_sink drv_includes)
 target_include_directories(target_lists PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
+###
 # Builders
+#
+
 if(XRT_BUILD_DRIVER_REMOTE)
 	target_sources(target_lists PRIVATE target_builder_remote.c)
 endif()
@@ -29,14 +24,55 @@ if(XRT_BUILD_DRIVER_PSVR OR XRT_BUILD_DRIVER_PSMV)
 	target_sources(target_lists PRIVATE target_builder_rgb_tracking.c)
 endif()
 
+if(XRT_BUILD_DRIVER_RIFT_S)
+	target_sources(target_lists PRIVATE target_builder_rift_s.c)
+endif()
+
 if(XRT_BUILD_DRIVER_SURVIVE OR XRT_BUILD_DRIVER_VIVE)
 	target_sources(target_lists PRIVATE target_builder_lighthouse.c)
 endif()
 
+if(XRT_BUILD_DRIVER_STEAMVR_LIGHTHOUSE)
+	target_sources(target_lists PRIVATE target_builder_steamvr.c)
+endif()
+
+if(XRT_BUILD_DRIVER_SIMULATED)
+	target_sources(target_lists PRIVATE target_builder_simulated.c)
+endif()
+
+if(XRT_BUILD_DRIVER_SIMULAVR)
+	target_sources(target_lists PRIVATE target_builder_simulavr.c)
+endif()
+
+if(XRT_BUILD_DRIVER_NS)
+	target_sources(target_lists PRIVATE target_builder_north_star.c)
+	target_link_libraries(target_lists PRIVATE drv_ns)
+endif()
+
+if(XRT_BUILD_DRIVER_WMR)
+	target_sources(target_lists PRIVATE target_builder_wmr.c)
+	target_link_libraries(target_lists PRIVATE drv_wmr)
+endif()
+
+if(XRT_BUILD_DRIVER_QWERTY)
+	target_sources(target_lists PRIVATE target_builder_qwerty.c)
+	target_link_libraries(target_lists PRIVATE drv_qwerty)
+endif()
+
+if(XRT_BUILD_DRIVER_XREAL_AIR)
+	target_sources(target_lists PRIVATE target_builder_xreal_air.c)
+	target_link_libraries(target_lists PRIVATE drv_xreal_air)
+endif()
+
+###
 # Drivers
+#
+
 if(XRT_BUILD_DRIVER_ARDUINO)
 	target_link_libraries(target_lists PRIVATE drv_arduino)
 endif()
+
+target_link_libraries(target_lists PRIVATE drv_cemu)
 
 if(XRT_BUILD_DRIVER_DAYDREAM)
 	target_link_libraries(target_lists PRIVATE drv_daydream)
@@ -62,12 +98,24 @@ if(XRT_BUILD_DRIVER_NS)
 	target_link_libraries(target_lists PRIVATE drv_ns)
 endif()
 
+if(XRT_BUILD_DRIVER_TWRAP)
+	target_link_libraries(target_lists PRIVATE drv_twrap)
+endif()
+
 if(XRT_BUILD_DRIVER_ULV2)
 	target_link_libraries(target_lists PRIVATE drv_ulv2)
 endif()
 
+if(XRT_BUILD_DRIVER_ULV5)
+	target_link_libraries(target_lists PRIVATE drv_ulv5)
+endif()
+
 if(XRT_BUILD_DRIVER_OHMD)
 	target_link_libraries(target_lists PRIVATE drv_ohmd)
+endif()
+
+if(XRT_BUILD_DRIVER_OPENGLOVES)
+	target_link_libraries(target_lists PRIVATE drv_opengloves)
 endif()
 
 if(XRT_BUILD_DRIVER_HANDTRACKING)
@@ -76,6 +124,10 @@ endif()
 
 if(XRT_BUILD_DRIVER_PSMV)
 	target_link_libraries(target_lists PRIVATE drv_psmv)
+endif()
+
+if(XRT_BUILD_DRIVER_PSSENSE)
+	target_link_libraries(target_lists PRIVATE drv_pssense)
 endif()
 
 if(XRT_BUILD_DRIVER_PSVR)
@@ -88,6 +140,14 @@ endif()
 
 if(XRT_BUILD_DRIVER_REMOTE)
 	target_link_libraries(target_lists PRIVATE drv_remote)
+endif()
+
+if(XRT_BUILD_DRIVER_RIFT_S)
+	target_link_libraries(target_lists PRIVATE drv_rift_s)
+endif()
+
+if(XRT_BUILD_DRIVER_ROKID)
+	target_link_libraries(target_lists PRIVATE drv_rokid)
 endif()
 
 if(XRT_HAVE_V4L2)
@@ -104,6 +164,11 @@ endif()
 
 if(XRT_BUILD_DRIVER_SURVIVE)
 	target_link_libraries(target_lists PRIVATE drv_survive)
+endif()
+
+if(XRT_BUILD_DRIVER_STEAMVR_LIGHTHOUSE)
+	target_link_libraries(target_lists PRIVATE drv_steamvr_lh)
+	target_sources(target_lists PRIVATE target_builder_steamvr.c)
 endif()
 
 if(XRT_BUILD_DRIVER_ANDROID)
@@ -124,14 +189,23 @@ if(XRT_BUILD_DRIVER_WMR)
 	target_link_libraries(target_lists PRIVATE drv_wmr)
 endif()
 
+if(XRT_BUILD_DRIVER_XREAL_AIR)
+	target_link_libraries(target_lists PRIVATE drv_xreal_air)
+endif()
+
 if(XRT_BUILD_DRIVER_EUROC)
 	target_link_libraries(target_lists PRIVATE drv_euroc)
+endif()
+
+if(XRT_BUILD_DRIVER_SIMULAVR)
+	target_link_libraries(target_lists PRIVATE drv_svr)
 endif()
 
 ####
 # Instance
 #
-if(XRT_FEATURE_COMPOSITOR_MAIN OR XRT_FEATURE_COMPOSITOR_NULL)
+
+if(XRT_MODULE_COMPOSITOR_MAIN OR XRT_MODULE_COMPOSITOR_NULL)
 	add_library(target_instance STATIC target_instance.c)
 	target_link_libraries(
 		target_instance
@@ -144,11 +218,11 @@ if(XRT_FEATURE_COMPOSITOR_MAIN OR XRT_FEATURE_COMPOSITOR_NULL)
 		)
 	target_include_directories(target_instance PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
-	if(XRT_FEATURE_COMPOSITOR_MAIN)
+	if(XRT_MODULE_COMPOSITOR_MAIN)
 		target_link_libraries(target_instance PRIVATE comp_main)
 	endif()
 
-	if(XRT_FEATURE_COMPOSITOR_NULL)
+	if(XRT_MODULE_COMPOSITOR_NULL)
 		target_link_libraries(target_instance PRIVATE comp_null)
 	endif()
 endif()

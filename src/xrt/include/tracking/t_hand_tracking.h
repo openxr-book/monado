@@ -23,6 +23,9 @@ extern "C" {
  *
  * Currently used by hand-tracking to determine if parts of the hand are not visible to the camera, ie. they are outside
  * of the camera's vignette.
+ *
+ * Feel free to move this out of t_hand_tracking if this becomes more generally applicable.
+ *
  * @ingroup xrt_iface
  */
 enum t_image_boundary_type
@@ -36,6 +39,9 @@ enum t_image_boundary_type
  *
  * Currently used by hand-tracking to determine if parts of the hand are not visible to the camera, ie. they are outside
  * of the camera's vignette.
+ *
+ * Feel free to move this out of t_hand_tracking if this becomes more generally applicable.
+ *
  * @ingroup xrt_iface
  */
 struct t_image_boundary_circle
@@ -49,57 +55,62 @@ struct t_image_boundary_circle
 };
 
 /*!
- * @brief Image boundary for one view.
+ * @brief Logical orientation of the camera image, relative to the user's head.
+ * For example, Rift S uses CAMERA_ORIENTATION_90 for the two front cameras.
  *
- * Currently used by hand-tracking to determine if parts of the hand are not visible to the camera, ie. they are outside
- * of the camera's vignette.
+ * Feel free to move this out of t_hand_tracking if this becomes more generally applicable.
+ *
+ */
+enum t_camera_orientation
+{
+	CAMERA_ORIENTATION_0 = 0,     // Normal "horizontal" orientation
+	CAMERA_ORIENTATION_90 = 90,   // Camera rotated 90° to the right
+	CAMERA_ORIENTATION_180 = 180, // Camera rotated 180° upside down
+	CAMERA_ORIENTATION_270 = 270, // Camera rotated 270° to the left
+};
+
+
+/*!
+ * @brief Information about image boundary and camera orientation for one view.
+ *
+ * Currently used by hand-tracking to determine if parts of the hand are not
+ * visible to the camera, ie. they are outside of the camera's vignette.
+ *
  * @ingroup xrt_iface
  */
-struct t_image_boundary_info_one_view
+struct t_camera_extra_info_one_view
 {
-	enum t_image_boundary_type type;
+	enum t_image_boundary_type boundary_type;
+
 	union {
 		struct t_image_boundary_circle circle;
 	} boundary;
+
+	enum t_camera_orientation camera_orientation;
 };
 
 /*!
- * @brief Image boundaries for all the cameras used in a tracking system.
+ * @brief Information about image boundaries and camera orientations for all the
+ * cameras used in a tracking system.
  *
- * Currently used by hand-tracking to determine if parts of the hand are not visible to the camera, ie. they are outside
- * of the camera's vignette.
+ * Currently used by hand-tracking to determine if parts of the hand are not
+ * visible to the camera, ie. they are outside of the camera's vignette.
+ *
  * @ingroup xrt_iface
  */
-struct t_image_boundary_info
+struct t_camera_extra_info
 {
 	//!@todo Hardcoded to 2 - needs to increase as we support headsets with more cameras.
-	struct t_image_boundary_info_one_view views[2];
+	struct t_camera_extra_info_one_view views[2];
 };
 
 /*!
- * @brief Output coordinate system of the hand-tracking system.
- *
- * In HT_OUTPUT_SPACE_LEFT_CAMERA, the origin is at the left camera.
- * In HT_OUTPUT_SPACE_CENTER_OF_STEREO_CAMERA (which you should not be using, because it assumes that your camera is a
- * parallel stereo camera), the origin is at the "centerline" between the two main cameras.
- * @ingroup xrt_iface
+ * Creation info for the creation of a hand tracker
  */
-enum t_hand_tracking_output_space
+struct t_hand_tracking_create_info
 {
-	HT_OUTPUT_SPACE_LEFT_CAMERA,
-	HT_OUTPUT_SPACE_CENTER_OF_STEREO_CAMERA,
-};
-
-/*!
- * @brief Which hand-tracking algorithm should we use?
- *
- * Never use HT_ALGORITHM_OLD_RGB. The tracking quality is extremely poor.
- * @ingroup xrt_iface
- */
-enum t_hand_tracking_algorithm
-{
-	HT_ALGORITHM_MERCURY,
-	HT_ALGORITHM_OLD_RGB
+	struct t_camera_extra_info cams_info;   //!< Extra camera info
+	struct xrt_hand_masks_sink *masks_sink; //!< Optional sink to stream hand bounding boxes to
 };
 
 /*!
@@ -171,8 +182,6 @@ struct t_hand_tracking_async
 	                 uint64_t desired_timestamp_ns,
 	                 struct xrt_hand_joint_set *out_value,
 	                 uint64_t *out_timestamp_ns);
-
-	void (*destroy)(struct t_hand_tracking_async *ht_async);
 };
 
 struct t_hand_tracking_async *

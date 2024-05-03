@@ -1,4 +1,4 @@
-// Copyright 2019-2021, Collabora, Ltd.
+// Copyright 2019-2022, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -35,6 +35,7 @@ client_gl_memobj_swapchain(struct xrt_swapchain *xsc)
 	return (struct client_gl_memobj_swapchain *)xsc;
 }
 
+
 /*
  *
  * Swapchain functions.
@@ -49,7 +50,7 @@ client_gl_memobj_swapchain_destroy(struct xrt_swapchain *xsc)
 	uint32_t image_count = sc->base.base.base.image_count;
 
 	struct client_gl_compositor *c = sc->base.gl_compositor;
-	enum xrt_result xret = c->context_begin(&c->base.base);
+	enum xrt_result xret = client_gl_compositor_context_begin(&c->base.base, CLIENT_GL_CONTEXT_REASON_OTHER);
 
 	if (image_count > 0) {
 		if (xret == XRT_SUCCESS) {
@@ -63,7 +64,7 @@ client_gl_memobj_swapchain_destroy(struct xrt_swapchain *xsc)
 	}
 
 	if (xret == XRT_SUCCESS) {
-		c->context_end(&c->base.base);
+		client_gl_compositor_context_end(&c->base.base, CLIENT_GL_CONTEXT_REASON_OTHER);
 	}
 
 	// Drop our reference, does NULL checking.
@@ -72,16 +73,33 @@ client_gl_memobj_swapchain_destroy(struct xrt_swapchain *xsc)
 	free(sc);
 }
 
+static bool
+client_gl_memobj_swapchain_import(GLuint memory, size_t size, xrt_graphics_buffer_handle_t handle)
+{
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
+	glImportMemoryFdEXT(memory, size, GL_HANDLE_TYPE_OPAQUE_FD_EXT, handle);
+	return true;
+#elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_WIN32_HANDLE)
+	glImportMemoryWin32HandleEXT(memory, size, GL_HANDLE_TYPE_OPAQUE_WIN32_EXT, handle);
+	return true;
+#else
+	(void)memory;
+	(void)size;
+	(void)handle;
+	return false;
+#endif
+}
+
 struct xrt_swapchain *
 client_gl_memobj_swapchain_create(struct xrt_compositor *xc,
                                   const struct xrt_swapchain_create_info *info,
                                   struct xrt_swapchain_native *xscn,
                                   struct client_gl_swapchain **out_cglsc)
 {
-#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
 	struct client_gl_compositor *c = client_gl_compositor(xc);
 	(void)c;
 
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD) || defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_WIN32_HANDLE)
 	if (xscn == NULL) {
 		return NULL;
 	}
@@ -110,8 +128,10 @@ client_gl_memobj_swapchain_create(struct xrt_compositor *xc,
 
 		GLint dedicated = xscn->images[i].use_dedicated_allocation ? GL_TRUE : GL_FALSE;
 		glMemoryObjectParameterivEXT(sc->memory[i], GL_DEDICATED_MEMORY_OBJECT_EXT, &dedicated);
-		glImportMemoryFdEXT(sc->memory[i], xscn->images[i].size, GL_HANDLE_TYPE_OPAQUE_FD_EXT,
-		                    xscn->images[i].handle);
+
+		if (!client_gl_memobj_swapchain_import(sc->memory[i], xscn->images[i].size, xscn->images[i].handle)) {
+			continue;
+		}
 
 		// We have consumed this now, make sure it's not freed again.
 		xscn->images[i].handle = XRT_GRAPHICS_BUFFER_HANDLE_INVALID;

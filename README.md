@@ -13,7 +13,7 @@ This must stay in sync with the last section!
 > * Maintained at <https://gitlab.freedesktop.org/monado/monado>
 > * Latest API documentation: <https://monado.pages.freedesktop.org/monado>
 > * Continuously-updated changelog of the default branch:
->   <https://monado.pages.freedesktop.org/monado/md__c_h_a_n_g_e_l_o_g.html>
+>   <https://monado.pages.freedesktop.org/monado/_c_h_a_n_g_e_l_o_g.html>
 
 Monado is an open source XR runtime delivering immersive experiences such as VR
 and AR on mobile, PC/desktop, and any other device
@@ -42,10 +42,10 @@ Dependencies include:
 * Python 3.6 or newer
 * Vulkan headers and loader - Fedora package `vulkan-loader-devel`
 * OpenGL headers
-* Eigen3 - Debian/Ubuntu package 'libeigen3-dev'
+* Eigen3 - Debian/Ubuntu package `libeigen3-dev`
 * glslangValidator - Debian/Ubuntu package `glslang-tools`, Fedora package `glslang`.
 * libusb
-* libudev - Fedora package `systemd-devel`
+* libudev - Debian/Ubuntu package `libudev-dev`, Fedora package `systemd-devel`
 * Video 4 Linux - Debian/Ubuntu package `libv4l-dev`.
 
 Optional (but recommended) dependencies:
@@ -55,14 +55,15 @@ Optional (but recommended) dependencies:
 
 Truly optional dependencies, useful for some drivers, app support, etc.:
 
-* Doxygen
+* Doxygen - Debian/Ubuntu package ´doxygen´ and ´graphviz´
 * Wayland development packages
 * Xlib development packages
-* libhidapi
+* libhidapi - Debian/Ubuntu package ´libhidapi-dev´
 * OpenCV
-* libuvc
-* ffmpeg
+* libuvc - Debian/Ubuntu package ´libuvc-dev´
 * libjpeg
+* libbluetooth - Debian/Ubuntu package ´libbluetooth-dev´
+* libsdl - Debian/Ubuntu package ´libsdl2-dev´
 
 Experimental Windows support requires the Vulkan SDK and also needs or works
 best with the following vcpkg packages installed:
@@ -71,13 +72,17 @@ best with the following vcpkg packages installed:
 
 If you have a recent [vcpkg](https://vcpkg.io) installed and use the appropriate
 CMake toolchain file, the vcpkg manifest in the Monado repository will instruct
-vcpkg to locally install the dependencies automatically.
+vcpkg to locally install the dependencies automatically. The Vulkan SDK
+installer should set the `VULKAN_SDK` Windows environment variable to point
+at the installation location (for example, `C:/VulkanSDK/1.3.250.1`), though
+make sure you open a new terminal (or open the CMake GUI) *after* doing that
+install to make sure it is available.
 
-Tested distributions that are fully compatible,
-on Intel (Vulkan only) and AMD graphics (Vulkan and OpenGL):
+Monado has been tested on these distributions, but is expected to work on almost
+any modern distribution.
 
-* Ubuntu 18.10 (18.04 does not work)
-* Debian 10 `buster`
+* Ubuntu 22.04, 20.04, (18.04 may not be fully supported)
+* Debian 11 `bookworm`, 10 `buster`
   * Up-to-date package lists can be found in our CI config file,
     `.gitlab-ci.yml`
 * Archlinux
@@ -242,11 +247,12 @@ The CI "style" job currently runs on Debian Bullseye, so it has clang-format-11.
 ## Contributing, Code of Conduct
 
 See `CONTRIBUTING.md` for details of contribution guidelines. GitLab Issues and
-Merge Requests are the preferred wait to discuss problems, suggest enhancements,
+Merge Requests are the preferred way to discuss problems, suggest enhancements,
 or submit changes for review. **In case of a security issue**, you should choose
 the "confidential" option when using the GitLab issues page. For highest
-security, you can send encrypted email (using GPG/OpenPGP) to Ryan Pavlik, with
-the address below and the associated key on <https://keys.openpgp.org>.
+security, you can send encrypted email (using GPG/OpenPGP) to Rylie Pavlik at
+<rylie.pavlik@collabora.com> and using the associated key from
+<https://keys.openpgp.org/vks/v1/by-fingerprint/45207B2B1E53E1F2755FF63CC5A2D593A61DBC9D>.
 
 Please note that this project is released with a Contributor Code of Conduct.
 By participating in this project you agree to abide by its terms.
@@ -260,7 +266,7 @@ reported by contacting:
 
 * First-line project contacts:
   * Jakob Bornecrantz <jakob@collabora.com>
-  * Ryan Pavlik <ryan.pavlik@collabora.com>
+  * Rylie Pavlik <rylie.pavlik@collabora.com>
 * freedesktop.org contacts: see most recent list at <https://www.freedesktop.org/wiki/CodeOfConduct/>
 
 Code of Conduct section excerpt adapted from the

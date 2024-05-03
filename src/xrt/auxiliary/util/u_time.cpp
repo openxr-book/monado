@@ -3,7 +3,7 @@
 /*!
  * @file
  * @brief  Implementation of a steady, convertible clock.
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup aux_util
  */
 
@@ -39,13 +39,13 @@ struct time_state
  */
 
 extern "C" struct time_state *
-time_state_create()
+time_state_create(uint64_t offset)
 {
 	time_state *state = new (std::nothrow) time_state;
 	if (!state) {
 		return state;
 	}
-	state->offset = os_monotonic_get_ns();
+	state->offset = offset;
 	return state;
 }
 

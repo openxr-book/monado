@@ -1,4 +1,4 @@
-// Copyright 2019-2022, Collabora, Ltd.
+// Copyright 2019-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -50,17 +50,52 @@ struct vk_bundle
 	enum u_logging_level log_level;
 
 	VkInstance instance;
+	uint32_t version;
 	VkPhysicalDevice physical_device;
 	int physical_device_index;
 	VkDevice device;
 	uint32_t queue_family_index;
 	uint32_t queue_index;
 	VkQueue queue;
+#if defined(VK_KHR_video_encode_queue)
+	uint32_t encode_queue_family_index;
+	uint32_t encode_queue_index;
+	VkQueue encode_queue;
+#endif
 
 	struct os_mutex queue_mutex;
 
 	struct
 	{
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_WIN32_HANDLE)
+		bool color_image_import_opaque_win32;
+		bool color_image_export_opaque_win32;
+		bool depth_image_import_opaque_win32;
+		bool depth_image_export_opaque_win32;
+
+		bool color_image_import_d3d11;
+		bool color_image_export_d3d11;
+		bool depth_image_import_d3d11;
+		bool depth_image_export_d3d11;
+
+#elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
+		bool color_image_import_opaque_fd;
+		bool color_image_export_opaque_fd;
+		bool depth_image_import_opaque_fd;
+		bool depth_image_export_opaque_fd;
+
+#elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER)
+		bool color_image_import_opaque_fd;
+		bool color_image_export_opaque_fd;
+		bool depth_image_import_opaque_fd;
+		bool depth_image_export_opaque_fd;
+
+		bool color_image_import_ahardwarebuffer;
+		bool color_image_export_ahardwarebuffer;
+		bool depth_image_import_ahardwarebuffer;
+		bool depth_image_export_ahardwarebuffer;
+#endif
+
 #if defined(XRT_GRAPHICS_SYNC_HANDLE_IS_FD)
 		bool fence_sync_fd;
 		bool fence_opaque_fd;
@@ -85,16 +120,27 @@ struct vk_bundle
 
 	// beginning of GENERATED instance extension code - do not modify - used by scripts
 	bool has_EXT_display_surface_counter;
+	bool has_EXT_swapchain_colorspace;
+	bool has_EXT_debug_utils;
 	// end of GENERATED instance extension code - do not modify - used by scripts
 
 	// beginning of GENERATED device extension code - do not modify - used by scripts
 	bool has_KHR_external_fence_fd;
 	bool has_KHR_external_semaphore_fd;
+	bool has_KHR_format_feature_flags2;
+	bool has_KHR_global_priority;
 	bool has_KHR_image_format_list;
+	bool has_KHR_maintenance1;
+	bool has_KHR_maintenance2;
+	bool has_KHR_maintenance3;
+	bool has_KHR_maintenance4;
+	bool has_KHR_synchronization2;
 	bool has_KHR_timeline_semaphore;
 	bool has_EXT_calibrated_timestamps;
 	bool has_EXT_display_control;
+	bool has_EXT_external_memory_dma_buf;
 	bool has_EXT_global_priority;
+	bool has_EXT_image_drm_format_modifier;
 	bool has_EXT_robustness2;
 	bool has_GOOGLE_display_timing;
 	// end of GENERATED device extension code - do not modify - used by scripts
@@ -112,6 +158,15 @@ struct vk_bundle
 
 		//! Were timeline semaphore requested, available, and enabled?
 		bool timeline_semaphore;
+
+		//! Per stage limit on sampled images (includes combined).
+		uint32_t max_per_stage_descriptor_sampled_images;
+
+		//! Per stage limit on storage images.
+		uint32_t max_per_stage_descriptor_storage_images;
+
+		//! Was synchronization2 requested, available, and enabled?
+		bool synchronization_2;
 	} features;
 
 	//! Is the GPU a tegra device.
@@ -121,10 +176,6 @@ struct vk_bundle
 	VkDebugReportCallbackEXT debug_report_cb;
 
 	VkPhysicalDeviceMemoryProperties device_memory_props;
-
-	VkCommandPool cmd_pool;
-
-	struct os_mutex cmd_pool_mutex;
 
 	// Loader functions
 	PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr;
@@ -151,6 +202,7 @@ struct vk_bundle
 	PFN_vkGetPhysicalDeviceSurfacePresentModesKHR vkGetPhysicalDeviceSurfacePresentModesKHR;
 	PFN_vkGetPhysicalDeviceSurfaceSupportKHR vkGetPhysicalDeviceSurfaceSupportKHR;
 	PFN_vkGetPhysicalDeviceFormatProperties vkGetPhysicalDeviceFormatProperties;
+	PFN_vkGetPhysicalDeviceFormatProperties2KHR vkGetPhysicalDeviceFormatProperties2;
 	PFN_vkGetPhysicalDeviceImageFormatProperties2 vkGetPhysicalDeviceImageFormatProperties2;
 	PFN_vkGetPhysicalDeviceExternalBufferPropertiesKHR vkGetPhysicalDeviceExternalBufferPropertiesKHR;
 	PFN_vkGetPhysicalDeviceExternalFencePropertiesKHR vkGetPhysicalDeviceExternalFencePropertiesKHR;
@@ -207,7 +259,14 @@ struct vk_bundle
 
 #if defined(VK_EXT_display_surface_counter)
 	PFN_vkGetPhysicalDeviceSurfaceCapabilities2EXT vkGetPhysicalDeviceSurfaceCapabilities2EXT;
+
 #endif // defined(VK_EXT_display_surface_counter)
+
+#if defined(VK_EXT_debug_utils)
+	PFN_vkCreateDebugUtilsMessengerEXT vkCreateDebugUtilsMessengerEXT;
+	PFN_vkSubmitDebugUtilsMessageEXT vkSubmitDebugUtilsMessageEXT;
+	PFN_vkDestroyDebugUtilsMessengerEXT vkDestroyDebugUtilsMessengerEXT;
+#endif // defined(VK_EXT_debug_utils)
 
 	// end of GENERATED instance loader code - do not modify - used by scripts
 
@@ -275,6 +334,7 @@ struct vk_bundle
 	PFN_vkCmdCopyImage vkCmdCopyImage;
 	PFN_vkCmdCopyImageToBuffer vkCmdCopyImageToBuffer;
 	PFN_vkCmdBlitImage vkCmdBlitImage;
+	PFN_vkCmdPushConstants vkCmdPushConstants;
 	PFN_vkEndCommandBuffer vkEndCommandBuffer;
 	PFN_vkFreeCommandBuffers vkFreeCommandBuffers;
 
@@ -365,7 +425,24 @@ struct vk_bundle
 	PFN_vkGetSwapchainCounterEXT vkGetSwapchainCounterEXT;
 	PFN_vkRegisterDeviceEventEXT vkRegisterDeviceEventEXT;
 	PFN_vkRegisterDisplayEventEXT vkRegisterDisplayEventEXT;
+
 #endif // defined(VK_EXT_display_control)
+
+#if defined(VK_EXT_image_drm_format_modifier)
+	PFN_vkGetImageDrmFormatModifierPropertiesEXT vkGetImageDrmFormatModifierPropertiesEXT;
+
+#endif // defined(VK_EXT_image_drm_format_modifier)
+
+#if defined(VK_EXT_debug_utils)
+	PFN_vkCmdBeginDebugUtilsLabelEXT vkCmdBeginDebugUtilsLabelEXT;
+	PFN_vkCmdEndDebugUtilsLabelEXT vkCmdEndDebugUtilsLabelEXT;
+	PFN_vkCmdInsertDebugUtilsLabelEXT vkCmdInsertDebugUtilsLabelEXT;
+	PFN_vkQueueBeginDebugUtilsLabelEXT vkQueueBeginDebugUtilsLabelEXT;
+	PFN_vkQueueEndDebugUtilsLabelEXT vkQueueEndDebugUtilsLabelEXT;
+	PFN_vkQueueInsertDebugUtilsLabelEXT vkQueueInsertDebugUtilsLabelEXT;
+	PFN_vkSetDebugUtilsObjectNameEXT vkSetDebugUtilsObjectNameEXT;
+	PFN_vkSetDebugUtilsObjectTagEXT vkSetDebugUtilsObjectTagEXT;
+#endif // defined(VK_EXT_debug_utils)
 
 	// end of GENERATED device loader code - do not modify - used by scripts
 };
@@ -381,6 +458,88 @@ struct vk_buffer
 
 /*
  *
+ * Helper defines.
+ *
+ */
+
+/*!
+ * This define will error if `RET` is not `VK_SUCCESS`, printing out that the
+ * @p FUNC_STR string has failed, then returns @p RET. The implicit argument
+ * @p vk will be used for the @ref vk_print_result call.
+ *
+ * Use this macro when your function returns a `VkResult`.
+ *
+ * @param RET      The @p VkResult to check.
+ * @param FUNC_STR String literal with the function name, used for logging.
+ *
+ * @ingroup aux_vk
+ *
+ * @see VK_CHK_WITH_RET
+ * @see VK_CHK_WITH_GOTO
+ */
+#define VK_CHK_AND_RET(RET, FUNC_STR)                                                                                  \
+	do {                                                                                                           \
+		VkResult _ret = RET;                                                                                   \
+		if (_ret != VK_SUCCESS) {                                                                              \
+			vk_print_result(vk, __FILE__, __LINE__, __func__, _ret, FUNC_STR);                             \
+			return _ret;                                                                                   \
+		}                                                                                                      \
+	} while (false)
+
+/*!
+ * This define will error if @p RET is not @p VK_SUCCESS, printing out that the
+ * @p FUNC_STR string has failed, then returns @p TO_RET. The implicit argument
+ * @p vk will be used for the @ref vk_print_result call.
+ *
+ * Use this macro when your function doesn't return a `VkResult`.
+ *
+ * @param RET      The @p VkResult to check.
+ * @param FUNC_STR String literal with the function name, used for logging.
+ * @param TO_RET   Value to return, upon error
+ *
+ * @ingroup aux_vk
+ *
+ * @see VK_CHK_AND_RET
+ * @see VK_CHK_WITH_GOTO
+ */
+#define VK_CHK_WITH_RET(RET, FUNC_STR, TO_RET)                                                                         \
+	do {                                                                                                           \
+		VkResult _ret = RET;                                                                                   \
+		if (_ret != VK_SUCCESS) {                                                                              \
+			vk_print_result(vk, __FILE__, __LINE__, __func__, _ret, FUNC_STR);                             \
+			return TO_RET;                                                                                 \
+		}                                                                                                      \
+	} while (false)
+
+/*!
+ * This define will error if @p RET is not @p VK_SUCCESS, printing out that the
+ * @p FUNC_STR string has failed, then goto @p GOTO. The implicit argument @p vk
+ * will be used for the @ref vk_print_result call.
+ *
+ * Use this macro when your function needs to `goto` some cleanup code and
+ * return from there.
+ *
+ * @param RET      The @p VkResult to check.
+ * @param FUNC_STR String literal with the function name, used for logging.
+ * @param GOTO     Label to jump to, upon error
+ *
+ * @ingroup aux_vk
+ *
+ * @see VK_CHK_AND_RET
+ * @see VK_CHK_WITH_RET
+ */
+#define VK_CHK_WITH_GOTO(RET, FUNC_STR, GOTO)                                                                          \
+	do {                                                                                                           \
+		VkResult _ret = RET;                                                                                   \
+		if (_ret != VK_SUCCESS) {                                                                              \
+			vk_print_result(vk, __FILE__, __LINE__, __func__, _ret, FUNC_STR);                             \
+			goto GOTO;                                                                                     \
+		}                                                                                                      \
+	} while (false)
+
+
+/*
+ *
  * String helper functions.
  *
  */
@@ -389,22 +548,76 @@ XRT_CHECK_RESULT const char *
 vk_result_string(VkResult code);
 
 XRT_CHECK_RESULT const char *
+vk_object_type_string(VkObjectType type);
+
+XRT_CHECK_RESULT const char *
+vk_physical_device_type_string(VkPhysicalDeviceType device_type);
+
+XRT_CHECK_RESULT const char *
 vk_format_string(VkFormat code);
+
+XRT_CHECK_RESULT const char *
+vk_sharing_mode_string(VkSharingMode code);
 
 XRT_CHECK_RESULT const char *
 vk_present_mode_string(VkPresentModeKHR code);
 
 XRT_CHECK_RESULT const char *
-vk_power_state_string(VkDisplayPowerStateEXT code);
-
-XRT_CHECK_RESULT const char *
 vk_color_space_string(VkColorSpaceKHR code);
 
 XRT_CHECK_RESULT const char *
-vk_format_feature_string(VkFormatFeatureFlagBits code);
+vk_power_state_string(VkDisplayPowerStateEXT code);
 
+
+/*
+ *
+ * Flag bits string functions.
+ *
+ */
+
+/*!
+ * Returns the format feature flag if one valid bit is set,
+ * if multiple bits are set, will return 'MULTIPLE BIT SET'.
+ */
 XRT_CHECK_RESULT const char *
-xrt_swapchain_usage_string(enum xrt_swapchain_usage_bits code);
+vk_format_feature_flag_string(VkFormatFeatureFlagBits bits, bool null_on_unknown);
+
+/*!
+ * Returns the image usage flag if one valid bit is set,
+ * if multiple bits are set, will return 'MULTIPLE BIT SET'.
+ */
+XRT_CHECK_RESULT const char *
+vk_image_usage_flag_string(VkImageUsageFlagBits bits, bool null_on_unknown);
+
+/*!
+ * Returns the composite alpha flag if one valid bit is set,
+ * if multiple bits are set, will return 'MULTIPLE BIT SET'.
+ */
+XRT_CHECK_RESULT const char *
+vk_composite_alpha_flag_string(VkCompositeAlphaFlagBitsKHR bits, bool null_on_unknown);
+
+/*!
+ * Returns the surface transform flag if one valid bit is set,
+ * if multiple bits are set, will return 'MULTIPLE BIT SET'.
+ */
+XRT_CHECK_RESULT const char *
+vk_surface_transform_flag_string(VkSurfaceTransformFlagBitsKHR bits, bool null_on_unknown);
+
+#ifdef VK_KHR_display
+/*!
+ * Returns the display plane alpha flag if one valid bit is set,
+ * if multiple bits are set, will return 'MULTIPLE BIT SET'.
+ */
+XRT_CHECK_RESULT const char *
+vk_display_plane_alpha_flag_string(VkDisplayPlaneAlphaFlagBitsKHR bits, bool null_on_unknown);
+#endif
+
+/*!
+ * Returns xrt swapchain_usage flag if one valid bit is set,
+ * if multiple bits are set, will return 'MULTIPLE BIT SET'.
+ */
+XRT_CHECK_RESULT const char *
+xrt_swapchain_usage_flag_string(enum xrt_swapchain_usage_bits bits, bool null_on_unknown);
 
 
 /*
@@ -419,59 +632,95 @@ xrt_swapchain_usage_string(enum xrt_swapchain_usage_bits code);
 #define VK_WARN(d, ...) U_LOG_IFL_W(d->log_level, __VA_ARGS__)
 #define VK_ERROR(d, ...) U_LOG_IFL_E(d->log_level, __VA_ARGS__)
 
-/*!
- * @brief Check a Vulkan VkResult, writing an error to the log and returning true if not VK_SUCCESS
+
+/*
  *
- * @param fun a string literal with the name of the Vulkan function, for logging purposes.
- * @param res a VkResult from that function.
- * @param file a string literal with the source code filename, such as from __FILE__
- * @param line a source code line number, such as from __LINE__
+ * Debug helper functions, in the vk_debug.c file.
  *
- * @see vk_check_error, vk_check_error_with_free which wrap this for easier usage.
- *
- * @ingroup aux_vk
  */
-XRT_CHECK_RESULT bool
-vk_has_error(VkResult res, const char *fun, const char *file, int line);
+
+#if defined(VK_EXT_debug_utils) || defined(XRT_DOXYGEN)
 
 /*!
- * @def vk_check_error
- * @brief Perform checking of a Vulkan result, returning in case it is not VK_SUCCESS.
- *
- * @param fun A string literal with the name of the Vulkan function, for logging purposes.
- * @param res a VkResult from that function.
- * @param ret value to return, if any, upon error
- *
- * @see vk_has_error which is wrapped by this macro
+ * Uses VK_EXT_debug_utils to set a name for an object, for easier debugging.
  *
  * @ingroup aux_vk
  */
-#define vk_check_error(fun, res, ret)                                                                                  \
-	do {                                                                                                           \
-		if (vk_has_error(res, fun, __FILE__, __LINE__))                                                        \
-			return ret;                                                                                    \
-	} while (0)
+void
+vk_name_object(struct vk_bundle *vk, VkObjectType type, uint64_t object, const char *name);
 
 /*!
- * @def vk_check_error_with_free
- * @brief Perform checking of a Vulkan result, freeing an allocation and returning in case it is not VK_SUCCESS.
- *
- * @param fun A string literal with the name of the Vulkan function, for logging purposes.
- * @param res a VkResult from that function.
- * @param ret value to return, if any, upon error
- * @param to_free expression to pass to `free()` upon error
- *
- * @see vk_has_error which is wrapped by this macro
+ * Small helper for @ref vk_name_object that makes use of pre-process to avoid
+ * writing out long type names.
  *
  * @ingroup aux_vk
  */
-#define vk_check_error_with_free(fun, res, ret, to_free)                                                               \
+#define VK_NAME_OBJ(VK, TYPE, SUFFIX, OBJ, NAME)                                                                       \
 	do {                                                                                                           \
-		if (vk_has_error(res, fun, __FILE__, __LINE__)) {                                                      \
-			free(to_free);                                                                                 \
-			return ret;                                                                                    \
+		if ((VK)->has_EXT_debug_utils) {                                                                       \
+			TYPE _thing = OBJ;                                                                             \
+			vk_name_object(VK, VK_OBJECT_TYPE_##SUFFIX, (uint64_t)_thing, NAME);                           \
 		}                                                                                                      \
-	} while (0)
+	} while (false)
+
+
+#else
+
+#define VK_NAME_OBJ(VK, TYPE, SUFFIX, OBJ, NAME) VK_NAME_OBJ_DISABLED(VK, TYPE, OBJ)
+
+#endif
+
+/*!
+ * Some combinations of Vulkan implementation and types are broken, we still
+ * want type safety so we have this define. Examples of broken combinations:
+ *
+ * 1. Both Mesa and the Vulkan loader didn't support setting names on the
+ *    VkInstance, loader got support in 1.3.261 and Mesa hasn't as of writing.
+ * 2. For Mesa drivers we can not name VkSurfaceKHR objects on some systems as
+ *    it causes memory corruption, asserts, crashes or functions failing. This
+ *    is as of writing broken on the 23.2.1 release, fixed in main and scheduled
+ *    for the 23.2.2 release.
+ * 3. Mesa RADV leaks the name strings for VkDescriptorSet objects for pools
+ *    that we use the reset function.
+ *
+ * @ingroup aux_vk
+ */
+#define VK_NAME_OBJ_DISABLED(VK, TYPE, OBJ)                                                                            \
+	do {                                                                                                           \
+		XRT_MAYBE_UNUSED TYPE _thing = OBJ;                                                                    \
+	} while (false)
+
+
+// clang-format off
+#define VK_NAME_INSTANCE(VK, OBJ, NAME) VK_NAME_OBJ_DISABLED(VK, VkInstance, OBJ)
+#define VK_NAME_PHYSICAL_DEVICE(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkPhysicalDevice, PHYSICAL_DEVICE, OBJ, NAME)
+#define VK_NAME_DEVICE(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkDevice, DEVICE, OBJ, NAME)
+#define VK_NAME_QUEUE(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkQueue, QUEUE, OBJ, NAME)
+#define VK_NAME_SEMAPHORE(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkSemaphore, SEMAPHORE, OBJ, NAME)
+#define VK_NAME_COMMAND_BUFFER(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkCommandBuffer, COMMAND_BUFFER, OBJ, NAME)
+#define VK_NAME_FENCE(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkFence, FENCE, OBJ, NAME)
+#define VK_NAME_DEVICE_MEMORY(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkDeviceMemory, DEVICE_MEMORY, OBJ, NAME)
+#define VK_NAME_BUFFER(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkBuffer, BUFFER, OBJ, NAME)
+#define VK_NAME_IMAGE(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkImage, IMAGE, OBJ, NAME)
+#define VK_NAME_EVENT(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkEvent, EVENT, OBJ, NAME)
+#define VK_NAME_QUERY_POOL(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkQueryPool, QUERY_POOL, OBJ, NAME)
+#define VK_NAME_BUFFER_VIEW(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkBufferView, BUFFER_VIEW, OBJ, NAME)
+#define VK_NAME_IMAGE_VIEW(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkImageView, IMAGE_VIEW, OBJ, NAME)
+#define VK_NAME_SHADER_MODULE(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkShaderModule, SHADER_MODULE, OBJ, NAME)
+#define VK_NAME_PIPELINE_CACHE(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkPipelineCache, PIPELINE_CACHE, OBJ, NAME)
+#define VK_NAME_PIPELINE_LAYOUT(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkPipelineLayout, PIPELINE_LAYOUT, OBJ, NAME)
+#define VK_NAME_RENDER_PASS(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkRenderPass, RENDER_PASS, OBJ, NAME)
+#define VK_NAME_PIPELINE(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkPipeline, PIPELINE, OBJ, NAME)
+#define VK_NAME_DESCRIPTOR_SET_LAYOUT(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkDescriptorSetLayout, DESCRIPTOR_SET_LAYOUT, OBJ, NAME)
+#define VK_NAME_SAMPLER(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkSampler, SAMPLER, OBJ, NAME)
+#define VK_NAME_DESCRIPTOR_POOL(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkDescriptorPool, DESCRIPTOR_POOL, OBJ, NAME)
+#define VK_NAME_DESCRIPTOR_SET(VK, OBJ, NAME) VK_NAME_OBJ_DISABLED(VK, VkDescriptorSet, OBJ)
+#define VK_NAME_FRAMEBUFFER(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkFramebuffer, FRAMEBUFFER, OBJ, NAME)
+#define VK_NAME_COMMAND_POOL(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkCommandPool, COMMAND_POOL, OBJ, NAME)
+
+#define VK_NAME_SURFACE(VK, OBJ, NAME) VK_NAME_OBJ_DISABLED(VK, VkSurfaceKHR, OBJ)
+#define VK_NAME_SWAPCHAIN(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkSwapchainKHR, SWAPCHAIN_KHR, OBJ, NAME)
+// clang-format on
 
 
 /*
@@ -479,6 +728,16 @@ vk_has_error(VkResult res, const char *fun, const char *file, int line);
  * Printing helpers, in the vk_print.c file.
  *
  */
+
+/*!
+ * Print the result of a function, info level if ret == `VK_SUCCESS` and error
+ * level otherwise. Also prints file and line.
+ *
+ * @ingroup aux_vk
+ */
+void
+vk_print_result(
+    struct vk_bundle *vk, const char *file, int line, const char *calling_func, VkResult ret, const char *called_func);
 
 /*!
  * Print device information to the logger at the given logging level,
@@ -489,7 +748,7 @@ vk_has_error(VkResult res, const char *fun, const char *file, int line);
 void
 vk_print_device_info(struct vk_bundle *vk,
                      enum u_logging_level log_level,
-                     VkPhysicalDeviceProperties *pdp,
+                     const VkPhysicalDeviceProperties *pdp,
                      uint32_t gpu_index,
                      const char *title);
 
@@ -515,6 +774,140 @@ vk_print_features_info(struct vk_bundle *vk, enum u_logging_level log_level);
  */
 void
 vk_print_external_handles_info(struct vk_bundle *vk, enum u_logging_level log_level);
+
+/*!
+ * Print a @p VkSwapchainCreateInfoKHR, used to log during creation.
+ */
+void
+vk_print_swapchain_create_info(struct vk_bundle *vk, VkSwapchainCreateInfoKHR *i, enum u_logging_level log_level);
+
+#ifdef VK_KHR_display
+/*!
+ * Print a @p VkDisplaySurfaceCreateInfoKHR, used to log during creation.
+ */
+void
+vk_print_display_surface_create_info(struct vk_bundle *vk,
+                                     VkDisplaySurfaceCreateInfoKHR *i,
+                                     enum u_logging_level log_level);
+#endif
+
+
+/*
+ *
+ * Enumeration helpers, in the vk_enumerate.c file.
+ *
+ */
+
+/*!
+ * Return the @p VkExtensionProperties of the given @p layer_name, NULL means
+ * the "base" driver instance.
+ *
+ * @ingroup aux_vk
+ */
+VkResult
+vk_enumerate_instance_extensions_properties(struct vk_bundle *vk,
+                                            const char *layer_name,
+                                            uint32_t *out_prop_count,
+                                            VkExtensionProperties **out_props);
+
+/*!
+ * Enumerate the physical devices of the @p VkInstance that has been opened on
+ * the given @ref vk_bundle.
+ *
+ * @ingroup aux_vk
+ */
+VkResult
+vk_enumerate_physical_devices(struct vk_bundle *vk,
+                              uint32_t *out_physical_device_count,
+                              VkPhysicalDevice **out_physical_devices);
+
+/*!
+ * Enumerate the extension properties of the given @p VkPhysicalDevice for the
+ * named @p layer_name, NULL means the "base" driver physical device.
+ *
+ * @ingroup aux_vk
+ */
+VkResult
+vk_enumerate_physical_device_extension_properties(struct vk_bundle *vk,
+                                                  VkPhysicalDevice physical_device,
+                                                  const char *layer_name,
+                                                  uint32_t *out_prop_count,
+                                                  VkExtensionProperties **out_props);
+
+#if defined(VK_KHR_surface) || defined(XRT_DOXYGEN)
+/*!
+ * Enumerate the surface formats of the given @p VkSurfaceKHR,
+ * returns a list of @p VkSurfaceFormatKHR, not @p VkFormat.
+ *
+ * @ingroup aux_vk
+ */
+VkResult
+vk_enumerate_surface_formats(struct vk_bundle *vk,
+                             VkSurfaceKHR surface,
+                             uint32_t *out_format_count,
+                             VkSurfaceFormatKHR **out_formats);
+
+/*!
+ * Enumerate the present modes of the given @p VkSurfaceKHR.
+ *
+ * @ingroup aux_vk
+ */
+VkResult
+vk_enumerate_surface_present_modes(struct vk_bundle *vk,
+                                   VkSurfaceKHR surface,
+                                   uint32_t *out_present_mode_count,
+                                   VkPresentModeKHR **out_present_modes);
+#endif
+
+#if defined(VK_KHR_swapchain) || defined(XRT_DOXYGEN)
+/*!
+ * Enumerate the images of the given @p VkSwapchainKHR.
+ *
+ * @ingroup aux_vk
+ */
+VkResult
+vk_enumerate_swapchain_images(struct vk_bundle *vk,
+                              VkSwapchainKHR swapchain,
+                              uint32_t *out_image_count,
+                              VkImage **out_images);
+#endif
+
+#if defined(VK_USE_PLATFORM_DISPLAY_KHR) || defined(XRT_DOXYGEN)
+/*!
+ * Enumerate the display properties of the given @p VkPhysicalDevice.
+ *
+ * @ingroup aux_vk
+ */
+VkResult
+vk_enumerate_physical_device_display_properties(struct vk_bundle *vk,
+                                                VkPhysicalDevice physical_device,
+                                                uint32_t *out_prop_count,
+                                                VkDisplayPropertiesKHR **out_props);
+
+/*!
+ * Enumerate the display plane properties of the given @p VkPhysicalDevice.
+ *
+ * @ingroup aux_vk
+ */
+VkResult
+vk_enumerate_physical_display_plane_properties(struct vk_bundle *vk,
+                                               VkPhysicalDevice physical_device,
+                                               uint32_t *out_prop_count,
+                                               VkDisplayPlanePropertiesKHR **out_props);
+
+/*!
+ * Enumerate the mode properties of the given @p VkDisplayKHR, which belongs
+ * to the given @p VkPhysicalDevice.
+ *
+ * @ingroup aux_vk
+ */
+VkResult
+vk_enumerate_display_mode_properties(struct vk_bundle *vk,
+                                     VkPhysicalDevice physical_device,
+                                     VkDisplayKHR display,
+                                     uint32_t *out_prop_count,
+                                     VkDisplayModePropertiesKHR **out_props);
+#endif
 
 
 /*
@@ -555,6 +948,16 @@ vk_get_device_functions(struct vk_bundle *vk);
  */
 
 /*!
+ * Check if the required instance extensions are supported, if not print error
+ * message with all extensions missing, returns VK_ERROR_EXTENSION_NOT_PRESENT
+ * if not all extensions are supported.
+ *
+ * @ingroup aux_vk
+ */
+VkResult
+vk_check_required_instance_extensions(struct vk_bundle *vk, struct u_string_list *required_instance_ext_list);
+
+/*!
  * Only requires @ref vk_get_loader_functions to have been called.
  *
  * @ingroup aux_vk
@@ -570,6 +973,14 @@ vk_build_instance_extensions(struct vk_bundle *vk,
 void
 vk_fill_in_has_instance_extensions(struct vk_bundle *vk, struct u_string_list *ext_list);
 
+/*!
+ * Setup the physical device, this is called by vk_create_device but has uses
+ * for outside of that.
+ *
+ * @ingroup aux_vk
+ */
+VkResult
+vk_select_physical_device(struct vk_bundle *vk, int forced_index);
 
 /*!
  * Used to enable device features as a argument @ref vk_create_device.
@@ -578,9 +989,11 @@ vk_fill_in_has_instance_extensions(struct vk_bundle *vk, struct u_string_list *e
  */
 struct vk_device_features
 {
+	bool shader_image_gather_extended;
 	bool shader_storage_image_write_without_format;
 	bool null_descriptor;
 	bool timeline_semaphore;
+	bool synchronization_2;
 };
 
 /*!
@@ -616,14 +1029,6 @@ VkResult
 vk_deinit_mutex(struct vk_bundle *vk);
 
 /*!
- * Requires device and queue to have been set up.
- *
- * @ingroup aux_vk
- */
-XRT_CHECK_RESULT VkResult
-vk_init_cmd_pool(struct vk_bundle *vk);
-
-/*!
  * Initialize a bundle with objects given to us by client code,
  * used by @ref client_vk_compositor in @ref comp_client.
  *
@@ -640,6 +1045,7 @@ vk_init_from_given(struct vk_bundle *vk,
                    bool external_fence_fd_enabled,
                    bool external_semaphore_fd_enabled,
                    bool timeline_semaphore_enabled,
+                   bool debug_utils_enabled,
                    enum u_logging_level log_level);
 
 
@@ -759,6 +1165,16 @@ vk_create_image_simple(struct vk_bundle *vk,
                        VkImage *out_image);
 
 /*!
+ * Helper to create a mutable RG88B8A8 VkImage that specializes in the two
+ * UNORM and SRGB variants of that formats.
+ *
+ * @ingroup aux_vk
+ */
+VkResult
+vk_create_image_mutable_rgba(
+    struct vk_bundle *vk, VkExtent2D extent, VkImageUsageFlags usage, VkDeviceMemory *out_mem, VkImage *out_image);
+
+/*!
  * @ingroup aux_vk
  * Helper to create a VkImage, with more options for tiling and memory storage.
  */
@@ -777,6 +1193,13 @@ vk_create_image_advanced(struct vk_bundle *vk,
  */
 VkResult
 vk_create_sampler(struct vk_bundle *vk, VkSamplerAddressMode clamp_mode, VkSampler *out_sampler);
+
+
+/*
+ *
+ * Helpers for creating ímage views.
+ *
+ */
 
 /*!
  * @ingroup aux_vk
@@ -801,9 +1224,27 @@ vk_create_view_swizzle(struct vk_bundle *vk,
                        VkComponentMapping components,
                        VkImageView *out_view);
 
-VkAccessFlags
-vk_get_access_flags(VkImageLayout layout);
+/*!
+ * Creates a image with a specific subset of usage, useful for a mutable images
+ * where one format might not support all usages defined by the image.
+ *
+ * @ingroup aux_vk
+ */
+VkResult
+vk_create_view_usage(struct vk_bundle *vk,
+                     VkImage image,
+                     VkImageViewType type,
+                     VkFormat format,
+                     VkImageUsageFlags image_usage,
+                     VkImageSubresourceRange subresource_range,
+                     VkImageView *out_view);
 
+
+/*
+ *
+ * Helpers for creating descriptor pools and sets.
+ *
+ */
 
 bool
 vk_init_descriptor_pool(struct vk_bundle *vk,
@@ -818,6 +1259,13 @@ vk_allocate_descriptor_sets(struct vk_bundle *vk,
                             uint32_t count,
                             const VkDescriptorSetLayout *set_layout,
                             VkDescriptorSet *sets);
+
+
+/*
+ *
+ * Helpers for creating buffers.
+ *
+ */
 
 bool
 vk_buffer_init(struct vk_bundle *vk,
@@ -836,66 +1284,14 @@ vk_update_buffer(struct vk_bundle *vk, float *buffer, size_t buffer_size, VkDevi
 
 /*
  *
- * Helpers for writing command buffers using the global command pool.
+ * Helpers for writing command buffers, in the vk_helpers.c file.
  *
  */
 
 /*!
- * Create a new command buffer, takes the pool lock.
- *
- * @pre Requires successful call to vk_init_mutex.
- *
- * @ingroup aux_vk
- */
-VkResult
-vk_init_cmd_buffer(struct vk_bundle *vk, VkCommandBuffer *out_cmd_buffer);
-
-/*!
- * A do everything command buffer submission function, during the operation
- * the pool lock will be taken and released.
- *
- * * Creates a new fence.
- * * Submits @p cmd_buffer to the queue, along with the fence.
- * * Waits for the fence to complete.
- * * Destroys the fence.
- * * Destroy @p cmd_buffer.
- *
- * @pre Requires successful call to vk_init_mutex.
- *
- * @ingroup aux_vk
- */
-XRT_CHECK_RESULT VkResult
-vk_submit_cmd_buffer(struct vk_bundle *vk, VkCommandBuffer cmd_buffer);
-
-/*!
- * Submits to the given queue, with the given fence.
- *
- * @pre Requires successful call to vk_init_mutex.
- *
- * @ingroup aux_vk
- */
-XRT_CHECK_RESULT VkResult
-vk_locked_submit(struct vk_bundle *vk, VkQueue queue, uint32_t count, const VkSubmitInfo *infos, VkFence fence);
-
-/*!
- * Set the image layout using a barrier command, takes the pool lock.
- *
- * @pre Requires successful call to vk_init_mutex.
- *
- * @ingroup aux_vk
- */
-void
-vk_cmd_image_barrier_gpu(struct vk_bundle *vk,
-                         VkCommandBuffer cmd_buffer,
-                         VkImage image,
-                         VkAccessFlags src_access_mask,
-                         VkAccessFlags dst_access_mask,
-                         VkImageLayout old_layout,
-                         VkImageLayout new_layout,
-                         VkImageSubresourceRange subresource_range);
-
-/*!
- * Inserts a image barrier command, doesn't take any locks.
+ * Inserts a image barrier command, doesn't take any locks, the calling code
+ * will need hold the lock for the pool that cmd_buffer is from or ensure it is
+ * externally synchronized.
  *
  * @ingroup aux_vk
  */
@@ -912,8 +1308,9 @@ vk_cmd_image_barrier_locked(struct vk_bundle *vk,
                             VkImageSubresourceRange subresource_range);
 
 /*!
- * Inserts a image barrier command specifically for GPU commands,
- * doesn't take any locks.
+ * Inserts a image barrier command specifically for GPU commands, doesn't take
+ * any locks, the calling code will need hold the lock for the pool that
+ * cmd_buffer is from or ensure it is externally synchronized.
  *
  * @ingroup aux_vk
  */
@@ -926,6 +1323,18 @@ vk_cmd_image_barrier_gpu_locked(struct vk_bundle *vk,
                                 VkImageLayout old_layout,
                                 VkImageLayout new_layout,
                                 VkImageSubresourceRange subresource_range);
+
+#if defined(VK_EXT_debug_utils) || defined(XRT_DOXYGEN)
+/*!
+ * Uses VK_EXT_debug_utils to insert debug label into a VkCommandBuffer.
+ *
+ * In the vk_debug.c file.
+ *
+ * @ingroup aux_vk
+ */
+void
+vk_cmd_insert_label(struct vk_bundle *vk, VkCommandBuffer cmd_buffer, const char *name);
+#endif
 
 
 /*
@@ -1006,9 +1415,17 @@ vk_create_compute_pipeline(struct vk_bundle *vk,
 
 /*
  *
- * Compositor swapchain image flags helpers, in the vk_compositor_flags.c file.
+ * Compositor buffer and swapchain image flags helpers, in the vk_compositor_flags.c file.
  *
  */
+
+/*!
+ * Return the extern handle type that a buffer should be created with.
+ *
+ * cb = Compositor Buffer.
+ */
+VkExternalMemoryHandleTypeFlags
+vk_cb_get_buffer_external_handle_type(struct vk_bundle *vk);
 
 /*!
  * Helper for all of the supported formats to check support for.
@@ -1047,6 +1464,7 @@ vk_create_compute_pipeline(struct vk_bundle *vk,
 	THING_COLOR(R8G8B8_UNORM)        /* OGL VK - Uncommon. Bad color precision. */                                 \
 	THING_COLOR(B8G8R8_UNORM)        /* VK     - Uncommon. Bad color precision. */                                 \
 	THING_COLOR(R5G6B5_UNORM_PACK16) /* OLG VK - Bad color precision. */                                           \
+	THING_COLOR(R32_SFLOAT)          /* OGL VK */                                                                  \
 	/* depth formats */                                                                                            \
 	THING_D(D32_SFLOAT)          /* OGL VK */                                                                      \
 	THING_D(D16_UNORM)           /* OGL VK */                                                                      \
@@ -1121,7 +1539,20 @@ vk_csci_get_image_view_aspect(VkFormat format, enum xrt_swapchain_usage_bits bit
  * CSCI = Compositor SwapChain Images.
  */
 VkExternalMemoryHandleTypeFlags
-vk_csci_get_image_external_handle_type(struct vk_bundle *vk);
+vk_csci_get_image_external_handle_type(struct vk_bundle *vk, struct xrt_image_native *xin);
+
+/*!
+ * Get whether a given image can be imported/exported for a handle type.
+ *
+ * CSCI = Compositor SwapChain Images.
+ */
+void
+vk_csci_get_image_external_support(struct vk_bundle *vk,
+                                   VkFormat image_format,
+                                   enum xrt_swapchain_usage_bits bits,
+                                   VkExternalMemoryHandleTypeFlags handle_type,
+                                   bool *out_importable,
+                                   bool *out_exportable);
 
 
 /*
@@ -1244,7 +1675,7 @@ vk_create_timeline_semaphore_from_native(struct vk_bundle *vk, xrt_graphics_sync
  * Note the timestamp needs to be in the past and not to old, this is because
  * not all GPU has full 64 bit timer resolution. For instance a Intel GPU "only"
  * have 36 bits of valid timestamp and a tick period 83.3333 nanosecond,
- * equating to an epoch of 5726 seconds before overflowing. The functio can
+ * equating to an epoch of 5726 seconds before overflowing. The function can
  * handle overflows happening between the given timestamps and when it is called
  * but only for one such epoch overflow, any more will only be treated as one
  * such overflow. So timestamps needs to be converted resonably soon after they

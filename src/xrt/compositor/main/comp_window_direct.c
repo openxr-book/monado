@@ -55,7 +55,7 @@ choose_best_vk_mode_auto(struct comp_target *ct, VkDisplayModePropertiesKHR *mod
 	}
 	VkDisplayModeParametersKHR best = mode_properties[best_index].parameters;
 	COMP_DEBUG(ct->c, "Auto choosing Vk direct mode %d: %dx%d@%.2f", best_index, best.visibleRegion.width,
-	           best.visibleRegion.width, (float)best.refreshRate / 1000.f);
+	           best.visibleRegion.height, (float)best.refreshRate / 1000.f);
 	return best_index;
 }
 
@@ -74,32 +74,42 @@ print_modes(struct comp_target *ct, VkDisplayModePropertiesKHR *mode_properties,
 	COMP_PRINT_MODE(ct->c, "Listed %d modes", mode_count);
 }
 
-VkDisplayModeKHR
-comp_window_direct_get_primary_display_mode(struct comp_target_swapchain *cts, VkDisplayKHR display)
+static VkDisplayModeKHR
+get_primary_display_mode(struct comp_target_swapchain *cts,
+                         VkDisplayKHR display,
+                         uint32_t *out_width,
+                         uint32_t *out_height)
 {
 	struct vk_bundle *vk = get_vk(cts);
 	struct comp_target *ct = &cts->base;
-	uint32_t mode_count;
+	VkDisplayModePropertiesKHR *mode_properties = NULL;
+	uint32_t mode_count = 0;
 	VkResult ret;
 
-	ret = vk->vkGetDisplayModePropertiesKHR(vk->physical_device, display, &mode_count, NULL);
+	// Get plane properties
+	ret = vk_enumerate_display_mode_properties( //
+	    vk,                                     //
+	    vk->physical_device,                    //
+	    display,                                //
+	    &mode_count,                            //
+	    &mode_properties);                      //
 	if (ret != VK_SUCCESS) {
-		COMP_ERROR(ct->c, "vkGetDisplayModePropertiesKHR: %s", vk_result_string(ret));
+		COMP_ERROR(ct->c, "vk_enumerate_display_mode_properties: %s", vk_result_string(ret));
 		return VK_NULL_HANDLE;
 	}
+
+
+	/*
+	 * Debug information.
+	 */
 
 	COMP_DEBUG(ct->c, "Found %d modes", mode_count);
-
-	VkDisplayModePropertiesKHR *mode_properties = U_TYPED_ARRAY_CALLOC(VkDisplayModePropertiesKHR, mode_count);
-	ret = vk->vkGetDisplayModePropertiesKHR(vk->physical_device, display, &mode_count, mode_properties);
-	if (ret != VK_SUCCESS) {
-		COMP_ERROR(ct->c, "vkGetDisplayModePropertiesKHR: %s", vk_result_string(ret));
-		free(mode_properties);
-		return VK_NULL_HANDLE;
-	}
-
 	print_modes(ct, mode_properties, mode_count);
 
+
+	/*
+	 * Select the mode.
+	 */
 
 	int chosen_mode = 0;
 
@@ -135,6 +145,9 @@ comp_window_direct_get_primary_display_mode(struct comp_target_swapchain *cts, V
 
 	free(mode_properties);
 
+	*out_width = props.parameters.visibleRegion.width;
+	*out_height = props.parameters.visibleRegion.height;
+
 	return props.displayMode;
 }
 
@@ -150,6 +163,13 @@ choose_alpha_mode(VkDisplayPlaneAlphaFlagsKHR flags)
 	return VK_DISPLAY_PLANE_ALPHA_GLOBAL_BIT_KHR;
 }
 
+
+/*
+ *
+ * 'Exported' functions.
+ *
+ */
+
 VkResult
 comp_window_direct_create_surface(struct comp_target_swapchain *cts,
                                   VkDisplayKHR display,
@@ -157,33 +177,62 @@ comp_window_direct_create_surface(struct comp_target_swapchain *cts,
                                   uint32_t height)
 {
 	struct vk_bundle *vk = get_vk(cts);
+	VkDisplayPlanePropertiesKHR *plane_properties = NULL;
+	uint32_t plane_property_count = 0;
+	VkResult ret;
 
 	// Get plane properties
-	uint32_t plane_property_count;
-	VkResult ret =
-	    vk->vkGetPhysicalDeviceDisplayPlanePropertiesKHR(vk->physical_device, &plane_property_count, NULL);
+	ret = vk_enumerate_physical_display_plane_properties( //
+	    vk,                                               //
+	    vk->physical_device,                              //
+	    &plane_property_count,                            //
+	    &plane_properties);                               //
 	if (ret != VK_SUCCESS) {
-		COMP_ERROR(cts->base.c, "vkGetPhysicalDeviceDisplayPlanePropertiesKHR: %s", vk_result_string(ret));
-		return ret;
+		COMP_ERROR(cts->base.c, "vk_enumerate_physical_display_plane_properties: %s", vk_result_string(ret));
+		return VK_ERROR_INITIALIZATION_FAILED;
 	}
 
-	COMP_DEBUG(cts->base.c, "Found %d plane properites.", plane_property_count);
-
-	VkDisplayPlanePropertiesKHR *plane_properties =
-	    U_TYPED_ARRAY_CALLOC(VkDisplayPlanePropertiesKHR, plane_property_count);
-
-	ret = vk->vkGetPhysicalDeviceDisplayPlanePropertiesKHR(vk->physical_device, &plane_property_count,
-	                                                       plane_properties);
-	if (ret != VK_SUCCESS) {
-		COMP_ERROR(cts->base.c, "vkGetPhysicalDeviceDisplayPlanePropertiesKHR: %s", vk_result_string(ret));
-		free(plane_properties);
-		return ret;
-	}
-
+	// Select the plane.
+	//! @todo actually select the plane.
 	uint32_t plane_index = 0;
+	uint32_t plane_stack_index = plane_properties[plane_index].currentStackIndex;
 
-	VkDisplayModeKHR display_mode = comp_window_direct_get_primary_display_mode(cts, display);
+	free(plane_properties);
+	plane_properties = NULL;
 
+	// Select the mode.
+	uint32_t mode_width = 0, mode_height = 0;
+	VkDisplayModeKHR display_mode = get_primary_display_mode( //
+	    cts,                                                  //
+	    display,                                              //
+	    &mode_width,                                          //
+	    &mode_height);                                        //
+
+	if (display_mode == VK_NULL_HANDLE) {
+		COMP_ERROR(cts->base.c, "Failed to find display mode!");
+		return VK_ERROR_INITIALIZATION_FAILED;
+	}
+
+	/*
+	 * This fixes a bug on NVIDIA Jetson. Note this isn't so much the NVIDIA
+	 * Jetson fault, while the code was working on desktop, Monado did
+	 * something wrong. What happned was that Monado would select a mode
+	 * with one size, while then creating a VkSurface/VkSwapchain of a
+	 * different size. This would work on hardware with scalers/panning
+	 * modes. The NVIDIA Jetson apparently doesn't have support for that so
+	 * failed when presenting. This patch makes sure that the VkSurface &
+	 * VkSwapchain extents match the mode for all direct mode targets.
+	 */
+	if (mode_width != width || mode_height != height) {
+		COMP_INFO(cts->base.c,
+		          "Ignoring given extent %dx%d and using %dx%d from mode, bugs could happen otherwise.",
+		          width,        //
+		          height,       //
+		          mode_width,   //
+		          mode_height); //
+	}
+
+	// We need the capabilities of the selected plane.
 	VkDisplayPlaneCapabilitiesKHR plane_caps;
 	vk->vkGetDisplayPlaneCapabilitiesKHR(vk->physical_device, display_mode, plane_index, &plane_caps);
 
@@ -193,22 +242,36 @@ comp_window_direct_create_surface(struct comp_target_swapchain *cts,
 	    .flags = 0,
 	    .displayMode = display_mode,
 	    .planeIndex = plane_index,
-	    .planeStackIndex = plane_properties[plane_index].currentStackIndex,
+	    .planeStackIndex = plane_stack_index,
 	    .transform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
 	    .globalAlpha = 1.0,
 	    .alphaMode = choose_alpha_mode(plane_caps.supportedAlpha),
 	    .imageExtent =
 	        {
-	            .width = width,
-	            .height = height,
+	            .width = mode_width,
+	            .height = mode_height,
 	        },
 	};
 
-	VkResult result = vk->vkCreateDisplayPlaneSurfaceKHR(vk->instance, &surface_info, NULL, &cts->surface.handle);
+	// This function is called seldom so ok to always print.
+	vk_print_display_surface_create_info(vk, &surface_info, U_LOGGING_INFO);
 
-	free(plane_properties);
+	// Everything decided and logged, do the creation.
+	VkSurfaceKHR surface = VK_NULL_HANDLE;
+	ret = vk->vkCreateDisplayPlaneSurfaceKHR( //
+	    vk->instance,                         //
+	    &surface_info,                        //
+	    NULL,                                 //
+	    &surface);                            //
+	if (ret != VK_SUCCESS) {
+		COMP_ERROR(cts->base.c, "vkCreateDisplayPlaneSurfaceKHR: %s", vk_result_string(ret));
+		return ret;
+	}
 
-	return result;
+	VK_NAME_SURFACE(vk, surface, "comp_target_swapchain direct surface");
+	cts->surface.handle = surface;
+
+	return VK_SUCCESS;
 }
 
 #ifdef VK_USE_PLATFORM_XLIB_XRANDR_EXT
@@ -234,15 +297,13 @@ comp_window_direct_acquire_xlib_display(struct comp_target_swapchain *cts, Displ
 	if (ret != VK_SUCCESS) {
 		COMP_ERROR(cts->base.c, "vkAcquireXlibDisplayEXT: %s (0x%016" PRIx64 ")", vk_result_string(ret),
 		           (uint64_t)display);
-		if (cts->base.c->settings.window_type == WINDOW_DIRECT_NVIDIA &&
-		    ret == VK_ERROR_INITIALIZATION_FAILED) {
-			COMP_ERROR(cts->base.c,
-			           "This can be caused by the AllowHMD "
-			           "xorg.conf option. Please make sure that "
-			           "AllowHMD is not set (like in '99-HMD.conf' "
-			           "from OpenHMD) and that the desktop is not "
-			           "currently extended to this display.");
-		}
+	}
+	if (ret == VK_ERROR_INITIALIZATION_FAILED) {
+		COMP_ERROR(
+		    cts->base.c,
+		    "If you are using the NVIDIA proprietary driver the above error can be caused by the AllowHMD "
+		    "xorg.conf option. Please make sure that AllowHMD is not set (like in '99-HMD.conf' from OpenHMD) "
+		    "and that the desktop is not currently extended to this display.");
 	}
 	return ret;
 }

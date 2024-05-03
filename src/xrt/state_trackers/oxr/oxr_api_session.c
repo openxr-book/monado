@@ -1,9 +1,10 @@
-// Copyright 2019-2020, Collabora, Ltd.
+// Copyright 2019-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Session entrypoints for the OpenXR state tracker.
  * @author Jakob Bornecrantz <jakob@collabora.com>
+ * @author Korcan Hussein <korcan.hussein@collabora.com>
  * @ingroup oxr_api
  */
 
@@ -26,7 +27,8 @@
 #include "oxr_handle.h"
 #include "oxr_chain.h"
 
-XrResult
+
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrCreateSession(XrInstance instance, const XrSessionCreateInfo *createInfo, XrSession *out_session)
 {
 	OXR_TRACE_MARKER();
@@ -60,7 +62,7 @@ oxr_xrCreateSession(XrInstance instance, const XrSessionCreateInfo *createInfo, 
 	return XR_SUCCESS;
 }
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrDestroySession(XrSession session)
 {
 	OXR_TRACE_MARKER();
@@ -82,7 +84,7 @@ oxr_xrDestroySession(XrSession session)
 	return oxr_handle_destroy(&log, &sess->handle);
 }
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrBeginSession(XrSession session, const XrSessionBeginInfo *beginInfo)
 {
 	OXR_TRACE_MARKER();
@@ -90,13 +92,18 @@ oxr_xrBeginSession(XrSession session, const XrSessionBeginInfo *beginInfo)
 	struct oxr_session *sess;
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrBeginSession");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, beginInfo, XR_TYPE_SESSION_BEGIN_INFO);
 	OXR_VERIFY_VIEW_CONFIG_TYPE(&log, sess->sys->inst, beginInfo->primaryViewConfigurationType);
+
+	if (sess->has_begun) {
+		return oxr_error(&log, XR_ERROR_SESSION_RUNNING, "Session is already running");
+	}
 
 	return oxr_session_begin(&log, sess, beginInfo);
 }
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrEndSession(XrSession session)
 {
 	OXR_TRACE_MARKER();
@@ -104,11 +111,13 @@ oxr_xrEndSession(XrSession session)
 	struct oxr_session *sess;
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrEndSession");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
+	OXR_VERIFY_SESSION_RUNNING(&log, sess);
 
 	return oxr_session_end(&log, sess);
 }
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrWaitFrame(XrSession session, const XrFrameWaitInfo *frameWaitInfo, XrFrameState *frameState)
 {
 	OXR_TRACE_MARKER();
@@ -116,6 +125,8 @@ oxr_xrWaitFrame(XrSession session, const XrFrameWaitInfo *frameWaitInfo, XrFrame
 	struct oxr_session *sess;
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrWaitFrame");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
+	OXR_VERIFY_SESSION_RUNNING(&log, sess);
 	OXR_VERIFY_ARG_TYPE_CAN_BE_NULL(&log, frameWaitInfo, XR_TYPE_FRAME_WAIT_INFO);
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, frameState, XR_TYPE_FRAME_STATE);
 	OXR_VERIFY_ARG_NOT_NULL(&log, frameState);
@@ -123,7 +134,7 @@ oxr_xrWaitFrame(XrSession session, const XrFrameWaitInfo *frameWaitInfo, XrFrame
 	return oxr_session_frame_wait(&log, sess, frameState);
 }
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrBeginFrame(XrSession session, const XrFrameBeginInfo *frameBeginInfo)
 {
 	OXR_TRACE_MARKER();
@@ -131,6 +142,8 @@ oxr_xrBeginFrame(XrSession session, const XrFrameBeginInfo *frameBeginInfo)
 	struct oxr_session *sess;
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrBeginFrame");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
+	OXR_VERIFY_SESSION_RUNNING(&log, sess);
 	// NULL explicitly allowed here because it's a basically empty struct.
 	OXR_VERIFY_ARG_TYPE_CAN_BE_NULL(&log, frameBeginInfo, XR_TYPE_FRAME_BEGIN_INFO);
 
@@ -138,14 +151,16 @@ oxr_xrBeginFrame(XrSession session, const XrFrameBeginInfo *frameBeginInfo)
 
 #ifdef XRT_FEATURE_RENDERDOC
 	if (sess->sys->inst->rdoc_api) {
+#ifndef XR_USE_PLATFORM_ANDROID
 		sess->sys->inst->rdoc_api->StartFrameCapture(NULL, NULL);
+#endif
 	}
 #endif
 
 	return res;
 }
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrEndFrame(XrSession session, const XrFrameEndInfo *frameEndInfo)
 {
 	OXR_TRACE_MARKER();
@@ -153,11 +168,15 @@ oxr_xrEndFrame(XrSession session, const XrFrameEndInfo *frameEndInfo)
 	struct oxr_session *sess;
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrEndFrame");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
+	OXR_VERIFY_SESSION_RUNNING(&log, sess);
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, frameEndInfo, XR_TYPE_FRAME_END_INFO);
 
 #ifdef XRT_FEATURE_RENDERDOC
 	if (sess->sys->inst->rdoc_api) {
+#ifndef XR_USE_PLATFORM_ANDROID
 		sess->sys->inst->rdoc_api->EndFrameCapture(NULL, NULL);
+#endif
 	}
 #endif
 
@@ -166,7 +185,7 @@ oxr_xrEndFrame(XrSession session, const XrFrameEndInfo *frameEndInfo)
 	return res;
 }
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrRequestExitSession(XrSession session)
 {
 	OXR_TRACE_MARKER();
@@ -174,11 +193,13 @@ oxr_xrRequestExitSession(XrSession session)
 	struct oxr_session *sess;
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrRequestExitSession");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
+	OXR_VERIFY_SESSION_RUNNING(&log, sess);
 
 	return oxr_session_request_exit(&log, sess);
 }
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrLocateViews(XrSession session,
                   const XrViewLocateInfo *viewLocateInfo,
                   XrViewState *viewState,
@@ -192,14 +213,32 @@ oxr_xrLocateViews(XrSession session,
 	struct oxr_space *spc;
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrLocateViews");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, viewLocateInfo, XR_TYPE_VIEW_LOCATE_INFO);
 	OXR_VERIFY_SPACE_NOT_NULL(&log, viewLocateInfo->space, spc);
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, viewState, XR_TYPE_VIEW_STATE);
+	OXR_VERIFY_VIEW_CONFIG_TYPE(&log, sess->sys->inst, viewLocateInfo->viewConfigurationType);
 
 	if (viewCapacityInput == 0) {
 		OXR_VERIFY_ARG_NOT_NULL(&log, viewCountOutput);
 	} else {
 		OXR_VERIFY_ARG_NOT_NULL(&log, views);
+	}
+
+	for (uint32_t i = 0; i < viewCapacityInput; i++) {
+		OXR_VERIFY_ARG_ARRAY_ELEMENT_TYPE(&log, views, i, XR_TYPE_VIEW);
+	}
+
+	if (viewLocateInfo->displayTime <= (XrTime)0) {
+		return oxr_error(&log, XR_ERROR_TIME_INVALID, "(time == %" PRIi64 ") is not a valid time.",
+		                 viewLocateInfo->displayTime);
+	}
+
+	if (viewLocateInfo->viewConfigurationType != sess->sys->view_config_type) {
+		return oxr_error(&log, XR_ERROR_VIEW_CONFIGURATION_TYPE_UNSUPPORTED,
+		                 "(viewConfigurationType == 0x%08x) "
+		                 "unsupported view configuration type",
+		                 viewLocateInfo->viewConfigurationType);
 	}
 
 	return oxr_session_locate_views( //
@@ -219,9 +258,8 @@ oxr_xrLocateViews(XrSession session,
  *
  */
 
-#ifdef XR_KHR_visibility_mask
-
-XrResult
+#ifdef OXR_HAVE_KHR_visibility_mask
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrGetVisibilityMaskKHR(XrSession session,
                            XrViewConfigurationType viewConfigurationType,
                            uint32_t viewIndex,
@@ -230,14 +268,45 @@ oxr_xrGetVisibilityMaskKHR(XrSession session,
 {
 	OXR_TRACE_MARKER();
 
-	struct oxr_session *sess;
+	struct oxr_session *sess = NULL;
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrGetVisibilityMaskKHR");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
 
-	return oxr_error(&log, XR_ERROR_HANDLE_INVALID, "Not implemented");
+	OXR_VERIFY_EXTENSION(&log, sess->sys->inst, KHR_visibility_mask);
+
+	visibilityMask->vertexCountOutput = 0;
+	visibilityMask->indexCountOutput = 0;
+
+	OXR_VERIFY_VIEW_CONFIG_TYPE(&log, sess->sys->inst, viewConfigurationType);
+	if (viewConfigurationType != sess->sys->view_config_type) {
+		return oxr_error(&log, XR_ERROR_VIEW_CONFIGURATION_TYPE_UNSUPPORTED,
+		                 "(viewConfigurationType == 0x%08x) unsupported view configuration type",
+		                 viewConfigurationType);
+	}
+
+	OXR_VERIFY_VIEW_INDEX(&log, viewIndex);
+
+	if (visibilityMaskType != XR_VISIBILITY_MASK_TYPE_HIDDEN_TRIANGLE_MESH_KHR &&
+	    visibilityMaskType != XR_VISIBILITY_MASK_TYPE_VISIBLE_TRIANGLE_MESH_KHR &&
+	    visibilityMaskType != XR_VISIBILITY_MASK_TYPE_LINE_LOOP_KHR) {
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE, "(visibilityMaskType == %d) is invalid",
+		                 visibilityMaskType);
+	}
+
+	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, visibilityMask, XR_TYPE_VISIBILITY_MASK_KHR);
+
+	if (visibilityMask->vertexCapacityInput != 0) {
+		OXR_VERIFY_ARG_NOT_NULL(&log, visibilityMask->vertices);
+	}
+
+	if (visibilityMask->indexCapacityInput != 0) {
+		OXR_VERIFY_ARG_NOT_NULL(&log, visibilityMask->indices);
+	}
+
+	return oxr_session_get_visibility_mask(&log, sess, visibilityMaskType, viewIndex, visibilityMask);
 }
-
-#endif
+#endif // OXR_HAVE_KHR_visibility_mask
 
 
 /*
@@ -246,9 +315,8 @@ oxr_xrGetVisibilityMaskKHR(XrSession session,
  *
  */
 
-#ifdef XR_EXT_performance_settings
-
-XrResult
+#ifdef OXR_HAVE_EXT_performance_settings
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrPerfSettingsSetPerformanceLevelEXT(XrSession session,
                                          XrPerfSettingsDomainEXT domain,
                                          XrPerfSettingsLevelEXT level)
@@ -258,11 +326,25 @@ oxr_xrPerfSettingsSetPerformanceLevelEXT(XrSession session,
 	struct oxr_session *sess;
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrPerfSettingsSetPerformanceLevelEXT");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
+	OXR_VERIFY_EXTENSION(&log, sess->sys->inst, EXT_performance_settings);
+	// check parameters
+	if (domain != XR_PERF_SETTINGS_DOMAIN_CPU_EXT && domain != XR_PERF_SETTINGS_DOMAIN_GPU_EXT) {
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE, "Invalid domain %d, must be 1(CPU) or 2(GPU)",
+		                 domain);
+	}
 
-	return oxr_error(&log, XR_ERROR_HANDLE_INVALID, "Not implemented");
+	if (level != XR_PERF_SETTINGS_LEVEL_POWER_SAVINGS_EXT && level != XR_PERF_SETTINGS_LEVEL_SUSTAINED_LOW_EXT &&
+	    level != XR_PERF_SETTINGS_LEVEL_SUSTAINED_HIGH_EXT && level != XR_PERF_SETTINGS_LEVEL_BOOST_EXT) {
+		return oxr_error(
+		    &log, XR_ERROR_VALIDATION_FAILURE,
+		    "Invalid level %d, must be 0(POWER SAVE), 25(SUSTAINED LOW), 50(SUSTAINED_HIGH) or 75(BOOST)",
+		    level);
+	}
+
+	return oxr_session_set_perf_level(&log, sess, domain, level);
 }
-
-#endif
+#endif // OXR_HAVE_EXT_performance_settings
 
 
 /*
@@ -273,7 +355,7 @@ oxr_xrPerfSettingsSetPerformanceLevelEXT(XrSession session,
 
 #ifdef XR_EXT_thermal_query
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrThermalGetTemperatureTrendEXT(XrSession session,
                                     XrPerfSettingsDomainEXT domain,
                                     XrPerfSettingsNotificationLevelEXT *notificationLevel,
@@ -285,6 +367,7 @@ oxr_xrThermalGetTemperatureTrendEXT(XrSession session,
 	struct oxr_session *sess;
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrThermalGetTemperatureTrendEXT");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
 
 	return oxr_error(&log, XR_ERROR_HANDLE_INVALID, "Not implemented");
 }
@@ -330,9 +413,9 @@ oxr_hand_tracker_create(struct oxr_logger *log,
 	// Find the assigned device.
 	struct xrt_device *xdev = NULL;
 	if (createInfo->hand == XR_HAND_LEFT_EXT) {
-		xdev = sess->sys->xsysd->roles.hand_tracking.left;
+		xdev = GET_XDEV_BY_ROLE(sess->sys, hand_tracking_left);
 	} else if (createInfo->hand == XR_HAND_RIGHT_EXT) {
-		xdev = sess->sys->xsysd->roles.hand_tracking.right;
+		xdev = GET_XDEV_BY_ROLE(sess->sys, hand_tracking_right);
 	}
 
 	// Find the correct input on the device.
@@ -361,7 +444,7 @@ oxr_hand_tracker_create(struct oxr_logger *log,
 	return XR_SUCCESS;
 }
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrCreateHandTrackerEXT(XrSession session,
                            const XrHandTrackerCreateInfoEXT *createInfo,
                            XrHandTrackerEXT *handTracker)
@@ -373,6 +456,7 @@ oxr_xrCreateHandTrackerEXT(XrSession session,
 	struct oxr_logger log;
 	XrResult ret;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrCreateHandTrackerEXT");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, createInfo, XR_TYPE_HAND_TRACKER_CREATE_INFO_EXT);
 	OXR_VERIFY_ARG_NOT_NULL(&log, handTracker);
 
@@ -392,7 +476,7 @@ oxr_xrCreateHandTrackerEXT(XrSession session,
 	return XR_SUCCESS;
 }
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrDestroyHandTrackerEXT(XrHandTrackerEXT handTracker)
 {
 	OXR_TRACE_MARKER();
@@ -404,7 +488,7 @@ oxr_xrDestroyHandTrackerEXT(XrHandTrackerEXT handTracker)
 	return oxr_handle_destroy(&log, &hand_tracker->handle);
 }
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrLocateHandJointsEXT(XrHandTrackerEXT handTracker,
                           const XrHandJointsLocateInfoEXT *locateInfo,
                           XrHandJointLocationsEXT *locations)
@@ -415,6 +499,7 @@ oxr_xrLocateHandJointsEXT(XrHandTrackerEXT handTracker,
 	struct oxr_space *spc;
 	struct oxr_logger log;
 	OXR_VERIFY_HAND_TRACKER_AND_INIT_LOG(&log, handTracker, hand_tracker, "xrLocateHandJointsEXT");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, hand_tracker->sess);
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, locateInfo, XR_TYPE_HAND_JOINTS_LOCATE_INFO_EXT);
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, locations, XR_TYPE_HAND_JOINT_LOCATIONS_EXT);
 	OXR_VERIFY_ARG_NOT_NULL(&log, locations->jointLocations);
@@ -459,13 +544,36 @@ oxr_xrLocateHandJointsEXT(XrHandTrackerEXT handTracker,
 
 /*
  *
+ * XR_MNDX_force_feedback_curl
+ *
+ */
+
+#ifdef XR_MNDX_force_feedback_curl
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrApplyForceFeedbackCurlMNDX(XrHandTrackerEXT handTracker, const XrForceFeedbackCurlApplyLocationsMNDX *locations)
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_hand_tracker *hand_tracker;
+	struct oxr_logger log;
+	OXR_VERIFY_HAND_TRACKER_AND_INIT_LOG(&log, handTracker, hand_tracker, "xrApplyForceFeedbackCurlMNDX");
+	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, locations, XR_TYPE_FORCE_FEEDBACK_CURL_APPLY_LOCATIONS_MNDX);
+
+	return oxr_session_apply_force_feedback(&log, hand_tracker, locations);
+}
+
+#endif
+
+/*
+ *
  * XR_FB_display_refresh_rate
  *
  */
 
-#ifdef XR_FB_display_refresh_rate
+#ifdef OXR_HAVE_FB_display_refresh_rate
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrEnumerateDisplayRefreshRatesFB(XrSession session,
                                      uint32_t displayRefreshRateCapacityInput,
                                      uint32_t *displayRefreshRateCountOutput,
@@ -474,6 +582,7 @@ oxr_xrEnumerateDisplayRefreshRatesFB(XrSession session,
 	struct oxr_session *sess = NULL;
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrEnumerateDisplayRefreshRatesFB");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
 
 	// headless
 	if (!sess->sys->xsysc) {
@@ -482,15 +591,17 @@ oxr_xrEnumerateDisplayRefreshRatesFB(XrSession session,
 	}
 
 	OXR_TWO_CALL_HELPER(&log, displayRefreshRateCapacityInput, displayRefreshRateCountOutput, displayRefreshRates,
-	                    sess->sys->xsysc->info.num_refresh_rates, sess->sys->xsysc->info.refresh_rates, XR_SUCCESS);
+	                    sess->sys->xsysc->info.refresh_rate_count, sess->sys->xsysc->info.refresh_rates_hz,
+	                    XR_SUCCESS);
 }
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrGetDisplayRefreshRateFB(XrSession session, float *displayRefreshRate)
 {
 	struct oxr_session *sess = NULL;
 	struct oxr_logger log;
-	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrEnumerateDisplayRefreshRatesFB");
+	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrGetDisplayRefreshRateFB");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
 
 	// headless
 	if (!sess->sys->xsysc) {
@@ -498,24 +609,238 @@ oxr_xrGetDisplayRefreshRateFB(XrSession session, float *displayRefreshRate)
 		return XR_SUCCESS;
 	}
 
-	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrGetDisplayRefreshRateFB");
-	if (sess->sys->xsysc->info.num_refresh_rates < 1) {
+	if (sess->sys->xsysc->info.refresh_rate_count < 1) {
 		return XR_ERROR_RUNTIME_FAILURE;
 	}
 
-	*displayRefreshRate = sess->sys->xsysc->info.refresh_rates[0];
-	return XR_SUCCESS;
+	return oxr_session_get_display_refresh_rate(&log, sess, displayRefreshRate);
 }
 
-XrResult
+XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrRequestDisplayRefreshRateFB(XrSession session, float displayRefreshRate)
 {
 	struct oxr_session *sess = NULL;
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrRequestDisplayRefreshRateFB");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
 
-	//! @todo support for changing refresh rates
+	if (displayRefreshRate == 0.0f) {
+		return XR_SUCCESS;
+	}
+
+	/*
+	 * For the requested display refresh rate, truncating to two decimal
+	 * places and checking if it's in the supported refresh rates.
+	 */
+	bool found = false;
+	for (int i = 0; i < (int)sess->sys->xsysc->info.refresh_rate_count; ++i) {
+		if ((int)(displayRefreshRate * 100.0f) == (int)(sess->sys->xsysc->info.refresh_rates_hz[i] * 100.0f)) {
+			found = true;
+			break;
+		}
+	}
+	if (!found) {
+		return XR_ERROR_DISPLAY_REFRESH_RATE_UNSUPPORTED_FB;
+	}
+
+	return oxr_session_request_display_refresh_rate(&log, sess, displayRefreshRate);
+}
+
+#endif
+
+/*
+ *
+ * XR_KHR_android_thread_settings
+ *
+ */
+
+#ifdef OXR_HAVE_KHR_android_thread_settings
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrSetAndroidApplicationThreadKHR(XrSession session, XrAndroidThreadTypeKHR threadType, uint32_t threadId)
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_session *sess = NULL;
+	struct oxr_logger log;
+	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrSetAndroidApplicationThreadKHR");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
+
+	if (threadType != XR_ANDROID_THREAD_TYPE_APPLICATION_MAIN_KHR &&
+	    threadType != XR_ANDROID_THREAD_TYPE_APPLICATION_WORKER_KHR &&
+	    threadType != XR_ANDROID_THREAD_TYPE_RENDERER_MAIN_KHR &&
+	    threadType != XR_ANDROID_THREAD_TYPE_RENDERER_WORKER_KHR) {
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE, "(threadType == %d) is invalid", threadType);
+	}
+
+	OXR_VERIFY_EXTENSION(&log, sess->sys->inst, KHR_android_thread_settings);
+
+	return oxr_session_android_thread_settings(&log, sess, threadType, threadId);
+}
+
+#endif
+
+#ifdef OXR_HAVE_HTC_facial_tracking
+
+static enum xrt_facial_tracking_type_htc
+oxr_to_xrt_facial_tracking_type_htc(enum XrFacialTrackingTypeHTC ft_type)
+{
+	return (enum xrt_facial_tracking_type_htc)ft_type;
+}
+
+static enum xrt_input_name
+oxr_facial_tracking_type_htc_to_input_name(enum xrt_facial_tracking_type_htc ft_type)
+{
+	switch (ft_type) {
+	case XRT_FACIAL_TRACKING_TYPE_LIP_DEFAULT_HTC: return XRT_INPUT_HTC_LIP_FACE_TRACKING;
+	case XRT_FACIAL_TRACKING_TYPE_EYE_DEFAULT_HTC:
+	default: return XRT_INPUT_HTC_EYE_FACE_TRACKING;
+	}
+}
+
+static XrResult
+oxr_facial_tracker_htc_destroy_cb(struct oxr_logger *log, struct oxr_handle_base *hb)
+{
+	struct oxr_facial_tracker_htc *face_tracker_htc = (struct oxr_facial_tracker_htc *)hb;
+	free(face_tracker_htc);
 	return XR_SUCCESS;
 }
 
+XrResult
+oxr_facial_tracker_htc_create(struct oxr_logger *log,
+                              struct oxr_session *sess,
+                              const XrFacialTrackerCreateInfoHTC *createInfo,
+                              struct oxr_facial_tracker_htc **out_face_tracker_htc)
+{
+	bool supports_eye = false;
+	bool supports_lip = false;
+	oxr_system_get_face_tracking_htc_support(log, sess->sys->inst, &supports_eye, &supports_lip);
+
+	const enum xrt_facial_tracking_type_htc facial_tracking_type =
+	    oxr_to_xrt_facial_tracking_type_htc(createInfo->facialTrackingType);
+
+	if (facial_tracking_type == XRT_FACIAL_TRACKING_TYPE_EYE_DEFAULT_HTC && !supports_eye) {
+		return oxr_error(log, XR_ERROR_FEATURE_UNSUPPORTED, "System does not support HTC eye facial tracking");
+	}
+	if (facial_tracking_type == XRT_FACIAL_TRACKING_TYPE_LIP_DEFAULT_HTC && !supports_lip) {
+		return oxr_error(log, XR_ERROR_FEATURE_UNSUPPORTED, "System does not support HTC lip facial tracking");
+	}
+
+	struct xrt_device *xdev = GET_XDEV_BY_ROLE(sess->sys, face);
+	if (xdev == NULL) {
+		return oxr_error(log, XR_ERROR_FEATURE_UNSUPPORTED, "No device found for face tracking role");
+	}
+
+	if (!xdev->face_tracking_supported) {
+		return oxr_error(log, XR_ERROR_FEATURE_UNSUPPORTED, "Device does not support HTC facial tracking");
+	}
+
+	struct oxr_facial_tracker_htc *face_tracker_htc = NULL;
+	OXR_ALLOCATE_HANDLE_OR_RETURN(log, face_tracker_htc, OXR_XR_DEBUG_FTRACKER, oxr_facial_tracker_htc_destroy_cb,
+	                              &sess->handle);
+
+	face_tracker_htc->sess = sess;
+	face_tracker_htc->xdev = xdev;
+	face_tracker_htc->facial_tracking_type = facial_tracking_type;
+
+	*out_face_tracker_htc = face_tracker_htc;
+
+	return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrCreateFacialTrackerHTC(XrSession session,
+                             const XrFacialTrackerCreateInfoHTC *createInfo,
+                             XrFacialTrackerHTC *facialTracker)
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_logger log;
+	XrResult ret = XR_SUCCESS;
+	struct oxr_session *sess = NULL;
+	struct oxr_facial_tracker_htc *facial_tracker_htc = NULL;
+	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrCreateFacialTrackerHTC");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
+	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, createInfo, XR_TYPE_FACIAL_TRACKER_CREATE_INFO_HTC);
+	OXR_VERIFY_EXTENSION(&log, sess->sys->inst, HTC_facial_tracking);
+
+	ret = oxr_facial_tracker_htc_create(&log, sess, createInfo, &facial_tracker_htc);
+	if (ret != XR_SUCCESS) {
+		return ret;
+	}
+
+	OXR_VERIFY_ARG_NOT_NULL(&log, facial_tracker_htc);
+	*facialTracker = oxr_facial_tracker_htc_to_openxr(facial_tracker_htc);
+
+	return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrDestroyFacialTrackerHTC(XrFacialTrackerHTC facialTracker)
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_logger log;
+	struct oxr_facial_tracker_htc *facial_tracker_htc = NULL;
+	OXR_VERIFY_FACE_TRACKER_HTC_AND_INIT_LOG(&log, facialTracker, facial_tracker_htc, "xrDestroyFacialTrackerHTC");
+
+	return oxr_handle_destroy(&log, &facial_tracker_htc->handle);
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrGetFacialExpressionsHTC(XrFacialTrackerHTC facialTracker, XrFacialExpressionsHTC *facialExpressions)
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_logger log;
+	struct oxr_facial_tracker_htc *facial_tracker_htc = NULL;
+	OXR_VERIFY_FACE_TRACKER_HTC_AND_INIT_LOG(&log, facialExpressions, facial_tracker_htc,
+	                                         "xrGetFacialExpressionsHTC");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, facial_tracker_htc->sess);
+	OXR_VERIFY_ARG_NOT_NULL(&log, facial_tracker_htc->xdev);
+	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, facialExpressions, XR_TYPE_FACIAL_EXPRESSIONS_HTC);
+	OXR_VERIFY_ARG_NOT_NULL(&log, facialExpressions->expressionWeightings);
+
+#define OXR_VERIFY_FACE_EXPRESSION_COUNT(fttype)                                                                       \
+	if (facial_tracker_htc->facial_tracking_type == XRT_FACIAL_TRACKING_TYPE_##fttype##_DEFAULT_HTC &&             \
+	    facialExpressions->expressionCount < XRT_FACIAL_EXPRESSION_##fttype##_COUNT_HTC) {                         \
+		return oxr_error(                                                                                      \
+		    &log, XR_ERROR_SIZE_INSUFFICIENT,                                                                  \
+		    "\"expressionCount\" (%d) size is less than the minimum size (%d) required for " #fttype           \
+		    " expressions.\n",                                                                                 \
+		    facialExpressions->expressionCount, XRT_FACIAL_EXPRESSION_##fttype##_COUNT_HTC);                   \
+	}
+
+	OXR_VERIFY_FACE_EXPRESSION_COUNT(EYE)
+	OXR_VERIFY_FACE_EXPRESSION_COUNT(LIP)
+#undef OXR_VERIFY_FACE_EXPRESSION_COUNT
+
+	const bool is_eye_tracking =
+	    facial_tracker_htc->facial_tracking_type == XRT_FACIAL_TRACKING_TYPE_EYE_DEFAULT_HTC;
+	const size_t expression_count =
+	    is_eye_tracking ? XRT_FACIAL_EXPRESSION_EYE_COUNT_HTC : XRT_FACIAL_EXPRESSION_LIP_COUNT_HTC;
+
+	struct xrt_facial_expression_set facial_expression_set_result = {0};
+	float *expression_weights = is_eye_tracking
+	                                ? facial_expression_set_result.eye_expression_set_htc.expression_weights
+	                                : facial_expression_set_result.lip_expression_set_htc.expression_weights;
+	memset(expression_weights, 0, sizeof(float) * expression_count);
+
+	const enum xrt_input_name ft_input_name =
+	    oxr_facial_tracking_type_htc_to_input_name(facial_tracker_htc->facial_tracking_type);
+
+	xrt_device_get_face_tracking(facial_tracker_htc->xdev, ft_input_name, &facial_expression_set_result);
+
+	facialExpressions->isActive = facial_expression_set_result.base_expression_set_htc.is_active;
+	if (facialExpressions->isActive == XR_FALSE)
+		return XR_SUCCESS;
+
+	const struct oxr_instance *inst = facial_tracker_htc->sess->sys->inst;
+	facialExpressions->sampleTime = time_state_monotonic_to_ts_ns(
+	    inst->timekeeping, facial_expression_set_result.base_expression_set_htc.sample_time_ns);
+
+	memcpy(facialExpressions->expressionWeightings, expression_weights, sizeof(float) * expression_count);
+
+	return XR_SUCCESS;
+}
 #endif

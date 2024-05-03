@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: CC0-1.0
-# SPDX-FileCopyrightText: 2018-2022 Collabora, Ltd. and the Monado contributors
+# SPDX-FileCopyrightText: 2018-2023 Collabora, Ltd. and the Monado contributors
 
 # Please run the following from the repo root after modifying this file:
 #   make -f .gitlab-ci/ci-scripts.mk
 
-fdo_ci_templates_sha: 34039cd573a2df832d465bc9e4c5f543571f5241
+fdo_ci_templates_sha: 185ede0e9b9b1924b92306ab8b882a6294e92613
 
 # These are a mapping, instead of a list/array, so we can merge.
 .default_debian_packages:
@@ -36,7 +36,6 @@ fdo_ci_templates_sha: 34039cd573a2df832d465bc9e4c5f543571f5241
   libhidapi-dev:
   libwayland-dev:
   libuvc-dev:
-  libavcodec-dev:
   libopencv-dev:
   libv4l-dev:
   libcjson-dev:
@@ -47,6 +46,7 @@ fdo_ci_templates_sha: 34039cd573a2df832d465bc9e4c5f543571f5241
   libgstreamer-plugins-base1.0-dev:
   libsystemd-dev:
   libbsd-dev:
+  libbluetooth-dev:
   # Only used for building packages
   devscripts:
   debhelper:
@@ -61,6 +61,9 @@ fdo_ci_templates_sha: 34039cd573a2df832d465bc9e4c5f543571f5241
   Eigen3_DIR: /usr/lib/cmake/eigen3/
   EIGEN3_INCLUDE_DIR: /usr/include/eigen3
 
+# Which build job do we use to build the documentation.
+documentation_build: "debian:cmake"
+
 # The distributions we'll make an image for
 distributions:
   - name: debian
@@ -68,7 +71,7 @@ distributions:
       # This image does some extra work.
       - codename: bullseye
         script: i386_and_proclamation_container_prep.sh
-        tag: "2022-04-22.0"
+        tag: "2024-01-16"
         deb_version_suffix: bpo11
         packages:
           <<: *default_debian_packages
@@ -84,23 +87,22 @@ distributions:
             # since this is the build that makes our docs.
             before_script:
               - pushd doc/changes
-              - proclamation build --overwrite vNEXT
+              - proclamation build vNEXT
               - popd
             artifact_path: build/doc/html/
+            cmake_defines:
+              BUILD_DOC: "ON"
 
           - name: "debian:cmake-no-opencv"
             cmake_defines:
-              BUILD_DOC: "OFF"
               XRT_HAVE_OPENCV: "OFF"
 
           - name: "debian:cmake-no-sdl2"
             cmake_defines:
-              BUILD_DOC: "OFF"
               XRT_HAVE_SDL2: "OFF"
 
           - name: "debian:cmake-no-service"
             cmake_defines:
-              BUILD_DOC: "OFF"
               XRT_FEATURE_SERVICE: "OFF"
 
           - name: "debian:cmake:32bit"
@@ -111,17 +113,17 @@ distributions:
 
       # This one is pretty minimal, compared to the others.
       # Though, we now install the android SDK in it...
-      - codename: bullseye-ndk
-        distro_version: bullseye
+      - codename: bookworm-ndk
+        distro_version: bookworm
         repo_suffix: ndk
         script: android_container_prep.sh
-        tag: "2022-06-27.0"
-        # This must match ext.sharedTargetSdk in build.gradle
-        android_compile_sdk: 31
+        tag: "2024-01-16"
+        # This must match ext.sharedCompileSdk in build.gradle
+        android_compile_sdk: 32
         # This must match buildscript.ext.buildToolsVersion in build.gradle
-        android_build_tools: 31.0.0
+        android_build_tools: 32.0.0
         # look up on https://developer.android.com/studio/index.html#downloads when updating other versions
-        android_cli_tools: 8512546
+        android_cli_tools: 9477386
 
         packages:
           git:
@@ -140,14 +142,15 @@ distributions:
           - name: "ndk:armeabi-v7a"
             cmake_defines:
               <<: *android_cmake_defines
-              BUILD_DOC: "OFF"
               ANDROID_ABI: armeabi-v7a
 
           - name: "ndk:arm64-v8a"
             cmake_defines:
               <<: *android_cmake_defines
-              BUILD_DOC: "OFF"
               ANDROID_ABI: arm64-v8a
+
+          - name: android:spotlessCheck
+            target: spotlessCheck
 
           - name: android:outOfProcessDebug
             target: assembleOutOfProcessDebug
@@ -170,47 +173,75 @@ distributions:
       # LTS
       - codename: focal
         distro_version: "20.04"
-        tag: "2022-04-22.0"
+        tag: "2024-01-16"
         deb_version_suffix: ubuntu2004
+        packages:
+          <<: *default_debian_packages
+        build_jobs:
+          - name: "ubuntu:focal:cmake"
+            cmake_defines:
+
+      - codename: jammy
+        distro_version: "22.04"
+        tag: "2024-01-16"
+        deb_version_suffix: ubuntu2204
         packages:
           <<: *default_debian_packages
           reprepro:
         build_jobs:
-          - name: "ubuntu:cmake"
+          - name: "ubuntu:jammy:cmake"
             cmake_defines:
-              BUILD_DOC: "OFF"
 
   - name: arch
     images:
-      - codename: rolling
-        tag: "2022-04-22.0"
+      - tag: "2024-01-16"
+        script: install-arch-additional-deps.sh
+        # pipewire-jack wireplumber: Explicitly choose dependencies to avoid pacman asking interactively
+        # python-setuptools glu: librealsense
+        # glew boost gtest fmt bc: basalt-monado-git
+        # python-attrs: xr-hardware-git
         packages:
-          git:
-          gcc:
+          base-devel:
+          pipewire-jack:
+          wireplumber:
+          bluez-libs:
+          check:
           clang:
           cmake:
-          ninja:
-          pkgconfig:
-          python3:
           diffutils:
-          patch:
           doxygen:
-          graphviz:
           eigen:
+          gcc:
+          git:
+          glfw-x11:
+          glslang:
+          graphviz:
+          gtk3:
           hidapi:
+          libusb:
           libxrandr:
           mesa:
-          glslang:
+          ninja:
+          opencv:
+          patch:
+          pkgconfig:
+          python3:
+          qt6-base:
+          v4l-utils:
           vulkan-headers:
           vulkan-icd-loader:
-          check:
-          glfw-x11:
-          libusb:
-          opencv:
-          gtk3:
-          ffmpeg:
-          v4l-utils:
-          qt5-base:
+          wget:
+          meson:
+          python-setuptools:
+          glu:
+          glew:
+          boost:
+          gtest:
+          fmt:
+          bc:
+          wayland:
+          libbsd:
+          python-attrs:
         build_jobs:
           - name: "arch:cmake"
 
@@ -219,10 +250,38 @@ distributions:
               CMAKE_C_COMPILER: /usr/bin/clang
               CMAKE_CXX_COMPILER: /usr/bin/clang++
 
+  - name: alpine
+    images:
+      - tag: "2024-01-16"
+        packages:
+          - "cmake"
+          - "cmd:glslangValidator"
+          - "cmd:wayland-scanner"
+          - "build-base"
+          - "doxygen"
+          - "eigen-dev"
+          - "eudev-dev"
+          - "graphviz"
+          - "libjpeg-turbo-dev"
+          - "libsurvive-dev"
+          - "libxrandr-dev"
+          - "mesa-dev"
+          - "opencv-dev"
+          - "openhmd-dev"
+          - "samurai"
+          - "sdl2-dev"
+          - "v4l-utils-dev"
+          - "vulkan-loader-dev"
+          - "wayland-dev"
+          - "wayland-protocols"
+          - "zlib-dev"
+        build_jobs:
+          - name: "alpine:cmake"
+
 android:
   platform: 26
 
 packaging:
   # Name and email associated with the package
   name: "Monado CI"
-  email: "ryan.pavlik@collabora.com"
+  email: "rylie.pavlik@collabora.com"

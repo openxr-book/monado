@@ -1,4 +1,4 @@
-// Copyright 2019, Collabora, Ltd.
+// Copyright 2019-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -6,16 +6,17 @@
  * @author Jakob Bornecrantz <jakob@collabora.com>
  */
 
-#include <string.h>
-#include <stdio.h>
-
-#include "xrt/xrt_instance.h"
+#include "xrt/xrt_space.h"
 #include "xrt/xrt_system.h"
 #include "xrt/xrt_device.h"
 #include "xrt/xrt_prober.h"
+#include "xrt/xrt_instance.h"
+#include "xrt/xrt_config_drivers.h"
+
 #include "cli_common.h"
 
-#include "xrt/xrt_config_drivers.h"
+#include <string.h>
+#include <stdio.h>
 
 static int
 do_exit(struct xrt_instance **xi_ptr, int ret)
@@ -47,10 +48,14 @@ cli_cmd_probe(int argc, const char **argv)
 	// Need to prime the prober with devices before dumping and listing.
 	printf(" :: Creating system devices!\n");
 
+	struct xrt_system *xsys = NULL;
 	struct xrt_system_devices *xsysd = NULL;
+	struct xrt_space_overseer *xso = NULL;
 	xret = xrt_instance_create_system( //
 	    xi,                            // Instance
+	    &xsys,                         // System
 	    &xsysd,                        // System devices.
+	    &xso,                          // Space overseer.
 	    NULL);                         // System compositor.
 	if (xret != XRT_SUCCESS) {
 		printf("\tCall to xrt_instance_create_system failed! '%i'\n", xret);
@@ -68,10 +73,12 @@ cli_cmd_probe(int argc, const char **argv)
 		return do_exit(&xi, -1);
 	}
 
+	size_t builder_count;
+	struct xrt_builder **builders;
 	size_t num_entries;
 	struct xrt_prober_entry **entries;
 	struct xrt_auto_prober **auto_probers;
-	ret = xrt_prober_get_entries(xp, &num_entries, &entries, &auto_probers);
+	ret = xrt_prober_get_builders(xp, &builder_count, &builders, &num_entries, &entries, &auto_probers);
 	if (ret != 0) {
 		do_exit(&xi, ret);
 	}
@@ -114,7 +121,9 @@ cli_cmd_probe(int argc, const char **argv)
 
 	printf(" :: Destroying probed devices\n");
 
+	xrt_space_overseer_destroy(&xso);
 	xrt_system_devices_destroy(&xsysd);
+	xrt_system_destroy(&xsys);
 
 	// End of program
 	printf(" :: All ok, shutting down.\n");

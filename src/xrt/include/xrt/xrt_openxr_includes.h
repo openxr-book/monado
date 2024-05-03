@@ -1,9 +1,10 @@
-// Copyright 2018-2022, Collabora, Ltd.
+// Copyright 2018-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Include all of the openxr headers in one place.
  * @author Jakob Bornecrantz <jakob@collabora.com>
+ * @author Korcan Hussein <korcan.hussein@collabora.com>
  * @ingroup xrt_iface
  */
 
@@ -36,15 +37,30 @@ typedef void (*__eglMustCastToProperFunctionPointerType)(void); // NOLINT
 typedef __eglMustCastToProperFunctionPointerType (*PFNEGLGETPROCADDRESSPROC)(const char *procname);
 #endif
 
-#if defined(XR_USE_GRAPHICS_API_D3D11)
+#if defined(XR_USE_PLATFORM_WIN32)
 #include "xrt_windows.h"
+#endif
+
+#if defined(XR_USE_GRAPHICS_API_D3D11)
 #include <d3d11.h>
+#endif
+
+#if defined(XR_USE_GRAPHICS_API_D3D12)
+#include <d3d12.h>
+#endif
+
+#if defined(XR_USE_GRAPHICS_API_VULKAN)
+#include "xrt_vulkan_includes.h"
 #endif
 
 #ifdef XR_USE_TIMESPEC
 #include <time.h>
 #endif
 
-#include "openxr/openxr.h"
-#include "openxr/openxr_platform.h"
-#include "openxr/loader_interfaces.h"
+#include "openxr/openxr.h"                    // IWYU pragma: export
+#include "openxr/openxr_platform.h"           // IWYU pragma: export
+#include "openxr/openxr_loader_negotiation.h" // IWYU pragma: export
+
+#include "openxr/XR_MNDX_hydra.h"
+#include "openxr/XR_MNDX_system_buttons.h"
+#include "openxr/XR_MNDX_ball_on_a_stick_controller.h"

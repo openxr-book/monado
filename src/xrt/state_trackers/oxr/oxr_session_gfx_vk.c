@@ -28,6 +28,7 @@
 
 
 DEBUG_GET_ONCE_BOOL_OPTION(force_timeline_semaphores, "OXR_DEBUG_FORCE_TIMELINE_SEMAPHORES", false)
+DEBUG_GET_ONCE_BOOL_OPTION(force_debug_utils, "OXR_DEBUG_FORCE_VK_DEBUG_UTILS", false)
 
 
 static bool
@@ -81,13 +82,15 @@ oxr_session_populate_vk(struct oxr_logger *log,
 	bool timeline_semaphore_enabled = sess->sys->vk.timeline_semaphore_enabled;
 	bool external_fence_fd_enabled = sess->sys->vk.external_fence_fd_enabled;
 	bool external_semaphore_fd_enabled = sess->sys->vk.external_semaphore_fd_enabled;
+	bool debug_utils_enabled = false;
+	bool renderdoc_enabled = false;
 
 
 #if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
 	if (sys->inst->extensions.KHR_vulkan_enable && sys->inst->extensions.KHR_vulkan_enable2 &&
 	    !external_fence_fd_enabled && !external_semaphore_fd_enabled) {
 		oxr_warn(log,
-		         "Both KHR_vulkan_enable and KHR_vulkan_enable2 are enabled can not safely determine if "
+		         "Both KHR_vulkan_enable and KHR_vulkan_enable2 are enabled cannot safely determine if "
 		         "external fence|semaphore FD has been enabled assuming yes.");
 		external_fence_fd_enabled = true;
 		external_semaphore_fd_enabled = true;
@@ -109,6 +112,30 @@ oxr_session_populate_vk(struct oxr_logger *log,
 		timeline_semaphore_enabled = true;
 	}
 
+#ifdef OXR_HAVE_KHR_vulkan_enable2
+	if (sys->inst->extensions.KHR_vulkan_enable2) {
+		debug_utils_enabled = sess->sys->vk.debug_utils_enabled;
+	}
+#endif
+
+	if (!debug_utils_enabled && debug_get_bool_option_force_debug_utils()) {
+		oxr_log(log, "Forcing VK_EXT_debug_utils on, your app better have enabled them!");
+		debug_utils_enabled = true;
+	}
+
+#ifndef VK_EXT_debug_utils
+	if (debug_utils_enabled) {
+		oxr_log(log, "VK_EXT_debug_utils detected or forced, but not built with it!");
+		debug_utils_enabled = false;
+	}
+#endif
+
+#if defined(XRT_FEATURE_RENDERDOC) && defined(XR_USE_PLATFORM_ANDROID)
+	if (sess->sys->inst->rdoc_api) {
+		renderdoc_enabled = true;
+	}
+#endif
+
 	struct xrt_compositor_native *xcn = sess->xcn;
 	struct xrt_compositor_vk *xcvk = xrt_gfx_vk_provider_create( //
 	    xcn,                                                     //
@@ -119,6 +146,8 @@ oxr_session_populate_vk(struct oxr_logger *log,
 	    external_fence_fd_enabled,                               //
 	    external_semaphore_fd_enabled,                           //
 	    timeline_semaphore_enabled,                              //
+	    debug_utils_enabled,                                     //
+	    renderdoc_enabled,                                       //
 	    next->queueFamilyIndex,                                  //
 	    next->queueIndex);                                       //
 

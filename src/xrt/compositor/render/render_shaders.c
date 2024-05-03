@@ -1,4 +1,4 @@
-// Copyright 2019-2022, Collabora, Ltd.
+// Copyright 2019-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -8,12 +8,16 @@
  * @ingroup comp_render
  */
 
+#include "vk/vk_mini_helpers.h"
+
 #include "render/render_interface.h"
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <assert.h>
+
+/*
+ *
+ * Shader headers.
+ *
+ */
 
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
@@ -21,14 +25,18 @@
 #pragma GCC diagnostic ignored "-Wnewline-eof"
 #endif
 
+#include "shaders/blit.comp.h"
 #include "shaders/clear.comp.h"
+#include "shaders/layer.comp.h"
 #include "shaders/distortion.comp.h"
-#include "shaders/layer.frag.h"
-#include "shaders/layer.vert.h"
-#include "shaders/equirect1.frag.h"
-#include "shaders/equirect1.vert.h"
-#include "shaders/equirect2.frag.h"
-#include "shaders/equirect2.vert.h"
+#include "shaders/layer_cylinder.frag.h"
+#include "shaders/layer_cylinder.vert.h"
+#include "shaders/layer_equirect2.frag.h"
+#include "shaders/layer_equirect2.vert.h"
+#include "shaders/layer_projection.vert.h"
+#include "shaders/layer_projection.vert.h"
+#include "shaders/layer_quad.vert.h"
+#include "shaders/layer_shared.frag.h"
 #include "shaders/mesh.frag.h"
 #include "shaders/mesh.vert.h"
 
@@ -39,11 +47,34 @@
 
 /*
  *
+ * Helpers
+ *
+ */
+
+#define LOAD(SHADER)                                                                                                   \
+	do {                                                                                                           \
+		const uint32_t *code = shaders_##SHADER;                                                               \
+		size_t size = sizeof(shaders_##SHADER);                                                                \
+		VkResult ret = shader_load(vk,          /* vk_bundle */                                                \
+		                           code,        /* code      */                                                \
+		                           size,        /* size      */                                                \
+		                           &s->SHADER); /* out       */                                                \
+		if (ret != VK_SUCCESS) {                                                                               \
+			VK_ERROR(vk, "Failed to load shader '" #SHADER "'");                                           \
+			render_shaders_close(s, vk);                                                                   \
+			return false;                                                                                  \
+		}                                                                                                      \
+		VK_NAME_SHADER_MODULE(vk, s->SHADER, #SHADER);                                                         \
+	} while (false)
+
+
+/*
+ *
  * Functions.
  *
  */
 
-static VkResult
+XRT_CHECK_RESULT static VkResult
 shader_load(struct vk_bundle *vk, const uint32_t *code, size_t size, VkShaderModule *out_module)
 {
 	VkResult ret;
@@ -55,102 +86,62 @@ shader_load(struct vk_bundle *vk, const uint32_t *code, size_t size, VkShaderMod
 	};
 
 	VkShaderModule module;
-	ret = vk->vkCreateShaderModule(vk->device, //
-	                               &info,      //
-	                               NULL,       //
-	                               &module);   //
-	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vkCreateShaderModule failed: %s", vk_result_string(ret));
-		return ret;
-	}
+	ret = vk->vkCreateShaderModule( //
+	    vk->device,                 //
+	    &info,                      //
+	    NULL,                       //
+	    &module);                   //
+	VK_CHK_AND_RET(ret, "vkCreateShaderModule");
 
 	*out_module = module;
 
 	return VK_SUCCESS;
 }
 
-#define C(c)                                                                                                           \
-	do {                                                                                                           \
-		VkResult ret = c;                                                                                      \
-		if (ret != VK_SUCCESS) {                                                                               \
-			render_shaders_close(s, vk);                                                                   \
-			return false;                                                                                  \
-		}                                                                                                      \
-	} while (false)
-
 bool
 render_shaders_load(struct render_shaders *s, struct vk_bundle *vk)
 {
-	C(shader_load(vk,                         // vk_bundle
-	              shaders_clear_comp,         // data
-	              sizeof(shaders_clear_comp), // size
-	              &s->clear_comp));           // out
+	LOAD(blit_comp);
 
-	C(shader_load(vk,                              // vk_bundle
-	              shaders_distortion_comp,         // data
-	              sizeof(shaders_distortion_comp), // size
-	              &s->distortion_comp));           // out
+	LOAD(clear_comp);
 
-	C(shader_load(vk,                        // vk_bundle
-	              shaders_mesh_vert,         // data
-	              sizeof(shaders_mesh_vert), // size
-	              &s->mesh_vert));           // out
-	C(shader_load(vk,                        // vk_bundle
-	              shaders_mesh_frag,         // data
-	              sizeof(shaders_mesh_frag), // size
-	              &s->mesh_frag));           // out
+	LOAD(layer_comp);
 
-	C(shader_load(vk,                             // vk_bundle
-	              shaders_equirect1_vert,         // data
-	              sizeof(shaders_equirect1_vert), // size
-	              &s->equirect1_vert));           // out
-	C(shader_load(vk,                             // vk_bundle
-	              shaders_equirect1_frag,         // data
-	              sizeof(shaders_equirect1_frag), // size
-	              &s->equirect1_frag));           // out
+	LOAD(distortion_comp);
 
-	C(shader_load(vk,                             // vk_bundle
-	              shaders_equirect2_vert,         // data
-	              sizeof(shaders_equirect2_vert), // size
-	              &s->equirect2_vert));           // out
-	C(shader_load(vk,                             // vk_bundle
-	              shaders_equirect2_frag,         // data
-	              sizeof(shaders_equirect2_frag), // size
-	              &s->equirect2_frag));           // out
+	LOAD(mesh_vert);
+	LOAD(mesh_frag);
 
-	C(shader_load(vk,                         // vk_bundle
-	              shaders_layer_vert,         // data
-	              sizeof(shaders_layer_vert), // size
-	              &s->layer_vert));           // out
-	C(shader_load(vk,                         // vk_bundle
-	              shaders_layer_frag,         // data
-	              sizeof(shaders_layer_frag), // size
-	              &s->layer_frag));           // out
+	LOAD(layer_cylinder_frag);
+	LOAD(layer_cylinder_vert);
+	LOAD(layer_equirect2_frag);
+	LOAD(layer_equirect2_vert);
+	LOAD(layer_projection_vert);
+	LOAD(layer_quad_vert);
+	LOAD(layer_shared_frag);
 
 	VK_DEBUG(vk, "Shaders loaded!");
 
 	return true;
 }
 
-#define D(shader)                                                                                                      \
-	if (s->shader != VK_NULL_HANDLE) {                                                                             \
-		vk->vkDestroyShaderModule(vk->device, s->shader, NULL);                                                \
-		s->shader = VK_NULL_HANDLE;                                                                            \
-	}
-
 void
 render_shaders_close(struct render_shaders *s, struct vk_bundle *vk)
 {
-	D(clear_comp);
-	D(distortion_comp);
-	D(mesh_vert);
-	D(mesh_frag);
-	D(equirect1_vert);
-	D(equirect1_frag);
-	D(equirect2_vert);
-	D(equirect2_frag);
-	D(layer_vert);
-	D(layer_frag);
+	D(ShaderModule, s->blit_comp);
+	D(ShaderModule, s->clear_comp);
+	D(ShaderModule, s->distortion_comp);
+	D(ShaderModule, s->layer_comp);
+	D(ShaderModule, s->mesh_vert);
+	D(ShaderModule, s->mesh_frag);
+
+	D(ShaderModule, s->layer_cylinder_frag);
+	D(ShaderModule, s->layer_cylinder_vert);
+	D(ShaderModule, s->layer_equirect2_frag);
+	D(ShaderModule, s->layer_equirect2_vert);
+	D(ShaderModule, s->layer_projection_vert);
+	D(ShaderModule, s->layer_quad_vert);
+	D(ShaderModule, s->layer_shared_frag);
 
 	VK_DEBUG(vk, "Shaders destroyed!");
 }

@@ -3,7 +3,7 @@
 /*!
  * @file
  * @brief  Library exposing IPC server.
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup ipc_android
  */
 
@@ -13,6 +13,7 @@
 #include "wrap/android.view.h"
 
 #include "server/ipc_server.h"
+#include "server/ipc_server_interface.h"
 #include "server/ipc_server_mainloop_android.h"
 #include "util/u_logging.h"
 
@@ -88,6 +89,7 @@ public:
 			server_thread->join();
 			server_thread.reset(nullptr);
 			server = NULL;
+			startup_complete = false;
 		}
 
 		return 0;
@@ -100,12 +102,16 @@ private:
 	waitForStartupComplete()
 	{
 		std::unique_lock<std::mutex> lock{server_mutex};
-		bool completed = startup_cond.wait_for(lock, START_TIMEOUT_SECONDS,
-		                                       [&]() { return server != NULL && startup_complete; });
+		bool completed = startup_cond.wait_for(lock, START_TIMEOUT_SECONDS, [&]() { return startup_complete; });
+
+		if (!server) {
+			U_LOG_E("Failed to create ipc server");
+		}
+
 		if (!completed) {
 			U_LOG_E("Server startup timeout!");
 		}
-		return completed;
+		return server && completed;
 	}
 
 	//! Reference to the ipc_server, managed by ipc_server_process
@@ -124,16 +130,23 @@ private:
 	bool startup_complete = false;
 
 	//! Timeout duration in seconds
-	static constexpr std::chrono::seconds START_TIMEOUT_SECONDS = 20s;
+	static constexpr std::chrono::seconds START_TIMEOUT_SECONDS = 40s;
 };
 } // namespace
 
-extern "C" void
-Java_org_freedesktop_monado_ipc_MonadoImpl_nativeStartServer(JNIEnv *env, jobject thiz)
+extern "C" JNIEXPORT void JNICALL
+Java_org_freedesktop_monado_ipc_MonadoImpl_nativeStartServer(JNIEnv *env, jobject thiz, jobject context)
 {
+	JavaVM *jvm = nullptr;
+	jint result = env->GetJavaVM(&jvm);
+	assert(result == JNI_OK);
+	assert(jvm);
+
 	jni::init(env);
 	jni::Object monadoImpl(thiz);
 	U_LOG_D("service: Called nativeStartServer");
+
+	android_globals_store_vm_and_context(jvm, context);
 
 	IpcServerHelper::instance().startServer();
 }
@@ -145,8 +158,11 @@ Java_org_freedesktop_monado_ipc_MonadoImpl_nativeAddClient(JNIEnv *env, jobject 
 	jni::Object monadoImpl(thiz);
 	U_LOG_D("service: Called nativeAddClient with fd %d", fd);
 
+	int native_fd = dup(fd);
+	U_LOG_D("service: transfer ownership to native and native_fd %d", native_fd);
+
 	// We try pushing the fd number to the server. If and only if we get a 0 return, has the server taken ownership.
-	return IpcServerHelper::instance().addClient(fd);
+	return IpcServerHelper::instance().addClient(native_fd);
 }
 
 extern "C" JNIEXPORT void JNICALL

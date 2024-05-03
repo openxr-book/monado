@@ -45,7 +45,7 @@ calc_projection(const struct xrt_fov *fov, struct xrt_matrix_4x4_f64 *result)
 	const float a43 = (float)(-(far_plane * near_plane) / (far_plane - near_plane));
 
 
-#if 1
+#if 0
 	// We skip a33 & a43 because we don't have depth.
 	(void)a33;
 	(void)a43;
@@ -61,6 +61,12 @@ calc_projection(const struct xrt_fov *fov, struct xrt_matrix_4x4_f64 *result)
 	};
 	// clang-format on
 #else
+	/*
+	 * Apparently the timewarp doesn't look good without this path being
+	 * used. With the above it stretches out. I tried with the code to see
+	 * if I could affect the depth where the view was placed but couldn't
+	 * see to do it, which is a head scratcher.
+	 */
 	// clang-format off
 	*result = (struct xrt_matrix_4x4_f64) {
 		.v = {
@@ -73,6 +79,13 @@ calc_projection(const struct xrt_fov *fov, struct xrt_matrix_4x4_f64 *result)
 	// clang-format on
 #endif
 }
+
+
+/*
+ *
+ * 'Exported' functions.
+ *
+ */
 
 void
 render_calc_time_warp_matrix(const struct xrt_pose *src_pose,
@@ -108,4 +121,39 @@ render_calc_time_warp_matrix(const struct xrt_pose *src_pose,
 	for (int i = 0; i < 16; i++) {
 		matrix->v[i] = (float)result.v[i];
 	}
+}
+
+void
+render_calc_uv_to_tangent_lengths_rect(const struct xrt_fov *fov, struct xrt_normalized_rect *out_rect)
+{
+	const struct xrt_fov copy = *fov;
+
+	const double tan_left = tan(copy.angle_left);
+	const double tan_right = tan(copy.angle_right);
+
+	const double tan_down = tan(copy.angle_down);
+	const double tan_up = tan(copy.angle_up);
+
+	const double tan_width = tan_right - tan_left;
+	const double tan_height = tan_up - tan_down;
+
+	/*
+	 * I do not know why we have to calculate the offsets like this, but
+	 * this one is the one that seems to work with what is currently in the
+	 * calc timewarp matrix function and the distortion shader. It works
+	 * with Index (unbalanced left and right angles) and WMR (unbalanced up
+	 * and down angles) so here it is. In so far it matches what the gfx
+	 * and non-timewarp compute pipeline produces.
+	 */
+	const double tan_offset_x = ((tan_right + tan_left) - tan_width) / 2;
+	const double tan_offset_y = (-(tan_up + tan_down) - tan_height) / 2;
+
+	struct xrt_normalized_rect transform = {
+	    .x = (float)tan_offset_x,
+	    .y = (float)tan_offset_y,
+	    .w = (float)tan_width,
+	    .h = (float)tan_height,
+	};
+
+	*out_rect = transform;
 }

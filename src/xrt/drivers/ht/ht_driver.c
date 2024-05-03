@@ -1,4 +1,4 @@
-// Copyright 2021, Collabora, Ltd.
+// Copyright 2021-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -24,12 +24,12 @@
 #include "util/u_config_json.h"
 #include "util/u_debug.h"
 #include "util/u_sink.h"
+#include "util/u_file.h"
 
 #include "tracking/t_hand_tracking.h"
 
 // Save me, Obi-Wan!
 
-#include "../../tracking/hand/old_rgb/rgb_interface.h"
 #include "../../tracking/hand/mercury/hg_interface.h"
 
 #ifdef XRT_BUILD_DRIVER_DEPTHAI
@@ -146,12 +146,6 @@ userConfigSetDefaults(struct ht_device *htd)
  */
 
 static void
-ht_device_update_inputs(struct xrt_device *xdev)
-{
-	// Empty
-}
-
-static void
 ht_device_get_hand_tracking(struct xrt_device *xdev,
                             enum xrt_input_name name,
                             uint64_t at_timestamp_ns,
@@ -214,7 +208,7 @@ ht_device_create_common(struct t_stereo_camera_calibration *calib,
 	htd->base.tracking_origin->offset.position.z = 0.0f;
 	htd->base.tracking_origin->offset.orientation.w = 1.0f;
 
-	htd->base.update_inputs = ht_device_update_inputs;
+	htd->base.update_inputs = u_device_noop_update_inputs;
 	htd->base.get_hand_tracking = ht_device_get_hand_tracking;
 	htd->base.destroy = ht_device_destroy;
 
@@ -240,9 +234,7 @@ ht_device_create_common(struct t_stereo_camera_calibration *calib,
 int
 ht_device_create(struct xrt_frame_context *xfctx,
                  struct t_stereo_camera_calibration *calib,
-                 enum t_hand_tracking_output_space output_space,
-                 enum t_hand_tracking_algorithm algorithm_choice,
-                 struct t_image_boundary_info boundary_info,
+                 struct t_hand_tracking_create_info create_info,
                  struct xrt_slam_sinks **out_sinks,
                  struct xrt_device **out_device)
 {
@@ -252,64 +244,24 @@ ht_device_create(struct xrt_frame_context *xfctx,
 
 	struct t_hand_tracking_sync *sync = NULL;
 
-	switch (algorithm_choice) {
-	case HT_ALGORITHM_MERCURY: {
-		sync = t_hand_tracking_sync_mercury_create(calib, output_space, boundary_info);
-	} break;
-	case HT_ALGORITHM_OLD_RGB: {
-		//!@todo Either have this deal with the output space correctly, or have everything use LEFT_CAMERA
-		sync = t_hand_tracking_sync_old_rgb_create(calib);
+	char path[1024] = {0};
+
+	int ret = u_file_get_hand_tracking_models_dir(path, ARRAY_SIZE(path));
+	if (ret < 0) {
+		U_LOG_E(
+		    "Could not find any directory with hand-tracking models!\n\t"
+		    "Run ./scripts/get-ht-models.sh or install monado-data package");
+		return -1;
 	}
-	}
+
+	sync = t_hand_tracking_sync_mercury_create(calib, create_info, path);
+
 	struct ht_device *htd = ht_device_create_common(calib, false, xfctx, sync);
 
 	HT_DEBUG(htd, "Hand Tracker initialized!");
 
 	*out_sinks = &htd->async->sinks;
 	*out_device = &htd->base;
+
 	return 0;
 }
-
-#ifdef XRT_BUILD_DRIVER_DEPTHAI
-struct xrt_device *
-ht_device_create_depthai_ov9282()
-{
-	XRT_TRACE_MARKER();
-
-	struct xrt_frame_context xfctx = {0};
-
-	struct xrt_fs *xfs = depthai_fs_stereo_grayscale(&xfctx);
-
-	if (xfs == NULL) {
-		return NULL;
-	}
-
-	struct t_stereo_camera_calibration *calib = NULL;
-
-	depthai_fs_get_stereo_calibration(xfs, &calib);
-
-	assert(calib != NULL);
-
-	struct t_hand_tracking_sync *sync;
-
-	struct t_image_boundary_info info;
-	info.views[0].type = HT_IMAGE_BOUNDARY_NONE;
-	info.views[1].type = HT_IMAGE_BOUNDARY_NONE;
-
-	sync = t_hand_tracking_sync_mercury_create(calib, HT_OUTPUT_SPACE_LEFT_CAMERA, info);
-
-	struct ht_device *htd = ht_device_create_common(calib, true, &xfctx, sync);
-
-	struct xrt_slam_sinks tmp;
-
-	t_stereo_camera_calibration_reference(&calib, NULL);
-
-	u_sink_force_genlock_create(&htd->xfctx, &htd->async->left, &htd->async->right, &tmp.left, &tmp.right);
-
-	xrt_fs_slam_stream_start(xfs, &tmp);
-
-	HT_DEBUG(htd, "Hand Tracker initialized!");
-
-	return &htd->base;
-}
-#endif

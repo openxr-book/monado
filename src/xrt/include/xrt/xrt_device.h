@@ -1,25 +1,27 @@
-// Copyright 2019-2021, Collabora, Ltd.
+// Copyright 2019-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Header defining an xrt display or controller device.
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @author Moses Turner <mosesturner@protonmail.com>
+ * @author Korcan Hussein <korcan.hussein@collabora.com>
  * @ingroup xrt_iface
  */
 
 #pragma once
 
-#define XRT_DEVICE_NAME_LEN 256
-#define XRT_DEVICE_PRODUCT_NAME_LEN 64 // Incl. termination
-
 #include "xrt/xrt_defines.h"
+#include "xrt/xrt_visibility_mask.h"
+#include "xrt/xrt_limits.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 struct xrt_tracking;
+
+#define XRT_DEVICE_NAME_LEN 256
 
 
 /*!
@@ -105,8 +107,9 @@ struct xrt_hmd_parts
 	 *
 	 * For now hardcoded display to two.
 	 */
-	struct xrt_view views[2];
+	struct xrt_view views[XRT_MAX_VIEWS];
 
+	size_t view_count;
 	/*!
 	 * Array of supported blend modes.
 	 */
@@ -137,15 +140,15 @@ struct xrt_hmd_parts
 			//! Indices, for triangle strip.
 			int *indices;
 			//! Number of indices for the triangle strips (one per view).
-			uint32_t index_counts[2];
+			uint32_t index_counts[XRT_MAX_VIEWS];
 			//! Offsets for the indices (one offset per view).
-			uint32_t index_offsets[2];
+			uint32_t index_offsets[XRT_MAX_VIEWS];
 			//! Total number of elements in mesh::indices array.
 			uint32_t index_count_total;
 		} mesh;
 
 		//! distortion is subject to the field of view
-		struct xrt_fov fov[2];
+		struct xrt_fov fov[XRT_MAX_VIEWS];
 	} distortion;
 };
 
@@ -259,6 +262,18 @@ struct xrt_device
 	bool orientation_tracking_supported;
 	bool position_tracking_supported;
 	bool hand_tracking_supported;
+	bool eye_gaze_supported;
+	bool force_feedback_supported;
+	bool ref_space_usage_supported;
+	bool form_factor_check_supported;
+	bool stage_supported;
+	bool face_tracking_supported;
+
+	/*
+	 *
+	 * Functions.
+	 *
+	 */
 
 	/*!
 	 * Update any attached inputs.
@@ -281,6 +296,9 @@ struct xrt_device
 	 * @param[in] name           Some devices may have multiple poses on
 	 *                           them, select the one using this field. For
 	 *                           HMDs use @p XRT_INPUT_GENERIC_HEAD_POSE.
+	 *                           For Unbounded Reference Space you can use
+	 *                           @p XRT_INPUT_GENERIC_UNBOUNDED_SPACE_POSE
+	 *                           to get the origin of that space.
 	 * @param[in] at_timestamp_ns If the device can predict or has a history
 	 *                            of positions, this is when the caller
 	 *                            wants the pose to be from.
@@ -321,6 +339,20 @@ struct xrt_device
 	                          uint64_t desired_timestamp_ns,
 	                          struct xrt_hand_joint_set *out_value,
 	                          uint64_t *out_timestamp_ns);
+
+	/*!
+	 * @brief Get the requested blend shape properties & weights for a face tracker
+	 *
+	 * @param[in] xdev                    The device.
+	 * @param[in] facial_expression_type  The facial expression data type (XR_FB_face_tracking,
+	 * XR_HTC_facial_tracking, etc).
+	 * @param[in] out_value               Set of requested expression weights & blend shape properties.
+	 *
+	 * @see xrt_input_name
+	 */
+	xrt_result_t (*get_face_tracking)(struct xrt_device *xdev,
+	                                  enum xrt_input_name facial_expression_type,
+	                                  struct xrt_facial_expression_set *out_value);
 
 	/*!
 	 * Set a output value.
@@ -376,6 +408,7 @@ struct xrt_device
 	                       struct xrt_space_relation *out_head_relation,
 	                       struct xrt_fov *out_fovs,
 	                       struct xrt_pose *out_poses);
+
 	/**
 	 * Compute the distortion at a single point.
 	 *
@@ -391,12 +424,58 @@ struct xrt_device
 	 * @param[out] out_result corresponding u,v pairs for all three color channels.
 	 */
 	bool (*compute_distortion)(
-	    struct xrt_device *xdev, int view, float u, float v, struct xrt_uv_triplet *out_result);
+	    struct xrt_device *xdev, uint32_t view, float u, float v, struct xrt_uv_triplet *out_result);
+
+	/*!
+	 * Get the visibility mask for this device.
+	 *
+	 * @param[in] xdev       The device.
+	 * @param[in] type       The type of visibility mask.
+	 * @param[in] view_index The index of the view to get the mask for.
+	 * @param[out] out_mask  Output mask, caller must free.
+	 */
+	xrt_result_t (*get_visibility_mask)(struct xrt_device *xdev,
+	                                    enum xrt_visibility_mask_type type,
+	                                    uint32_t view_index,
+	                                    struct xrt_visibility_mask **out_mask);
+
+	/*!
+	 * Called by the @ref xrt_space_overseer when a reference space that is
+	 * implemented by this device is first used, or when the last usage of
+	 * the reference space stops.
+	 *
+	 * What is provided is both the @ref xrt_reference_space_type that
+	 * triggered the usage change and the @ref xrt_input_name (if any) that
+	 * is used to drive the space.
+	 *
+	 * @see xrt_space_overseer_ref_space_inc
+	 * @see xrt_space_overseer_ref_space_dec
+	 * @see xrt_input_name
+	 * @see xrt_reference_space_type
+	 */
+	xrt_result_t (*ref_space_usage)(struct xrt_device *xdev,
+	                                enum xrt_reference_space_type type,
+	                                enum xrt_input_name name,
+	                                bool used);
+
+	/*!
+	 * @brief Check if given form factor is available or not.
+	 *
+	 * This should only be used in HMD device, if the device driver supports form factor check.
+	 *
+	 * @param[in] xdev The device.
+	 * @param[in] form_factor Form factor to check.
+	 *
+	 * @return true if given form factor is available; otherwise false.
+	 */
+	bool (*is_form_factor_available)(struct xrt_device *xdev, enum xrt_form_factor form_factor);
 
 	/*!
 	 * Destroy device.
 	 */
 	void (*destroy)(struct xrt_device *xdev);
+
+	// Add new functions above destroy.
 };
 
 /*!
@@ -446,6 +525,21 @@ xrt_device_get_hand_tracking(struct xrt_device *xdev,
 }
 
 /*!
+ * Helper function for @ref xrt_device::get_face_tracking.
+ *
+ * @copydoc xrt_device::get_face_tracking
+ *
+ * @public @memberof xrt_device
+ */
+static inline xrt_result_t
+xrt_device_get_face_tracking(struct xrt_device *xdev,
+                             enum xrt_input_name facial_expression_type,
+                             struct xrt_facial_expression_set *out_value)
+{
+	return xdev->get_face_tracking(xdev, facial_expression_type, out_value);
+}
+
+/*!
  * Helper function for @ref xrt_device::set_output.
  *
  * @copydoc xrt_device::set_output
@@ -484,10 +578,56 @@ xrt_device_get_view_poses(struct xrt_device *xdev,
  *
  * @public @memberof xrt_device
  */
-static inline void
-xrt_device_compute_distortion(struct xrt_device *xdev, int view, float u, float v, struct xrt_uv_triplet *out_result)
+static inline bool
+xrt_device_compute_distortion(
+    struct xrt_device *xdev, uint32_t view, float u, float v, struct xrt_uv_triplet *out_result)
 {
-	xdev->compute_distortion(xdev, view, u, v, out_result);
+	return xdev->compute_distortion(xdev, view, u, v, out_result);
+}
+
+/*!
+ * Helper function for @ref xrt_device::get_visibility_mask.
+ *
+ * @copydoc xrt_device::get_visibility_mask
+ *
+ * @public @memberof xrt_device
+ */
+static inline xrt_result_t
+xrt_device_get_visibility_mask(struct xrt_device *xdev,
+                               enum xrt_visibility_mask_type type,
+                               uint32_t view_index,
+                               struct xrt_visibility_mask **out_mask)
+{
+	return xdev->get_visibility_mask(xdev, type, view_index, out_mask);
+}
+
+/*!
+ * Helper function for @ref xrt_device::ref_space_usage.
+ *
+ * @copydoc xrt_device::ref_space_usage
+ *
+ * @public @memberof xrt_device
+ */
+static inline xrt_result_t
+xrt_device_ref_space_usage(struct xrt_device *xdev,
+                           enum xrt_reference_space_type type,
+                           enum xrt_input_name name,
+                           bool used)
+{
+	return xdev->ref_space_usage(xdev, type, name, used);
+}
+
+/*!
+ * Helper function for @ref xrt_device::is_form_factor_available.
+ *
+ * @copydoc xrt_device::is_form_factor_available
+ *
+ * @public @memberof xrt_device
+ */
+static inline bool
+xrt_device_is_form_factor_available(struct xrt_device *xdev, enum xrt_form_factor form_factor)
+{
+	return xdev->is_form_factor_available(xdev, form_factor);
 }
 
 /*!

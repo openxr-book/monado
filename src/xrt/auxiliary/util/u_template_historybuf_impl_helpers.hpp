@@ -5,12 +5,14 @@
  * @file
  * @brief All the "element-type-independent" code (helper objects, base classes) for a ringbuffer implementation on top
  * of a fixed size array
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @author Moses Turner <moses@collabora.com>
  * @ingroup aux_util
  */
 
 #pragma once
+
+// IWYU pragma: private, include "util/u_template_historybuf.hpp"
 
 #include <algorithm>
 #include <assert.h>

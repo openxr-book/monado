@@ -5,7 +5,7 @@
  * @brief  Server mainloop details on Linux.
  * @author Pete Black <pblack@collabora.com>
  * @author Jakob Bornecrantz <jakob@collabora.com>
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup ipc_server
  */
 
@@ -41,11 +41,20 @@
 #include <string.h>
 #include <assert.h>
 #include <limits.h>
+#include "util/u_debug.h"
 
 #ifdef XRT_HAVE_SYSTEMD
 #include <systemd/sd-daemon.h>
 #endif
 
+/*
+ * "XRT_NO_STDIN" option disables stdin and prevents monado-service from terminating.
+ * This could be useful for situations where there is no proper or in a non-interactive shell.
+ * Two example scenarios are:
+ *    * IDE terminals,
+ *    * Some scripting environments where monado-service is spawned in the background
+ */
+DEBUG_GET_ONCE_BOOL_OPTION(skip_stdin, "XRT_NO_STDIN", false)
 
 /*
  *
@@ -88,7 +97,7 @@ create_listen_socket(struct ipc_server_mainloop *ml, int *out_fd)
 
 	char sock_file[PATH_MAX];
 
-	int size = u_file_get_path_in_runtime_dir(IPC_MSG_SOCK_FILE, sock_file, PATH_MAX);
+	int size = u_file_get_path_in_runtime_dir(XRT_IPC_MSG_SOCK_FILENAME, sock_file, PATH_MAX);
 	if (size == -1) {
 		U_LOG_E("Could not get socket file name");
 		return -1;
@@ -178,7 +187,7 @@ init_epoll(struct ipc_server_mainloop *ml)
 
 	struct epoll_event ev = {0};
 
-	if (!ml->launched_by_socket) {
+	if (!ml->launched_by_socket && !debug_get_bool_option_skip_stdin()) {
 		// Can't do this when launched by systemd socket activation by
 		// default.
 		// This polls stdin.
@@ -211,7 +220,9 @@ handle_listen(struct ipc_server *vs, struct ipc_server_mainloop *ml)
 		ipc_server_handle_failure(vs);
 		return;
 	}
-	ipc_server_start_client_listener_thread(vs, ret);
+
+	// Call into the generic client connected handling code.
+	ipc_server_handle_client_connected(vs, ret);
 }
 
 #define NUM_POLL_EVENTS 8

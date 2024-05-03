@@ -1,5 +1,5 @@
 // Copyright 2020-2021, N Madsen.
-// Copyright 2020-2021, Collabora, Ltd.
+// Copyright 2020-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -12,11 +12,31 @@
 
 #pragma once
 
+#include "xrt/xrt_compiler.h"
+
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+
+/*!
+ * Headset type, used to select different control and init/shutdown procedures.
+ *
+ * @ingroup drv_wmr
+ */
+enum wmr_headset_type
+{
+	WMR_HEADSET_GENERIC,
+	WMR_HEADSET_HP_VR1000,
+	WMR_HEADSET_REVERB_G1,
+	WMR_HEADSET_REVERB_G2,
+	WMR_HEADSET_SAMSUNG_XE700X3AI,
+	WMR_HEADSET_SAMSUNG_800ZAA,
+	WMR_HEADSET_LENOVO_EXPLORER,
+	WMR_HEADSET_MEDION_ERAZER_X1000,
+	WMR_HEADSET_DELL_VISOR,
+};
 
 /*!
  * Defines for the WMR driver.
@@ -35,12 +55,16 @@ extern "C" {
 #define WMR_CONTROLLER_RIGHT_PRODUCT_STRING "Motion controller - Right"
 
 #define HP_VID 0x03f0
+#define VR1000_PID 0x0367
 #define REVERB_G1_PID 0x0c6a
 #define REVERB_G2_PID 0x0580
 #define REVERB_G2_CONTROLLER_PID 0x066a /* On 0x045e Microsoft VID */
 
 #define LENOVO_VID 0x17ef
 #define EXPLORER_PID 0xb801
+
+#define DELL_VID 0x413c
+#define VISOR_PID 0xb0d5
 
 #define SAMSUNG_VID 0x04e8
 #define ODYSSEY_PID 0x7310

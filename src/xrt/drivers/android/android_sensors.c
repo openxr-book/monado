@@ -1,7 +1,7 @@
 // Copyright 2013, Fredrik Hultin.
 // Copyright 2013, Jakob Bornecrantz.
 // Copyright 2015, Joey Ferwerda.
-// Copyright 2020, Collabora, Ltd.
+// Copyright 2020-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -110,14 +110,28 @@ android_run_thread(void *ptr)
 	d->event_queue = ASensorManager_createEventQueue(d->sensor_manager, looper, ALOOPER_POLL_CALLBACK,
 	                                                 android_sensor_callback, (void *)d);
 
-	// Start sensors in case this was not done already.
+	/*
+	 * Start sensors in case this was not done already.
+	 *
+	 * On some Android devices, such as Pixel 4 and Meizu 20 series, running
+	 * apps was not smooth due to the failure in setting the sensor's event
+	 * rate. This was caused by the calculated sensor's event rate based on
+	 * the screen refresh rate, which could be smaller than the sensor's
+	 * minimum delay value. Make sure to set it to a valid value.
+	 */
 	if (d->accelerometer != NULL) {
+		int32_t accelerometer_min_delay = ASensor_getMinDelay(d->accelerometer);
+		int32_t accelerometer_poll_rate_usec = MAX(poll_rate_usec, accelerometer_min_delay);
+
 		ASensorEventQueue_enableSensor(d->event_queue, d->accelerometer);
-		ASensorEventQueue_setEventRate(d->event_queue, d->accelerometer, poll_rate_usec);
+		ASensorEventQueue_setEventRate(d->event_queue, d->accelerometer, accelerometer_poll_rate_usec);
 	}
 	if (d->gyroscope != NULL) {
+		int32_t gyroscope_min_delay = ASensor_getMinDelay(d->gyroscope);
+		int32_t gyroscope_poll_rate_usec = MAX(poll_rate_usec, gyroscope_min_delay);
+
 		ASensorEventQueue_enableSensor(d->event_queue, d->gyroscope);
-		ASensorEventQueue_setEventRate(d->event_queue, d->gyroscope, poll_rate_usec);
+		ASensorEventQueue_setEventRate(d->event_queue, d->gyroscope, gyroscope_poll_rate_usec);
 	}
 
 	int ret = 0;
@@ -156,12 +170,6 @@ android_device_destroy(struct xrt_device *xdev)
 }
 
 static void
-android_device_update_inputs(struct xrt_device *xdev)
-{
-	// Empty
-}
-
-static void
 android_device_get_tracked_pose(struct xrt_device *xdev,
                                 enum xrt_input_name name,
                                 uint64_t at_timestamp_ns,
@@ -177,19 +185,6 @@ android_device_get_tracked_pose(struct xrt_device *xdev,
 	                                                               XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
 }
 
-static void
-android_device_get_view_poses(struct xrt_device *xdev,
-                              const struct xrt_vec3 *default_eye_relation,
-                              uint64_t at_timestamp_ns,
-                              uint32_t view_count,
-                              struct xrt_space_relation *out_head_relation,
-                              struct xrt_fov *out_fovs,
-                              struct xrt_pose *out_poses)
-{
-	u_device_get_view_poses(xdev, default_eye_relation, at_timestamp_ns, view_count, out_head_relation, out_fovs,
-	                        out_poses);
-}
-
 
 /*
  *
@@ -198,7 +193,8 @@ android_device_get_view_poses(struct xrt_device *xdev,
  */
 
 static bool
-android_device_compute_distortion(struct xrt_device *xdev, int view, float u, float v, struct xrt_uv_triplet *result)
+android_device_compute_distortion(
+    struct xrt_device *xdev, uint32_t view, float u, float v, struct xrt_uv_triplet *result)
 {
 	struct android_device *d = android_device(xdev);
 	return u_compute_distortion_cardboard(&d->cardboard.values[view], u, v, result);
@@ -214,9 +210,9 @@ android_device_create()
 
 	d->base.name = XRT_DEVICE_GENERIC_HMD;
 	d->base.destroy = android_device_destroy;
-	d->base.update_inputs = android_device_update_inputs;
+	d->base.update_inputs = u_device_noop_update_inputs;
 	d->base.get_tracked_pose = android_device_get_tracked_pose;
-	d->base.get_view_poses = android_device_get_view_poses;
+	d->base.get_view_poses = u_device_get_view_poses;
 	d->base.compute_distortion = android_device_compute_distortion;
 	d->base.inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;
 	d->base.device_type = XRT_DEVICE_TYPE_HMD;
@@ -235,7 +231,7 @@ android_device_create()
 	}
 
 	struct xrt_android_display_metrics metrics;
-	if (!android_custom_surface_get_display_metrics(android_globals_get_vm(), android_globals_get_activity(),
+	if (!android_custom_surface_get_display_metrics(android_globals_get_vm(), android_globals_get_context(),
 	                                                &metrics)) {
 		U_LOG_E("Could not get Android display metrics.");
 		/* Fallback to default values (Pixel 3) */

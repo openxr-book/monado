@@ -17,14 +17,14 @@ extern "C" {
 #endif
 
 /*!
- * Create Mercury hand tracking pipeline.
+ * Create a Mercury hand tracking pipeline.
  *
  * @ingroup aux_tracking
  */
 struct t_hand_tracking_sync *
 t_hand_tracking_sync_mercury_create(struct t_stereo_camera_calibration *calib,
-                                    enum t_hand_tracking_output_space output_space,
-                                    struct t_image_boundary_info boundary_info);
+                                    struct t_hand_tracking_create_info create_info,
+                                    const char *models_folder);
 
 #ifdef __cplusplus
 } // extern "C"

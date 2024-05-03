@@ -3,13 +3,13 @@
 /*!
  * @file
  * @brief  D3D 11 and 12 shared routines
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup oxr_main
  */
 
 #include "util/u_misc.h"
 #include "util/u_debug.h"
-#include "d3d/d3d_helpers.hpp"
+#include "d3d/d3d_dxgi_helpers.hpp"
 
 #include "oxr_objects.h"
 #include "oxr_logger.h"
@@ -44,6 +44,10 @@ oxr_d3d_get_requirements(struct oxr_logger *log,
                          LUID *adapter_luid,
                          D3D_FEATURE_LEVEL *min_feature_level)
 {
+	if (sys->xsysc == NULL) {
+		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, " sys->xsysc == NULL");
+	}
+
 	try {
 
 		if (sys->xsysc->info.client_d3d_deviceLUID_valid) {
@@ -73,20 +77,18 @@ oxr_d3d_get_requirements(struct oxr_logger *log,
 }
 
 XrResult
-oxr_d3d_check_device(struct oxr_logger *log, struct oxr_system *sys, IDXGIDevice *device)
+oxr_d3d_check_luid(struct oxr_logger *log, struct oxr_system *sys, LUID *adapter_luid)
 {
-	try {
-		wil::com_ptr<IDXGIAdapter> adapter;
-		THROW_IF_FAILED(device->GetAdapter(adapter.put()));
-		DXGI_ADAPTER_DESC desc{};
-		adapter->GetDesc(&desc);
-		if (desc.AdapterLuid.HighPart != sys->suggested_d3d_luid.HighPart ||
-		    desc.AdapterLuid.LowPart != sys->suggested_d3d_luid.LowPart) {
-
-			return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID,
-			                 " supplied device does not match required LUID.");
-		}
-		return XR_SUCCESS;
+	if (sys->xsysc == NULL) {
+		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, " sys->xsysc == NULL");
 	}
-	DEFAULT_CATCH(" failure checking adapter LUID")
+
+	if (adapter_luid->HighPart != sys->suggested_d3d_luid.HighPart ||
+	    adapter_luid->LowPart != sys->suggested_d3d_luid.LowPart) {
+
+		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID,
+		                 " supplied device does not match required LUID.");
+	}
+
+	return XR_SUCCESS;
 }

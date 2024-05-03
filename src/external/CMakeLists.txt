@@ -1,12 +1,14 @@
-# Copyright 2020, Collabora, Ltd.
+# Copyright 2020-2023, Collabora, Ltd.
 # SPDX-License-Identifier: BSL-1.0
 
 # Catch2
 add_library(xrt-external-catch2 INTERFACE)
-target_include_directories(xrt-external-catch2 INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/Catch2)
+target_include_directories(xrt-external-catch2 SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/Catch2)
+
+# OpenVR
 add_library(xrt-external-openvr INTERFACE)
 target_include_directories(
-	xrt-external-openvr INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/openvr_includes
+	xrt-external-openvr SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/openvr_includes
 	)
 
 # cJSON
@@ -24,18 +26,30 @@ endif()
 add_library(xrt-external-flexkalman INTERFACE)
 target_include_directories(xrt-external-flexkalman INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/flexkalman)
 
+# FlexKalman
+add_library(xrt-external-util-headers INTERFACE)
+target_include_directories(
+	xrt-external-util-headers INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/util-headers
+	)
+
 # Glad
 add_library(xrt-external-glad INTERFACE)
-target_include_directories(xrt-external-glad INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/glad/include)
+target_include_directories(
+	xrt-external-glad SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/glad/include
+	)
 
 # Hungarian graph algorithm
 add_library(xrt-external-hungarian INTERFACE)
-target_include_directories(xrt-external-hungarian INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/hungarian)
+target_include_directories(
+	xrt-external-hungarian SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/hungarian
+	)
 
 # JNIPP and Android JNI wrappers
 if(ANDROID)
 	add_library(xrt-external-jnipp STATIC jnipp/jnipp.cpp)
-	target_include_directories(xrt-external-jnipp PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/jnipp)
+	target_include_directories(
+		xrt-external-jnipp SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/jnipp
+		)
 
 	file(GLOB WRAP_SOURCES android-jni-wrap/wrap/*.cpp)
 	add_library(xrt-external-jni-wrap STATIC ${WRAP_SOURCES})
@@ -45,21 +59,45 @@ if(ANDROID)
 	target_link_libraries(xrt-external-jni-wrap PUBLIC xrt-external-jnipp)
 endif()
 
+# Nano Protobuf
+add_library(
+	xrt-external-nanopb STATIC
+	nanopb/monado_metrics.pb.c
+	nanopb/monado_metrics.pb.h
+	nanopb/pb.h
+	nanopb/pb_common.c
+	nanopb/pb_common.h
+	nanopb/pb_decode.c
+	nanopb/pb_decode.h
+	nanopb/pb_encode.c
+	nanopb/pb_encode.h
+	)
+target_include_directories(xrt-external-nanopb PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/nanopb)
+
 # OpenXR
 add_library(xrt-external-openxr INTERFACE)
 target_include_directories(
 	xrt-external-openxr INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/openxr_includes
 	)
 
-# External SLAM tracking
+# External VIT interface
 if(XRT_FEATURE_SLAM)
-	add_library(xrt-external-slam STATIC slam_tracker/slam_tracker.hpp)
-	set_target_properties(xrt-external-slam PROPERTIES LINKER_LANGUAGE CXX)
+	add_library(xrt-external-vit INTERFACE)
 	target_include_directories(
-		xrt-external-slam INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/slam_tracker
+		xrt-external-vit INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/vit_includes
 		)
-	target_include_directories(xrt-external-slam SYSTEM INTERFACE ${SLAM_INCLUDE_DIRS})
-	target_link_libraries(xrt-external-slam INTERFACE ${SLAM_LIBRARIES})
+endif()
+
+# SDL
+if(XRT_HAVE_SDL2)
+	add_library(xrt-external-sdl2 INTERFACE)
+	target_link_libraries(xrt-external-sdl2 INTERFACE SDL2::SDL2)
+
+	# Fix SDL2 build include for Alpine Linux
+	find_path(SDL2_DIRECTFB_INCLUDE_DIR directfb.h PATH_SUFFIXES directfb)
+	if(SDL2_DIRECTFB_INCLUDE_DIR)
+		target_include_directories(xrt-external-sdl2 INTERFACE ${SDL2_DIRECTFB_INCLUDE_DIR})
+	endif()
 endif()
 
 # STB
@@ -115,14 +153,7 @@ if(XRT_HAVE_OPENGL)
 			imgui/imgui/imgui_impl_sdl.h
 			)
 		target_link_libraries(
-			xrt-external-imgui-sdl2
-			PUBLIC xrt-external-imgui
-			PUBLIC ${SDL2_LIBRARIES}
-			)
-
-		target_include_directories(xrt-external-imgui-sdl2 PUBLIC ${SDL2_INCLUDE_DIRS})
-		target_include_directories(
-			xrt-external-imgui-sdl2 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/imgui
+			xrt-external-imgui-sdl2 PUBLIC xrt-external-imgui xrt-external-sdl2
 			)
 		set_target_properties(
 			xrt-external-imgui-sdl2 PROPERTIES INTERPROCEDURAL_OPTIMIZATION OFF
@@ -133,4 +164,22 @@ endif()
 
 # tinyceres
 add_library(xrt-external-tinyceres INTERFACE)
-target_include_directories(xrt-external-tinyceres SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/tinyceres/include)
+target_include_directories(
+	xrt-external-tinyceres SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/tinyceres/include
+	)
+
+# Tracy
+if(XRT_HAVE_TRACY)
+	add_library(xrt-external-tracy STATIC tracy/TracyClient.cpp)
+	target_include_directories(
+		xrt-external-tracy SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/tracy
+		)
+	target_compile_definitions(xrt-external-tracy PRIVATE TRACY_ENABLE)
+	target_link_libraries(xrt-external-tracy PRIVATE ${CMAKE_DL_LIBS})
+endif()
+
+# Valve VDF parser
+add_library(xrt-external-vdf INTERFACE)
+target_include_directories(
+	xrt-external-vdf SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/valve-file-vdf
+	)

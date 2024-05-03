@@ -7,22 +7,25 @@
  * @ingroup drv_qwerty
  */
 
-#include "qwerty_device.h"
+#include "xrt/xrt_device.h"
+
+#include "math/m_api.h"
+#include "math/m_space.h"
+#include "math/m_mathinclude.h"
 
 #include "util/u_device.h"
 #include "util/u_distortion_mesh.h"
 #include "util/u_var.h"
 #include "util/u_logging.h"
 #include "util/u_time.h"
+#include "util/u_misc.h"
+#include "os/os_time.h"
 
-#include "math/m_api.h"
-#include "math/m_space.h"
-#include "math/m_mathinclude.h"
-
-#include "xrt/xrt_device.h"
+#include "qwerty_device.h"
 
 #include <stdio.h>
 #include <assert.h>
+
 
 #define QWERTY_HMD_INITIAL_MOVEMENT_SPEED 0.002f // in meters per frame
 #define QWERTY_HMD_INITIAL_LOOK_SPEED 0.02f      // in radians per frame
@@ -111,17 +114,12 @@ qwerty_update_inputs(struct xrt_device *xd)
 	struct qwerty_controller *qc = qwerty_controller(xd);
 	struct qwerty_device *qd = &qc->base;
 
-	xd->inputs[QWERTY_SELECT].value.boolean = qc->select_clicked;
-	if (qc->select_clicked) {
-		QWERTY_INFO(qd, "[%s] Select click", xd->str);
-		qc->select_clicked = false;
-	}
+	QWERTY_TRACE(qd, "select: %u, menu: %u", qc->select_clicked, qc->menu_clicked);
 
+	xd->inputs[QWERTY_SELECT].value.boolean = qc->select_clicked;
+	xd->inputs[QWERTY_SELECT].timestamp = qc->select_timestamp;
 	xd->inputs[QWERTY_MENU].value.boolean = qc->menu_clicked;
-	if (qc->menu_clicked) {
-		QWERTY_INFO(qd, "[%s] Menu click", xd->str);
-		qc->menu_clicked = false;
-	}
+	xd->inputs[QWERTY_MENU].timestamp = qc->menu_timestamp;
 }
 
 static void
@@ -207,19 +205,6 @@ qwerty_get_tracked_pose(struct xrt_device *xd,
 }
 
 static void
-qwerty_get_view_poses(struct xrt_device *xdev,
-                      const struct xrt_vec3 *default_eye_relation,
-                      uint64_t at_timestamp_ns,
-                      uint32_t view_count,
-                      struct xrt_space_relation *out_head_relation,
-                      struct xrt_fov *out_fovs,
-                      struct xrt_pose *out_poses)
-{
-	u_device_get_view_poses(xdev, default_eye_relation, at_timestamp_ns, view_count, out_head_relation, out_fovs,
-	                        out_poses);
-}
-
-static void
 qwerty_destroy(struct xrt_device *xd)
 {
 	// Note: do not destroy a single device of a qwerty system or its var tracking
@@ -276,7 +261,7 @@ qwerty_hmd_create(void)
 
 	xd->update_inputs = qwerty_update_inputs;
 	xd->get_tracked_pose = qwerty_get_tracked_pose;
-	xd->get_view_poses = qwerty_get_view_poses;
+	xd->get_view_poses = u_device_get_view_poses;
 	xd->destroy = qwerty_destroy;
 	u_distortion_mesh_set_none(xd); // Fill in xd->compute_distortion()
 
@@ -506,10 +491,33 @@ qwerty_release_all(struct qwerty_device *qd)
 
 // Controller methods
 
-// clang-format off
-void qwerty_select_click(struct qwerty_controller *qc) { qc->select_clicked = true; }
-void qwerty_menu_click(struct qwerty_controller *qc) { qc->menu_clicked = true; }
-// clang-format on
+void
+qwerty_press_select(struct qwerty_controller *qc)
+{
+	qc->select_clicked = true;
+	qc->select_timestamp = os_monotonic_get_ns();
+}
+
+void
+qwerty_release_select(struct qwerty_controller *qc)
+{
+	qc->select_clicked = false;
+	qc->select_timestamp = os_monotonic_get_ns();
+}
+
+void
+qwerty_press_menu(struct qwerty_controller *qc)
+{
+	qc->menu_clicked = true;
+	qc->menu_timestamp = os_monotonic_get_ns();
+}
+
+void
+qwerty_release_menu(struct qwerty_controller *qc)
+{
+	qc->menu_clicked = false;
+	qc->menu_timestamp = os_monotonic_get_ns();
+}
 
 void
 qwerty_follow_hmd(struct qwerty_controller *qc, bool follow)

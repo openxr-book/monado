@@ -155,15 +155,6 @@ void
 math_vec3_cross(const struct xrt_vec3 *l, const struct xrt_vec3 *r, struct xrt_vec3 *result);
 
 /*!
- * Cross product of a vector.
- *
- * @relates xrt_vec3
- * @ingroup aux_math
- */
-void
-math_vec3_f64_cross(const struct xrt_vec3_f64 *l, const struct xrt_vec3_f64 *r, struct xrt_vec3_f64 *result);
-
-/*!
  * Get translation vector from isometry matrix (col-major).
  *
  * @relates xrt_vec3
@@ -181,14 +172,31 @@ math_vec3_translation_from_isometry(const struct xrt_matrix_4x4 *isometry, struc
 void
 math_vec3_normalize(struct xrt_vec3 *in);
 
+
+/*
+ *
+ * 64 bit vector functions.
+ *
+ */
+
+/*!
+ * Cross product of a vec3_f64.
+ *
+ * @relates xrt_vec3_f64
+ * @ingroup aux_math
+ */
+void
+math_vec3_f64_cross(const struct xrt_vec3_f64 *l, const struct xrt_vec3_f64 *r, struct xrt_vec3_f64 *result);
+
 /*!
  * Normalize a vec3_f64 in place.
  *
- * @relates xrt_vec3
+ * @relates xrt_vec3_f64
  * @ingroup aux_math
  */
 void
 math_vec3_f64_normalize(struct xrt_vec3_f64 *in);
+
 
 /*
  *
@@ -205,6 +213,14 @@ math_vec3_f64_normalize(struct xrt_vec3_f64 *in);
  */
 void
 math_quat_from_angle_vector(float angle_rads, const struct xrt_vec3 *vector, struct xrt_quat *result);
+
+/*!
+ * Create a rotation from euler angles to a quaternion
+ * @relates xrt_quat
+ * @ingroup aux_math
+ */
+void
+math_quat_from_euler_angles(const struct xrt_vec3 *angles, struct xrt_quat *result);
 
 /*!
  * Create a rotation from a 3x3 rotation (row major) matrix.
@@ -351,7 +367,8 @@ math_quat_finite_difference(const struct xrt_quat *quat0,
                             struct xrt_vec3 *out_ang_vel);
 
 /*!
- * Converts a rotation vector in axis-angle form to its corresponding unit quaternion.
+ * Takes a rotation vector equal to half of a Rodrigues rotation vector and returns its corresponding unit quaternion.
+ * Useful for head tracking and pose-prediction.
  *
  * @relates xrt_quat
  * @see xrt_vec3
@@ -362,7 +379,8 @@ math_quat_exp(const struct xrt_vec3 *axis_angle, struct xrt_quat *out_quat);
 
 
 /*!
- * Converts a unit quaternion into its corresponding axis-angle vector representation.
+ * Takes a unit quaternion and returns a rotation vector equal to half of its corresponding Rodrigues rotation vector.
+ * Useful for head tracking and pose-prediction.
  *
  * @relates xrt_quat
  * @see xrt_vec3
@@ -391,22 +409,40 @@ math_quat_rotate_derivative(const struct xrt_quat *quat, const struct xrt_vec3 *
 void
 math_quat_slerp(const struct xrt_quat *left, const struct xrt_quat *right, float t, struct xrt_quat *result);
 
+
+/*!
+ * Converts a 2D vector to a quaternion
+ *
+ * @relates xrt_quat
+ * @ingroup aux_math
+ */
+void
+math_quat_from_swing(const struct xrt_vec2 *swing, struct xrt_quat *result);
+
+
+/*!
+ * Converts a 2D vector and a float to a quaternion
+ *
+ * @relates xrt_quat
+ * @ingroup aux_math
+ */
+void
+math_quat_from_swing_twist(const struct xrt_vec2 *swing, const float twist, struct xrt_quat *result);
+
+/*!
+ * Converts a quaternion to XY-swing and Z-twist
+ *
+ * @relates xrt_quat
+ * @ingroup aux_math
+ */
+void
+math_quat_to_swing_twist(const struct xrt_quat *in, struct xrt_vec2 *out_swing, float *out_twist);
+
 /*
  *
  * Matrix functions
  *
  */
-
-/*!
- * Multiply Matrix2x2.
- *
- * @relates xrt_matrix_2x2
- * @ingroup aux_math
- */
-void
-math_matrix_2x2_multiply(const struct xrt_matrix_2x2 *left,
-                         const struct xrt_matrix_2x2 *right,
-                         struct xrt_matrix_2x2 *result_out);
 
 /*!
  * Initialize a 3x3 matrix to the identity matrix
@@ -416,6 +452,15 @@ math_matrix_2x2_multiply(const struct xrt_matrix_2x2 *left,
  */
 void
 math_matrix_3x3_identity(struct xrt_matrix_3x3 *mat);
+
+/*!
+ * Initialize a 3x3 matrix from a quaternion
+ *
+ * @see xrt_matrix_3x3
+ * @ingroup aux_math
+ */
+void
+math_matrix_3x3_from_quat(const struct xrt_quat *q, struct xrt_matrix_3x3 *result_out);
 
 /*!
  * Initialize a double 3x3 matrix to the identity matrix
@@ -434,6 +479,17 @@ math_matrix_3x3_f64_identity(struct xrt_matrix_3x3_f64 *mat);
  */
 void
 math_matrix_3x3_transform_vec3(const struct xrt_matrix_3x3 *left,
+                               const struct xrt_vec3 *right,
+                               struct xrt_vec3 *result_out);
+
+/*!
+ * Transform a vec3 by a 4x4 matrix, extending the vector with w = 1.0
+ *
+ * @see xrt_matrix_4x4
+ * @ingroup aux_math
+ */
+void
+math_matrix_4x4_transform_vec3(const struct xrt_matrix_4x4 *left,
                                const struct xrt_vec3 *right,
                                struct xrt_vec3 *result_out);
 
@@ -598,6 +654,19 @@ void
 math_matrix_4x4_inverse_view_projection(const struct xrt_matrix_4x4 *view,
                                         const struct xrt_matrix_4x4 *projection,
                                         struct xrt_matrix_4x4 *result);
+
+/*!
+ * Compute a projection matrix with settings for Vulkan, it will also have it's
+ * far plane at infinite and the NDC depth will be reversed.
+ *
+ * @relates xrt_matrix_4x4
+ * @ingroup aux_math
+ */
+void
+math_matrix_4x4_projection_vulkan_infinite_reverse(const struct xrt_fov *fov,
+                                                   float near_plane,
+                                                   struct xrt_matrix_4x4 *result);
+
 
 /*
  *

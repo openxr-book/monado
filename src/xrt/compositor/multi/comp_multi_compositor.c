@@ -8,11 +8,12 @@
  * @ingroup comp_multi
  */
 
-#include "xrt/xrt_gfx_native.h"
+#include "xrt/xrt_session.h"
 
 #include "os/os_time.h"
 
 #include "util/u_var.h"
+#include "util/u_wait.h"
 #include "util/u_misc.h"
 #include "util/u_time.h"
 #include "util/u_debug.h"
@@ -41,9 +42,18 @@
  *
  */
 
+
+/*!
+ * Clear a slot, need to have the list_and_timing_lock held.
+ */
 static void
-slot_clear(struct multi_layer_slot *slot)
+slot_clear_locked(struct multi_compositor *mc, struct multi_layer_slot *slot)
 {
+	if (slot->active) {
+		uint64_t now_ns = os_monotonic_get_ns();
+		u_pa_retired(mc->upa, slot->data.frame_id, now_ns);
+	}
+
 	for (size_t i = 0; i < slot->layer_count; i++) {
 		for (size_t k = 0; k < ARRAY_SIZE(slot->layers[i].xscs); k++) {
 			xrt_swapchain_reference(&slot->layers[i].xscs[k], NULL);
@@ -51,17 +61,33 @@ slot_clear(struct multi_layer_slot *slot)
 	}
 
 	U_ZERO(slot);
+	slot->data.frame_id = -1;
 }
 
+/*!
+ * Clear a slot, need to have the list_and_timing_lock held.
+ */
 static void
-slot_move_and_clear(struct multi_layer_slot *dst, struct multi_layer_slot *src)
+slot_move_into_cleared(struct multi_layer_slot *dst, struct multi_layer_slot *src)
 {
-	slot_clear(dst);
+	assert(!dst->active);
+	assert(dst->data.frame_id == -1);
 
 	// All references are kept.
 	*dst = *src;
 
 	U_ZERO(src);
+	src->data.frame_id = -1;
+}
+
+/*!
+ * Move a slot into a cleared slot, must be cleared before.
+ */
+static void
+slot_move_and_clear_locked(struct multi_compositor *mc, struct multi_layer_slot *dst, struct multi_layer_slot *src)
+{
+	slot_clear_locked(mc, dst);
+	slot_move_into_cleared(dst, src);
 }
 
 
@@ -71,50 +97,11 @@ slot_move_and_clear(struct multi_layer_slot *dst, struct multi_layer_slot *src)
  *
  */
 
-void
-multi_compositor_push_event(struct multi_compositor *mc, const union xrt_compositor_event *xce)
+xrt_result_t
+multi_compositor_push_event(struct multi_compositor *mc, const union xrt_session_event *xse)
 {
-	struct multi_event *me = U_TYPED_CALLOC(struct multi_event);
-	me->xce = *xce;
-
-	os_mutex_lock(&mc->event.mutex);
-
-	// Find the last slot.
-	struct multi_event **slot = &mc->event.next;
-	while (*slot != NULL) {
-		slot = &(*slot)->next;
-	}
-
-	*slot = me;
-
-	os_mutex_unlock(&mc->event.mutex);
-}
-
-static void
-pop_event(struct multi_compositor *mc, union xrt_compositor_event *out_xce)
-{
-	out_xce->type = XRT_COMPOSITOR_EVENT_NONE;
-
-	os_mutex_lock(&mc->event.mutex);
-
-	if (mc->event.next != NULL) {
-		struct multi_event *me = mc->event.next;
-
-		*out_xce = me->xce;
-		mc->event.next = me->next;
-		free(me);
-	}
-
-	os_mutex_unlock(&mc->event.mutex);
-}
-
-static void
-drain_events(struct multi_compositor *mc)
-{
-	union xrt_compositor_event xce;
-	do {
-		pop_event(mc, &xce);
-	} while (xce.type != XRT_COMPOSITOR_EVENT_NONE);
+	// Dispatch to the current event sink.
+	return xrt_session_event_sink_push(mc->xses, xse);
 }
 
 
@@ -176,6 +163,10 @@ wait_semaphore(struct xrt_compositor_semaphore **xcsem_ptr, uint64_t value)
 	} while (true);
 
 	xrt_compositor_semaphore_reference(xcsem_ptr, NULL);
+
+	if (ret != XRT_SUCCESS) {
+		U_LOG_E("Semaphore waiting failed!");
+	}
 }
 
 static void
@@ -189,37 +180,55 @@ wait_for_scheduled_free(struct multi_compositor *mc)
 
 	// Block here if the scheduled slot is not clear.
 	while (v_mc->scheduled.active) {
+		uint64_t now_ns = os_monotonic_get_ns();
 
 		// This frame is for the next frame, drop the old one no matter what.
-		if (time_is_within_half_ms(mc->progress.display_time_ns, mc->slot_next_frame_display)) {
-			U_LOG_W("Dropping old missed frame in favour for completed new frame");
+		if (time_is_within_half_ms(mc->progress.data.display_time_ns, mc->slot_next_frame_display)) {
+			U_LOG_W("%.3fms: Dropping old missed frame in favour for completed new frame",
+			        time_ns_to_ms_f(now_ns));
 			break;
 		}
 
 		// Replace the scheduled frame if it's in the past.
-		uint64_t now_ns = os_monotonic_get_ns();
-		if (v_mc->scheduled.display_time_ns < now_ns) {
+		if (v_mc->scheduled.data.display_time_ns < now_ns) {
+			U_LOG_T("%.3fms: Replacing frame for time in past in favour of completed new frame",
+			        time_ns_to_ms_f(now_ns));
 			break;
 		}
 
-		U_LOG_D("next: %f (%" PRIu64 ")\nprogress: %f (%" PRIu64 ")\nscheduled: %f (%" PRIu64 ")\n",
-		        time_ns_to_ms_f((int64_t)v_mc->slot_next_frame_display - now_ns),   //
-		        v_mc->slot_next_frame_display,                                      //
-		        time_ns_to_ms_f((int64_t)v_mc->progress.display_time_ns - now_ns),  //
-		        v_mc->progress.display_time_ns,                                     //
-		        time_ns_to_ms_f((int64_t)v_mc->scheduled.display_time_ns - now_ns), //
-		        v_mc->scheduled.display_time_ns);                                   //
+		U_LOG_D(
+		    "Two frames have completed GPU work and are waiting to be displayed."
+		    "\n\tnext frame: %fms (%" PRIu64
+		    ") (next time for compositor to pick up frame)"
+		    "\n\tprogress: %fms (%" PRIu64
+		    ")  (latest completed frame)"
+		    "\n\tscheduled: %fms (%" PRIu64 ") (oldest waiting frame)",
+		    time_ns_to_ms_f((int64_t)v_mc->slot_next_frame_display - now_ns),        //
+		    v_mc->slot_next_frame_display,                                           //
+		    time_ns_to_ms_f((int64_t)v_mc->progress.data.display_time_ns - now_ns),  //
+		    v_mc->progress.data.display_time_ns,                                     //
+		    time_ns_to_ms_f((int64_t)v_mc->scheduled.data.display_time_ns - now_ns), //
+		    v_mc->scheduled.data.display_time_ns);                                   //
 
 		os_mutex_unlock(&mc->slot_lock);
 
-		os_nanosleep(U_TIME_1MS_IN_NS);
+		os_precise_sleeper_nanosleep(&mc->scheduled_sleeper, U_TIME_1MS_IN_NS);
 
 		os_mutex_lock(&mc->slot_lock);
 	}
 
-	slot_move_and_clear(&mc->scheduled, &mc->progress);
-
 	os_mutex_unlock(&mc->slot_lock);
+
+	/*
+	 * Need to take list_and_timing_lock before slot_lock because slot_lock
+	 * is taken in multi_compositor_deliver_any_frames with list_and_timing_lock
+	 * held to stop clients from going away.
+	 */
+	os_mutex_lock(&mc->msc->list_and_timing_lock);
+	os_mutex_lock(&mc->slot_lock);
+	slot_move_and_clear_locked(mc, &mc->scheduled, &mc->progress);
+	os_mutex_unlock(&mc->slot_lock);
+	os_mutex_unlock(&mc->msc->list_and_timing_lock);
 }
 
 static void *
@@ -227,7 +236,8 @@ run_func(void *ptr)
 {
 	struct multi_compositor *mc = (struct multi_compositor *)ptr;
 
-	os_thread_helper_name(&(mc->wait_thread.oth), "Multi-Compositor Client Wait Thread");
+	U_TRACE_SET_THREAD_NAME("Multi Client Module: Waiter");
+	os_thread_helper_name(&mc->wait_thread.oth, "Multi Client Module: Waiter");
 
 	os_thread_helper_lock(&mc->wait_thread.oth);
 
@@ -453,12 +463,17 @@ multi_compositor_create_semaphore(struct xrt_compositor *xc,
 }
 
 static xrt_result_t
-multi_compositor_begin_session(struct xrt_compositor *xc, enum xrt_view_type type)
+multi_compositor_begin_session(struct xrt_compositor *xc, const struct xrt_begin_session_info *info)
 {
 	COMP_TRACE_MARKER();
 
 	struct multi_compositor *mc = multi_compositor(xc);
-	(void)mc;
+
+	assert(!mc->state.session_active);
+	if (!mc->state.session_active) {
+		multi_system_compositor_update_session_status(mc->msc, true);
+		mc->state.session_active = true;
+	}
 
 	return XRT_SUCCESS;
 }
@@ -469,7 +484,12 @@ multi_compositor_end_session(struct xrt_compositor *xc)
 	COMP_TRACE_MARKER();
 
 	struct multi_compositor *mc = multi_compositor(xc);
-	(void)mc;
+
+	assert(mc->state.session_active);
+	if (mc->state.session_active) {
+		multi_system_compositor_update_session_status(mc->msc, false);
+		mc->state.session_active = false;
+	}
 
 	return XRT_SUCCESS;
 }
@@ -513,10 +533,11 @@ multi_compositor_mark_frame(struct xrt_compositor *xc,
 
 	struct multi_compositor *mc = multi_compositor(xc);
 
+	uint64_t now_ns = os_monotonic_get_ns();
+
 	switch (point) {
 	case XRT_COMPOSITOR_FRAME_POINT_WOKE:
 		os_mutex_lock(&mc->msc->list_and_timing_lock);
-		uint64_t now_ns = os_monotonic_get_ns();
 		u_pa_mark_point(mc->upa, frame_id, U_TIMING_POINT_WAKE_UP, now_ns);
 		os_mutex_unlock(&mc->msc->list_and_timing_lock);
 		break;
@@ -548,14 +569,12 @@ multi_compositor_wait_frame(struct xrt_compositor *xc,
 	    out_predicted_display_time_ns,    //
 	    out_predicted_display_period_ns); //
 
+	// Wait until the given wake up time.
+	u_wait_until(&mc->frame_sleeper, wake_up_time_ns);
+
 	uint64_t now_ns = os_monotonic_get_ns();
-	if (now_ns < wake_up_time_ns) {
-		uint32_t delay = (uint32_t)(wake_up_time_ns - now_ns);
-		os_precise_sleeper_nanosleep(&mc->sleeper, delay);
-	}
 
-	now_ns = os_monotonic_get_ns();
-
+	// Signal that we woke up.
 	xrt_comp_mark_frame(xc, frame_id, XRT_COMPOSITOR_FRAME_POINT_WOKE, now_ns);
 
 	*out_frame_id = frame_id;
@@ -594,17 +613,14 @@ multi_compositor_discard_frame(struct xrt_compositor *xc, int64_t frame_id)
 }
 
 static xrt_result_t
-multi_compositor_layer_begin(struct xrt_compositor *xc,
-                             int64_t frame_id,
-                             uint64_t display_time_ns,
-                             enum xrt_blend_mode env_blend_mode)
+multi_compositor_layer_begin(struct xrt_compositor *xc, const struct xrt_layer_frame_data *data)
 {
 	struct multi_compositor *mc = multi_compositor(xc);
 
 	// As early as possible.
 	uint64_t now_ns = os_monotonic_get_ns();
 	os_mutex_lock(&mc->msc->list_and_timing_lock);
-	u_pa_mark_delivered(mc->upa, frame_id, now_ns, display_time_ns);
+	u_pa_mark_delivered(mc->upa, data->frame_id, now_ns, data->display_time_ns);
 	os_mutex_unlock(&mc->msc->list_and_timing_lock);
 
 	/*
@@ -623,48 +639,46 @@ multi_compositor_layer_begin(struct xrt_compositor *xc,
 	U_ZERO(&mc->progress);
 
 	mc->progress.active = true;
-	mc->progress.display_time_ns = display_time_ns;
-	mc->progress.env_blend_mode = env_blend_mode;
+	mc->progress.data = *data;
 
 	return XRT_SUCCESS;
 }
 
 static xrt_result_t
-multi_compositor_layer_stereo_projection(struct xrt_compositor *xc,
-                                         struct xrt_device *xdev,
-                                         struct xrt_swapchain *l_xsc,
-                                         struct xrt_swapchain *r_xsc,
-                                         const struct xrt_layer_data *data)
+multi_compositor_layer_projection(struct xrt_compositor *xc,
+                                  struct xrt_device *xdev,
+                                  struct xrt_swapchain *xsc[XRT_MAX_VIEWS],
+                                  const struct xrt_layer_data *data)
 {
 	struct multi_compositor *mc = multi_compositor(xc);
 	(void)mc;
 
 	size_t index = mc->progress.layer_count++;
 	mc->progress.layers[index].xdev = xdev;
-	xrt_swapchain_reference(&mc->progress.layers[index].xscs[0], l_xsc);
-	xrt_swapchain_reference(&mc->progress.layers[index].xscs[1], r_xsc);
+	for (uint32_t i = 0; i < data->view_count; ++i) {
+		xrt_swapchain_reference(&mc->progress.layers[index].xscs[i], xsc[i]);
+	}
 	mc->progress.layers[index].data = *data;
 
 	return XRT_SUCCESS;
 }
 
 static xrt_result_t
-multi_compositor_layer_stereo_projection_depth(struct xrt_compositor *xc,
-                                               struct xrt_device *xdev,
-                                               struct xrt_swapchain *l_xsc,
-                                               struct xrt_swapchain *r_xsc,
-                                               struct xrt_swapchain *l_d_xsc,
-                                               struct xrt_swapchain *r_d_xsc,
-                                               const struct xrt_layer_data *data)
+multi_compositor_layer_projection_depth(struct xrt_compositor *xc,
+                                        struct xrt_device *xdev,
+                                        struct xrt_swapchain *xsc[XRT_MAX_VIEWS],
+                                        struct xrt_swapchain *d_xsc[XRT_MAX_VIEWS],
+                                        const struct xrt_layer_data *data)
 {
 	struct multi_compositor *mc = multi_compositor(xc);
 
 	size_t index = mc->progress.layer_count++;
 	mc->progress.layers[index].xdev = xdev;
-	xrt_swapchain_reference(&mc->progress.layers[index].xscs[0], l_xsc);
-	xrt_swapchain_reference(&mc->progress.layers[index].xscs[1], r_xsc);
-	xrt_swapchain_reference(&mc->progress.layers[index].xscs[2], l_d_xsc);
-	xrt_swapchain_reference(&mc->progress.layers[index].xscs[3], r_d_xsc);
+
+	for (uint32_t i = 0; i < data->view_count; ++i) {
+		xrt_swapchain_reference(&mc->progress.layers[index].xscs[i], xsc[i]);
+		xrt_swapchain_reference(&mc->progress.layers[index].xscs[i + data->view_count], d_xsc[i]);
+	}
 	mc->progress.layers[index].data = *data;
 
 	return XRT_SUCCESS;
@@ -751,12 +765,13 @@ multi_compositor_layer_equirect2(struct xrt_compositor *xc,
 }
 
 static xrt_result_t
-multi_compositor_layer_commit(struct xrt_compositor *xc, int64_t frame_id, xrt_graphics_sync_handle_t sync_handle)
+multi_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sync_handle)
 {
 	COMP_TRACE_MARKER();
 
 	struct multi_compositor *mc = multi_compositor(xc);
 	struct xrt_compositor_fence *xcf = NULL;
+	int64_t frame_id = mc->progress.data.frame_id;
 
 	do {
 		if (!xrt_graphics_sync_handle_is_valid(sync_handle)) {
@@ -797,13 +812,13 @@ multi_compositor_layer_commit(struct xrt_compositor *xc, int64_t frame_id, xrt_g
 
 static xrt_result_t
 multi_compositor_layer_commit_with_semaphore(struct xrt_compositor *xc,
-                                             int64_t frame_id,
                                              struct xrt_compositor_semaphore *xcsem,
                                              uint64_t value)
 {
 	COMP_TRACE_MARKER();
 
 	struct multi_compositor *mc = multi_compositor(xc);
+	int64_t frame_id = mc->progress.data.frame_id;
 
 	push_semaphore_to_wait_thread(mc, frame_id, xcsem, value);
 
@@ -811,13 +826,30 @@ multi_compositor_layer_commit_with_semaphore(struct xrt_compositor *xc,
 }
 
 static xrt_result_t
-multi_compositor_poll_events(struct xrt_compositor *xc, union xrt_compositor_event *out_xce)
+multi_compositor_set_thread_hint(struct xrt_compositor *xc, enum xrt_thread_hint hint, uint32_t thread_id)
+{
+	// No-op
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+multi_compositor_get_display_refresh_rate(struct xrt_compositor *xc, float *out_display_refresh_rate_hz)
 {
 	COMP_TRACE_MARKER();
 
 	struct multi_compositor *mc = multi_compositor(xc);
 
-	pop_event(mc, out_xce);
+	return xrt_comp_get_display_refresh_rate(&mc->msc->xcn->base, out_display_refresh_rate_hz);
+}
+
+static xrt_result_t
+multi_compositor_request_display_refresh_rate(struct xrt_compositor *xc, float display_refresh_rate_hz)
+{
+	COMP_TRACE_MARKER();
+
+	struct multi_compositor *mc = multi_compositor(xc);
+
+	xrt_comp_request_display_refresh_rate(&mc->msc->xcn->base, display_refresh_rate_hz);
 
 	return XRT_SUCCESS;
 }
@@ -828,6 +860,11 @@ multi_compositor_destroy(struct xrt_compositor *xc)
 	COMP_TRACE_MARKER();
 
 	struct multi_compositor *mc = multi_compositor(xc);
+
+	if (mc->state.session_active) {
+		multi_system_compositor_update_session_status(mc->msc, false);
+		mc->state.session_active = false;
+	}
 
 	os_mutex_lock(&mc->msc->list_and_timing_lock);
 
@@ -840,25 +877,38 @@ multi_compositor_destroy(struct xrt_compositor *xc)
 
 	os_mutex_unlock(&mc->msc->list_and_timing_lock);
 
-	drain_events(mc);
-
 	// Destroy the wait thread, destroy also stops the thread.
 	os_thread_helper_destroy(&mc->wait_thread.oth);
 
 	// We are now off the rendering list, clear slots for any swapchains.
-	slot_clear(&mc->progress);
-	slot_clear(&mc->scheduled);
-	slot_clear(&mc->delivered);
+	os_mutex_lock(&mc->msc->list_and_timing_lock);
+	slot_clear_locked(mc, &mc->progress);
+	slot_clear_locked(mc, &mc->scheduled);
+	slot_clear_locked(mc, &mc->delivered);
+	os_mutex_unlock(&mc->msc->list_and_timing_lock);
 
 	// Does null checking.
 	u_pa_destroy(&mc->upa);
 
-	os_precise_sleeper_deinit(&mc->sleeper);
+	os_precise_sleeper_deinit(&mc->frame_sleeper);
+	os_precise_sleeper_deinit(&mc->scheduled_sleeper);
 
 	os_mutex_destroy(&mc->slot_lock);
-	os_mutex_destroy(&mc->event.mutex);
 
 	free(mc);
+}
+
+static void
+log_frame_time_diff(uint64_t frame_time_ns, uint64_t display_time_ns)
+{
+	int64_t diff_ns = (int64_t)frame_time_ns - (int64_t)display_time_ns;
+	bool late = false;
+	if (diff_ns < 0) {
+		diff_ns = -diff_ns;
+		late = true;
+	}
+
+	U_LOG_W("Frame %s by %.2fms!", late ? "late" : "early", time_ns_to_ms_f(diff_ns));
 }
 
 void
@@ -871,16 +921,34 @@ multi_compositor_deliver_any_frames(struct multi_compositor *mc, uint64_t displa
 		return;
 	}
 
-	if (time_is_greater_then_or_within_half_ms(display_time_ns, mc->scheduled.display_time_ns)) {
-		slot_move_and_clear(&mc->delivered, &mc->scheduled);
+	if (time_is_greater_then_or_within_half_ms(display_time_ns, mc->scheduled.data.display_time_ns)) {
+		slot_move_and_clear_locked(mc, &mc->delivered, &mc->scheduled);
+
+		uint64_t frame_time_ns = mc->delivered.data.display_time_ns;
+		if (!time_is_within_half_ms(frame_time_ns, display_time_ns)) {
+			log_frame_time_diff(frame_time_ns, display_time_ns);
+		}
 	}
 
 	os_mutex_unlock(&mc->slot_lock);
 }
 
+void
+multi_compositor_latch_frame_locked(struct multi_compositor *mc, uint64_t when_ns, int64_t system_frame_id)
+{
+	u_pa_latched(mc->upa, mc->delivered.data.frame_id, when_ns, system_frame_id);
+}
+
+void
+multi_compositor_retire_delivered_locked(struct multi_compositor *mc, uint64_t when_ns)
+{
+	slot_clear_locked(mc, &mc->delivered);
+}
+
 xrt_result_t
 multi_compositor_create(struct multi_system_compositor *msc,
                         const struct xrt_session_info *xsi,
+                        struct xrt_session_event_sink *xses,
                         struct xrt_compositor_native **out_xcn)
 {
 	COMP_TRACE_MARKER();
@@ -900,8 +968,8 @@ multi_compositor_create(struct multi_system_compositor *msc,
 	mc->base.base.begin_frame = multi_compositor_begin_frame;
 	mc->base.base.discard_frame = multi_compositor_discard_frame;
 	mc->base.base.layer_begin = multi_compositor_layer_begin;
-	mc->base.base.layer_stereo_projection = multi_compositor_layer_stereo_projection;
-	mc->base.base.layer_stereo_projection_depth = multi_compositor_layer_stereo_projection_depth;
+	mc->base.base.layer_projection = multi_compositor_layer_projection;
+	mc->base.base.layer_projection_depth = multi_compositor_layer_projection_depth;
 	mc->base.base.layer_quad = multi_compositor_layer_quad;
 	mc->base.base.layer_cube = multi_compositor_layer_cube;
 	mc->base.base.layer_cylinder = multi_compositor_layer_cylinder;
@@ -910,19 +978,24 @@ multi_compositor_create(struct multi_system_compositor *msc,
 	mc->base.base.layer_commit = multi_compositor_layer_commit;
 	mc->base.base.layer_commit_with_semaphore = multi_compositor_layer_commit_with_semaphore;
 	mc->base.base.destroy = multi_compositor_destroy;
-	mc->base.base.poll_events = multi_compositor_poll_events;
+	mc->base.base.set_thread_hint = multi_compositor_set_thread_hint;
+	mc->base.base.get_display_refresh_rate = multi_compositor_get_display_refresh_rate;
+	mc->base.base.request_display_refresh_rate = multi_compositor_request_display_refresh_rate;
 	mc->msc = msc;
+	mc->xses = xses;
 	mc->xsi = *xsi;
 
-	os_mutex_init(&mc->event.mutex);
 	os_mutex_init(&mc->slot_lock);
 	os_thread_helper_init(&mc->wait_thread.oth);
 
 	// Passthrough our formats from the native compositor to the client.
 	mc->base.base.info = msc->xcn->base.info;
 
-	// Using in wait frame.
-	os_precise_sleeper_init(&mc->sleeper);
+	// Used in wait frame.
+	os_precise_sleeper_init(&mc->frame_sleeper);
+
+	// Used in scheduled waiting function.
+	os_precise_sleeper_init(&mc->scheduled_sleeper);
 
 	// This is safe to do without a lock since we are not on the list yet.
 	u_paf_create(msc->upaf, &mc->upa);

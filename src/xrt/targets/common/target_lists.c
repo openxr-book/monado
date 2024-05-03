@@ -1,4 +1,4 @@
-// Copyright 2019-2022, Collabora, Ltd.
+// Copyright 2019-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -28,16 +28,24 @@
 #include "ohmd/oh_interface.h"
 #endif
 
-#ifdef XRT_BUILD_DRIVER_NS
-#include "north_star/ns_interface.h"
-#endif
-
 #ifdef XRT_BUILD_DRIVER_PSMV
 #include "psmv/psmv_interface.h"
 #endif
 
+#ifdef XRT_BUILD_DRIVER_PSSENSE
+#include "pssense/pssense_interface.h"
+#endif
+
 #ifdef XRT_BUILD_DRIVER_PSVR
 #include "psvr/psvr_interface.h"
+#endif
+
+#ifdef XRT_BUILD_DRIVER_RIFT_S
+#include "rift_s/rift_s_interface.h"
+#endif
+
+#ifdef XRT_BUILD_DRIVER_ROKID
+#include "rokid/rokid_interface.h"
 #endif
 
 #ifdef XRT_BUILD_DRIVER_HYDRA
@@ -64,17 +72,21 @@
 #include "ultraleap_v2/ulv2_interface.h"
 #endif
 
-#ifdef XRT_BUILD_DRIVER_DEPTHAI
-#include "depthai/depthai_interface.h"
+#ifdef XRT_BUILD_DRIVER_ULV5
+#include "ultraleap_v5/ulv5_interface.h"
 #endif
 
-#ifdef XRT_BUILD_DRIVER_QWERTY
-#include "qwerty/qwerty_interface.h"
+#ifdef XRT_BUILD_DRIVER_DEPTHAI
+#include "depthai/depthai_interface.h"
 #endif
 
 #ifdef XRT_BUILD_DRIVER_WMR
 #include "wmr/wmr_interface.h"
 #include "wmr/wmr_common.h"
+#endif
+
+#ifdef XRT_BUILD_DRIVER_XREAL_AIR
+#include "xreal_air/xreal_air_interface.h"
 #endif
 
 #ifdef XRT_BUILD_DRIVER_EUROC
@@ -92,21 +104,54 @@
  * Builders
  */
 xrt_builder_create_func_t target_builder_list[] = {
+#ifdef T_BUILDER_QWERTY // High up to override any real hardware.
+    t_builder_qwerty_create,
+#endif // T_BUILDER_QWERTY
+
+#ifdef T_BUILDER_REMOTE // High up to override any real hardware.
+    t_builder_remote_create,
+#endif // T_BUILDER_REMOTE
+
+#ifdef T_BUILDER_SIMULATED // High up to override any real hardware.
+    t_builder_simulated_create,
+#endif // T_BUILDER_SIMULATED
+
+#ifdef XRT_BUILD_DRIVER_RIFT_S
+    rift_s_builder_create,
+#endif // XRT_BUILD_DRIVER_RIFT_S
+
 #ifdef T_BUILDER_RGB_TRACKING
     t_builder_rgb_tracking_create,
 #endif // T_BUILDER_RGB_TRACKING
+
+#ifdef T_BUILDER_SIMULAVR
+    t_builder_simula_create,
+#endif // T_BUILDER_SIMULAVR
+
+#ifdef T_BUILDER_STEAMVR
+    t_builder_steamvr_create,
+#endif // T_BUILDER_STEAMVR
 
 #ifdef T_BUILDER_LIGHTHOUSE
     t_builder_lighthouse_create,
 #endif // T_BUILDER_LIGHTHOUSE
 
-#ifdef T_BUILDER_REMOTE
-    t_builder_remote_create,
-#endif // T_BUILDER_REMOTE
+#ifdef T_BUILDER_NS
+    t_builder_north_star_create,
+#endif // T_BUILDER_NS
+
+#ifdef T_BUILDER_WMR
+    t_builder_wmr_create,
+#endif // T_BUILDER_WMR
+
+#ifdef XRT_BUILD_DRIVER_XREAL_AIR
+    xreal_air_builder_create,
+#endif // T_BUILDER_XREAL_AIR
 
 #ifdef T_BUILDER_LEGACY
     t_builder_legacy_create,
 #endif // T_BUILDER_LEGACY
+
     NULL,
 };
 
@@ -134,6 +179,15 @@ struct xrt_prober_entry target_entry_list[] = {
     {PSMV_VID, PSMV_PID_ZCM2, psmv_found, "PS Move Controller (ZCM2)", "psmv"},
 #endif // XRT_BUILD_DRIVER_PSMV
 
+#ifdef XRT_BUILD_DRIVER_PSSENSE
+    {PSSENSE_VID, PSSENSE_PID_LEFT, pssense_found, "PlayStation VR2 Sense Controller (L)", "pssense"},
+    {PSSENSE_VID, PSSENSE_PID_RIGHT, pssense_found, "PlayStation VR2 Sense Controller (R)", "pssense"},
+#endif // XRT_BUILD_DRIVER_PSSENSE
+
+#ifdef XRT_BUILD_DRIVER_ROKID
+    {ROKID_VID, ROKID_PID, rokid_found, "Rokid Air or Max", "rokid"},
+#endif // XRT_BUILD_DRIVER_ROKID
+
 #ifdef XRT_BUILD_DRIVER_HYDRA
     {HYDRA_VID, HYDRA_PID, hydra_found, "Razer Hydra", "hydra"},
 #endif // XRT_BUILD_DRIVER_HYDRA
@@ -141,23 +195,6 @@ struct xrt_prober_entry target_entry_list[] = {
 #ifdef XRT_BUILD_DRIVER_HDK
     {HDK_VID, HDK_PID, hdk_found, "OSVR HDK", "osvr"},
 #endif // XRT_BUILD_DRIVER_HDK
-
-
-#ifdef XRT_BUILD_DRIVER_ULV2
-    {ULV2_VID, ULV2_PID, ulv2_found, "Leap Motion Controller", "ulv2"},
-#endif
-
-#ifdef XRT_BUILD_DRIVER_DEPTHAI
-    {DEPTHAI_VID, DEPTHAI_PID, depthai_3dof_device_found, "DepthAI Device as Head Tracker", "depthai"},
-#endif
-
-#ifdef XRT_BUILD_DRIVER_WMR
-    {MICROSOFT_VID, HOLOLENS_SENSORS_PID, wmr_found, "Microsoft HoloLens Sensors", "wmr"},
-    {MICROSOFT_VID, WMR_CONTROLLER_PID, wmr_bt_controller_found, "WMR Bluetooth controller", "wmr"},
-    {MICROSOFT_VID, REVERB_G2_CONTROLLER_PID, wmr_bt_controller_found, "HP Reverb G2 Bluetooth controller", "wmr"},
-    {MICROSOFT_VID, ODYSSEY_CONTROLLER_PID, wmr_bt_controller_found, "Odyssey Bluetooth controller", "wmr"},
-
-#endif // XRT_BUILD_DRIVER_WMR
 
     {0x0000, 0x0000, NULL, NULL, NULL}, // Terminate
 };
@@ -187,11 +224,6 @@ xrt_auto_prober_create_func_t target_auto_list[] = {
     oh_create_auto_prober,
 #endif
 
-#ifdef XRT_BUILD_DRIVER_NS
-    // North star driver here for now.
-    ns_create_auto_prober,
-#endif
-
 #ifdef XRT_BUILD_DRIVER_ANDROID
     android_create_auto_prober,
 #endif
@@ -208,20 +240,11 @@ xrt_auto_prober_create_func_t target_auto_list[] = {
     euroc_create_auto_prober,
 #endif
 
-#ifdef XRT_BUILD_DRIVER_QWERTY
-    qwerty_create_auto_prober,
-#endif
-
 #ifdef XRT_BUILD_DRIVER_SIMULATED
     // Simulated headset driver last.
     simulated_create_auto_prober,
 #endif
 
-#ifdef XRT_BUILD_DRIVER_HANDTRACKING
-#ifdef XRT_BUILD_DRIVER_DEPTHAI
-    ht_create_auto_prober,
-#endif
-#endif
     NULL, // Terminate
 };
 

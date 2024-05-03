@@ -8,7 +8,7 @@
  *
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @author Lubosz Sarnecki <lubosz.sarnecki@collabora.com>
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup comp_null
  */
 
@@ -55,20 +55,6 @@ extern "C" {
  */
 
 /*!
- * State to emulate state transitions correctly.
- *
- * @ingroup comp_null
- */
-enum null_comp_state
-{
-	NULL_COMP_STATE_UNINITIALIZED = 0,
-	NULL_COMP_STATE_READY = 1,
-	NULL_COMP_STATE_PREPARED = 2,
-	NULL_COMP_STATE_VISIBLE = 3,
-	NULL_COMP_STATE_FOCUSED = 4,
-};
-
-/*!
  * Tracking frame state.
  *
  * @ingroup comp_null
@@ -84,7 +70,10 @@ struct null_comp_frame
 /*!
  * Main compositor struct tying everything in the compositor together.
  *
- * @implements xrt_compositor_native, comp_base.
+ * This ultimately implements @ref xrt_compositor_native but does so by
+ * extending @ref comp_base, similar to how @ref comp_compositor works.
+ *
+ * @extends comp_base
  * @ingroup comp_null
  */
 struct null_compositor
@@ -107,9 +96,6 @@ struct null_compositor
 
 	// Kept here for convenience.
 	struct xrt_system_compositor_info sys_info;
-
-	//! State for generating the correct set of events.
-	enum null_comp_state state;
 
 	//! @todo Insert your own required members here
 

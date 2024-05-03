@@ -9,23 +9,24 @@
  * @ingroup drv_cemu
  */
 
-#include "ht_ctrl_emu_interface.h"
-
 #include "xrt/xrt_defines.h"
+#include "xrt/xrt_device.h"
+
+#include "os/os_time.h"
 
 #include "math/m_api.h"
 #include "math/m_space.h"
 #include "math/m_vec3.h"
 
-#include "util/u_debug.h"
+#include "util/u_var.h"
 #include "util/u_time.h"
+#include "util/u_misc.h"
+#include "util/u_debug.h"
 #include "util/u_device.h"
 #include "util/u_distortion_mesh.h"
-#include "util/u_var.h"
 #include "util/u_config_json.h"
 
-#include "os/os_time.h"
-#include "xrt/xrt_device.h"
+#include "ht_ctrl_emu_interface.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -356,6 +357,12 @@ cemu_device_get_tracked_pose(struct xrt_device *xdev,
 	}
 }
 
+static void
+cemu_device_set_output(struct xrt_device *xdev, enum xrt_output_name name, const union xrt_output_value *value)
+{
+	// No-op, needed to avoid crash.
+}
+
 //! @todo This is flickery; investigate once we get better hand tracking
 static void
 decide(xrt_vec3 one, xrt_vec3 two, bool *out)
@@ -363,10 +370,10 @@ decide(xrt_vec3 one, xrt_vec3 two, bool *out)
 	float dist = m_vec3_len_sqrd(one - two);
 	// These used to be 0.02f and 0.04f, but I bumped them way up to compensate for bad tracking. Once our tracking
 	// is better, bump these back down.
-	float activation_dist = 0.04f;
-	float deactivation_dist = 0.1f;
+	float activation_dist = 0.02f;
+	float deactivation_dist = 0.04f;
 	const float pinch_activation_dist =
-	    (*out ? activation_dist * activation_dist : deactivation_dist * deactivation_dist);
+	    (*out ? deactivation_dist * deactivation_dist : activation_dist * activation_dist);
 
 	*out = (dist < pinch_activation_dist);
 }
@@ -435,17 +442,22 @@ cemu_devices_create(struct xrt_device *head, struct xrt_device *hands, struct xr
 
 		cemud[i]->base.update_inputs = cemu_device_update_inputs;
 		cemud[i]->base.get_tracked_pose = cemu_device_get_tracked_pose;
+		cemud[i]->base.set_output = cemu_device_set_output;
 		cemud[i]->base.get_hand_tracking = cemu_device_get_hand_tracking;
 		cemud[i]->base.destroy = cemu_device_destroy;
 
 		cemud[i]->base.device_type =
 		    i ? XRT_DEVICE_TYPE_RIGHT_HAND_CONTROLLER : XRT_DEVICE_TYPE_LEFT_HAND_CONTROLLER;
 
-		//!@todo What should we do with the serial numbers?
 		int n =
 		    snprintf(cemud[i]->base.str, XRT_DEVICE_NAME_LEN, "%s %s Hand", i ? "Right" : "Left", hands->str);
 		if (n > XRT_DEVICE_NAME_LEN) {
 			CEMU_DEBUG(cemud[i], "name truncated: %s", cemud[i]->base.str);
+		}
+
+		n = snprintf(cemud[i]->base.serial, XRT_DEVICE_NAME_LEN, "%s (%d)", hands->str, i);
+		if (n > XRT_DEVICE_NAME_LEN) {
+			CEMU_WARN(cemud[i], "serial truncated: %s", cemud[i]->base.str);
 		}
 
 		cemud[i]->ht_input_name =

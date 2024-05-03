@@ -1,4 +1,4 @@
-// Copyright 2020-2022, Collabora, Ltd.
+// Copyright 2020-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -147,7 +147,38 @@ typedef enum xrt_result
 	 */
 	XRT_ERROR_DEVICE_CREATION_FAILED = -22,
 	/*!
+	 * Some D3D error, from code shared between D3D11 and D3D12
+	 */
+	XRT_ERROR_D3D = -23,
+	/*!
 	 * Some D3D11 error
 	 */
-	XRT_ERROR_D3D11 = -23,
+	XRT_ERROR_D3D11 = -24,
+	/*!
+	 * Some D3D12 error
+	 */
+	XRT_ERROR_D3D12 = -25,
+	/*!
+	 * The @ref xrt_space_overseer doesn't support recentering driven from
+	 * the application side of things.
+	 */
+	XRT_ERROR_RECENTERING_NOT_SUPPORTED = -26,
+	/*!
+	 * The system doesn't support compositor, this error can be returned
+	 * when trying to create the system compositor or trying to create the
+	 * native compositor.
+	 */
+	XRT_ERROR_COMPOSITOR_NOT_SUPPORTED = -27,
+	/*!
+	 * The client has not created a compositor on this IPC connection,
+	 * which is needed for the given command.
+	 */
+	XRT_ERROR_IPC_COMPOSITOR_NOT_CREATED = -28,
+
+	/*!
+	 * The function called on the device was not implemented, it is not
+	 * meant to query the availability of the function or feature, only a
+	 * error condition on bad code.
+	 */
+	XRT_ERROR_DEVICE_FUNCTION_NOT_IMPLEMENTED = -29,
 } xrt_result_t;

@@ -1,4 +1,4 @@
-// Copyright 2019-2022, Collabora, Ltd.
+// Copyright 2019-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -8,6 +8,7 @@
  * @ingroup comp_util
  */
 
+#include "util/u_wait.h"
 #include "util/u_trace_marker.h"
 
 #include "util/comp_base.h"
@@ -69,7 +70,7 @@ base_create_swapchain(struct xrt_compositor *xc,
 	struct xrt_swapchain_create_properties xsccp = {0};
 	xrt_comp_get_swapchain_create_properties(xc, info, &xsccp);
 
-	return comp_swapchain_create(&cb->vk, &cb->cscgc, info, &xsccp, out_xsc);
+	return comp_swapchain_create(&cb->vk, &cb->cscs, info, &xsccp, out_xsc);
 }
 
 static xrt_result_t
@@ -81,7 +82,7 @@ base_import_swapchain(struct xrt_compositor *xc,
 {
 	struct comp_base *cb = comp_base(xc);
 
-	return comp_swapchain_import(&cb->vk, &cb->cscgc, info, native_images, image_count, out_xsc);
+	return comp_swapchain_import(&cb->vk, &cb->cscs, info, native_images, image_count, out_xsc);
 }
 
 static xrt_result_t
@@ -103,33 +104,31 @@ base_create_semaphore(struct xrt_compositor *xc,
 }
 
 static xrt_result_t
-base_layer_begin(struct xrt_compositor *xc,
-                 int64_t frame_id,
-                 uint64_t display_time_ns,
-                 enum xrt_blend_mode env_blend_mode)
+base_layer_begin(struct xrt_compositor *xc, const struct xrt_layer_frame_data *data)
 {
 	struct comp_base *cb = comp_base(xc);
 
-	cb->slot.env_blend_mode = env_blend_mode;
+	cb->slot.data = *data;
 	cb->slot.layer_count = 0;
 
 	return XRT_SUCCESS;
 }
 
 static xrt_result_t
-base_layer_stereo_projection(struct xrt_compositor *xc,
-                             struct xrt_device *xdev,
-                             struct xrt_swapchain *l_xsc,
-                             struct xrt_swapchain *r_xsc,
-                             const struct xrt_layer_data *data)
+base_layer_projection(struct xrt_compositor *xc,
+                      struct xrt_device *xdev,
+                      struct xrt_swapchain *xsc[XRT_MAX_VIEWS],
+                      const struct xrt_layer_data *data)
 {
 	struct comp_base *cb = comp_base(xc);
 
 	uint32_t layer_id = cb->slot.layer_count;
 
 	struct comp_layer *layer = &cb->slot.layers[layer_id];
-	layer->sc_array[0] = comp_swapchain(l_xsc);
-	layer->sc_array[1] = comp_swapchain(r_xsc);
+	assert(ARRAY_SIZE(layer->sc_array) >= data->view_count);
+	for (uint32_t i = 0; i < data->view_count; ++i) {
+		layer->sc_array[i] = comp_swapchain(xsc[i]);
+	}
 	layer->data = *data;
 
 	cb->slot.layer_count++;
@@ -138,23 +137,21 @@ base_layer_stereo_projection(struct xrt_compositor *xc,
 }
 
 static xrt_result_t
-base_layer_stereo_projection_depth(struct xrt_compositor *xc,
-                                   struct xrt_device *xdev,
-                                   struct xrt_swapchain *l_xsc,
-                                   struct xrt_swapchain *r_xsc,
-                                   struct xrt_swapchain *l_d_xsc,
-                                   struct xrt_swapchain *r_d_xsc,
-                                   const struct xrt_layer_data *data)
+base_layer_projection_depth(struct xrt_compositor *xc,
+                            struct xrt_device *xdev,
+                            struct xrt_swapchain *xsc[XRT_MAX_VIEWS],
+                            struct xrt_swapchain *d_xsc[XRT_MAX_VIEWS],
+                            const struct xrt_layer_data *data)
 {
 	struct comp_base *cb = comp_base(xc);
 
 	uint32_t layer_id = cb->slot.layer_count;
 
 	struct comp_layer *layer = &cb->slot.layers[layer_id];
-	layer->sc_array[0] = comp_swapchain(l_xsc);
-	layer->sc_array[1] = comp_swapchain(r_xsc);
-	layer->sc_array[2] = comp_swapchain(l_d_xsc);
-	layer->sc_array[3] = comp_swapchain(r_d_xsc);
+	for (uint32_t i = 0; i < data->view_count; ++i) {
+		layer->sc_array[i] = comp_swapchain(xsc[i]);
+		layer->sc_array[i + data->view_count] = comp_swapchain(d_xsc[i]);
+	}
 	layer->data = *data;
 
 	cb->slot.layer_count++;
@@ -177,11 +174,7 @@ base_layer_cube(struct xrt_compositor *xc,
                 struct xrt_swapchain *xsc,
                 const struct xrt_layer_data *data)
 {
-#if 0
 	return do_single_layer(xc, xdev, xsc, data);
-#else
-	return XRT_SUCCESS; //! @todo Implement
-#endif
 }
 
 static xrt_result_t
@@ -233,14 +226,12 @@ base_wait_frame(struct xrt_compositor *xc,
 	    out_predicted_display_time_ns,    //
 	    out_predicted_display_period_ns); //
 
+	// Wait until the given wake up time.
+	u_wait_until(&cb->sleeper, wake_up_time_ns);
+
 	uint64_t now_ns = os_monotonic_get_ns();
-	if (now_ns < wake_up_time_ns) {
-		uint32_t delay = (uint32_t)(wake_up_time_ns - now_ns);
-		os_precise_sleeper_nanosleep(&cb->sleeper, delay);
-	}
 
-	now_ns = os_monotonic_get_ns();
-
+	// Signal that we woke up.
 	xrt_comp_mark_frame(xc, frame_id, XRT_COMPOSITOR_FRAME_POINT_WOKE, now_ns);
 
 	*out_frame_id = frame_id;
@@ -264,8 +255,8 @@ comp_base_init(struct comp_base *cb)
 	cb->base.base.create_semaphore = base_create_semaphore;
 	cb->base.base.import_fence = base_import_fence;
 	cb->base.base.layer_begin = base_layer_begin;
-	cb->base.base.layer_stereo_projection = base_layer_stereo_projection;
-	cb->base.base.layer_stereo_projection_depth = base_layer_stereo_projection_depth;
+	cb->base.base.layer_projection = base_layer_projection;
+	cb->base.base.layer_projection_depth = base_layer_projection_depth;
 	cb->base.base.layer_quad = base_layer_quad;
 	cb->base.base.layer_cube = base_layer_cube;
 	cb->base.base.layer_cylinder = base_layer_cylinder;
@@ -273,7 +264,7 @@ comp_base_init(struct comp_base *cb)
 	cb->base.base.layer_equirect2 = base_layer_equirect2;
 	cb->base.base.wait_frame = base_wait_frame;
 
-	u_threading_stack_init(&cb->cscgc.destroy_swapchains);
+	u_threading_stack_init(&cb->cscs.destroy_swapchains);
 
 	os_precise_sleeper_init(&cb->sleeper);
 }
@@ -283,5 +274,5 @@ comp_base_fini(struct comp_base *cb)
 {
 	os_precise_sleeper_deinit(&cb->sleeper);
 
-	u_threading_stack_fini(&cb->cscgc.destroy_swapchains);
+	u_threading_stack_fini(&cb->cscs.destroy_swapchains);
 }
