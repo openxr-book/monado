@@ -1,5 +1,5 @@
 #!/bin/sh
-# Copyright 2020, Ryan Pavlik <ryan@ryanpavlik.com>
+# Copyright 2020, Rylie Pavlik <rylie@ryliepavlik.com>
 # SPDX-License-Identifier: CC0-1.0
 # Registers dpkg-mergechangelogs as a git merge driver so the gitattributes in here works right.
 # defaults to local-only: calling with --global is recommended

@@ -20,4 +20,4 @@ monado (0.3.0-2) experimental; urgency=medium
 
     systemctl --user stop monado.socket
 
- -- Ryan Pavlik <ryan@ryanpavlik.com>  Tue, 14 Jul 2020 16:01:24 -0500
+ -- Rylie Pavlik <rylie@ryliepavlik.com>  Tue, 14 Jul 2020 16:01:24 -0500
