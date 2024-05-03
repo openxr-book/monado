@@ -31,8 +31,7 @@ Build-Depends: debhelper-compat (= 12),
                libxrandr-dev,
                libxxf86vm-dev,
                pandoc <!nodoc>,
-               pkg-config,
-               wayland-protocols
+               pkg-config
 Standards-Version: 4.6.2
 Vcs-Browser: https://gitlab.freedesktop.org/monado/monado/-/tree/debian/bullseye
 Vcs-Git: https://gitlab.freedesktop.org/monado/monado.git -b debian/bullseye
