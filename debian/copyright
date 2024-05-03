@@ -29,7 +29,10 @@ Copyright: 2018-2021, Collabora, Ltd.
 License: BSL-1.0
 
 Files: cmake/CleanDirectoryList.cmake
-Copyright: 2009, 2010, Iowa State University.
+  cmake/GetGitRevisionDescription.cmake.in
+  cmake/PrefixListGlob.cmake
+  cmake/ProgramFilesGlob.cmake
+Copyright: 2009-2010, Iowa State University
 License: BSL-1.0
 
 Files: cmake/FindEGL.cmake
@@ -102,6 +105,13 @@ License: BSL-1.0
 Files: debian/extra/*
 Copyright: 2020, Rylie Pavlik <rylie@ryliepavlik.com>
 License: CC0-1.0
+
+Files: debian/monado-cli.1
+  debian/monado-ctl.1
+  debian/monado-gui.1
+  debian/monado-service.1
+Copyright: 2018-2022, Collabora, Ltd.
+License: BSL-1.0
 
 Files: debian/org.freedesktop.monado.openxr1.metainfo.xml
 Copyright: 2020, Collabora, Ltd.
@@ -223,8 +233,8 @@ Copyright: 2019, Collabora, Ltd.
 License: Apache-2.0
 
 Files: src/external/glad/*
-Copyright: 2020-2022, Collabora, Ltd. and the Monado contributors
-License: CC0-1.0
+Copyright: 2013-2022, David Herberth
+License: Expat
 
 Files: src/external/glad/include/*
 Copyright: 2007-2024, The Khronos Group Inc.
@@ -286,6 +296,10 @@ Files: src/external/imgui/imgui/imstb_rectpack.h
   src/external/imgui/imgui/imstb_truetype.h
 Copyright: 2017, Sean Barrett
 License: Expat or Unlicense
+
+Files: src/external/imgui/imgui_monado/*
+Copyright: 2018-2023, Collabora, Ltd.
+License: BSL-1.0
 
 Files: src/external/jnipp/*
 Copyright: 2020, Collabora, Ltd.
