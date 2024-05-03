@@ -57,8 +57,3 @@ ifneq (,$(findstring linux,$(DEB_HOST_ARCH_OS)))
 	sed -i "s/%N/monado/" debian/tmp/usr/lib/systemd/user/monado.service
 endif
 	dh_install
-
-# Remove imgui config file if it's there.
-override_dh_auto_clean:
-	-rm -f imgui.ini
-	dh_auto_clean
