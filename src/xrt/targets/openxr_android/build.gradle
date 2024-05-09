@@ -8,7 +8,7 @@ plugins {
 
     id 'com.mikepenz.aboutlibraries.plugin'
 
-    id "com.gladed.androidgitversion"
+    id 'com.palantir.git-version' version '3.0.0'
     id "de.undercouch.download"
 
     // Hilt dependency injection
@@ -33,12 +33,6 @@ spotless {
         // Use ktfmt(https://github.com/facebook/ktfmt) as the default Kotlin formatter.
         ktfmt('0.43').kotlinlangStyle()
     }
-}
-
-androidGitVersion {
-    tagPattern(/^v[0-9]+.*/)
-    codeFormat = 'MMNPBBBBB'
-    format = '%tag%%-count%%-gcommit%%-dirty%'
 }
 
 def parseOpenXRVersion(def fn) {
@@ -115,10 +109,14 @@ android {
         minSdkVersion project.sharedMinSdk
         targetSdkVersion project.sharedTargetSdk
 
-        versionCode androidGitVersion.code()
-        versionName androidGitVersion.name()
+        def gitDetails = versionDetails()
+        var gitCode = gitDetails.lastTag.replaceAll("[^0-9]+", "") + String.format("%05d", gitDetails.commitDistance)
+
+        versionCode = Integer.parseInt(gitCode)
+        versionName = gitVersion()
 
         println versionName
+        println versionCode
 
         resValue "string", "monado_lib_version", "${versionName}"
 
