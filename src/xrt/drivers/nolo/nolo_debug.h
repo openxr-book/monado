@@ -1,28 +1,13 @@
-// Copyright 2020-2021, Collabora, Ltd.
+// Copyright 2022-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Interface to nolo driver.
- * @author Jakob Bornecrantz <jakob@collabora.com>
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Michael Speth <mspeth@monky-games.com>
  * @ingroup drv_nolo
  */
 
 #pragma once
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <assert.h>
-#include "util/u_logging.h"
-#include "xrt/xrt_prober.h"
-#include "xrt/xrt_defines.h"
-#include "math/m_imu_3dof.h"
-#include "xrt/xrt_device.h"
-#include "util/u_device.h"
-#include "nolo_interface.h"
-
-//DEBUG_GET_ONCE_LOG_OPTION(nolo_log, "NOLO_LOG", U_LOGGING_WARN)
 
 //#define DEBUG_INPUT 
 //#define DEBUG_POSITION

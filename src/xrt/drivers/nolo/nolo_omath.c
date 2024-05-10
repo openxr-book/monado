@@ -1,12 +1,13 @@
+// Copyright 2022-2024, Collabora, Ltd.
 // Copyright 2013, Fredrik Hultin.
 // Copyright 2013, Jakob Bornecrantz.
 // SPDX-License-Identifier: BSL-1.0
-/*
- * OpenHMD - Free and Open Source API and drivers for immersive technology.
+/*!
+ * @file
+ * @brief  Math Code Implementation for @ref drv_nolo 
+ * @author Michael Speth <mspeth@monky-games.com>
+ * @ingroup drv_nolo
  */
-
-/* Math Code Implementation */
-
 
 #include <string.h>
 #include <stdbool.h>

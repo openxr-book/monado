@@ -1,4 +1,5 @@
-
+// Copyright 2022-2024, Collabora, Ltd.
+// SPDX-License-Identifier: BSL-1.0
 #include "nolo_interface.h"
 #include "nolo_debug.h"
 #include "util/u_prober.h"
@@ -69,19 +70,6 @@ void print_analog_input(struct nolo_device * device, int index_x, int index_y)
 
 void print_controller_inputs(struct nolo_device *device)
 {
-	/*
-	switch(device->base.device_type)
-	{
-		case XRT_DEVICE_TYPE_LEFT_HAND_CONTROLLER:
-			NOLO_DEBUG_INPUT(device,"Nolo Left Controller Inputs");
-			break;
-		case XRT_DEVICE_TYPE_RIGHT_HAND_CONTROLLER:
-			NOLO_DEBUG_INPUT(device,"Nolo Right Controller Inputs");
-			break;
-		defaut:
-			NOLO_DEBUG_INPUT(device,"HMD?");
-	}
-	*/
 	print_digital_input(device,NOLO_TRACKPAD_CLICK);
 	print_digital_input(device,NOLO_TRIGGER_CLICK);
 	print_digital_input(device,NOLO_MENU_CLICK);
@@ -89,8 +77,6 @@ void print_controller_inputs(struct nolo_device *device)
 	print_digital_input(device,NOLO_SQUEEZE_CLICK);
 	print_digital_input(device,NOLO_TRACKPAD_TOUCH);
  	print_analog_input(device, NOLO_TRACKPAD, 7);
-    //nolo_device_set_trackpad_X(device, now, 6);
-    //nolo_device_set_trackpad_Y(device, now, 7);
 }
 
 /**
@@ -137,128 +123,9 @@ void print_nolo_controller_trigger_pulled(struct nolo_device *device){
  * Prints the raw acceleration and gyroscope values to the console.
  */
 void print_plot_data(struct nolo_device *device){
-//	/*
 	NOLO_DEBUG_PLOT("%ld, %05f,%05f,%05f,%05f,%05f,%05f",
 		os_realtime_get_ns(),
 		device->raw_accel.x,device->raw_accel.y,device->raw_accel.z,
 		device->raw_gyro.x,device->raw_gyro.y,device->raw_gyro.z
 	);
-//	*/
-	/*
-	// plot the position values
-	NOLO_DEBUG_PLOT("%ld, %05f,%05f,%05f",
-		os_realtime_get_ns(),
-		(float)device->pose.position.x,
-		(float)device->pose.position.y,
-		(float)device->pose.position.z
-	);
-	*/
-	/*
-	// plot the rotation of HMD
-	NOLO_DEBUG_PLOT("%ld, %05f,%05f,%05f,%05f,%05f,%05f,%05f",
-		os_realtime_get_ns(),
-		(float)device->sample.w,
-		(float)device->sample.accel[0],
-		(float)device->sample.accel[1],
-		(float)device->sample.accel[2],
-		(float)device->sample.gyro[0],
-		(float)device->sample.gyro[1],
-		(float)device->sample.gyro[2]
-	);
-	*/
-
-	/*
-	// plot the rotation of HMD
-	NOLO_DEBUG_PLOT("%ld, %05f,%05f,%05f,%05f,%05f,%05f,%05f,%05f,%05f,%05f",
-		os_realtime_get_ns(),
-		(float)device->sample.rot[0],
-		(float)device->sample.rot[1],
-		(float)device->sample.rot[2],
-		(float)device->sample.rot[3],
-		(float)device->sample.rot[4],
-		(float)device->sample.rot[5],
-		(float)device->sample.rot[6],
-		(float)device->sample.rot[7],
-		(float)device->sample.rot[8],
-		(float)device->sample.rot[9]
-	);
-	*/
-	/*
-	// plot the rotation of HMD
-	NOLO_DEBUG_PLOT("%ld, %05f,%05f,%05f",
-		os_realtime_get_ns(),
-		(float)device->sample.rot[7],
-		(float)device->sample.rot[8],
-		(float)device->sample.rot[9]
-	);
-	*/
-	/*
-	// plot the rotation of HMD
-	NOLO_DEBUG_PLOT("%ld, %05f,%05f,%05f,%05f",
-		os_realtime_get_ns(),
-		(float)device->sample.rot[6],
-		(float)device->sample.rot[7],
-		(float)device->sample.rot[8],
-		(float)device->sample.rot[9]
-	);
-	*/
-	/*
-	// plot the rotation of HMD
-	NOLO_DEBUG_PLOT("%ld, %05f,%05f,%05f",
-		os_realtime_get_ns(),
-		(float)device->sample.rot[3],
-		(float)device->sample.rot[4],
-		(float)device->sample.rot[5]
-	);
-	*/
-	/*
-	NOLO_DEBUG_PLOT("%ld, %05f,%05f,%05f",
-		os_realtime_get_ns(),
-		(float)device->sample.rot[0],
-		(float)device->sample.rot[1],
-		(float)device->sample.rot[2]
-	);
-	*/
-	
-	/*
-	// plot the position values
-	NOLO_DEBUG_PLOT("%ld, %05f,%05f,%05f,%05f",
-		os_realtime_get_ns(),
-		(float)device->connected,
-		(float)device->battery,
-		(float)device->time0,
-		(float)device->time1
-	);
-	*/
-	/*
-	// plot the rotation of HMD
-	NOLO_DEBUG_PLOT("%ld, %05f,%05f,%05f,%05f",
-		os_realtime_get_ns(),
-		(float)device->pose.orientation.x,
-		(float)device->pose.orientation.y,
-		(float)device->pose.orientation.z,
-		(float)device->pose.orientation.w
-	);
-	*/
-	/*
-	// plot the rotation of Controller
-	NOLO_DEBUG_PLOT("%ld, %05f,%05f,%05f,%05f,%05f,%05f",
-		os_realtime_get_ns(),
-		(float)device->sample.rot[0],
-		(float)device->sample.rot[1],
-		(float)device->sample.rot[2],
-		(float)device->sample.rot[3],
-		(float)device->sample.rot[4],
-		(float)device->sample.rot[5]
-	);
-	*/
-	/*
-	// plot the rotation of Controller
-	NOLO_DEBUG_PLOT("%ld, %05f,%05f,%05f",
-		os_realtime_get_ns(),
-		(float)device->sample.rot[0],
-		(float)device->sample.rot[1],
-		(float)device->sample.rot[2]
-	);
-	*/
 }

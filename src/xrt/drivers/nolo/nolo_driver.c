@@ -1,4 +1,4 @@
-// Copyright 2020-2021, Collabora, Ltd.
+// Copyright 2022-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -175,7 +175,7 @@ static void recenter(struct nolo_device * device){
 	ofusion_init(&ns->right_controller->sensor_fusion);
 }
 
-uint64_t ohmd_monotonic_conv(uint64_t ticks, uint64_t srcTicksPerSecond, uint64_t dstTicksPerSecond)
+static uint64_t monotonic_conv(uint64_t ticks, uint64_t srcTicksPerSecond, uint64_t dstTicksPerSecond)
 {
 	// This would be more straightforward with floating point arithmetic,
 	// but we avoid it here in order to avoid the rounding errors that that
@@ -187,7 +187,7 @@ uint64_t ohmd_monotonic_conv(uint64_t ticks, uint64_t srcTicksPerSecond, uint64_
 }
 
 static const uint64_t NUM_1_000_000_000 = 1000000000;
-void ohmd_monotonic_init(struct nolo_device* device)
+static void monotonic_init(struct nolo_device* device)
 {
 		struct timespec ts;
 		if (clock_getres(CLOCK_MONOTONIC, &ts) !=  0) {
@@ -199,24 +199,6 @@ void ohmd_monotonic_init(struct nolo_device* device)
 			ts.tv_nsec >= 1000 ?
 			NUM_1_000_000_000 :
 			NUM_1_000_000_000 / ts.tv_nsec;
-}
-
-uint64_t ohmd_monotonic_get(struct nolo_device* device)
-{
-	struct timespec now;
-	clock_gettime(CLOCK_MONOTONIC, &now);
-
-	return ohmd_monotonic_conv(
-		now.tv_sec * NUM_1_000_000_000 + now.tv_nsec,
-		NUM_1_000_000_000,
-		device->monotonic_ticks_per_sec);
-}
-
-double ohmd_get_tick()
-{
-	struct timeval now;
-	gettimeofday(&now, NULL);
-	return (double)now.tv_sec * 1.0 + (double)now.tv_usec / 1000000.0;
 }
 
 // How to address DRIFT
@@ -269,22 +251,8 @@ static void handle_tracker_sensor_msg(struct nolo_device* device, unsigned char*
 		print_plot_data(device);
 	}
 
-	//print_nolo_tracker_rotation_full(device);
 	print_nolo_tracker_rotation(device);
 	print_nolo_tracker_position(device);
-
-	// check if need to correct for drift
-	// doesn't really work
-	/*
-	if(device->nolo_type == NOLO_TRACKER){
-		if(device->home_position.x != device->last_home_position.x){
-			recenter(device);
-			device->last_home_position.x = device->home_position.x;
-			device->last_home_position.y = device->home_position.y;
-			device->last_home_position.z = device->home_position.z;
-		}
-	}
-	*/
 }
 
 /*
@@ -294,8 +262,7 @@ static int
 nolo_read_data_hid(struct nolo_device *device, timepoint_ns now)
 {
 	assert(device);
-	uint8_t buffer[256];
-	//unsigned char buffer[256];
+	uint8_t buffer[256] = {0};
 	bool got_message = false;
 	//NOLO_DEBUG(device,"data hid = %p",(void *)&device->data_hid);
 	do {
@@ -519,7 +486,7 @@ nolo_device_create(struct os_hid_device *hid, enum nolo_device_type nolo_type)
 
 	// Initialize fusion
 	m_imu_3dof_init(&device->fusion, M_IMU_3DOF_USE_GRAVITY_DUR_20MS);
-	ohmd_monotonic_init(device);
+	monotonic_init(device);
 
 	device->imu.gyro_range = 8.726646f;
 	device->imu.acc_range = 39.226600f;
@@ -654,7 +621,6 @@ nolo_found(struct xrt_prober *xp,
 			ns->hmd_tracker->sys = ns;
 			ns->num_devices++;
 			out_xdev[0] = &(ns->hmd_tracker->base);
-
 
 			// create left and right controllers
             ns->left_controller = nolo_device_create(hmd_hid, NOLO_CONTROLLER);

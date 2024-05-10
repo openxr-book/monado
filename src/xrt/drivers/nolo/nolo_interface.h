@@ -1,10 +1,9 @@
-// Copyright 2020-2021, Collabora, Ltd.
+// Copyright 2022-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Interface to nolo driver.
- * @author Jakob Bornecrantz <jakob@collabora.com>
- * @author Ryan Pavlik <ryan.pavlik@collabora.com>
+ * @author Michael Speth <mspeth@monky-games.com>
  * @ingroup drv_nolo
  */
 
@@ -18,14 +17,6 @@
 #include "math/m_imu_3dof.h"
 #include "os/os_hid.h"
 #include "nolo_fusion.h"
-
-struct nolo_imu_range_modes_report
-{
-	uint8_t id;
-	uint8_t gyro_range;
-	uint8_t accel_range;
-	uint8_t unknown[61];
-} __attribute__((packed));
 
 #ifdef __cplusplus
 extern "C" {
@@ -52,25 +43,9 @@ extern "C" {
 //iProduct                2 NOLO HMD
 #define NOLO_PID 0x5750
 
-enum nolo_input_index
-{
-	NOLO_TRACKPAD_CLICK,
-	NOLO_TRIGGER_CLICK,
-	NOLO_MENU_CLICK,
-	NOLO_SYSTEM_CLICK,
-	NOLO_SQUEEZE_CLICK,
-	NOLO_TRACKPAD_TOUCH,
-	NOLO_TRACKPAD,
-	NOLO_GRIP_POSE,
-	NOLO_AIM_POSE,
-
-	NOLO_MAX_INDEX
-};
-
-
 enum nolo_device_type
 {
-	NOLO_CONTROLLER,
+	NOLO_CONTROLLER = 0,
 	NOLO_TRACKER,
 };
 
@@ -83,16 +58,6 @@ typedef struct
 	uint64_t tick;
 } nolo_sample;
 
-
-typedef enum
-{
-	//LEGACY firmware < 2.0
-	NOLO_LEGACY_CONTROLLER_TRACKER = 165,
-	NOLO_LEGACY_HMD_TRACKER = 166,
-	//firmware > 2.0
-	NOLO_CONTROLLER_0_HMD_SMP1 = 16,
-	NOLO_CONTROLLER_1_HMD_SMP2 = 17,
-} nolo_irq_cmd;
 
 /*!
  * A nolo device.

@@ -1,11 +1,12 @@
+// Copyright 2022-2024, Collabora, Ltd.
 // Copyright 2017, Joey Ferwerda.
 // SPDX-License-Identifier: BSL-1.0
-/*
- * OpenHMD - Free and Open Source API and drivers for immersive technology.
- * Original implementation by: Yann Vernier.
+/*!
+ * @file
+ * @brief  Packet Decoding and Utilities for @ref drv_nolo 
+ * @author Michael Speth <mspeth@monky-games.com>
+ * @ingroup drv_nolo
  */
-
-/* NOLO VR - Packet Decoding and Utilities */
 
 #include <stdio.h>
 #include "nolo_interface.h"

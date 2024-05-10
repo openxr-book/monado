@@ -1,11 +1,10 @@
-// Copyright 2020-2022, Collabora, Ltd.
+// Copyright 2022-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  Shared bindings structs for @ref drv_nolo & @ref drv_survive.
- * @author Christoph Haag <christoph.haag@collabora.com>
- * @author Jakob Bornecrantz <jakob@collabora.com>
- * @ingroup aux_vive
+ * @brief  Bindings structs for @ref drv_nolo 
+ * @author Michael Speth <mspeth@monky-games.com>
+ * @ingroup drv_nolo
  */
 
 #include "nolo_bindings.h"
@@ -31,11 +30,6 @@ struct xrt_binding_input_pair simple_inputs_nolo[9] = {
     {XRT_INPUT_TOUCH_THUMBSTICK, XRT_INPUT_NOLO_TRACKPAD},
 };
 
-/*
-struct xrt_binding_output_pair simple_outputs_nolo[1] = {
-    {XRT_OUTPUT_NAME_SIMPLE_VIBRATION, XRT_OUTPUT_NAME_TOUCH_HAPTIC},
-};
-*/
 struct xrt_binding_output_pair simple_outputs_nolo[0] = {
 };
 
