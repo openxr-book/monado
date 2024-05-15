@@ -1,0 +1,1 @@
+d/steamvr_lh: fix angular velocity

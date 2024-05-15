@@ -665,7 +665,7 @@ Device::update_pose(const vr::DriverPose_t &newPose) const
 		relation.relation_flags = XRT_SPACE_RELATION_BITMASK_ALL;
 		relation.pose = copy_pose(newPose.qRotation, newPose.vecPosition);
 		relation.linear_velocity = copy_vec3(newPose.vecVelocity);
-		relation.angular_velocity = copy_vec3(newPose.vecAngularVelocity);
+		relation.angular_velocity = copy_vec3(newPose.vecAngularAcceleration);
 
 		math_quat_rotate_vec3(&relation.pose.orientation, &relation.angular_velocity,
 		                      &relation.angular_velocity);
@@ -673,6 +673,8 @@ Device::update_pose(const vr::DriverPose_t &newPose) const
 		// apply over local transform
 		const xrt_pose local = copy_pose(newPose.qDriverFromHeadRotation, newPose.vecDriverFromHeadTranslation);
 		math_pose_transform(&relation.pose, &local, &relation.pose);
+		math_quat_rotate_vec3(&local.orientation, &relation.linear_velocity, &relation.linear_velocity);
+		math_quat_rotate_vec3(&local.orientation, &relation.angular_velocity, &relation.angular_velocity);
 
 		// apply world transform
 		const xrt_pose world =
