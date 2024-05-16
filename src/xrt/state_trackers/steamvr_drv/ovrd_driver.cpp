@@ -415,6 +415,8 @@ public:
 		case XRT_DEVICE_VIVE_TRACKER_TUNDRA: m_render_model = "{htc}vr_tracker_vive_1_0"; break;
 		case XRT_DEVICE_PSMV:
 		case XRT_DEVICE_HYDRA:
+		case XRT_DEVICE_NOLO_CONTROLLER: m_render_model = "{monado}nolo_controller"; break;
+		case XRT_DEVICE_NOLO_TRACKER:
 		case XRT_DEVICE_DAYDREAM:
 		case XRT_DEVICE_GENERIC_HMD:
 		default: m_render_model = "locator_one_sided"; break;
@@ -619,6 +621,20 @@ public:
 			AddControl("/input/b/click", XRT_INPUT_PSMV_SQUARE_CLICK, NULL);
 
 			AddOutputControl(XRT_OUTPUT_NAME_PSMV_RUMBLE_VIBRATION, "/output/haptic");
+		} break;
+		case XRT_DEVICE_NOLO_CONTROLLER: {
+			AddControl("/input/a/click", XRT_INPUT_NOLO_TRACKPAD_CLICK, NULL);
+			AddControl("/input/trigger/click", XRT_INPUT_NOLO_TRIGGER_CLICK, NULL);
+			AddControl("/input/b/click", XRT_INPUT_NOLO_MENU_CLICK, NULL);
+			AddControl("/input/system/click", XRT_INPUT_NOLO_SYSTEM_CLICK, NULL);
+			AddControl("/input/trackpad/touch", XRT_INPUT_NOLO_TRACKPAD_TOUCH, NULL);
+
+			struct MonadoInputComponent x = {true, true, false};
+			struct MonadoInputComponent y = {true, false, true};
+
+			AddControl("/input/trackpad/x", XRT_INPUT_NOLO_TRACKPAD, &x);
+			AddControl("/input/trackpad/y", XRT_INPUT_NOLO_TRACKPAD, &y);
+			AddOutputControl(XRT_OUTPUT_NAME_NOLO_HAPTIC, "/output/haptic");
 		} break;
 
 		case XRT_DEVICE_TOUCH_CONTROLLER: break;    // TODO
@@ -868,6 +884,10 @@ public:
 			grip_name = XRT_INPUT_HYDRA_POSE;
 		} else if (m_xdev->name == XRT_DEVICE_TOUCH_CONTROLLER) {
 			grip_name = XRT_INPUT_TOUCH_GRIP_POSE;
+		} else if (m_xdev->name == XRT_DEVICE_NOLO_CONTROLLER) {
+			grip_name = XRT_INPUT_NOLO_GRIP_POSE;
+		} else if (m_xdev->name == XRT_DEVICE_NOLO_TRACKER) {
+			grip_name = XRT_INPUT_NOLO_GRIP_POSE;
 		} else if (m_xdev->name == XRT_DEVICE_SIMPLE_CONTROLLER) {
 			grip_name = XRT_INPUT_SIMPLE_GRIP_POSE;
 		} else {

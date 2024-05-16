@@ -94,6 +94,10 @@ if(XRT_BUILD_DRIVER_HYDRA)
 	target_link_libraries(target_lists PRIVATE drv_hydra)
 endif()
 
+if(XRT_BUILD_DRIVER_NOLO)
+	target_link_libraries(target_lists PRIVATE drv_nolo)
+endif()
+
 if(XRT_BUILD_DRIVER_NS)
 	target_link_libraries(target_lists PRIVATE drv_ns)
 endif()

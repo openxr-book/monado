@@ -28,6 +28,10 @@ static const char *driver_list[] = {
     "hdk",
 #endif
 
+#ifdef XRT_BUILD_DRIVER_NOLO
+    "nolo",
+#endif
+
 #ifdef XRT_BUILD_DRIVER_ULV2
     "ulv2",
 #endif

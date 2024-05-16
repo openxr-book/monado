@@ -55,6 +55,9 @@ enum xrt_tracking_type
 	// The device(s) are tracked by Hydra
 	XRT_TRACKING_TYPE_HYDRA,
 
+	// The device(s) are tracked by Nolo
+	XRT_TRACKING_TYPE_NOLO,
+
 	// The device(s) are tracked by external SLAM
 	XRT_TRACKING_TYPE_EXTERNAL_SLAM,
 

@@ -96,6 +96,14 @@ if(XRT_BUILD_DRIVER_HYDRA)
 	list(APPEND ENABLED_DRIVERS hydra)
 endif()
 
+if(XRT_BUILD_DRIVER_NOLO)
+	set(NOLO_SOURCE_FILES)
+
+	add_library(drv_nolo STATIC nolo/nolo_driver.c nolo/nolo_interface.h nolo/nolo_packet.c nolo/nolo_bindings.h nolo/nolo_bindings.c nolo/nolo_debug.h nolo/nolo_debug.c nolo/nolo_fusion.c nolo/nolo_fusion.h nolo/nolo_omath.c nolo/nolo_omath.h)
+	target_link_libraries(drv_nolo PRIVATE xrt-interfaces aux_math)
+	list(APPEND ENABLED_DRIVERS nolo)
+endif()
+
 if(XRT_BUILD_DRIVER_NS)
 	add_library(
 		drv_ns STATIC

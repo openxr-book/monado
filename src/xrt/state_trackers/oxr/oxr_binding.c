@@ -376,6 +376,8 @@ oxr_get_profile_for_device_name(struct oxr_logger *log,
 	// no interaction
 	default:
 	case XRT_DEVICE_HYDRA:
+	case XRT_DEVICE_NOLO_TRACKER:
+	case XRT_DEVICE_NOLO_CONTROLLER:
 	case XRT_DEVICE_DAYDREAM:
 	case XRT_DEVICE_GENERIC_HMD:
 	case XRT_DEVICE_REALSENSE:

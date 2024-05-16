@@ -59,7 +59,8 @@
                 "knuckles",
                 "oculus_touch",
                 "vive_controller",
-                "vive_pro"
+                "vive_pro",
+                "nolo_controller"
             ]
         },
         "monadoDeviceName": {
