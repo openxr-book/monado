@@ -14,6 +14,7 @@
 
 #if defined(XRT_OS_WINDOWS) && defined(XRT_HAVE_WIL)
 #include <wil/result.h>
+#include <wil/result_macros.h>
 
 namespace xrt::auxiliary::util {
 
