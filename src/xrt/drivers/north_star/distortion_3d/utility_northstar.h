@@ -489,7 +489,7 @@ public:
 	}
 
 	inline Matrix4x4 // Until clang-format-11 is on the CI.
-	operator*(const Matrix4x4 &_in) const
+	operator*(const Matrix4x4 & _in) const
 	{
 		Matrix4x4 ret;
 		ret.m00 = (m00 * _in.m00) + (m01 * _in.m10) + (m02 * _in.m20) + (m03 * _in.m30);
@@ -964,7 +964,7 @@ public:
 	}
 
 	inline Quaternion // Until clang-format-11 is on the CI.
-	operator*(const Quaternion &q) const
+	operator*(const Quaternion & q) const
 	{
 		return Quaternion(y * q.z - z * q.y + x * q.w + w * q.x, z * q.x - x * q.z + y * q.w + w * q.y,
 		                  x * q.y - y * q.x + z * q.w + w * q.z, w * q.w - x * q.x - y * q.y - z * q.z);

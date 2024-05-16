@@ -45,7 +45,8 @@ public:
 	valid() const noexcept;
 
 	//! Is this iterator valid?
-	explicit operator bool() const noexcept
+	explicit
+	operator bool() const noexcept
 	{
 		return valid();
 	}

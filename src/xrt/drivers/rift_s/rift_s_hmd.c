@@ -41,7 +41,7 @@
 
 #include "rift_s_hmd.h"
 
-#define DEG_TO_RAD(D) ((D)*M_PI / 180.)
+#define DEG_TO_RAD(D) ((D) * M_PI / 180.)
 
 
 static void
