@@ -31,6 +31,7 @@
 #define OXR_XR_DEBUG_FTRACKER  (*(uint64_t *)"oxrftra\0")
 // body tracker
 #define OXR_XR_DEBUG_BTRACKER  (*(uint64_t *)"oxrbtra\0")
+#define OXR_XR_DEBUG_XDEVLIST  (*(uint64_t *)"oxrxdli\0")
 // clang-format on
 
 /*!
@@ -108,6 +109,7 @@ enum oxr_space_type
 	OXR_SPACE_TYPE_REFERENCE_LOCALIZATION_MAP_ML,
 
 	OXR_SPACE_TYPE_ACTION,
+	OXR_SPACE_TYPE_XDEV_POSE,
 };
 
 /*!

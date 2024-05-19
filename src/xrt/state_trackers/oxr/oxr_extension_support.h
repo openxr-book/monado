@@ -384,6 +384,17 @@
 
 
 /*
+ * XR_FB_body_tracking
+ */
+#if defined(XR_FB_body_tracking) && defined(XRT_FEATURE_OPENXR_BODY_TRACKING_FB)
+#define OXR_HAVE_FB_body_tracking
+#define OXR_EXTENSION_SUPPORT_FB_body_tracking(_) _(FB_body_tracking, FB_BODY_TRACKING)
+#else
+#define OXR_EXTENSION_SUPPORT_FB_body_tracking(_)
+#endif
+
+
+/*
  * XR_FB_composition_layer_alpha_blend
  */
 #if defined(XR_FB_composition_layer_alpha_blend) && defined(XRT_FEATURE_OPENXR_LAYER_FB_ALPHA_BLEND)
@@ -418,6 +429,7 @@
 #define OXR_EXTENSION_SUPPORT_FB_composition_layer_settings(_)
 #endif
 
+
 /*
  * XR_FB_composition_layer_depth_test
  */
@@ -429,6 +441,7 @@
 #define OXR_EXTENSION_SUPPORT_FB_composition_layer_depth_test(_)
 #endif
 
+
 /*
  * XR_FB_display_refresh_rate
  */
@@ -439,6 +452,7 @@
 #define OXR_EXTENSION_SUPPORT_FB_display_refresh_rate(_)
 #endif
 
+
 /*
  * XR_FB_passthrough
  */
@@ -448,6 +462,18 @@
 #else
 #define OXR_EXTENSION_SUPPORT_FB_passthrough(_)
 #endif
+
+
+/*
+ * XR_HTC_facial_tracking
+ */
+#if defined(XR_HTC_facial_tracking) && defined(XRT_FEATURE_OPENXR_FACIAL_TRACKING_HTC)
+#define OXR_HAVE_HTC_facial_tracking
+#define OXR_EXTENSION_SUPPORT_HTC_facial_tracking(_) _(HTC_facial_tracking, HTC_FACIAL_TRACKING)
+#else
+#define OXR_EXTENSION_SUPPORT_HTC_facial_tracking(_)
+#endif
+
 
 /*
  * XR_ML_ml2_controller_interaction
@@ -598,24 +624,13 @@
 
 
 /*
- * XR_HTC_facial_tracking
+ * XR_MNDX_xdev_space
  */
-#if defined(XR_HTC_facial_tracking) && defined(XRT_FEATURE_OPENXR_FACIAL_TRACKING_HTC)
-#define OXR_HAVE_HTC_facial_tracking
-#define OXR_EXTENSION_SUPPORT_HTC_facial_tracking(_) _(HTC_facial_tracking, HTC_FACIAL_TRACKING)
+#if defined(XR_MNDX_xdev_space) && defined(XRT_FEATURE_OPENXR_XDEV_SPACE)
+#define OXR_HAVE_MNDX_xdev_space
+#define OXR_EXTENSION_SUPPORT_MNDX_xdev_space(_) _(MNDX_xdev_space, MNDX_XDEV_SPACE)
 #else
-#define OXR_EXTENSION_SUPPORT_HTC_facial_tracking(_)
-#endif
-
-
-/*
- * XR_FB_body_tracking
- */
-#if defined(XR_FB_body_tracking) && defined(XRT_FEATURE_OPENXR_BODY_TRACKING_FB)
-#define OXR_HAVE_FB_body_tracking
-#define OXR_EXTENSION_SUPPORT_FB_body_tracking(_) _(FB_body_tracking, FB_BODY_TRACKING)
-#else
-#define OXR_EXTENSION_SUPPORT_FB_body_tracking(_)
+#define OXR_EXTENSION_SUPPORT_MNDX_xdev_space(_)
 #endif
 
 // end of GENERATED per-extension defines - do not modify - used by scripts
@@ -674,12 +689,14 @@
     OXR_EXTENSION_SUPPORT_EXT_palm_pose(_) \
     OXR_EXTENSION_SUPPORT_EXT_performance_settings(_) \
     OXR_EXTENSION_SUPPORT_EXT_samsung_odyssey_controller(_) \
+    OXR_EXTENSION_SUPPORT_FB_body_tracking(_) \
     OXR_EXTENSION_SUPPORT_FB_composition_layer_alpha_blend(_) \
     OXR_EXTENSION_SUPPORT_FB_composition_layer_image_layout(_) \
     OXR_EXTENSION_SUPPORT_FB_composition_layer_settings(_) \
-    OXR_EXTENSION_SUPPORT_FB_composition_layer_depth_test(_)  \
+    OXR_EXTENSION_SUPPORT_FB_composition_layer_depth_test(_) \
     OXR_EXTENSION_SUPPORT_FB_display_refresh_rate(_) \
     OXR_EXTENSION_SUPPORT_FB_passthrough(_) \
+    OXR_EXTENSION_SUPPORT_HTC_facial_tracking(_) \
     OXR_EXTENSION_SUPPORT_ML_ml2_controller_interaction(_) \
     OXR_EXTENSION_SUPPORT_MND_headless(_) \
     OXR_EXTENSION_SUPPORT_MND_swapchain_usage_input_attachment_bit(_) \
@@ -693,6 +710,5 @@
     OXR_EXTENSION_SUPPORT_MNDX_force_feedback_curl(_) \
     OXR_EXTENSION_SUPPORT_MNDX_hydra(_) \
     OXR_EXTENSION_SUPPORT_MNDX_system_buttons(_) \
-    OXR_EXTENSION_SUPPORT_HTC_facial_tracking(_) \
-    OXR_EXTENSION_SUPPORT_FB_body_tracking(_)
+    OXR_EXTENSION_SUPPORT_MNDX_xdev_space(_)
 // clang-format on

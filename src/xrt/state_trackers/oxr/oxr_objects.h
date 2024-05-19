@@ -124,6 +124,7 @@ struct oxr_hand_tracker;
 struct oxr_facial_tracker_htc;
 struct oxr_facial_tracker_fb;
 struct oxr_body_tracker_fb;
+struct oxr_xdev_list;
 
 #define XRT_MAX_HANDLE_CHILDREN 256
 #define OXR_MAX_BINDINGS_PER_ACTION 32
@@ -867,6 +868,18 @@ oxr_space_reference_create(struct oxr_logger *log,
                            const XrReferenceSpaceCreateInfo *createInfo,
                            struct oxr_space **out_space);
 
+/*!
+ * Monado special space that always points to a specific @ref xrt_device and
+ * pose, useful when you want to bypass the action binding system for instance.
+ */
+XrResult
+oxr_space_xdev_pose_create(struct oxr_logger *log,
+                           struct oxr_session *sess,
+                           struct xrt_device *xdev,
+                           enum xrt_input_name name,
+                           const struct xrt_pose *pose,
+                           struct oxr_space **out_space);
+
 XrResult
 oxr_space_locate(
     struct oxr_logger *log, struct oxr_space *spc, struct oxr_space *baseSpc, XrTime time, XrSpaceLocation *location);
@@ -1105,6 +1118,34 @@ oxr_xdev_get_hand_tracking_at(struct oxr_logger *log,
                               enum xrt_input_name name,
                               XrTime at_time,
                               struct xrt_hand_joint_set *out_value);
+
+#ifdef OXR_HAVE_MNDX_xdev_space
+static inline XrXDevListMNDX
+oxr_xdev_list_to_openxr(struct oxr_xdev_list *sc)
+{
+	return XRT_CAST_PTR_TO_OXR_HANDLE(XrXDevListMNDX, sc);
+}
+
+XrResult
+oxr_xdev_list_create(struct oxr_logger *log,
+                     struct oxr_session *sess,
+                     const XrCreateXDevListInfoMNDX *createInfo,
+                     struct oxr_xdev_list **out_xdl);
+
+XrResult
+oxr_xdev_list_get_properties(struct oxr_logger *log,
+                             struct oxr_xdev_list *xdl,
+                             uint32_t index,
+                             XrXDevPropertiesMNDX *properties);
+
+XrResult
+oxr_xdev_list_space_create(struct oxr_logger *log,
+                           struct oxr_xdev_list *xdl,
+                           const XrCreateXDevSpaceInfoMNDX *createInfo,
+                           uint32_t index,
+                           struct oxr_space **out_space);
+
+#endif // OXR_HAVE_MNDX_xdev_space
 
 
 /*
@@ -1408,6 +1449,10 @@ struct oxr_system
 	struct os_mutex sync_actions_mutex;
 
 	struct xrt_visibility_mask *visibility_mask[2];
+
+#ifdef OXR_HAVE_MNDX_xdev_space
+	bool supports_xdev_space;
+#endif
 
 #ifdef XR_USE_GRAPHICS_API_VULKAN
 	//! The instance/device we create when vulkan_enable2 is used
@@ -2197,7 +2242,8 @@ oxr_space_type_is_reference(enum oxr_space_type space_type)
 		return true;
 
 	case OXR_SPACE_TYPE_ACTION:
-		// Not a reference space.
+	case OXR_SPACE_TYPE_XDEV_POSE:
+		// These are not reference spaces.
 		return false;
 	}
 
@@ -2241,6 +2287,11 @@ struct oxr_space
 		struct xrt_device *xdev;
 		enum xrt_input_name name;
 	} action;
+
+	struct
+	{
+		struct xrt_space *xs;
+	} xdev_pose;
 };
 
 /*!
@@ -2676,6 +2727,35 @@ oxr_locate_body_joints_fb(struct oxr_logger *log,
                           const XrBodyJointsLocateInfoFB *locateInfo,
                           XrBodyJointLocationsFB *locations);
 #endif
+
+#ifdef OXR_HAVE_MNDX_xdev_space
+/*!
+ * Object that holds a list of the current @ref xrt_devices.
+ *
+ * Parent type/handle is @ref oxr_session
+ *
+ * @obj{XrXDevList}
+ * @extends oxr_handle_base
+ */
+struct oxr_xdev_list
+{
+	//! Common structure for things referred to by OpenXR handles.
+	struct oxr_handle_base handle;
+
+	//! Owner of this @ref xrt_device list.
+	struct oxr_session *sess;
+
+	//! Monotonically increasing number.
+	uint64_t generation_number;
+
+	uint64_t ids[XRT_SYSTEM_MAX_DEVICES];
+	struct xrt_device *xdevs[XRT_SYSTEM_MAX_DEVICES];
+	enum xrt_input_name names[XRT_SYSTEM_MAX_DEVICES];
+
+	//! Counts ids, names and xdevs.
+	uint32_t device_count;
+};
+#endif // OXR_HAVE_MNDX_xdev_space
 
 /*!
  * @}
