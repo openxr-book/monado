@@ -24,6 +24,8 @@
 
 #ifdef XRT_OS_ANDROID
 #include "android/android_globals.h"
+#include "android/android_check_signature.h"
+#include "xrt/xrt_config_android.h"
 #endif
 
 #include "openxr/openxr.h"
@@ -124,6 +126,17 @@ oxr_check_android_extensions(struct oxr_logger *log,
 			                 "(createInfo->next...->applicationActivity) "
 			                 "applicationActivity must be populated");
 		}
+#ifdef CHECK_OVERLAY_SIGNATURE_ENABLED
+		// Check signature for XR_EXTX_OVERLAY_EXTENSION_NAME
+		if (is_check_overlay_signature_property_enabled() &&
+		    is_extension_enabled(createInfo->enabledExtensionCount, createInfo->enabledExtensionNames,
+		                         XR_EXTX_OVERLAY_EXTENSION_NAME)) {
+			if (!android_check_signature(createInfoAndroid->applicationActivity, XRT_ANDROID_PACKAGE)) {
+				return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,
+				                 "XR_EXTX_OVERLAY_EXTENSION_NAME signature check failed");
+			}
+		}
+#endif
 	}
 	return XR_SUCCESS;
 }
