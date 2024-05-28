@@ -206,6 +206,15 @@ ipc_handle_instance_describe_client(volatile struct ipc_client_state *ics,
 #ifdef OXR_HAVE_FB_body_tracking
 	EXT(fb_body_tracking_enabled);
 #endif
+#ifdef OXR_HAVE_META_body_tracking_full_body
+	EXT(meta_body_tracking_full_body_enabled);
+#endif
+#ifdef OXR_HAVE_META_body_tracking_fidelity
+	EXT(meta_body_tracking_fidelity_enabled);
+#endif
+#ifdef OXR_HAVE_META_body_tracking_calibration
+	EXT(meta_body_tracking_calibration_enabled);
+#endif
 
 #undef EXT
 #undef PTT
@@ -299,6 +308,9 @@ ipc_handle_session_begin(volatile struct ipc_client_state *ics)
 	    .ext_hand_interaction_enabled = ics->client_state.info.ext_hand_interaction_enabled,
 	    .htc_facial_tracking_enabled = ics->client_state.info.htc_facial_tracking_enabled,
 	    .fb_body_tracking_enabled = ics->client_state.info.fb_body_tracking_enabled,
+	    .meta_body_tracking_full_body_enabled = ics->client_state.info.meta_body_tracking_full_body_enabled,
+	    .meta_body_tracking_fidelity_enabled = ics->client_state.info.meta_body_tracking_fidelity_enabled,
+	    .meta_body_tracking_calibration_enabled = ics->client_state.info.meta_body_tracking_calibration_enabled,
 	};
 
 	return xrt_comp_begin_session(ics->xc, &begin_session_info);
@@ -1912,4 +1924,29 @@ ipc_handle_device_get_body_joints(volatile struct ipc_client_state *ics,
 {
 	struct xrt_device *xdev = get_xdev(ics, id);
 	return xrt_device_get_body_joints(xdev, body_tracking_type, desired_timestamp_ns, out_value);
+}
+
+xrt_result_t
+ipc_handle_device_reset_body_tracking_calibration_meta(volatile struct ipc_client_state *ics, uint32_t id)
+{
+	struct xrt_device *xdev = get_xdev(ics, id);
+	return xrt_device_reset_body_tracking_calibration_meta(xdev);
+}
+
+xrt_result_t
+ipc_handle_device_set_body_tracking_calibration_override_meta(volatile struct ipc_client_state *ics,
+                                                              uint32_t id,
+                                                              float new_body_height)
+{
+	struct xrt_device *xdev = get_xdev(ics, id);
+	return xrt_device_set_body_tracking_calibration_override_meta(xdev, new_body_height);
+}
+
+xrt_result_t
+ipc_handle_device_set_body_tracking_fidelity_meta(volatile struct ipc_client_state *ics,
+                                                  uint32_t id,
+                                                  enum xrt_body_tracking_fidelity_meta new_fidelity)
+{
+	struct xrt_device *xdev = get_xdev(ics, id);
+	return xrt_device_set_body_tracking_fidelity_meta(xdev, new_fidelity);
 }

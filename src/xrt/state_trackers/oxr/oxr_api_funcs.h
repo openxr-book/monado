@@ -682,6 +682,27 @@ XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrCreateXDevSpaceMNDX(XrSession session, const XrCreateXDevSpaceInfoMNDX *createInfo, XrSpace *space);
 #endif
 
+/*
+ *
+ * oxr_api_body_tracking.c
+ *
+ */
+#ifdef OXR_HAVE_META_body_tracking_fidelity
+//! OpenXR API function @ep{xrRequestBodyTrackingFidelityMETA}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrRequestBodyTrackingFidelityMETA(XrBodyTrackerFB bodyTracker, const XrBodyTrackingFidelityMETA fidelity);
+#endif
+
+#ifdef OXR_HAVE_META_body_tracking_calibration
+//! OpenXR API function @ep{xrResetBodyTrackingCalibrationMETA}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrResetBodyTrackingCalibrationMETA(XrBodyTrackerFB bodyTracker);
+
+//! OpenXR API function @ep{xrSuggestBodyTrackingCalibrationOverrideMETA}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrSuggestBodyTrackingCalibrationOverrideMETA(XrBodyTrackerFB bodyTracker,
+                                                 const XrBodyTrackingCalibrationInfoMETA *calibrationInfo);
+#endif
 
 /*!
  * @}

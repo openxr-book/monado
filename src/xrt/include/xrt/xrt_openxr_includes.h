@@ -65,3 +65,9 @@ typedef __eglMustCastToProperFunctionPointerType (*PFNEGLGETPROCADDRESSPROC)(con
 #include "openxr/XR_MNDX_xdev_space.h"
 #include "openxr/XR_MNDX_system_buttons.h"
 #include "openxr/XR_MNDX_ball_on_a_stick_controller.h"
+
+#if defined(XRT_USE_META_EXT_HEADERS)
+#include "meta_openxr_preview/meta_body_tracking_full_body.h"
+#include "meta_openxr_preview/meta_body_tracking_fidelity.h"
+#include "meta_openxr_preview/meta_body_tracking_calibration.h"
+#endif
