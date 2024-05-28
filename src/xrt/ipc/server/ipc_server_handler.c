@@ -1984,6 +1984,18 @@ ipc_handle_system_devices_get_roles(volatile struct ipc_client_state *ics, struc
 }
 
 xrt_result_t
+ipc_handle_system_devices_begin_feature(volatile struct ipc_client_state *ics, enum xrt_device_feature feature)
+{
+	return xrt_system_devices_begin_feature(ics->server->xsysd, feature);
+}
+
+xrt_result_t
+ipc_handle_system_devices_end_feature(volatile struct ipc_client_state *ics, enum xrt_device_feature feature)
+{
+	return xrt_system_devices_end_feature(ics->server->xsysd, feature);
+}
+
+xrt_result_t
 ipc_handle_device_get_face_tracking(volatile struct ipc_client_state *ics,
                                     uint32_t id,
                                     enum xrt_input_name facial_expression_type,

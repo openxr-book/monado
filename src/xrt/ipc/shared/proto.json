@@ -62,6 +62,18 @@
 		]
 	},
 
+	"system_devices_begin_feature": {
+		"in": [
+			{"name": "feature", "type": "enum xrt_device_feature"}
+		]
+	},
+
+	"system_devices_end_feature": {
+		"in": [
+			{"name": "feature", "type": "enum xrt_device_feature"}
+		]
+	},
+
 	"system_compositor_get_info": {
 		"out": [
 			{"name": "info", "type": "struct xrt_system_compositor_info"}
