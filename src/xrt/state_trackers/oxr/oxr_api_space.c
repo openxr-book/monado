@@ -7,6 +7,9 @@
  * @ingroup oxr_api
  */
 
+#include "openxr/openxr.h"
+#include "oxr_chain.h"
+#include "util/u_misc.h"
 #include "xrt/xrt_compiler.h"
 
 #include "util/u_debug.h"
@@ -50,6 +53,10 @@ is_reference_space_type_valid(struct oxr_logger *log,
 			return XR_SUCCESS;
 		}
 #endif
+		if (OXR_API_VERSION_AT_LEAST(sys->inst, 1, 1)) {
+			return XR_SUCCESS;
+		}
+
 		return oxr_error(
 		    log, XR_ERROR_VALIDATION_FAILURE,
 		    "(%s == XR_REFERENCE_SPACE_TYPE_LOCAL_FLOOR_EXT) is only valid if XR_EXT_local_floor is enabled",
@@ -243,4 +250,89 @@ oxr_xrDestroySpace(XrSpace space)
 	OXR_VERIFY_SPACE_AND_INIT_LOG(&log, space, spc, "xrDestroySpace");
 
 	return oxr_handle_destroy(&log, &spc->handle);
+}
+
+static XrResult
+verify_space(struct oxr_logger *log, XrSpace space, struct oxr_space **out_space)
+{
+	struct oxr_space *spc;
+	OXR_VERIFY_SPACE_NOT_NULL(log, space, spc);
+	*out_space = spc;
+	return XR_SUCCESS;
+}
+
+static XrResult
+locate_spaces(XrSession session, const XrSpacesLocateInfo *locateInfo, XrSpaceLocations *spaceLocations, char *fn)
+{
+	struct oxr_space *spc;
+	struct oxr_space *baseSpc;
+	struct oxr_logger log;
+	OXR_VERIFY_SPACE_AND_INIT_LOG(&log, locateInfo->baseSpace, spc, fn);
+	OXR_VERIFY_SESSION_NOT_LOST(&log, spc->sess);
+	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, locateInfo, XR_TYPE_SPACES_LOCATE_INFO_KHR);
+	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, spaceLocations, XR_TYPE_SPACE_LOCATIONS_KHR);
+	OXR_VERIFY_SPACE_NOT_NULL(&log, locateInfo->baseSpace, baseSpc);
+
+	OXR_VERIFY_ARG_NOT_ZERO(&log, locateInfo->spaceCount);
+	OXR_VERIFY_ARG_NOT_ZERO(&log, spaceLocations->locationCount);
+
+	if (locateInfo->spaceCount != spaceLocations->locationCount) {
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
+		                 "(locateInfo->spaceCount == %d) must equal (spaceLocations->locationCount == %d)",
+		                 locateInfo->spaceCount, spaceLocations->locationCount);
+	}
+
+
+	if (locateInfo->time <= (XrTime)0) {
+		return oxr_error(&log, XR_ERROR_TIME_INVALID, "(time == %" PRIi64 ") is not a valid time.",
+		                 locateInfo->time);
+	}
+
+	XrSpaceVelocitiesKHR *velocities =
+	    OXR_GET_OUTPUT_FROM_CHAIN((void *)spaceLocations->next, XR_TYPE_SPACE_VELOCITIES_KHR, XrSpaceVelocitiesKHR);
+	if (velocities) {
+		if (velocities->velocityCount != locateInfo->spaceCount) {
+			return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
+			                 "(next->velocityCount == %d) must equal (locateInfo->spaceCount == %d)",
+			                 velocities->velocityCount, locateInfo->spaceCount);
+		}
+	}
+
+
+	uint32_t space_count = locateInfo->spaceCount;
+	struct oxr_space **spaces = U_TYPED_ARRAY_CALLOC(struct oxr_space *, space_count);
+
+	XrResult res;
+	for (uint32_t i = 0; i < space_count; i++) {
+		res = verify_space(&log, locateInfo->spaces[i], &spaces[i]);
+		if (res != XR_SUCCESS) {
+			break;
+		}
+	}
+
+	if (res == XR_SUCCESS) {
+		res = oxr_spaces_locate(&log, spaces, space_count, baseSpc, locateInfo->time, spaceLocations);
+	}
+
+	free(spaces);
+
+	return res;
+}
+
+#ifdef OXR_HAVE_KHR_locate_spaces
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrLocateSpacesKHR(XrSession session, const XrSpacesLocateInfoKHR *locateInfo, XrSpaceLocationsKHR *spaceLocations)
+{
+	OXR_TRACE_MARKER();
+
+	return locate_spaces(session, locateInfo, spaceLocations, "xrLocateSpacesKHR");
+}
+#endif
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrLocateSpaces(XrSession session, const XrSpacesLocateInfo *locateInfo, XrSpaceLocations *spaceLocations)
+{
+	OXR_TRACE_MARKER();
+
+	return locate_spaces(session, locateInfo, spaceLocations, "xrLocateSpaces");
 }

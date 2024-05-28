@@ -8,6 +8,7 @@
  * @ingroup oxr_main
  */
 
+#include "bindings/b_generated_bindings.h"
 #include "xrt/xrt_config_os.h"
 #include "xrt/xrt_config_build.h"
 #include "xrt/xrt_instance.h"
@@ -193,6 +194,7 @@ apply_quirks(struct oxr_logger *log, struct oxr_instance *inst)
 XrResult
 oxr_instance_create(struct oxr_logger *log,
                     const XrInstanceCreateInfo *createInfo,
+                    XrVersion major_minor,
                     const struct oxr_extension_status *extensions,
                     struct oxr_instance **out_instance)
 {
@@ -205,6 +207,7 @@ oxr_instance_create(struct oxr_logger *log,
 	OXR_ALLOCATE_HANDLE_OR_RETURN(log, inst, OXR_XR_DEBUG_INSTANCE, oxr_instance_destroy, NULL);
 
 	inst->extensions = *extensions; // Sets the enabled extensions.
+	inst->openxr_version.major_minor = major_minor;
 	inst->lifecycle_verbose = debug_get_bool_option_lifecycle_verbose();
 	inst->debug_spaces = debug_get_bool_option_debug_spaces();
 	inst->debug_views = debug_get_bool_option_debug_views();
@@ -251,27 +254,13 @@ oxr_instance_create(struct oxr_logger *log,
 	OXR_FOR_EACH_SUBACTION_PATH_DETAILED(CACHE_SUBACTION_PATHS)
 
 #undef CACHE_SUBACTION_PATHS
-	// clang-format off
 
-	cache_path(log, inst, "/interaction_profiles/khr/simple_controller", &inst->path_cache.khr_simple_controller);
-	cache_path(log, inst, "/interaction_profiles/google/daydream_controller", &inst->path_cache.google_daydream_controller);
-	cache_path(log, inst, "/interaction_profiles/htc/vive_controller", &inst->path_cache.htc_vive_controller);
-	cache_path(log, inst, "/interaction_profiles/htc/vive_pro", &inst->path_cache.htc_vive_pro);
-	cache_path(log, inst, "/interaction_profiles/microsoft/motion_controller", &inst->path_cache.microsoft_motion_controller);
-	cache_path(log, inst, "/interaction_profiles/microsoft/xbox_controller", &inst->path_cache.microsoft_xbox_controller);
-	cache_path(log, inst, "/interaction_profiles/oculus/go_controller", &inst->path_cache.oculus_go_controller);
-	cache_path(log, inst, "/interaction_profiles/oculus/touch_controller", &inst->path_cache.oculus_touch_controller);
-	cache_path(log, inst, "/interaction_profiles/valve/index_controller", &inst->path_cache.valve_index_controller);
-	cache_path(log, inst, "/interaction_profiles/hp/mixed_reality_controller", &inst->path_cache.hp_mixed_reality_controller);
-	cache_path(log, inst, "/interaction_profiles/samsung/odyssey_controller", &inst->path_cache.samsung_odyssey_controller);
-	cache_path(log, inst, "/interaction_profiles/ml/ml2_controller", &inst->path_cache.ml_ml2_controller);
-	cache_path(log, inst, "/interaction_profiles/mndx/ball_on_a_stick_controller", &inst->path_cache.mndx_ball_on_a_stick_controller);
-	cache_path(log, inst, "/interaction_profiles/microsoft/hand_interaction", &inst->path_cache.msft_hand_interaction);
-	cache_path(log, inst, "/interaction_profiles/ext/eye_gaze_interaction", &inst->path_cache.ext_eye_gaze_interaction);
-	cache_path(log, inst, "/interaction_profiles/ext/hand_interaction_ext", &inst->path_cache.ext_hand_interaction);
-	cache_path(log, inst, "/interaction_profiles/oppo/mr_controller_oppo", &inst->path_cache.oppo_mr_controller);
+	const struct oxr_bindings_path_cache *path_cache;
+	oxr_get_interaction_profile_path_cache(&path_cache);
 
-	// clang-format on
+	for (uint32_t i = 0; i < ARRAY_SIZE(path_cache->path_cache); i++) {
+		cache_path(log, inst, *path_cache->path_cache[i].path_cache_name, path_cache->path_cache[i].path_cache);
+	}
 
 	// fill in our application info - @todo - replicate all createInfo
 	// fields?
@@ -384,6 +373,7 @@ oxr_instance_create(struct oxr_logger *log,
 	        "\tcreateInfo->applicationInfo.applicationVersion: %i\n"
 	        "\tcreateInfo->applicationInfo.engineName: %s\n"
 	        "\tcreateInfo->applicationInfo.engineVersion: %i\n"
+	        "\tcreateInfo->applicationInfo.apiVersion: %d.%d.%d\n"
 	        "\tappinfo.detected.engine.name: %s\n"
 	        "\tappinfo.detected.engine.version: %i.%i.%i\n"
 	        "\tquirks.disable_vulkan_format_depth_stencil: %s\n"
@@ -392,6 +382,9 @@ oxr_instance_create(struct oxr_logger *log,
 	        createInfo->applicationInfo.applicationVersion,                           //
 	        createInfo->applicationInfo.engineName,                                   //
 	        createInfo->applicationInfo.engineVersion,                                //
+	        XR_VERSION_MAJOR(createInfo->applicationInfo.apiVersion),                 //
+	        XR_VERSION_MINOR(createInfo->applicationInfo.apiVersion),                 //
+	        XR_VERSION_PATCH(createInfo->applicationInfo.apiVersion),                 //
 	        inst->appinfo.detected.engine.name,                                       //
 	        inst->appinfo.detected.engine.major,                                      //
 	        inst->appinfo.detected.engine.minor,                                      //

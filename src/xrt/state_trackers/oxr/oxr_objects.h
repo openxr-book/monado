@@ -226,6 +226,7 @@ oxr_instance_to_openxr(struct oxr_instance *inst)
 XrResult
 oxr_instance_create(struct oxr_logger *log,
                     const XrInstanceCreateInfo *createInfo,
+                    XrVersion major_minor,
                     const struct oxr_extension_status *extensions,
                     struct oxr_instance **out_inst);
 
@@ -889,6 +890,14 @@ oxr_space_xdev_pose_create(struct oxr_logger *log,
 XrResult
 oxr_space_locate(
     struct oxr_logger *log, struct oxr_space *spc, struct oxr_space *baseSpc, XrTime time, XrSpaceLocation *location);
+
+XrResult
+oxr_spaces_locate(struct oxr_logger *log,
+                  struct oxr_space **spcs,
+                  uint32_t spc_count,
+                  struct oxr_space *baseSpc,
+                  XrTime time,
+                  XrSpaceLocations *locations);
 
 /*!
  * Locate the @ref xrt_device in the given base space, useful for implementing
@@ -1604,6 +1613,13 @@ struct oxr_instance
 	//! Enabled extensions
 	struct oxr_extension_status extensions;
 
+	//! The OpenXR version requested in the app info. It determines the instance's OpenXR version.
+	struct
+	{
+		//! Stores only major.minor version. Simplifies comparisons for e.g. "at least OpenXR 1.1".
+		XrVersion major_minor;
+	} openxr_version;
+
 	// Hardcoded single system.
 	struct oxr_system system;
 
@@ -1645,25 +1661,6 @@ struct oxr_instance
 		OXR_FOR_EACH_SUBACTION_PATH(SUBACTION_PATH_MEMBER)
 
 #undef SUBACTION_PATH_MEMBER
-
-
-		XrPath khr_simple_controller;
-		XrPath google_daydream_controller;
-		XrPath htc_vive_controller;
-		XrPath htc_vive_pro;
-		XrPath microsoft_motion_controller;
-		XrPath microsoft_xbox_controller;
-		XrPath oculus_go_controller;
-		XrPath oculus_touch_controller;
-		XrPath valve_index_controller;
-		XrPath hp_mixed_reality_controller;
-		XrPath samsung_odyssey_controller;
-		XrPath ml_ml2_controller;
-		XrPath mndx_ball_on_a_stick_controller;
-		XrPath msft_hand_interaction;
-		XrPath ext_eye_gaze_interaction;
-		XrPath ext_hand_interaction;
-		XrPath oppo_mr_controller;
 	} path_cache;
 
 	struct
