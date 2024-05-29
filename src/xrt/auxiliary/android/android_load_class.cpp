@@ -41,6 +41,9 @@ getRuntimeSourceDir()
 		// /data/app/~~sha27MVNR46wLF-96zA_LQ==/org.freedesktop.monado.openxr_runtime.out_of_process-cqs8L2Co3WfHGgvDwF12JA==/lib/arm64/libopenxr_monado.so
 		dir = info.dli_fname;
 		dir = dir.substr(0, dir.find("/lib/"));
+
+		// /data/app/~~sha27MVNR46wLF-96zA_LQ==/org.freedesktop.monado.openxr_runtime.out_of_process-cqs8L2Co3WfHGgvDwF12JA==/base.apk!/lib/arm64/libopenxr_monado.so
+		dir = dir.substr(0, dir.find("/base.apk!"));
 	}
 
 	return dir;
