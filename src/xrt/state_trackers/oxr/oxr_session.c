@@ -55,6 +55,7 @@
 DEBUG_GET_ONCE_NUM_OPTION(ipd, "OXR_DEBUG_IPD_MM", 63)
 DEBUG_GET_ONCE_NUM_OPTION(wait_frame_sleep, "OXR_DEBUG_WAIT_FRAME_EXTRA_SLEEP_MS", 0)
 DEBUG_GET_ONCE_BOOL_OPTION(frame_timing_spew, "OXR_FRAME_TIMING_SPEW", false)
+DEBUG_GET_ONCE_BOOL_OPTION(force_head_position_tracked, "XRT_FORCE_HEAD_POSITION_TRACKED", false)
 
 
 /*
@@ -512,6 +513,19 @@ oxr_session_locate_views(struct oxr_logger *log,
 	    &T_xdev_head,          //
 	    fovs,                  //
 	    poses);
+
+	// for inprocess builds this needs to be done here
+	if (debug_get_bool_option_force_head_position_tracked()) {
+		if ((T_xdev_head.relation_flags & XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT) != 0 &&
+		    (T_xdev_head.relation_flags & XRT_SPACE_RELATION_POSITION_TRACKED_BIT) == 0) {
+			T_xdev_head.relation_flags |= XRT_SPACE_RELATION_POSITION_VALID_BIT;
+			T_xdev_head.relation_flags |= XRT_SPACE_RELATION_POSITION_TRACKED_BIT;
+			for (uint32_t i = 0; i < view_count; i++) {
+				poses[i].position = (struct xrt_vec3)XRT_VEC3_ZERO;
+			}
+		}
+	}
+
 
 	// The xdev pose in the base space.
 	struct xrt_space_relation T_base_xdev = XRT_SPACE_RELATION_ZERO;
