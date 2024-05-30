@@ -46,6 +46,9 @@ struct wmr_headset_descriptor
 
 	//! String by which we recognise the device
 	const char *dev_id_str;
+	int vid;
+	int pid;
+	bool is_well_supported;
 	//! Friendly ID string for debug
 	const char *debug_name;
 
@@ -219,6 +222,10 @@ bool
 wmr_hmd_send_controller_packet(struct wmr_hmd *hmd, const uint8_t *buffer, uint32_t buf_size);
 int
 wmr_hmd_read_sync_from_controller(struct wmr_hmd *hmd, uint8_t *buffer, uint32_t buf_size, int timeout_ms);
+const struct wmr_headset_descriptor *
+get_wmr_headset_map();
+int
+get_wmr_headset_map_size();
 #ifdef __cplusplus
 }
 #endif

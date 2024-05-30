@@ -107,22 +107,39 @@ wmr_hmd_deactivate_odyssey_plus(struct wmr_hmd *wh);
 static void
 wmr_hmd_screen_enable_odyssey_plus(struct wmr_hmd *wh, bool enable);
 
+
 const struct wmr_headset_descriptor headset_map[] = {
-    {WMR_HEADSET_GENERIC, NULL, "Unknown WMR HMD", NULL, NULL, NULL}, /* Catch-all for unknown headsets */
-    {WMR_HEADSET_HP_VR1000, "HP Reverb VR Headset VR1000-1xxx", "HP VR1000", NULL, NULL, NULL}, /*! @todo init funcs */
-    {WMR_HEADSET_REVERB_G1, "HP Reverb VR Headset VR1000-2xxx", "HP Reverb", wmr_hmd_activate_reverb,
-     wmr_hmd_deactivate_reverb, wmr_hmd_screen_enable_reverb},
-    {WMR_HEADSET_REVERB_G2, "HP Reverb Virtual Reality Headset G2", "HP Reverb G2", wmr_hmd_activate_reverb,
-     wmr_hmd_deactivate_reverb, wmr_hmd_screen_enable_reverb},
-    {WMR_HEADSET_SAMSUNG_XE700X3AI, "Samsung Windows Mixed Reality XE700X3AI", "Samsung Odyssey",
-     wmr_hmd_activate_odyssey_plus, wmr_hmd_deactivate_odyssey_plus, wmr_hmd_screen_enable_odyssey_plus},
-    {WMR_HEADSET_SAMSUNG_800ZAA, "Samsung Windows Mixed Reality 800ZAA", "Samsung Odyssey+",
-     wmr_hmd_activate_odyssey_plus, wmr_hmd_deactivate_odyssey_plus, wmr_hmd_screen_enable_odyssey_plus},
-    {WMR_HEADSET_LENOVO_EXPLORER, "Lenovo VR-2511N", "Lenovo Explorer", NULL, NULL, NULL},
-    {WMR_HEADSET_MEDION_ERAZER_X1000, "Medion Erazer X1000", "Medion Erazer", NULL, NULL, NULL},
-    {WMR_HEADSET_DELL_VISOR, "DELL VR118", "Dell Visor", NULL, NULL, NULL},
+    {WMR_HEADSET_GENERIC, NULL, 0, 0, false, "Unknown WMR HMD", NULL, NULL, NULL}, /* Catch-all for unknown headsets */
+    {WMR_HEADSET_HP_VR1000, "HP Reverb VR Headset VR1000-1xxx", HP_VID, VR1000_PID, true, "HP VR1000", NULL, NULL,
+     NULL}, /*! @todo init funcs */
+    {WMR_HEADSET_REVERB_G1, "HP Reverb VR Headset VR1000-2xxx", HP_VID, REVERB_G1_PID, true, "HP Reverb",
+     wmr_hmd_activate_reverb, wmr_hmd_deactivate_reverb, wmr_hmd_screen_enable_reverb},
+    {WMR_HEADSET_REVERB_G2, "HP Reverb Virtual Reality Headset G2", HP_VID, REVERB_G2_PID, true, "HP Reverb G2",
+     wmr_hmd_activate_reverb, wmr_hmd_deactivate_reverb, wmr_hmd_screen_enable_reverb},
+    {WMR_HEADSET_SAMSUNG_XE700X3AI, "Samsung Windows Mixed Reality XE700X3AI", SAMSUNG_VID, ODYSSEY_PID, false,
+     "Samsung Odyssey", wmr_hmd_activate_odyssey_plus, wmr_hmd_deactivate_odyssey_plus,
+     wmr_hmd_screen_enable_odyssey_plus},
+    {WMR_HEADSET_SAMSUNG_800ZAA, "Samsung Windows Mixed Reality 800ZAA", SAMSUNG_VID, ODYSSEY_PLUS_PID, true,
+     "Samsung Odyssey+", wmr_hmd_activate_odyssey_plus, wmr_hmd_deactivate_odyssey_plus,
+     wmr_hmd_screen_enable_odyssey_plus},
+    {WMR_HEADSET_LENOVO_EXPLORER, "Lenovo VR-2511N", LENOVO_VID, EXPLORER_PID, true, "Lenovo Explorer", NULL, NULL,
+     NULL},
+    {WMR_HEADSET_MEDION_ERAZER_X1000, "Medion Erazer X1000", QUANTA_VID, MEDION_ERAZER_X1000_PID, true, "Medion Erazer",
+     NULL, NULL, NULL},
+    {WMR_HEADSET_DELL_VISOR, "DELL VR118", DELL_VID, VISOR_PID, true, "Dell Visor", NULL, NULL, NULL},
 };
 const int headset_map_n = sizeof(headset_map) / sizeof(headset_map[0]);
+
+const struct wmr_headset_descriptor *
+get_wmr_headset_map()
+{
+	return headset_map;
+}
+int
+get_wmr_headset_map_size()
+{
+	return headset_map_n;
+}
 
 
 /*
