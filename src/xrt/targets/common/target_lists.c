@@ -148,6 +148,10 @@ xrt_builder_create_func_t target_builder_list[] = {
     xreal_air_builder_create,
 #endif // T_BUILDER_XREAL_AIR
 
+#ifdef T_BUILDER_XREAL_LIGHT
+    t_builder_xreal_light_create,
+#endif // T_BUILDER_XREAL_LIGHT
+
 #ifdef T_BUILDER_LEGACY
     t_builder_legacy_create,
 #endif // T_BUILDER_LEGACY

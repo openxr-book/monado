@@ -55,6 +55,10 @@
 #define T_BUILDER_WMR
 #endif
 
+#if defined(XRT_BUILD_DRIVER_XREAL_LIGHT) || defined(XRT_DOXYGEN)
+#define T_BUILDER_XREAL_LIGHT
+#endif
+
 
 /*
  *
@@ -141,4 +145,12 @@ t_builder_simula_create(void);
  */
 struct xrt_builder *
 t_builder_wmr_create(void);
+#endif
+
+#ifdef T_BUILDER_XREAL_LIGHT
+/*!
+ * Builder for Xreal Light glasses
+ */
+struct xrt_builder *
+t_builder_xreal_light_create(void);
 #endif
