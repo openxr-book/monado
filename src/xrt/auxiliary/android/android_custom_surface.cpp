@@ -218,6 +218,8 @@ android_custom_surface_get_display_metrics(struct _JavaVM *vm,
 			U_LOG_W("Could not get refresh rate, returning 60hz");
 			displayRefreshRate = 60.0f;
 		}
+		std::vector<float> supported_refresh_rates =
+		    MonadoView::getSupportedRefreshRates(Context((jobject)context));
 
 		struct xrt_android_display_metrics metrics = {
 		    .width_pixels = displayMetrics.get<int>("widthPixels"),
@@ -228,7 +230,11 @@ android_custom_surface_get_display_metrics(struct _JavaVM *vm,
 		    .xdpi = displayMetrics.get<float>("density"),
 		    .ydpi = displayMetrics.get<float>("scaledDensity"),
 		    .refresh_rate = displayRefreshRate,
+		    .refresh_rate_count = (uint32_t)supported_refresh_rates.size(),
 		};
+		for (int i = 0; i < (int)metrics.refresh_rate_count; ++i) {
+			metrics.refresh_rates[i] = supported_refresh_rates[i];
+		}
 
 		*out_metrics = metrics;
 
@@ -244,4 +250,26 @@ android_custom_surface_can_draw_overlays(struct _JavaVM *vm, void *context)
 {
 	jni::init(vm);
 	return Settings::canDrawOverlays(Context{(jobject)context});
+}
+
+float
+android_custom_surface_get_display_refresh_rate(struct _JavaVM *vm, void *context)
+{
+	jni::init(vm);
+	try {
+		auto clazz = loadClassFromRuntimeApk((jobject)context, MonadoView::getFullyQualifiedTypeName());
+		if (clazz.isNull()) {
+			U_LOG_E("Could not load class '%s' from package '%s'", MonadoView::getFullyQualifiedTypeName(),
+			        XRT_ANDROID_PACKAGE);
+			return 0;
+		}
+
+		// Teach the wrapper our class before we start to use it.
+		MonadoView::staticInitClass((jclass)clazz.object().getHandle());
+
+		return MonadoView::getDisplayRefreshRate(Context((jobject)context));
+	} catch (std::exception const &e) {
+		U_LOG_E("Could not get display refresh rate: %s", e.what());
+		return 0;
+	}
 }

@@ -11,6 +11,7 @@
 #pragma once
 
 #include <xrt/xrt_config_os.h>
+#include <xrt/xrt_limits.h>
 
 #ifdef XRT_OS_ANDROID
 
@@ -33,6 +34,8 @@ struct xrt_android_display_metrics
 	float xdpi;
 	float ydpi;
 	float refresh_rate;
+	float refresh_rates[XRT_MAX_SUPPORTED_REFRESH_RATES];
+	uint32_t refresh_rate_count;
 };
 
 /*!
@@ -105,6 +108,9 @@ android_custom_surface_get_display_metrics(struct _JavaVM *vm,
 
 bool
 android_custom_surface_can_draw_overlays(struct _JavaVM *vm, void *context);
+
+float
+android_custom_surface_get_display_refresh_rate(struct _JavaVM *vm, void *context);
 
 #ifdef __cplusplus
 }

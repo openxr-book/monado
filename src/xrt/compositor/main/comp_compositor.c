@@ -82,6 +82,11 @@
 #include <unistd.h>
 #endif
 
+#ifdef XRT_OS_ANDROID
+#include "android/android_custom_surface.h"
+#include "android/android_globals.h"
+#include <dlfcn.h>
+#endif
 
 #define WINDOW_TITLE "Monado"
 
@@ -327,10 +332,15 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 static xrt_result_t
 compositor_get_display_refresh_rate(struct xrt_compositor *xc, float *out_display_refresh_rate_hz)
 {
+#ifdef XRT_OS_ANDROID
+	*out_display_refresh_rate_hz =
+	    android_custom_surface_get_display_refresh_rate(android_globals_get_vm(), android_globals_get_context());
+#else
 	struct comp_compositor *c = comp_compositor(xc);
 
 	//! @todo: Implement the method to change display refresh rate.
 	*out_display_refresh_rate_hz = (float)(1. / time_ns_to_s(c->settings.nominal_frame_interval_ns));
+#endif
 
 	return XRT_SUCCESS;
 }
@@ -338,7 +348,21 @@ compositor_get_display_refresh_rate(struct xrt_compositor *xc, float *out_displa
 static xrt_result_t
 compositor_request_display_refresh_rate(struct xrt_compositor *xc, float display_refresh_rate_hz)
 {
-	//! @todo: Implement the method to change display refresh rate.
+#ifdef XRT_OS_ANDROID
+	typedef int32_t (*PF_SETFRAMERATE)(ANativeWindow * window, float frameRate, int8_t compatibility);
+	void *android_handle = dlopen("libandroid.so", RTLD_NOW);
+	PF_SETFRAMERATE set_frame_rate = (PF_SETFRAMERATE)dlsym(android_handle, "ANativeWindow_setFrameRate");
+	if (!set_frame_rate) {
+		U_LOG_E("ANativeWindow_setFrameRate not found");
+		return XRT_SUCCESS;
+	}
+	struct ANativeWindow *window = (struct ANativeWindow *)android_globals_get_window();
+	if (window == NULL || (set_frame_rate(window, display_refresh_rate_hz, 1) != 0)) {
+		U_LOG_E("set_frame_rate error");
+	}
+#else
+	// Currently not implemented on other platforms.
+#endif
 	return XRT_SUCCESS;
 }
 
@@ -1106,9 +1130,28 @@ comp_main_create_system_compositor(struct xrt_device *xdev,
 		u_var_add_native_images_debug(c, &c->scratch.views[i].unid, tmp);
 	}
 
+#ifdef XRT_OS_ANDROID
+	// Get info about display.
+	struct xrt_android_display_metrics metrics;
+	if (!android_custom_surface_get_display_metrics(android_globals_get_vm(), android_globals_get_context(),
+	                                                &metrics)) {
+		U_LOG_E("Could not get Android display metrics.");
+		/* Fallback to default values */
+		metrics.refresh_rates[0] = 60.0f;
+		metrics.refresh_rate_count = 1;
+		metrics.refresh_rate = metrics.refresh_rates[0];
+	}
+
+	// Copy data to info.
+	sys_info->refresh_rate_count = metrics.refresh_rate_count;
+	for (size_t i = 0; i < sys_info->refresh_rate_count; ++i) {
+		sys_info->refresh_rates_hz[i] = metrics.refresh_rates[i];
+	}
+#else
 	//! @todo: Query all supported refresh rates of the current mode
 	sys_info->refresh_rate_count = 1;
 	sys_info->refresh_rates_hz[0] = (float)(1. / time_ns_to_s(c->settings.nominal_frame_interval_ns));
+#endif // XRT_OS_ANDROID
 
 	// Needs to be delayed until after compositor's u_var has been setup.
 	if (!c->deferred_surface) {
