@@ -1,0 +1,1 @@
+Add XRT_FORCE_HEAD_POSITION_TRACKED=1 environment variable.
