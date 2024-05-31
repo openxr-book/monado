@@ -26,6 +26,10 @@
 
 #include <assert.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /*!
  * Floating point parameters for @ref T_DISTORTION_FISHEYE_KB4
  * @ingroup aux_tracking
@@ -64,7 +68,7 @@ struct t_camera_model_params
 };
 
 
-const float SQRT_EPSILON = 0.00316; // sqrt(1e-05)
+static const float SQRT_EPSILON = 0.00316; // sqrt(1e-05)
 
 /*
  * Functions for @ref T_DISTORTION_FISHEYE_KB4 (un)projections
@@ -169,12 +173,12 @@ kb4_unproject(const struct t_camera_model_params *dist, //
 	const float mx = (x - dist->cx) / dist->fx;
 	const float my = (y - dist->cy) / dist->fy;
 
-	float theta(0);
-	float sin_theta(0);
-	float cos_theta(1);
+	float theta = 0.0;
+	float sin_theta = 0.0;
+	float cos_theta = 1.0;
 	float thetad = sqrt(mx * mx + my * my);
-	float scaling(1);
-	float d_func_d_theta(0);
+	float scaling = 1.0;
+	float d_func_d_theta = 0.0;
 
 	if (thetad > SQRT_EPSILON) {
 		theta = kb4_solve_theta(dist, &thetad, &d_func_d_theta);
@@ -191,6 +195,17 @@ kb4_unproject(const struct t_camera_model_params *dist, //
 	//!@todo I'm not 100% sure if kb4 is always non-injective. basalt-headers always returns true here, so it might
 	//! be wrong too.
 	return true;
+}
+
+static inline void
+kb4_undistort(const struct t_camera_model_params *dist, const float x, const float y, float *out_x, float *out_y)
+{
+	float xp, yp, zp;
+
+	kb4_unproject(dist, x, y, &xp, &yp, &zp);
+
+	*out_x = xp / zp;
+	*out_y = yp / zp;
 }
 
 /*
@@ -228,19 +243,19 @@ rt8_project(const struct t_camera_model_params *dist, //
 }
 
 static inline void
-rt8_distort(const t_camera_model_params *params,
-            const xrt_vec2 *undist,
-            xrt_vec2 *dist,
-            xrt_matrix_2x2 *d_dist_d_undist)
+rt8_distort(const struct t_camera_model_params *params,
+            const struct xrt_vec2 *undist,
+            struct xrt_vec2 *dist,
+            struct xrt_matrix_2x2 *d_dist_d_undist)
 {
-	const float &k1 = params->rt8.k1;
-	const float &k2 = params->rt8.k2;
-	const float &p1 = params->rt8.p1;
-	const float &p2 = params->rt8.p2;
-	const float &k3 = params->rt8.k3;
-	const float &k4 = params->rt8.k4;
-	const float &k5 = params->rt8.k5;
-	const float &k6 = params->rt8.k6;
+	const float k1 = params->rt8.k1;
+	const float k2 = params->rt8.k2;
+	const float p1 = params->rt8.p1;
+	const float p2 = params->rt8.p2;
+	const float k3 = params->rt8.k3;
+	const float k4 = params->rt8.k4;
+	const float k5 = params->rt8.k5;
+	const float k6 = params->rt8.k6;
 
 	const float xp = undist->x;
 	const float yp = undist->y;
@@ -287,11 +302,9 @@ rt8_distort(const t_camera_model_params *params,
 	d_dist_d_undist->v[3] = dypp_dyp;
 }
 
-static inline bool
-rt8_unproject(
-    const struct t_camera_model_params *hg_dist, const float u, const float v, float *out_x, float *out_y, float *out_z)
+static inline void
+rt8_undistort(const struct t_camera_model_params *hg_dist, const float u, const float v, float *out_x, float *out_y)
 {
-
 	const float x0 = (u - hg_dist->cx) / hg_dist->fx;
 	const float y0 = (v - hg_dist->cy) / hg_dist->fy;
 
@@ -325,16 +338,22 @@ rt8_unproject(
 			break;
 		}
 	}
-	const float xp = undist.x;
-	const float yp = undist.y;
+	*out_x = undist.x;
+	*out_y = undist.y;
+}
 
+static inline bool
+rt8_unproject(
+    const struct t_camera_model_params *hg_dist, const float u, const float v, float *out_x, float *out_y, float *out_z)
+{
+	float xp, yp;
+
+	rt8_undistort(hg_dist, u, v, &xp, &yp);
 
 	const float norm_inv = 1.0f / sqrt(xp * xp + yp * yp + 1.0f);
 	*out_x = xp * norm_inv;
 	*out_y = yp * norm_inv;
 	*out_z = norm_inv;
-
-
 
 	const float rp2 = xp * xp + yp * yp;
 	bool in_injective_area =
@@ -510,6 +529,26 @@ t_camera_models_unproject_and_flip(
 	return ret;
 }
 
+/*!
+ * Takes a distorted 2D point through \p x and \p y and computes the undistorted point into
+ * \p out_x and \p out_y
+ */
+static inline void
+t_camera_models_undistort(
+    const struct t_camera_model_params *dist, const float x, const float y, float *out_x, float *out_y)
+{
+	switch (dist->model) {
+	case T_DISTORTION_OPENCV_RADTAN_8: {
+		rt8_undistort(dist, x, y, out_x, out_y);
+	}; break;
+	case T_DISTORTION_FISHEYE_KB4: {
+		kb4_undistort(dist, x, y, out_x, out_y);
+	}; break;
+	// Return false so we don't get warnings on Release builds.
+	default: assert(false);
+	}
+}
+
 
 /*!
  * Takes a 3D point through \p x, \p y, and \p z, projects it into image space, and returns the result
@@ -553,3 +592,7 @@ t_camera_models_flip_and_project(const struct t_camera_model_params *dist, //
 
 	return t_camera_models_project(dist, x, _y, _z, out_x, out_y);
 }
+
+#ifdef __cplusplus
+}
+#endif
