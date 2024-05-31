@@ -277,6 +277,20 @@ struct xrt_device
 	 */
 
 	/*!
+	 * Function for @ref xrt_system_devices to set if this feature is being used.
+	 *
+	 * @param[in] xdev        The device.
+	 */
+	void (*begin_feature)(struct xrt_device *xdev);
+
+	/*!
+	 * Function for @ref xrt_system_devices to signal that the feature isn't being used anymore.
+	 *
+	 * @param[in] xdev        The device.
+	 */
+	void (*end_feature)(struct xrt_device *xdev);
+
+	/*!
 	 * Update any attached inputs.
 	 *
 	 * @param[in] xdev        The device.
@@ -509,6 +523,32 @@ struct xrt_device
 
 	// Add new functions above destroy.
 };
+
+/*!
+ * Helper function for @ref xrt_device::begin_feature.
+ *
+ * @copydoc xrt_device::begin_feature
+ *
+ * @public @memberof xrt_device
+ */
+static inline void
+xrt_device_begin_feature(struct xrt_device *xdev)
+{
+	xdev->begin_feature(xdev);
+}
+
+/*!
+ * Helper function for @ref xrt_device::end_feature.
+ *
+ * @copydoc xrt_device::end_feature
+ *
+ * @public @memberof xrt_device
+ */
+static inline void
+xrt_device_end_feature(struct xrt_device *xdev)
+{
+	xdev->end_feature(xdev);
+}
 
 /*!
  * Helper function for @ref xrt_device::update_inputs.

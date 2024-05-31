@@ -207,6 +207,16 @@ struct xrt_system_roles
 		0, -1, -1, -1, XRT_DEVICE_INVALID, XRT_DEVICE_INVALID, XRT_DEVICE_INVALID,                             \
 	}
 
+/*!
+ * Higher level features for devices.
+ */
+enum xrt_device_feature
+{
+	XRT_DEVICE_FEATURE_HAND_TRACKING_LEFT = 0,
+	XRT_DEVICE_FEATURE_HAND_TRACKING_RIGHT,
+	XRT_DEVICE_FEATURE_EYE_TRACKING,
+	XRT_DEVICE_FEATURE_MAX_ENUM,
+};
 
 /*!
  * A collection of @ref xrt_device, and an interface for identifying the roles
@@ -302,6 +312,22 @@ struct xrt_system_devices
 	xrt_result_t (*get_roles)(struct xrt_system_devices *xsysd, struct xrt_system_roles *out_roles);
 
 	/*!
+	 * Function to set if a feature is being used.
+	 *
+	 * @param xsysd   Pointer to self
+	 * @param feature Which feature is being used.
+	 */
+	xrt_result_t (*begin_feature)(struct xrt_system_devices *xsysd, enum xrt_device_feature feature);
+
+	/*!
+	 * Function to signal that a feature isn't being used anymore.
+	 *
+	 * @param xsysd   Pointer to self
+	 * @param feature Which feature has stopped being used.
+	 */
+	xrt_result_t (*end_feature)(struct xrt_system_devices *xsysd, enum xrt_device_feature feature);
+
+	/*!
 	 * Destroy all the devices that are owned by this system devices.
 	 *
 	 * Code consuming this interface should use @ref xrt_system_devices_destroy.
@@ -322,6 +348,32 @@ static inline xrt_result_t
 xrt_system_devices_get_roles(struct xrt_system_devices *xsysd, struct xrt_system_roles *out_roles)
 {
 	return xsysd->get_roles(xsysd, out_roles);
+}
+
+/*!
+ * @copydoc xrt_system_devices::begin_feature
+ *
+ * Helper for calling through the function pointer.
+ *
+ * @public @memberof xrt_system_devices
+ */
+static inline xrt_result_t
+xrt_system_devices_begin_feature(struct xrt_system_devices *xsysd, enum xrt_device_feature feature)
+{
+	return xsysd->begin_feature(xsysd, feature);
+}
+
+/*!
+ * @copydoc xrt_system_devices::end_feature
+ *
+ * Helper for calling through the function pointer.
+ *
+ * @public @memberof xrt_system_devices
+ */
+static inline xrt_result_t
+xrt_system_devices_end_feature(struct xrt_system_devices *xsysd, enum xrt_device_feature feature)
+{
+	return xsysd->end_feature(xsysd, feature);
 }
 
 /*!

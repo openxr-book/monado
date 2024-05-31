@@ -51,6 +51,22 @@ ipc_client_system_devices_get_roles(struct xrt_system_devices *xsysd, struct xrt
 	return ipc_call_system_devices_get_roles(usysd->ipc_c, out_roles);
 }
 
+static xrt_result_t
+ipc_client_system_devices_begin_feature(struct xrt_system_devices *xsysd, enum xrt_device_feature feature)
+{
+	struct ipc_client_system_devices *usysd = ipc_system_devices(xsysd);
+
+	return ipc_call_system_devices_begin_feature(usysd->ipc_c, feature);
+}
+
+static xrt_result_t
+ipc_client_system_devices_end_feature(struct xrt_system_devices *xsysd, enum xrt_device_feature feature)
+{
+	struct ipc_client_system_devices *usysd = ipc_system_devices(xsysd);
+
+	return ipc_call_system_devices_end_feature(usysd->ipc_c, feature);
+}
+
 static void
 ipc_client_system_devices_destroy(struct xrt_system_devices *xsysd)
 {
@@ -74,6 +90,8 @@ ipc_client_system_devices_create(struct ipc_connection *ipc_c)
 	struct ipc_client_system_devices *icsd = U_TYPED_CALLOC(struct ipc_client_system_devices);
 	icsd->base.base.get_roles = ipc_client_system_devices_get_roles;
 	icsd->base.base.destroy = ipc_client_system_devices_destroy;
+	icsd->base.base.begin_feature = ipc_client_system_devices_begin_feature;
+	icsd->base.base.end_feature = ipc_client_system_devices_end_feature;
 	icsd->ipc_c = ipc_c;
 
 	return &icsd->base.base;
