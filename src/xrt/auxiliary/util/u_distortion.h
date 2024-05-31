@@ -1,9 +1,10 @@
-// Copyright 2020, Collabora, Ltd.
+// Copyright 2020-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Code to handle distortion parameters and fov.
  * @author Jakob Bornecrantz <jakob@collabora.com>
+ * @author Korcan Hussein <korcan.hussein@collabora.com>
  * @ingroup aux_distortion
  */
 
@@ -104,6 +105,15 @@ void
 u_distortion_cardboard_calculate(const struct u_cardboard_distortion_arguments *args,
                                  struct xrt_hmd_parts *parts,
                                  struct u_cardboard_distortion *out_dist);
+
+/*!
+ * Reads cardboard.proto file from the given file path @ref proto_file to
+ * out @ref u_cardboard_distortion_values struct.
+ *
+ * @ingroup aux_distortion
+ */
+bool
+u_cardboard_distortion_arguments_read(const char *proto_file, struct u_cardboard_distortion_arguments *out_dist);
 
 
 #ifdef __cplusplus

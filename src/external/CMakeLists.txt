@@ -64,6 +64,8 @@ add_library(
 	xrt-external-nanopb STATIC
 	nanopb/monado_metrics.pb.c
 	nanopb/monado_metrics.pb.h
+	nanopb/cardboard_device.pb.c
+	nanopb/cardboard_device.pb.h
 	nanopb/pb.h
 	nanopb/pb_common.c
 	nanopb/pb_common.h

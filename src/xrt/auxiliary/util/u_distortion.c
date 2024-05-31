@@ -1,9 +1,10 @@
-// Copyright 2020, Collabora, Ltd.
+// Copyright 2020-2023, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Code to handle distortion parameters and fov.
  * @author Jakob Bornecrantz <jakob@collabora.com>
+ * @author Korcan Hussein <korcan.hussein@collabora.com>
  * @ingroup aux_distortion
  */
 
@@ -15,6 +16,16 @@
 #include "util/u_device.h"
 #include "util/u_distortion.h"
 
+#include "cardboard_device.pb.h"
+#include "pb_decode.h"
+
+#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+
+#include "util/u_logging.h"
 
 void
 u_distortion_cardboard_calculate(const struct u_cardboard_distortion_arguments *args,
@@ -84,4 +95,69 @@ u_distortion_cardboard_calculate(const struct u_cardboard_distortion_arguments *
 		values->screen.size.x /= view_count;
 		values->screen.offset.x -= values->screen.size.x * i;
 	}
+}
+
+bool
+u_cardboard_distortion_arguments_read(const char *proto_file, struct u_cardboard_distortion_arguments *out_dist)
+{
+	if (proto_file == NULL || out_dist == NULL) {
+		return false;
+	}
+
+	FILE *file = fopen(proto_file, "rb");
+	if (file == NULL) {
+		U_LOG_E("Failed to load calibration file: %s", proto_file);
+		return false;
+	}
+
+	// get total fize size.
+	fseek(file, 0L, SEEK_END);
+	const size_t buffer_size = ftell(file);
+	fseek(file, 0L, SEEK_SET);
+
+	uint8_t *device_params_buffer = (uint8_t *)malloc(buffer_size * sizeof(uint8_t));
+	if (device_params_buffer == NULL) {
+		fclose(file);
+		return false;
+	}
+
+	const size_t read_size = fread(device_params_buffer, sizeof(uint8_t), buffer_size, file);
+	fclose(file);
+	if (read_size != buffer_size) {
+		U_LOG_E("Failed to get file size");
+		free(device_params_buffer);
+		return false;
+	}
+
+	// cardboard sdk writes current_device_params file with a 8-byte header.
+	const size_t offset = sizeof(uint32_t) * 2;
+	const size_t proto_size = buffer_size - offset;
+	const uint8_t *proto = device_params_buffer + offset;
+
+	DeviceParams msg = DeviceParams_init_default;
+	pb_istream_t stream = pb_istream_from_buffer(proto, proto_size);
+	const bool result = pb_decode(&stream, DeviceParams_fields, &msg);
+	free(device_params_buffer);
+
+	if (result) {
+		memcpy(out_dist->distortion_k, msg.distortion_coefficients, sizeof(out_dist->distortion_k));
+		if (msg.has_inter_lens_distance) {
+			out_dist->inter_lens_distance_meters = msg.inter_lens_distance;
+		}
+		if (msg.has_screen_to_lens_distance) {
+			out_dist->screen_to_lens_distance_meters = msg.screen_to_lens_distance;
+		}
+#define XR_DEG_TO_RAD(x) (float)(x * M_PI / 180.0)
+		const float *const device_fov = msg.left_eye_field_of_view_angles;
+		const struct xrt_fov fov = {.angle_left = -XR_DEG_TO_RAD(device_fov[0]),
+		                            .angle_right = XR_DEG_TO_RAD(device_fov[1]),
+		                            .angle_down = -XR_DEG_TO_RAD(device_fov[2]),
+		                            .angle_up = XR_DEG_TO_RAD(device_fov[3])};
+#undef XR_DEG_TO_RAD
+		out_dist->fov = fov;
+		U_LOG_I("Successfully loaded calibration: vendor: \"%s\" model: \"%s\"",
+		        msg.has_vendor ? msg.vendor : "Unknown", msg.has_model ? msg.model : "Unknown");
+	} else
+		U_LOG_E("Failed to load calibration file: %s", proto_file);
+	return result;
 }
