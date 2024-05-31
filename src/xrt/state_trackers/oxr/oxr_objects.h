@@ -32,6 +32,7 @@
 #include "oxr_extension_support.h"
 #include "oxr_subaction.h"
 #include "oxr_defines.h"
+#include "oxr_frame_sync.h"
 
 #if defined(XRT_HAVE_D3D11) || defined(XRT_HAVE_D3D12)
 #include <dxgi.h>
@@ -1757,7 +1758,7 @@ struct oxr_session
 	} frame_id;
 
 	struct os_semaphore sem;
-
+	struct os_synchronization_helper osh;
 	/*!
 	 * Used to implement precise extra sleeping in wait frame.
 	 */
@@ -2776,6 +2777,7 @@ struct oxr_xdev_list
 /*!
  * @}
  */
+
 
 
 #ifdef __cplusplus

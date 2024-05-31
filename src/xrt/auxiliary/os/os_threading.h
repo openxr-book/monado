@@ -258,7 +258,6 @@ os_cond_destroy(struct os_cond *oc)
 }
 
 
-
 /*
  *
  * Thread.
