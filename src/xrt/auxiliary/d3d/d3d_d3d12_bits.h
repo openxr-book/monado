@@ -58,16 +58,17 @@ d3d_convert_usage_bits_to_d3d12_app_resource_state(enum xrt_swapchain_usage_bits
 {
 	D3D12_RESOURCE_STATES state = D3D12_RESOURCE_STATES(0);
 
-	if ((xsub & XRT_SWAPCHAIN_USAGE_UNORDERED_ACCESS) != 0) {
-		state |= D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-	}
 	if ((xsub & XRT_SWAPCHAIN_USAGE_COLOR) != 0) {
 		// since we are treating these as mutually exclusive
 		assert((xsub & XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL) == 0);
 		state |= D3D12_RESOURCE_STATE_RENDER_TARGET;
-	}
-	if ((xsub & XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL) != 0) {
+	} else if ((xsub & XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL) != 0) {
 		state |= D3D12_RESOURCE_STATE_DEPTH_WRITE;
+	} else if ((xsub & XRT_SWAPCHAIN_USAGE_UNORDERED_ACCESS) != 0) {
+		/*
+		 * Note the usage of this flag is underspecified in the spec and may need to change in the future.
+		 */
+		state |= D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
 	}
 	return state;
 }
