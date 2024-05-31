@@ -17,6 +17,7 @@
 
 #include "math/m_space.h"
 
+#include "util/u_debug.h"
 #include "util/u_misc.h"
 #include "util/u_hashmap.h"
 #include "util/u_logging.h"
@@ -26,6 +27,7 @@
 #include <math.h>
 #include <pthread.h>
 
+DEBUG_GET_ONCE_BOOL_OPTION(force_head_position_tracked, "XRT_FORCE_HEAD_POSITION_TRACKED", false)
 
 /*
  *
@@ -281,6 +283,26 @@ notify_ref_space_usage_device(struct u_space_overseer *uso, enum xrt_reference_s
  *
  */
 
+static void
+get_tracked_pose(struct xrt_device *xdev,
+                 enum xrt_input_name name,
+                 uint64_t at_timestamp_ns,
+                 struct xrt_space_relation *out_relation)
+{
+	xrt_device_get_tracked_pose(xdev, name, at_timestamp_ns, out_relation);
+
+	if (debug_get_bool_option_force_head_position_tracked()) {
+		if (name == XRT_INPUT_GENERIC_HEAD_POSE) {
+			if ((out_relation->relation_flags & XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT) != 0 &&
+			    (out_relation->relation_flags & XRT_SPACE_RELATION_POSITION_TRACKED_BIT) == 0) {
+				out_relation->pose.position = (struct xrt_vec3)XRT_VEC3_ZERO;
+				out_relation->relation_flags |= XRT_SPACE_RELATION_POSITION_VALID_BIT;
+				out_relation->relation_flags |= XRT_SPACE_RELATION_POSITION_TRACKED_BIT;
+			}
+		}
+	}
+}
+
 /*!
  * For each space, push the relation of that space and then traverse by calling
  * @p push_then_traverse again with the parent space. That means traverse goes
@@ -297,7 +319,7 @@ push_then_traverse(struct xrt_relation_chain *xrc, struct u_space *space, uint64
 		assert(space->pose.xname != 0);
 
 		struct xrt_space_relation xsr;
-		xrt_device_get_tracked_pose(space->pose.xdev, space->pose.xname, at_timestamp_ns, &xsr);
+		get_tracked_pose(space->pose.xdev, space->pose.xname, at_timestamp_ns, &xsr);
 		m_relation_chain_push_relation(xrc, &xsr);
 	} break;
 	case U_SPACE_TYPE_OFFSET: m_relation_chain_push_pose_if_not_identity(xrc, &space->offset.pose); break;
@@ -337,7 +359,7 @@ traverse_then_push_inverse(struct xrt_relation_chain *xrc, struct u_space *space
 		assert(space->pose.xname != 0);
 
 		struct xrt_space_relation xsr;
-		xrt_device_get_tracked_pose(space->pose.xdev, space->pose.xname, at_timestamp_ns, &xsr);
+		get_tracked_pose(space->pose.xdev, space->pose.xname, at_timestamp_ns, &xsr);
 		m_relation_chain_push_inverted_relation(xrc, &xsr);
 	} break;
 	case U_SPACE_TYPE_OFFSET: m_relation_chain_push_inverted_pose_if_not_identity(xrc, &space->offset.pose); break;

@@ -9,6 +9,7 @@
  * @ingroup ipc_server
  */
 
+#include "util/u_debug.h"
 #include "util/u_misc.h"
 #include "util/u_handles.h"
 #include "util/u_pretty_print.h"
@@ -17,11 +18,13 @@
 
 #include "server/ipc_server.h"
 #include "ipc_server_generated.h"
+#include "xrt/xrt_defines.h"
 
 #ifdef XRT_GRAPHICS_SYNC_HANDLE_IS_FD
 #include <unistd.h>
 #endif
 
+DEBUG_GET_ONCE_BOOL_OPTION(force_head_position_tracked, "XRT_FORCE_HEAD_POSITION_TRACKED", false)
 
 /*
  *
@@ -1816,6 +1819,18 @@ ipc_handle_device_get_view_poses(volatile struct ipc_client_state *ics,
 	    fovs,                  //
 	    poses);                //
 
+	if (debug_get_bool_option_force_head_position_tracked()) {
+		for (uint32_t i = 0; i < view_count; i++) {
+			if ((reply.head_relation.relation_flags & XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT) != 0 &&
+			    (reply.head_relation.relation_flags & XRT_SPACE_RELATION_POSITION_TRACKED_BIT) == 0) {
+				reply.head_relation.pose.position = (struct xrt_vec3)XRT_VEC3_ZERO;
+				reply.head_relation.relation_flags |= XRT_SPACE_RELATION_POSITION_VALID_BIT;
+				reply.head_relation.relation_flags |= XRT_SPACE_RELATION_POSITION_TRACKED_BIT;
+			}
+		}
+	}
+
+
 	/*
 	 * Operation ok, head_relation has already been put in the reply
 	 * struct, so we don't need to send that manually.
@@ -1876,6 +1891,18 @@ ipc_handle_device_get_view_poses_2(volatile struct ipc_client_state *ics,
 	    &out_info->head_relation, //
 	    out_info->fovs,           //
 	    out_info->poses);         //
+
+	if (debug_get_bool_option_force_head_position_tracked()) {
+		for (uint32_t i = 0; i < 2; i++) {
+			if ((out_info->head_relation.relation_flags & XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT) !=
+			        0 &&
+			    (out_info->head_relation.relation_flags & XRT_SPACE_RELATION_POSITION_TRACKED_BIT) == 0) {
+				out_info->head_relation.pose.position = (struct xrt_vec3)XRT_VEC3_ZERO;
+				out_info->head_relation.relation_flags |= XRT_SPACE_RELATION_POSITION_VALID_BIT;
+				out_info->head_relation.relation_flags |= XRT_SPACE_RELATION_POSITION_TRACKED_BIT;
+			}
+		}
+	}
 
 	return XRT_SUCCESS;
 }
