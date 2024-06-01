@@ -1,3 +1,6 @@
+/**
+ * SPDX-License-Identifier: CC0-1.0 AND Apache-2.0
+ */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -122,9 +125,9 @@ static void glad_glx_load_GLX_VERSION_1_3( GLADuserptrloadfunc load, void* userp
 
 static int glad_glx_has_extension(Display *display, int screen, const char *ext) {
 #ifndef GLX_VERSION_1_1
-    (void) display;
-    (void) screen;
-    (void) ext;
+    GLAD_UNUSED(display);
+    GLAD_UNUSED(screen);
+    GLAD_UNUSED(ext);
 #else
     const char *terminator;
     const char *loc;
@@ -162,7 +165,7 @@ static GLADapiproc glad_glx_get_proc_from_userptr(void *userptr, const char* nam
 }
 
 static int glad_glx_find_extensions(Display *display, int screen) {
-    (void) glad_glx_has_extension;
+    GLAD_UNUSED(glad_glx_has_extension);
     return 1;
 }
 
@@ -170,7 +173,7 @@ static int glad_glx_find_core_glx(Display **display, int *screen) {
     int major = 0, minor = 0;
     if(*display == NULL) {
 #ifdef GLAD_GLX_NO_X11
-        (void) screen;
+        GLAD_UNUSED(screen);
         return 0;
 #else
         *display = XOpenDisplay(0);
@@ -200,6 +203,7 @@ int gladLoadGLXUserPtr(Display *display, int screen, GLADuserptrloadfunc load, v
     glad_glx_load_GLX_VERSION_1_3(load, userptr);
 
     if (!glad_glx_find_extensions(display, screen)) return 0;
+
 
     return version;
 }

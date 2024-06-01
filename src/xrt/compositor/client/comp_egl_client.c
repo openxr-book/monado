@@ -208,19 +208,27 @@ create_context(
 
 	eglBindAPI(api_type);
 
-	// clang-format off
-	EGLint attrs[] = {
-	    EGL_CONTEXT_MAJOR_VERSION_KHR, 3,
-	    EGL_CONTEXT_MINOR_VERSION_KHR, 1, // Panfrost only supports 3.1
-	    EGL_NONE, EGL_NONE,
-	    EGL_NONE,
-	};
-	// clang-format on
+	size_t attrc = 0;
+	EGLint attrs[9] = {0};
+
+	attrs[attrc++] = EGL_CONTEXT_MAJOR_VERSION;
+	attrs[attrc++] = 3;
+	attrs[attrc++] = EGL_CONTEXT_MINOR_VERSION;
+	attrs[attrc++] = 1;
 
 	if (api_type == EGL_OPENGL_API) {
-		attrs[4] = EGL_CONTEXT_OPENGL_PROFILE_MASK;
-		attrs[5] = EGL_CONTEXT_OPENGL_COMPATIBILITY_PROFILE_BIT;
+		attrs[attrc++] = EGL_CONTEXT_OPENGL_PROFILE_MASK;
+		attrs[attrc++] = EGL_CONTEXT_OPENGL_COMPATIBILITY_PROFILE_BIT;
 	}
+
+	EGLint strategy;
+	if (eglQueryContext(display, app_context, EGL_CONTEXT_OPENGL_RESET_NOTIFICATION_STRATEGY_EXT, &strategy)) {
+		attrs[attrc++] = EGL_CONTEXT_OPENGL_RESET_NOTIFICATION_STRATEGY_EXT;
+		attrs[attrc++] = strategy;
+	}
+
+	attrs[attrc++] = EGL_NONE;
+	assert(attrc <= ARRAY_SIZE(attrs));
 
 	EGLContext our_context = eglCreateContext(display, config, app_context, attrs);
 
