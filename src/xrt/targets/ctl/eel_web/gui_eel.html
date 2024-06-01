@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>General UI</title>
+    <script type='text/javascript' src='/eel.js'></script>
+    <script type='text/javascript'>
+       eel.expose(displayConnectedDevices);
+       function displayConnectedDevices(devices) {
+            var deviceList = document.getElementById('device-list');
+
+            // Clear the existing device list
+            deviceList.innerHTML = '';
+
+            // Create a new list item for each device
+            devices.forEach(function(device) {
+                var listItem = document.createElement('li');
+                listItem.textContent = device.name;
+                deviceList.appendChild(listItem);
+            });
+        }
+        // Call the Python function to retrieve connected devices
+        eel.get_connected_devices()(displayConnectedDevices);
+    </script>
+</head>
+
+<body>
+  <h1>Connected Devices:</h1>
+  <!-- <ul id="device-list"></ul> -->
+</body>
+</html>
