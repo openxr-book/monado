@@ -206,6 +206,14 @@ oxr_session_enumerate_formats(struct oxr_logger *log,
 XrResult
 oxr_session_begin(struct oxr_logger *log, struct oxr_session *sess, const XrSessionBeginInfo *beginInfo)
 {
+	/*
+	 * If the session is not running when the application calls xrBeginSession, but the session is not yet in the
+	 * XR_SESSION_STATE_READY state, the runtime must return error XR_ERROR_SESSION_NOT_READY.
+	 */
+	if (sess->state != XR_SESSION_STATE_READY) {
+		return oxr_error(log, XR_ERROR_SESSION_NOT_READY, "Session is not ready to begin");
+	}
+
 	struct xrt_compositor *xc = sess->compositor;
 	if (xc != NULL) {
 		XrViewConfigurationType view_type = beginInfo->primaryViewConfigurationType;
@@ -264,11 +272,23 @@ oxr_session_end(struct oxr_logger *log, struct oxr_session *sess)
 		return XR_SUCCESS;
 	}
 
-	struct xrt_compositor *xc = sess->compositor;
+	/*
+	 * If the session is not running when the application calls xrEndSession, the runtime must return
+	 * error XR_ERROR_SESSION_NOT_RUNNING
+	 */
+	if (sess->state == XR_SESSION_STATE_IDLE || sess->state == XR_SESSION_STATE_READY) {
+		return oxr_error(log, XR_ERROR_SESSION_NOT_RUNNING, "Session is not running");
+	}
+
+	/*
+	 * If the session is still running when the application calls xrEndSession, but the session is not yet in
+	 * the XR_SESSION_STATE_STOPPING state, the runtime must return error XR_ERROR_SESSION_NOT_STOPPING.
+	 */
 	if (sess->state != XR_SESSION_STATE_STOPPING) {
 		return oxr_error(log, XR_ERROR_SESSION_NOT_STOPPING, "Session is not stopping");
 	}
 
+	struct xrt_compositor *xc = sess->compositor;
 	if (xc != NULL) {
 		if (sess->frame_id.waited > 0) {
 			xrt_comp_discard_frame(xc, sess->frame_id.waited);
@@ -1135,6 +1155,8 @@ oxr_session_create(struct oxr_logger *log,
 		xsi.z_order = overlay_info->sessionLayersPlacement;
 	}
 
+	oxr_session_change_state(log, sess, XR_SESSION_STATE_IDLE, 0);
+
 	/* Try allocating and populating. */
 	XrResult ret = oxr_session_create_impl(log, sys, createInfo, &xsi, &sess);
 	if (ret != XR_SUCCESS) {
@@ -1148,7 +1170,6 @@ oxr_session_create(struct oxr_logger *log,
 	}
 
 	// Everything is in order, start the state changes.
-	oxr_session_change_state(log, sess, XR_SESSION_STATE_IDLE, 0);
 	oxr_session_change_state(log, sess, XR_SESSION_STATE_READY, 0);
 
 	*out_session = sess;
