@@ -46,11 +46,18 @@ struct comp_vulkan_arguments
 	//! Logging level to be set on the @ref vk_bundle.
 	enum u_logging_level log_level;
 
+	//! Should we enable the buffer device address feature
+	//! (enables memory allocation on multiple physical devices of a device group)
+	bool buffer_device_address;
+
 	//! Should we look for a queue with no graphics, only compute.
 	bool only_compute_queue;
 
 	//! Should we try to enable timeline semaphores if available
 	bool timeline_semaphore;
+
+	//! Should we use a device group (if available)
+	bool use_device_group;
 
 	//! Vulkan physical device to be selected, -1 for auto.
 	int selected_gpu_index;

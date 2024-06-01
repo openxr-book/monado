@@ -274,13 +274,12 @@ create_device(struct vk_bundle *vk, const struct comp_vulkan_arguments *vk_args)
 
 	const bool only_compute_queue = vk_args->only_compute_queue;
 
-	struct vk_device_features device_features = {
-	    .shader_image_gather_extended = true,
-	    .shader_storage_image_write_without_format = true,
-	    .null_descriptor = only_compute_queue,
-	    .timeline_semaphore = vk_args->timeline_semaphore,
-	    .synchronization_2 = true,
-	};
+	struct vk_device_features device_features = {.shader_image_gather_extended = true,
+	                                             .shader_storage_image_write_without_format = true,
+	                                             .null_descriptor = only_compute_queue,
+	                                             .timeline_semaphore = vk_args->timeline_semaphore,
+	                                             .synchronization_2 = true,
+	                                             .buffer_device_address = vk_args->buffer_device_address};
 
 	ret = vk_init_mutex(vk);
 	if (ret != VK_SUCCESS) {
@@ -294,6 +293,7 @@ create_device(struct vk_bundle *vk, const struct comp_vulkan_arguments *vk_args)
 		    vk,                                  //
 		    vk_args->selected_gpu_index,         //
 		    only_compute_queue,                  // compute_only
+		    vk_args->use_device_group,           // device groups
 		    prios[i],                            // global_priority
 		    vk_args->required_device_extensions, //
 		    vk_args->optional_device_extensions, //

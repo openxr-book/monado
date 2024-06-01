@@ -62,6 +62,7 @@ create_buffer(struct vk_bundle *vk,
 	    vk,                      //
 	    mem_reqs.memoryTypeBits, //
 	    memory_property_flags,   //
+	    0,                       //
 	    &memory_type_index);     //
 	if (!bret) {
 		VK_ERROR(vk, "vk_get_memory_type failed: 'false'\n\tFailed to find a matching memory type.");
