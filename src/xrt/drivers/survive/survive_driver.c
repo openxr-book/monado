@@ -637,6 +637,7 @@ update_button(struct survive_device *survive, const struct SurviveSimpleButtonEv
 	enum SurviveButton btn_id = e->button_id;
 	enum SurviveInputEvent e_type = e->event_type;
 
+	ts = survive_timecode_to_monotonic(ts);
 
 	if (e_type == SURVIVE_INPUT_EVENT_BUTTON_UP) {
 		enum input_index index = buttons[btn_id].click;
@@ -869,6 +870,8 @@ static void
 survive_device_update_inputs(struct xrt_device *xdev)
 {
 	struct survive_device *survive = (struct survive_device *)xdev;
+
+	uint64_t time = os_monotonic_get_ns();
 
 	os_mutex_lock(&survive->sys->lock);
 

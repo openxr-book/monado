@@ -386,8 +386,11 @@ cemu_device_update_inputs(struct xrt_device *xdev)
 	struct xrt_hand_joint_set joint_set;
 	uint64_t noop;
 
-	xrt_device_get_hand_tracking(dev->sys->in_hand, dev->ht_input_name, os_monotonic_get_ns(), &joint_set, &noop);
+	uint64_t time = os_monotonic_get_ns();
 
+	xrt_device_get_hand_tracking(dev->sys->in_hand, dev->ht_input_name, time, &joint_set, &noop);
+	xdev->inputs[CEMU_INDEX_MENU].timestamp = time;
+	xdev->inputs[CEMU_INDEX_SELECT].timestamp = time;
 
 	if (!joint_set.is_active) {
 		xdev->inputs[CEMU_INDEX_SELECT].value.boolean = false;
