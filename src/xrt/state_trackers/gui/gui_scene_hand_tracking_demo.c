@@ -13,6 +13,7 @@
 #include "xrt/xrt_config_have.h"
 #include "xrt/xrt_config_drivers.h"
 #include "xrt/xrt_config_drivers.h"
+#include "xrt/xrt_frameserver.h"
 
 #include "math/m_api.h"
 #include "math/m_space.h"
@@ -35,6 +36,11 @@
 
 #ifdef XRT_BUILD_DRIVER_DEPTHAI
 #include "depthai/depthai_interface.h"
+#endif
+
+#ifdef XRT_BUILD_DRIVER_XVISIO
+#include "xvisio/xv_interface.h"
+#include "xvisio/xv_util.h"
 #endif
 
 #ifdef XRT_BUILD_DRIVER_HANDTRACKING
@@ -108,8 +114,63 @@ gui_scene_hand_tracking_demo(struct gui_program *p)
 	gui_scene_debug(p);
 }
 
+#elif defined(XRT_BUILD_DRIVER_XVISIO) && defined(XRT_BUILD_DRIVER_HANDTRACKING)
 
-#else /* XRT_BUILD_DRIVER_DEPTHAI */
+void
+gui_scene_hand_tracking_demo(struct gui_program *p)
+{
+	struct u_system_devices *usysd = u_system_devices_allocate();
+	struct xrt_system_devices *xsysd = &usysd->base;
+	struct xrt_device *ht_dev;
+
+	struct xrt_fs *frameserver = xvisio_frameserver_create(&usysd->xfctx);
+
+	if (frameserver == NULL) {
+		xrt_system_devices_destroy(&xsysd);
+		return;
+	}
+
+	struct t_stereo_camera_calibration *calib = NULL;
+	xvisio_frameserver_get_stereo_calibration(frameserver, &calib);
+
+	struct xrt_slam_sinks *hand_sinks = NULL;
+
+	struct t_camera_extra_info extra_camera_info = XRT_STRUCT_INIT;
+	extra_camera_info.views[0].boundary_type = HT_IMAGE_BOUNDARY_NONE;
+	extra_camera_info.views[0].camera_orientation = CAMERA_ORIENTATION_0;
+	extra_camera_info.views[1].boundary_type = HT_IMAGE_BOUNDARY_NONE;
+	extra_camera_info.views[1].camera_orientation = CAMERA_ORIENTATION_0;
+
+	int create_status = ht_device_create(
+	    &usysd->xfctx,
+	    calib,
+	    extra_camera_info,
+	    &hand_sinks,
+	    &ht_dev);
+	t_stereo_camera_calibration_reference(&calib, NULL);
+	if (create_status != 0) {
+		xrt_system_devices_destroy(&xsysd);
+		return;
+	}
+
+	xsysd->xdevs[xsysd->xdev_count++] = ht_dev;
+
+	struct xrt_slam_sinks gen_lock = {0};
+	u_sink_force_genlock_create(
+	    &usysd->xfctx,
+	    hand_sinks->cams[0],
+	    hand_sinks->cams[1],
+	    &gen_lock.cams[0],
+	    &gen_lock.cams[1]);
+
+	xrt_fs_slam_stream_start(frameserver, &gen_lock);
+
+	p->xsysd = xsysd;
+
+	gui_scene_debug(p);
+}
+
+#else /* XRT_BUILD_DRIVER_DEPTHAI || XRT_BUILD_DRIVER_XVISIO */
 
 
 void

@@ -138,6 +138,10 @@ if(XRT_BUILD_DRIVER_REALSENSE)
 	target_link_libraries(target_lists PRIVATE drv_realsense)
 endif()
 
+if(XRT_BUILD_DRIVER_XVISIO)
+	target_link_libraries(target_lists PRIVATE drv_xvisio)
+endif()
+
 if(XRT_BUILD_DRIVER_REMOTE)
 	target_link_libraries(target_lists PRIVATE drv_remote)
 endif()

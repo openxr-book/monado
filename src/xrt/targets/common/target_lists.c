@@ -68,6 +68,10 @@
 #include "realsense/rs_interface.h"
 #endif
 
+#ifdef XRT_BUILD_DRIVER_XVISIO
+#include "xvisio/xv_interface.h"
+#endif
+
 #ifdef XRT_BUILD_DRIVER_ULV2
 #include "ultraleap_v2/ulv2_interface.h"
 #endif
@@ -234,6 +238,10 @@ xrt_auto_prober_create_func_t target_auto_list[] = {
 
 #ifdef XRT_BUILD_DRIVER_REALSENSE
     rs_create_auto_prober,
+#endif
+
+#ifdef XRT_BUILD_DRIVER_XVISIO
+    xvisio_create_auto_prober,
 #endif
 
 #ifdef XRT_BUILD_DRIVER_EUROC

@@ -114,6 +114,7 @@ find_package(cJSON MODULE)
 find_package(LeapV2 MODULE)
 find_package(LeapSDK 5 CONFIG)
 find_package(ONNXRuntime MODULE)
+find_package(xvsdk)
 if(NOT WIN32)
 	find_package(EGL MODULE)
 	find_package(Percetto MODULE)
@@ -301,6 +302,7 @@ option_with_deps(XRT_HAVE_JPEG "Enable jpeg code (used for some video drivers)" 
 option_with_deps(XRT_HAVE_LIBUSB "Enable libusb (used for most drivers)" DEPENDS LIBUSB1_FOUND)
 option_with_deps(XRT_HAVE_LIBUVC "Enable libuvc video driver" DEPENDS LIBUVC_FOUND XRT_HAVE_LIBUSB)
 option_with_deps(XRT_HAVE_REALSENSE "Enable RealSense support" DEPENDS realsense2_FOUND)
+option_with_deps(XRT_HAVE_XVISIO "Enable XVisio support" DEPENDS xvsdk_FOUND)
 option_with_deps(XRT_HAVE_OPENVR "Enable OpenVR support" DEPENDS OPENVR_FOUND)
 
 # Drivers to build (sorted)
@@ -322,6 +324,7 @@ option_with_deps(XRT_BUILD_DRIVER_PSSENSE "Enable PlayStation Sense driver" DEPE
 option_with_deps(XRT_BUILD_DRIVER_PSVR "Enable PSVR HMD driver" DEPENDS XRT_HAVE_HIDAPI)
 option_with_deps(XRT_BUILD_DRIVER_QWERTY "Enable Qwerty driver" DEPENDS XRT_HAVE_SDL2)
 option_with_deps(XRT_BUILD_DRIVER_REALSENSE "Enable RealSense device driver" DEPENDS XRT_HAVE_REALSENSE)
+option_with_deps(XRT_BUILD_DRIVER_XVISIO "Enable XVisio device driver" DEPENDS XRT_HAVE_XVISIO)
 option_with_deps(XRT_BUILD_DRIVER_REMOTE "Enable remote debugging driver" DEPENDS "XRT_HAVE_LINUX OR ANDROID OR WIN32")
 option_with_deps(XRT_BUILD_DRIVER_RIFT_S "Enable Oculus Rift S device driver" DEPENDS XRT_HAVE_V4L2)
 option_with_deps(XRT_BUILD_DRIVER_ROKID "Enable Rokid driver" DEPENDS "XRT_HAVE_LIBUSB")
@@ -503,6 +506,7 @@ list(
 	"TWRAP"
 	"XREAL_AIR"
 	"STEAMVR_LIGHTHOUSE"
+	"XVISIO"
 	)
 
 # Package name needs to be known by the native code itself.
@@ -638,6 +642,7 @@ message(STATUS "#    WAYLAND_DIRECT:  ${XRT_HAVE_WAYLAND_DIRECT}")
 message(STATUS "#    XCB:             ${XRT_HAVE_XCB}")
 message(STATUS "#    XLIB:            ${XRT_HAVE_XLIB}")
 message(STATUS "#    XRANDR:          ${XRT_HAVE_XRANDR}")
+message(STATUS "#    XVISIO:          ${XRT_HAVE_XVISIO}")
 message(STATUS "#")
 message(STATUS "#    MODULE_AUX_VIVE:             ${XRT_MODULE_AUX_VIVE}")
 message(STATUS "#    MODULE_COMPOSITOR:           ${XRT_MODULE_COMPOSITOR}")
@@ -724,6 +729,7 @@ message(STATUS "#    DRIVER_VIVE:                 ${XRT_BUILD_DRIVER_VIVE}")
 message(STATUS "#    DRIVER_WMR:                  ${XRT_BUILD_DRIVER_WMR}")
 message(STATUS "#    DRIVER_XREAL_AIR:            ${XRT_BUILD_DRIVER_XREAL_AIR}")
 message(STATUS "#    DRIVER_STEAMVR_LIGHTHOUSE:   ${XRT_BUILD_DRIVER_STEAMVR_LIGHTHOUSE}")
+message(STATUS "#    DRIVER_XVISIO:               ${XRT_BUILD_DRIVER_XVISIO}")
 message(STATUS "#####----- Config -----#####")
 # cmake-format: on
 

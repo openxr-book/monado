@@ -209,6 +209,43 @@ if(XRT_BUILD_DRIVER_REALSENSE)
 	list(APPEND ENABLED_HEADSET_DRIVERS rs)
 endif()
 
+if(XRT_BUILD_DRIVER_XVISIO)
+add_library(
+	drv_xvisio STATIC
+	xvisio/xv_xr50.cpp
+	xvisio/xv_prober.c
+<<<<<<< HEAD
+	xvisio/xv_util.cpp
+	xvisio/xv_util.h
+	xvisio/xv_interface.h
+)
+target_include_directories(drv_xvisio SYSTEM PRIVATE ${EIGEN3_INCLUDE_DIR})
+target_link_libraries(
+	drv_xvisio PRIVATE 
+	aux_math
+	xrt-interfaces
+	aux_util
+	${xvsdk_LIBRARIES}
+	xrt-external-tinyceres
+=======
+	xvisio/xv_interface.h
+)
+
+target_link_libraries(
+	drv_xvisio PRIVATE 
+	xrt-interfaces
+	aux_util
+	${xvsdk_LIBRARIES}
+>>>>>>> 73f47bcc2b0cf51ff78e4bfd2ec4be71166cc47f
+)
+
+include_directories(
+	${xvsdk_INCLUDE_DIRS}/xvsdk
+)
+
+list(APPEND ENABLED_HEADSET_DRIVERS xvisio)
+endif()
+
 if(XRT_BUILD_DRIVER_REMOTE)
 	add_library(
 		drv_remote STATIC

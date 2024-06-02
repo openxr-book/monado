@@ -61,3 +61,7 @@ endif()
 if(XRT_HAVE_SDL2)
 	target_link_libraries(st_gui PUBLIC xrt-external-imgui-sdl2)
 endif()
+
+if(XRT_BUILD_DRIVER_XVISIO)
+	target_link_libraries(st_gui PRIVATE drv_xvisio)
+endif()
