@@ -764,23 +764,39 @@ client_d3d11_compositor_destroy(struct xrt_compositor *xc)
 static void
 client_d3d11_compositor_init_try_timeline_semaphores(struct client_d3d11_compositor *c)
 {
+	struct xrt_compositor_semaphore *xcsem{nullptr};
+	HANDLE timeline_semaphore_handle_raw{};
+	xrt_result_t xret;
+
+	// Set the value to something non-zero.
 	c->timeline_semaphore_value = 1;
+
 	// See if we can make a "timeline semaphore", also known as ID3D11Fence
 	if (!c->xcn->base.create_semaphore || !c->xcn->base.layer_commit_with_semaphore) {
 		return;
 	}
-	struct xrt_compositor_semaphore *xcsem = nullptr;
-	wil::unique_handle timeline_semaphore_handle;
-	if (XRT_SUCCESS != xrt_comp_create_semaphore(&(c->xcn->base), timeline_semaphore_handle.put(), &xcsem)) {
+
+	/*
+	 * This call returns a HANDLE in the out_handle argument, it is owned by
+	 * the returned xrt_compositor_semaphore object we should not track it.
+	 */
+	xret = xrt_comp_create_semaphore(   //
+	    &(c->xcn->base),                // xc
+	    &timeline_semaphore_handle_raw, // out_handle
+	    &xcsem);                        // out_xcsem
+	if (xret != XRT_SUCCESS) {
 		D3D_WARN(c, "Native compositor tried but failed to created a timeline semaphore for us.");
 		return;
 	}
 	D3D_INFO(c, "Native compositor created a timeline semaphore for us.");
 
+	// Because importFence throws on failure we use this ref.
 	unique_compositor_semaphore_ref timeline_semaphore{xcsem};
 
-	// try to import and signal
-	wil::com_ptr<ID3D11Fence> fence = import_fence(*(c->fence_device), timeline_semaphore_handle.get());
+	// Try to import the fence.
+	wil::com_ptr<ID3D11Fence> fence = import_fence(*(c->fence_device), timeline_semaphore_handle_raw);
+
+	// And try to signal the fence to make sure it works.
 	HRESULT hr = c->fence_context->Signal(fence.get(), c->timeline_semaphore_value);
 	if (!SUCCEEDED(hr)) {
 		D3D_WARN(c,
